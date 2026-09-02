@@ -15,6 +15,23 @@ import { hasReplayedTraces } from './stream.js';
 
 const LOG_LIMIT = 800;
 
+/**
+ * A run's state as `GET /bench` says it — `session._bench_state`, mirrored so
+ * the rail does not read `idle` for the length of a run. The snapshot is
+ * fetched once at boot and again when a run parks; between those two the only
+ * thing that knows the bench is busy is the stream.
+ *
+ * A terminal state maps to `stopping` because the worker is still parking, and
+ * `parked` is not a bench state at all: it is the transition to `idle`.
+ */
+export function benchStateOf(runState) {
+  if (BENCH_STATES.has(runState)) return runState;
+  if (runState === 'queued') return 'preflight';
+  return 'stopping';
+}
+
+const BENCH_STATES = new Set(['idle', 'preflight', 'running', 'paused', 'stopping']);
+
 /** Terminal run states, from the contract's state diagram. */
 export const TERMINAL = new Set(['done', 'stopped', 'aborted', 'failed', 'blocked', 'cancelled']);
 
@@ -176,19 +193,40 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
           // `parked` where it should read `failed` is the bench lying quietly.
           record.parked_at = frame.ts;
           record.phase = null;
-          if (state.activeRunId === frame.run_id) state.activeRunId = null;
+          if (state.activeRunId === frame.run_id) {
+            state.activeRunId = null;
+            state.benchState = 'idle';
+          }
           if (!TERMINAL.has(record.state)) record.state = 'parked';
           break;
         }
         record.state = data.state;
         record.reason = data.reason || '';
         if (data.state === 'running' && !record.started_at) record.started_at = frame.ts;
+        if (data.state === 'queued') {
+          // The queue the rail counts is the service's: runs waiting for the
+          // worker. A `POST /runs` behind a running one is queued here and
+          // leaves the moment the worker picks it up — otherwise the count
+          // only ever changed when a run parked and the snapshot was re-read.
+          if (!state.queue.includes(frame.run_id)) state.queue = [...state.queue, frame.run_id];
+        } else {
+          if (state.queue.includes(frame.run_id)) {
+            state.queue = state.queue.filter((id) => id !== frame.run_id);
+          }
+        }
         if (TERMINAL.has(data.state)) {
           record.finished_at = frame.ts;
-          if (state.activeRunId === frame.run_id) state.activeRunId = null;
           record.phase = null;
+          // The run still owns the worker while `park()` makes the bench safe,
+          // and on hardware that can block on instrument I/O for a while. So
+          // `activeRunId` is cleared at `parked` above, not here: cleared now,
+          // `currentRun` would pick a run that is still sitting in the queue.
+          if (state.activeRunId === frame.run_id && data.state !== 'cancelled') {
+            state.benchState = benchStateOf(data.state);
+          }
         } else if (data.state !== 'queued') {
           state.activeRunId = frame.run_id;
+          state.benchState = benchStateOf(data.state);
         }
         log(frame, TERMINAL.has(data.state) && data.state !== 'done' ? 'warn' : 'info',
             `${data.state}${data.reason ? ' · ' + data.reason : ''}`);

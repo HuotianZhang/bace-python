@@ -171,6 +171,53 @@ test('a pipeline keeps each node\'s shots and each scope\'s progress apart', () 
   assert.equal(run.state, 'done');
 });
 
+test('the bench state follows the run, between one snapshot and the next', () => {
+  // `GET /bench` is fetched at boot and again when a run parks; between those
+  // two the only thing that knows the bench is busy is the stream. A rail that
+  // read `idle` for the length of a scan would be describing the last fetch.
+  const s = store();
+  s.applyBench(JSON.parse(fixture('hello_sim.json')).data.bench);
+  assert.equal(s.getState().benchState, 'idle');
+
+  const seen = [];
+  for (const frame of parseJsonl(fixture('stream_bace_sim.jsonl'))) {
+    s.applyFrame(frame);
+    const now = s.getState().benchState;
+    if (seen[seen.length - 1] !== now) seen.push(now);
+  }
+  assert.deepEqual(seen, ['idle', 'preflight', 'running', 'stopping', 'idle'],
+                   'preflight, running, then stopping while the worker parks');
+});
+
+test('a queued run is in the queue, and leaves it when the worker takes it', () => {
+  // No recording has two overlapping submissions — under `--fast` the first
+  // run is over before a second could be posted — so these two frames are the
+  // recorded shapes with a second run_id. The rule is the store's, not the
+  // wire's: `POST /runs` while a run is active queues (contract §2).
+  const s = store();
+  const queued = (runId, state) => ({
+    seq: 1, ts: 1, run_id: runId, node_path: '', type: 'RunStateChanged',
+    data: { state, reason: state === 'queued' ? 'submitted' : 'started' }, decimated: {},
+  });
+  s.applyFrame(queued('run-1', 'running'));
+  s.applyFrame(queued('run-2', 'queued'));
+  assert.deepEqual(s.getState().queue, ['run-2']);
+  assert.equal(s.getState().activeRunId, 'run-1');
+
+  s.applyFrame(queued('run-1', 'done'));
+  assert.equal(s.getState().activeRunId, 'run-1',
+               'the run that is being parked still owns the worker');
+  assert.equal(s.getState().benchState, 'stopping');
+
+  s.applyFrame({ ...queued('run-1', 'parked'), data: { state: 'parked', reason: 'done' } });
+  assert.equal(s.getState().activeRunId, null);
+  assert.equal(s.getState().benchState, 'idle');
+
+  s.applyFrame(queued('run-2', 'preflight'));
+  assert.deepEqual(s.getState().queue, [], 'and it leaves the queue when picked up');
+  assert.equal(s.getState().benchState, 'preflight');
+});
+
 test('the Hello frame carries the whole bench', () => {
   const s = store();
   const hello = JSON.parse(fixture('hello_sim.json'));

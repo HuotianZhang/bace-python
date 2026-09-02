@@ -79,7 +79,16 @@ export function createStream({
     }
     socket = ws;
     ws.onopen = () => { retry = 0; };
-    ws.onmessage = (event) => handle(parse(event.data));
+    ws.onmessage = (event) => {
+      // A socket we have already replaced can still deliver what the service
+      // queued before we closed it. Those frames belong to the session we just
+      // walked away from: folded, they would advance the cursor past zero and
+      // the new socket's `since=0` replay would then be discarded as
+      // duplicates — losing exactly the completed shots the reconnect exists
+      // to recover. `onclose` has always made this check; `onmessage` must too.
+      if (ws !== socket) return;
+      handle(parse(event.data));
+    };
     ws.onerror = () => {};
     ws.onclose = (event) => {
       if (ws !== socket) return;              // a socket we already replaced

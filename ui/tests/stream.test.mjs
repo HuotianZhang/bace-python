@@ -100,6 +100,29 @@ test('a restarted service is reconnected to with since=0, not without since', ()
   assert.equal(stream.state.session, 'S2');
 });
 
+test('a socket we have replaced is not listened to any more', () => {
+  // The service queues frames before we close the stale socket, and they can
+  // still be dispatched afterwards. Folded, they would push the cursor above
+  // zero — and the new socket's `since=0` replay would then be thrown away as
+  // duplicates, losing the completed shots the reconnect exists to recover.
+  const { stream, frames } = harness();
+  stream.start(null);
+  FakeSocket.last.deliver(hello('S1', 120));
+  const stale = FakeSocket.last;
+
+  stale.deliver(hello('S2', 3));                 // the service restarted
+  assert.equal(FakeSocket.last.url, 'ws://bench/events?since=0');
+  assert.equal(stream.state.lastSeq, 0);
+
+  stale.deliver(frame(90));                      // in flight when we closed it
+  assert.equal(stream.state.lastSeq, 0, 'the old session cannot move the new cursor');
+  assert.equal(frames.length, 0);
+
+  FakeSocket.last.deliver(hello('S2', 3));
+  FakeSocket.last.deliver(frame(1));
+  assert.deepEqual(frames.map((f) => f.seq), [1], 'and the replay from 0 still arrives');
+});
+
 test('being dropped at 1008 reconnects at once, from the notice the service sent', () => {
   const { stream, frames } = harness();
   stream.start(null);
