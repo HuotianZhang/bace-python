@@ -1,16 +1,16 @@
 {
  "seq": null,
- "ts": 1788381998.1916282,
+ "ts": 1788384263.0935137,
  "run_id": null,
  "node_path": "",
  "type": "Hello",
  "data": {
   "session": {
-   "id": "20260902_204357",
+   "id": "20260902_212415",
    "mode": "sim",
    "fast": true,
-   "started": "2026-09-02T20:43:57",
-   "started_at": 1788381837.0452287,
+   "started": "2026-09-02T21:24:15",
+   "started_at": 1788384255.0891106,
    "sample": {
     "sample": "",
     "material": "",
@@ -19,22 +19,22 @@
     "operator": "",
     "comment": ""
    },
-   "out": "/tmp/claude-0/-home-user-bace-python/d0a5436a-8df7-52ce-8423-72d22311f52f/scratchpad/runs",
+   "out": "runs",
    "rig_toml": "/home/user/bace-python/rig.toml",
    "run_toml": "/home/user/bace-python/run.toml",
    "fingerprint": "9ab7e55b8144",
-   "journal": "/tmp/claude-0/-home-user-bace-python/d0a5436a-8df7-52ce-8423-72d22311f52f/scratchpad/runs/journal/20260902_204357.jsonl",
+   "journal": "runs/journal/20260902_212415.jsonl",
    "errors": 0,
    "last_error": null
   },
-  "seq": 151,
+  "seq": 122,
   "bench": {
    "session": {
-    "id": "20260902_204357",
+    "id": "20260902_212415",
     "mode": "sim",
     "fast": true,
-    "started": "2026-09-02T20:43:57",
-    "started_at": 1788381837.0452287,
+    "started": "2026-09-02T21:24:15",
+    "started_at": 1788384255.0891106,
     "sample": {
      "sample": "",
      "material": "",
@@ -43,18 +43,18 @@
      "operator": "",
      "comment": ""
     },
-    "out": "/tmp/claude-0/-home-user-bace-python/d0a5436a-8df7-52ce-8423-72d22311f52f/scratchpad/runs",
+    "out": "runs",
     "rig_toml": "/home/user/bace-python/rig.toml",
     "run_toml": "/home/user/bace-python/run.toml",
     "fingerprint": "9ab7e55b8144",
-    "journal": "/tmp/claude-0/-home-user-bace-python/d0a5436a-8df7-52ce-8423-72d22311f52f/scratchpad/runs/journal/20260902_204357.jsonl",
+    "journal": "runs/journal/20260902_212415.jsonl",
     "errors": 0,
     "last_error": null
    },
    "state": "idle",
    "run": null,
    "queue": [],
-   "read_at": 1788381998.1866412,
+   "read_at": 1788384263.0884979,
    "instruments": {
     "relay": {
      "position": "amplifier",
@@ -94,12 +94,12 @@
      "frequency_hz": 500.0
     },
     "voc": {
-     "value": 0.9040736711190411,
+     "value": 0.904257923858254,
      "led_v": 1.02,
      "from": {
-      "run_id": "20260902_204357-003",
+      "run_id": "20260902_212415-001",
       "node_path": "jv_bace",
-      "ts": 1788381998.0032556,
+      "ts": 1788384262.6900256,
       "how": "jv_bace"
      }
     },
@@ -122,7 +122,7 @@
    },
    "inferred": [],
    "chain": {
-    "read_at": 1788381998.1866412,
+    "read_at": 1788384263.0884979,
     "ok": 3,
     "total": 4,
     "items": [
@@ -166,7 +166,7 @@
    },
    "rig": {
     "path": "/home/user/bace-python/rig.toml",
-    "loaded_at": 1788381837.0455956,
+    "loaded_at": 1788384255.0895867,
     "fingerprint": "9ab7e55b8144",
     "values": {
      "sense_resistor_ohm": 5.192,

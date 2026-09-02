@@ -66,6 +66,7 @@ shape `GET /runs/{id}/data` answers, because a browser cannot open HDF5.
 | `jv_sim.json`, `jv_sim.h5` | the J-V chart. The journal reduces `JVCurveDone` to metrics with no arrays, so this had to be recorded |
 | `hello_sim.json` | the bench snapshot — the rail and the chain. No journal contains one |
 | `stream_bace_sim.jsonl`, `stream_jv_sim.jsonl` | the wire: traces decimated with `stride`/`n_full`, and the `StepPhase` frames that are live-only |
+| `stream_pipeline_sim.jsonl` | node identity: two `bace` nodes under one `run_id`, each numbering its own shots from one, and the loop's `Progress` beside the leaf's |
 
 Everything with `_sim` in its name came off `--sim`, and says so in its name on
 purpose: a simulated J-V is a plausible-looking curve, and must never be

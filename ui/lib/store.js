@@ -196,20 +196,18 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
       }
 
       case 'NodeStarted':
-        record.nodes[data.node_path] = {
-          ...(record.nodes[data.node_path] || {}),
-          node_path: data.node_path, kind: data.kind, label: data.label, started_at: frame.ts, outcome: null,
-        };
+        Object.assign(nodeOf(record, data.node_path), {
+          kind: data.kind, label: data.label, started_at: frame.ts, outcome: null,
+        });
         record.node_path = data.node_path;
         break;
 
       case 'NodeDone': {
-        const node = record.nodes[data.node_path] || { node_path: data.node_path };
         const detail = data.detail || {};
-        record.nodes[data.node_path] = {
-          ...node, outcome: data.outcome, detail, finished_at: frame.ts,
+        Object.assign(nodeOf(record, data.node_path), {
+          outcome: data.outcome, detail, finished_at: frame.ts,
           kept: detail.kept, requested: detail.requested, folder: detail.folder, summary: detail.summary,
-        };
+        });
         // A pipeline's counts are the sum over its module nodes, the same sum
         // the session's record makes; a manual run has one node and the sum is
         // that node. Either way the rail says "kept of requested" (§9).
@@ -231,11 +229,13 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         record.requested = record.requested || data.n_shots || null;
         break;
 
-      case 'AxisResolved':
-        record.axis = data.axis || null;
-        record.values = data.values || [];
-        record.voc = data.voc === undefined ? record.voc : data.voc;
+      case 'AxisResolved': {
+        const node = nodeOf(record, frame.node_path);
+        node.axis = record.axis = data.axis || null;
+        node.values = record.values = data.values || [];
+        if (data.voc !== undefined) node.voc = record.voc = data.voc;
         break;
+      }
 
       case 'DCMeasured':
         record.dc = data;
@@ -258,26 +258,42 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         break;
 
       case 'StepDone':
-        foldStepDone(record, frame, data);
+        foldStepDone(record, nodeOf(record, frame.node_path), frame, data);
         break;
 
-      case 'LoopDone':
-        record.loops.push({ loop: data.loop, q_mean: data.q_mean, q_std: data.q_std, ts: frame.ts });
-        record.q_mean = data.q_mean;
-        record.q_std = data.q_std;
+      case 'LoopDone': {
+        const loop = { node_path: frame.node_path || '', loop: data.loop,
+                       q_mean: data.q_mean, q_std: data.q_std, ts: frame.ts };
+        const node = nodeOf(record, frame.node_path);
+        record.loops.push(loop);
+        node.loops.push(loop);
+        node.q_mean = record.q_mean = data.q_mean;
+        node.q_std = record.q_std = data.q_std;
         break;
+      }
 
-      case 'Progress':
-        record.progress = { ...data, ts: frame.ts };
+      case 'Progress': {
+        // Three counters at three time scales, and they are three *events*:
+        // the executor emits `Progress(node_path="T=250K")` for a loop node
+        // while the leaf emits its own with `node_path: ""`. Folding them onto
+        // one field would leave the temperature counter holding the shot
+        // counter's numbers — which is `docs/ui-rules.md` §5's whole point,
+        // that "step 412 of 8400" is useless here.
+        const scope = data.node_path || '';
+        record.progressByNode[scope] = { ...data, ts: frame.ts };
+        if (scope === '') record.progress = record.progressByNode[scope];
         break;
+      }
 
-      case 'RunFinished':
-        record.finished = data;
-        record.axis = data.axis || record.axis;
-        record.values = data.values || record.values;
-        record.q_mean = data.q_mean || record.q_mean;
-        record.q_std = data.q_std || record.q_std;
+      case 'RunFinished': {
+        const node = nodeOf(record, frame.node_path);
+        node.finished = record.finished = data;
+        node.axis = record.axis = data.axis || record.axis;
+        node.values = record.values = data.values || record.values;
+        node.q_mean = record.q_mean = data.q_mean || record.q_mean;
+        node.q_std = record.q_std = data.q_std || record.q_std;
         break;
+      }
 
       case 'RunAborted':
         record.aborted = data;
@@ -295,9 +311,12 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         record.jv = data;
         break;
 
-      case 'JVCurveDone':
-        record.curves.push({ ...data, ts: frame.ts });
+      case 'JVCurveDone': {
+        const curve = { ...data, node_path: frame.node_path || '', ts: frame.ts };
+        record.curves.push(curve);
+        nodeOf(record, frame.node_path).curves.push(curve);
         break;
+      }
 
       case 'JVFinished':
         // The summary's curves are the same objects, reduced the same way in
@@ -376,11 +395,16 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
  * held are left alone. A client that blanked the chart here would have a bug
  * that only appears after being dropped at 1008.
  */
-function foldStepDone(record, frame, data) {
+function foldStepDone(record, node, frame, data) {
   const replay = hasReplayedTraces(frame);
-  const key = `${data.loop}:${data.index}`;
+  // A pipeline is one `run_id` over many nodes and each module node numbers
+  // its own shots from one, so `loop:index` alone is not an identity: the
+  // second `bace` would overwrite the first's shots and a shorter node would
+  // leave the previous one's tail behind, describing no node that ever ran.
+  const key = `${node.node_path}|${data.loop}:${data.index}`;
   const previous = record.shotsByKey[key];
   const shot = {
+    node_path: node.node_path,
     index: data.index, loop: data.loop, step: data.step,
     setpoint: data.setpoint, axis_value: data.axis_value,
     q: data.q, q_mean: data.q_mean, q_std: data.q_std,
@@ -394,9 +418,15 @@ function foldStepDone(record, frame, data) {
     tracesGone: replay && !(previous && previous.traces),
   };
   record.shotsByKey[key] = shot;
-  if (previous) record.shots[record.shots.indexOf(previous)] = shot;
-  else record.shots.push(shot);
+  if (previous) {
+    record.shots[record.shots.indexOf(previous)] = shot;
+    node.shots[node.shots.indexOf(previous)] = shot;
+  } else {
+    record.shots.push(shot);
+    node.shots.push(shot);
+  }
   record.lastShot = shot;
+  node.lastShot = shot;
   record.kept = record.shots.length;
   if (shot.verdict && shot.verdict.level === 'warn') {
     record.shotWarnings.push({ index: data.index, loop: data.loop, text: shot.verdict.text, ts: frame.ts });
@@ -408,6 +438,25 @@ function replaceVerdict(list, entry) {
   const at = list.findIndex((v) => v.code === entry.code && v.node_path === entry.node_path);
   if (at === -1) list.push(entry);
   else list[at] = entry;
+}
+
+/**
+ * The part of a run that belongs to one module node rather than to the run.
+ *
+ * A pipeline is one `run_id` over many nodes, and each module node starts its
+ * own axis, loops and shot numbering. Kept only on the run, the second node's
+ * `RunFinished` would overwrite the first's — so the node-scoped facts are
+ * mirrored here, keyed by the path the envelope carries, and the run-level
+ * fields stay what they have always been: the newest node's, which is what a
+ * manual run (one node) means by them.
+ */
+function nodeOf(record, path) {
+  const key = path || '';
+  const existing = record.nodes[key];
+  if (existing) return existing;
+  const created = { node_path: key, shots: [], curves: [], loops: [] };
+  record.nodes[key] = created;
+  return created;
 }
 
 function sumNodes(record, field) {
@@ -431,7 +480,7 @@ export function emptyRun(runId) {
     shots: [], shotsByKey: {}, lastShot: null, shotWarnings: [],
     loops: [], q_mean: null, q_std: null,
     curves: [], jv: null, jvFinished: null, seriesPoints: [],
-    progress: null, eta: null, finished: null, aborted: null, error: null,
+    progress: null, progressByNode: {}, eta: null, finished: null, aborted: null, error: null,
     needsOperator: null, resumes: [],
     nodes: {}, verdicts: [], notices: [], instruments: {},
     kept: null, requested: null,
