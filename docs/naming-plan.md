@@ -75,15 +75,33 @@ both the loop node and the module node.
 - `SessionStarted` gains the `[sample]` block — `sample`, `material`, `pixel`,
   `operator`, `comment`. It is session-scoped and already in `GET /session`.
 
-  **Writing it into the header is necessary and not sufficient.** `_Parsed`
-  keeps `header` beside `runs` and never joins them; `run_index()` is
-  `out.extend(run.summary() for run in reversed(parsed.runs))`; `_Run.summary()`
-  emits no identity at all; and `GET /runs` returns that list unchanged. A grid
-  reading `?session=all` would still be parsing folder names. So the identity
-  has to reach the rows: `run_index()` merges its file's header into each
-  summary, and `run_record()` does the same for the full record. One session's
-  header covers every run in that file, which is what makes the merge cheap —
-  the files are already parsed once and kept.
+  **The header alone is not enough, and merging it into the rows is not
+  either.** Three paths defeat it, each verified:
+
+  1. `_Parsed` keeps `header` beside `runs` and never joins them;
+     `run_index()` is `out.extend(run.summary() for run in
+     reversed(parsed.runs))`; `_Run.summary()` emits no identity; and
+     `GET /runs` returns that list unchanged. A grid reading `?session=all`
+     would still be parsing folder names.
+  2. `Session.run_record()` returns `rec.as_wire()` for any run this process
+     still holds, and `RunRecord.as_wire()` carries no identity either — so a
+     header merge in the journal reader would light up `GET /runs/{id}` after
+     a restart and not while the run is live.
+  3. A header is a property of the *file*, not of the runs in it. `Journal`
+     resumes an existing file (`self.resumed = os.path.isfile(self.path) and
+     os.path.getsize(self.path) > 0`) and writes `SessionStarted` only
+     `if not self.resumed`. Two processes started in the same second share a
+     `session_id`, hence a file; the second one's `[sample]` is never recorded
+     and its runs would be attributed to the first one's device.
+
+  So the identity travels **with each run**, not only in the header:
+  `RunQueued` gains the `[sample]` block beside the `params`/`resolved` it
+  already carries, `RunRecord` keeps it, and both `_Run.summary()` and
+  `RunRecord.as_wire()` expose it — so `GET /runs` and `GET /runs/{id}` agree
+  whether the answer comes from this process or from a journal file. Per-run is
+  what makes paths 2 and 3 go away rather than being worked around.
+  `SessionStarted` keeps the block too: it is the session's own context, it
+  costs one line, and it is what a file with no runs in it can still say.
 - `executor._node_detail` builds its metadata fields from the same
   `RunMetadata` the recorder wrote, rather than assembling them from whichever
   `RunContext` fields happen to be set. In practice: call `ctx.temperature()`
@@ -186,9 +204,25 @@ na_na_na_naK_namVLED_namVVOC_offsetraw_20260902_183355                nothing kn
 The placeholders are shorter than the values they stand in for, so the
 `COMMENT_MAX` budget against Windows' 260-character path limit only loosens.
 
-`na` can in principle collide with a pixel someone names `na`. Nothing breaks
-if it does — nothing parses these names (below) — and the metadata still says
-which it was.
+**The sentinel is reserved.** An operator who types `na` into an identity field
+would otherwise produce the same folder name as one who typed nothing, and the
+grid makes that a genuine collision where today it is not — `sample = "na"`
+gives `na_290K_…` and `sample = ""` gives `290K_…`, two different names. So a
+literal `na` in `sample`, `material` or `pixel` is escaped on the way into the
+name (`na-`), and `as_dict()` keeps what was typed.
+
+That is worth doing, but it is not the whole hazard, and the difference should
+be said plainly: **two runs whose metadata matches to the second already
+overwrite each other today.** `RunRecorder._start()` is
+`os.makedirs(self.folder, exist_ok=True)`, and every file inside is named from
+`metadata.stamp` — `<stem><stamp>.dat`, `run<stamp>.h5` — so identical
+metadata in the same second means the same folder and the same file names, and
+the second run lands on the first. Under `--sim --fast` a run takes
+milliseconds and same-second pairs are ordinary; on the rig they are not. The
+grid widens the surface slightly by mapping "unset" and a literal `na` together;
+reserving the sentinel closes that much. Making colliding folders unique at all
+is a separate change, out of this proposal's scope, and is named here so it is
+not mistaken for something the grid already handles.
 
 `sample`, `material` and `pixel` are reduced with `slug()` on the way in, for
 the reason above: whitespace and `_` become `-`, the characters a Windows path
