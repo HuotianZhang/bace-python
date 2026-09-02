@@ -15,7 +15,7 @@ the setpoint is written, the console is polled every `TEMPERATURE_POLL_S`,
 each usable reading goes out as a `TemperatureRead`, and the node is done
 once the reading has stayed inside `tolerance_k` of the setpoint -- with no
 ramp still walking the setpoint (RAMPST?) -- for `hold_s`. That is the dwell
-of ui-brief 01-modules: the hold starts when the band is entered, not when
+of the design pack (01-modules, docs/ui-rules.md): the hold starts when the band is entered, not when
 the setpoint is written. When there is no controller the node pauses exactly
 as it did before the console was wired: `NeedsOperator`, the worker blocks in
 `Job.wait_for_operator`, the resume's `temperature_k` becomes the subtree's

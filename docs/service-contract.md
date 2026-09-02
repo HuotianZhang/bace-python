@@ -3,7 +3,9 @@
 2026-09-02. This is the implementation contract for `bace/service/`, derived from
 `docs/service-plan.md` (the plan), the Round 3 console design
 (`docs/bace-console-round3.html`, artifact *UI mockups: Pipeline bench timeline*)
-and the design pack in `D:\BACE\ui-brief\`. Where this file and the plan
+and the design pack, historical since 2026-09-02 — what survives of it is
+`docs/ui-rules.md`, and the canvas source is `docs/design/`. Where this file
+and the plan
 disagree, the plan wins; where this file and the code disagree, fix one of them
 and say so here.
 
@@ -66,7 +68,7 @@ import without FastAPI installed — only `app.py` and `__main__.py` need it.
 **Engine changes made in round 1 beyond the plan's five items** (recorded here
 so "only the round-1 items changed" is true, the plan's 不重写测量逻辑
 notwithstanding; each is a sequencing gap the design pack had already
-recorded, ui-brief 01-modules §4): `run_jv` opens the shutter for a light
+recorded, the design pack 01-modules §4, `docs/ui-rules.md`): `run_jv` opens the shutter for a light
 curve and shuts it for a dark one (`_set_shutter`) and yields
 `InstrumentState({"shutter": …})` per curve; `_set_illumination` no longer
 swallows a failing `led.off()` and skips the settle on a bare-SMU rig;
@@ -238,7 +240,7 @@ the whole card as last-used and hide a recipe edit for twenty sessions.
 computes `service.wire.shot_verdict(light.y, dark.y)` and attaches
 `"verdict": {"rail_light": n, "rail_dark": n, "rail_run_light": n, "rail_run_dark": n, "shared_extreme": bool, "peak_light_a": A, "peak_dark_a": A, "level": "ok"|"warn", "text": …}`
 to the wire `data` (not to the dataclass). The rule is the design's, corrected
-2026-09-02 (ui-brief 03-states §C): **only a run of identical samples inside
+2026-09-02 (the design pack 03-states §C, `docs/ui-rules.md`): **only a run of identical samples inside
 one trace is evidence of the digitiser's rail** — `rail_run_*` ≥ 7 consecutive
 samples on the trace's own extreme is `warn`, "the charge of this shot is
 meaningless"; an extreme repeated more than 8 times anywhere (`rail_*`) is

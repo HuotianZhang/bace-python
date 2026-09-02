@@ -45,8 +45,8 @@ can mistake a shortened array for a short record.
 The per-shot verdict is the service's judgement about a shot and is
 attached to the wire `data` here rather than added to the dataclass: the
 recorder's files must not change because the console learned to say "0 rail
-samples". The rule is the design's, corrected 2026-09-02 (ui-brief
-03-states section C): only a run of identical samples *inside one trace* is
+samples". The rule is the design's, corrected 2026-09-02 (the design
+pack 03-states section C, docs/ui-rules.md): only a run of identical samples *inside one trace* is
 evidence of the digitiser's rail, and an extreme repeated more than a few
 times is a window that is probably too small. Light and dark sharing an
 extreme is reported as a fact and judged as nothing -- the displacement

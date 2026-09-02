@@ -39,8 +39,9 @@ beyond a web font, and they fall back cleanly without it.
 
 | file | what it is |
 |---|---|
+| `ui-rules.md` | What a mockup cannot show and a contract has no place for: significant figures and the two zeros that mean *not recorded* and *not calibrated*, colour with a job, the three time scales and why “step 412 of 8400” is useless, provenance and inheritance on screen, the ten segments of one shot, the failures that look like results, and the questions the design has already answered. Distilled from the design pack, which is now historical. |
 | `bace-console-round3.html` | 《BACE console — Round 3 · B》 — the console mockup: home is the five modules as cards, each card parameters + Run + result; the bench rail across the top; the pipeline composed from the cards as they stand; the rig diagram on its own tab. Three turns — cold bench, the same bench mid-check, and the rig tab. **Self-contained**: all 33 assets it needs (React, the stylesheet, the web font) are inlined, so it opens from disk with no network and no account. This is the current version — its chain-timing lane carries the corrected light path, 502 ns with delay zero at 0, and (2026-09-02) its 81150A `:OUTP1:POL` reads **NORM** in all four artboards, where the mockup had it INV from the overturned ④ below. The bace card's second polarity row is now `output_polarity` → NORM: NORM/INV is `output_polarity`'s pair, while `inverted_output` is a boolean. |
-| `BACE Console - Round 3.dc.html` | The editable canvas source for the same design, and **not openable as it stands.** Its text was brought level with the bundle on 2026-09-02 — the same four polarity corrections, and the footer's `+ 47 ns` replaced by the measured light path — but it references `./support.js`, `_ds/modernist-…/styles.css` and `BACE Console - Round 1 / 2.dc.html`, none of which are in this folder, so a browser renders it unstyled and inert. Kept only as the source form; read `bace-console-round3.html` instead. |
+| `design/` | The Claude Design project the mockups were made in, exported whole and openable from a local server: the three rounds’ canvas sources, `BenchRail.dc.html`, the icon set, the design system — and `bace-charts*.js`, which is where the chart decisions actually live, as framework-free custom elements with the measured numbers baked in. **Round 2’s R2·3 is the only results design that exists**; Round 1 is archived uncorrected. `design/README.md` says what each file is and what was corrected. |
 
 ## The service layer
 
@@ -51,7 +52,7 @@ Markdown, not figure pages. Read in this order.
 | `service-plan.md` | 《BACE 服务层规划》 — why the service is a thin shell around the engine: one process, one worker thread as the bench lock, the API by tab, the three pipeline bindings, `NeedsOperator` for a cryostat that is not wired, the verdict rule, and the P0 core cleanups to make first. Chinese. |
 | `service-contract.md` | The contract `bace/service/` was built to, derived from the plan and the Round 3 canvas: package layout, the concurrency and stop semantics, every endpoint's shape, the wire and journal payload policy, the tree schema, the check catalogue and the cost model. Where it and the plan disagree the plan wins; where it and the code disagree, fix one and say so there. |
 | `../bace/service/README.md` | How to run the service and drive it by hand with `curl`, `httpx` and a WebSocket client. |
-| `ui-kickoff.md` | The brief for the session that builds `ui/`: the design inputs, the dev backend (`--sim --fast`), what the service guarantees the UI, and the known gaps. Start there. |
+| `ui-kickoff.md` | The brief for the session that builds `ui/`: the design inputs, the dev backend (`--sim --fast`), what the service guarantees the UI, and the known gaps. Start there — then `ui-rules.md` and `design/`. |
 
 ## What has been overturned
 

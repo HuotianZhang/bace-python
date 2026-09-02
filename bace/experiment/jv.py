@@ -332,7 +332,7 @@ def _set_shutter(rig: Rig, dark: bool) -> str | None:
     `InstrumentState` the run yields; None when the rig has no shutter.
 
     Until 2026-09-02 `run_jv` never touched the shutter (recorded gap,
-    ui-brief 01-modules section 4). An LED that is on is not the same as light
+    the design pack 01-modules section 4, docs/ui-rules.md). An LED that is on is not the same as light
     reaching the sample, and only the shutter knows the difference: a light
     J-V taken with the shutter shut is a dark J-V wearing a light label --
     V_oc of nothing, J_sc of nothing, and a file that says "1.02 V". Moved

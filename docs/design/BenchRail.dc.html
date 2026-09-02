@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/modernist-b29601f6-87b1-46fc-8c1f-21927c5d6d4e/styles.css">
+<script src="_ds/modernist-b29601f6-87b1-46fc-8c1f-21927c5d6d4e/_ds_bundle.js"></script>
+<script src="icons.js"></script>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+.br{display:grid;align-items:stretch;background:#fff;border-bottom:2px solid var(--color-divider);border-top:2px solid var(--color-divider);grid-template-columns:236px repeat(7,1fr);font-variant-numeric:tabular-nums}
+.brc{display:flex;flex-direction:column;gap:2px;padding:8px 13px 9px;border-left:1px solid var(--color-neutral-300)}
+.brc:first-child{border-left:0}
+.brl{display:flex;align-items:center;gap:5px;font:600 9px/1 'IBM Plex Sans',sans-serif;letter-spacing:.11em;text-transform:uppercase;color:var(--color-neutral-600)}
+.brv{display:flex;align-items:baseline;gap:6px;font:500 17px/1.15 'IBM Plex Mono',monospace;letter-spacing:-.01em}
+.brs{font:400 10.5px/1.25 'IBM Plex Mono',monospace;color:var(--color-neutral-600)}
+.alert{background:var(--color-accent);color:#fff}
+.alert .brl,.alert .brs{color:rgba(255,255,255,.85)}
+.warn .brv,.warn .brs{color:var(--color-accent-700)}
+.off .brv{color:var(--color-neutral-500)}
+.relay{display:flex;align-items:center;margin-top:3px}
+.rn{font:500 9px/1 'IBM Plex Mono',monospace;padding:3px 5px;border:1px solid var(--color-neutral-400);color:var(--color-neutral-500)}
+.rn.on{border-color:var(--color-text);background:var(--color-text);color:#fff}
+.rw{flex:1;height:2px;background:var(--color-neutral-300)}
+.rw.on{background:var(--color-text)}
+</style>
+</helmet>
+
+<sc-if value="{{ isCold }}" hint-placeholder-val="{{ true }}">
+<div class="br">
+  <div class="brc">
+    <span class="brl"><lu-i name="relay" style="width:12px"></lu-i>relay · interlock</span>
+    <span class="brv">neutral</span>
+    <div class="relay"><span class="rn">2400</span><span class="rw"></span><span class="rn">device</span><span class="rw"></span><span class="rn">amp</span></div>
+  </div>
+  <div class="brc off"><span class="brl"><lu-i name="bias" style="width:12px"></lu-i>bias 81150A</span><span class="brv">off</span></div>
+  <div class="brc off"><span class="brl"><lu-i name="smu" style="width:12px"></lu-i>SMU 2400</span><span class="brv">off</span><span class="brs">cc ≤ 50 mA / 5.0 V</span></div>
+  <div class="brc"><span class="brl"><lu-i name="shutter" style="width:12px"></lu-i>shutter</span><span class="brv">shut</span></div>
+  <div class="brc warn"><span class="brl"><lu-i name="led" style="width:12px"></lu-i>LED 33220A</span><span class="brv">off <lu-i name="warn" style="width:12px"></lu-i></span><span class="brs">POL NORM · low 0.400 V</span></div>
+  <div class="brc off"><span class="brl"><lu-i name="voc" style="width:12px"></lu-i>V_oc</span><span class="brv">— <lu-i name="blank" style="width:12px"></lu-i></span><span class="brs">none this session</span></div>
+  <div class="brc warn"><span class="brl"><lu-i name="power" style="width:12px"></lu-i>optical power</span><span class="brv">— <lu-i name="warn" style="width:12px"></lu-i></span><span class="brs">:8918 silent</span></div>
+  <div class="brc warn"><span class="brl"><lu-i name="temp" style="width:12px"></lu-i>T</span><span class="brv">294.8 K <lu-i name="blank" style="width:12px"></lu-i></span><span class="brs">set — · not wired</span></div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isArmed }}" hint-placeholder-val="{{ false }}">
+<div class="br">
+  <div class="brc">
+    <span class="brl"><lu-i name="relay" style="width:12px"></lu-i>relay · interlock</span>
+    <span class="brv">Keithley 2400</span>
+    <div class="relay"><span class="rn on">2400</span><span class="rw on"></span><span class="rn on">device</span><span class="rw"></span><span class="rn">amp</span></div>
+  </div>
+  <div class="brc off"><span class="brl"><lu-i name="bias" style="width:12px"></lu-i>bias 81150A</span><span class="brv">off</span><span class="brs">armed EXT ✓</span></div>
+  <div class="brc off"><span class="brl"><lu-i name="smu" style="width:12px"></lu-i>SMU 2400</span><span class="brv">off</span><span class="brs">cc 50 mA / 5.0 V</span></div>
+  <div class="brc"><span class="brl"><lu-i name="shutter" style="width:12px"></lu-i>shutter</span><span class="brv">shut</span></div>
+  <div class="brc warn"><span class="brl"><lu-i name="led" style="width:12px"></lu-i>LED 33220A</span><span class="brv">off <lu-i name="warn" style="width:12px"></lu-i></span><span class="brs">POL NORM · low 0.400 V</span></div>
+  <div class="brc"><span class="brl"><lu-i name="voc" style="width:12px"></lu-i>V_oc</span><span class="brv">1.0479 V</span><span class="brs">@ 1.030 V · 12:08</span></div>
+  <div class="brc"><span class="brl"><lu-i name="power" style="width:12px"></lu-i>optical power</span><span class="brv">1.407 mW</span><span class="brs">530 nm · mW cm⁻² —</span></div>
+  <div class="brc warn"><span class="brl"><lu-i name="temp" style="width:12px"></lu-i>T</span><span class="brv">294.8 K <lu-i name="blank" style="width:12px"></lu-i></span><span class="brs">set — · not wired</span></div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isBench }}" hint-placeholder-val="{{ false }}">
+<div class="br">
+  <div class="brc">
+    <span class="brl"><lu-i name="relay" style="width:12px"></lu-i>relay · interlock</span>
+    <span class="brv">amplifier</span>
+    <div class="relay"><span class="rn">2400</span><span class="rw"></span><span class="rn on">device</span><span class="rw on"></span><span class="rn on">amp</span></div>
+  </div>
+  <div class="brc alert"><span class="brl"><lu-i name="bias" style="width:12px"></lu-i>bias 81150A</span><span class="brv">LIVE</span><span class="brs">1.0423 → −4.00 V</span></div>
+  <div class="brc off"><span class="brl"><lu-i name="smu" style="width:12px"></lu-i>SMU 2400</span><span class="brv">off</span></div>
+  <div class="brc"><span class="brl"><lu-i name="shutter" style="width:12px"></lu-i>shutter</span><span class="brv">open</span></div>
+  <div class="brc"><span class="brl"><lu-i name="led" style="width:12px"></lu-i>LED 33220A</span><span class="brv">1.020 V</span><span class="brs">on · 1 kHz · POL INV ✓</span></div>
+  <div class="brc"><span class="brl"><lu-i name="voc" style="width:12px"></lu-i>V_oc</span><span class="brv">1.0423 V</span><span class="brs">@ 1.020 V · jv_bace 20:58</span></div>
+  <div class="brc"><span class="brl"><lu-i name="power" style="width:12px"></lu-i>optical power</span><span class="brv">1.407 mW</span><span class="brs">530 nm · mW cm⁻² —</span></div>
+  <div class="brc warn"><span class="brl"><lu-i name="temp" style="width:12px"></lu-i>T</span><span class="brv">294.8 K <lu-i name="blank" style="width:12px"></lu-i></span><span class="brs">set — · not wired</span></div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isReady }}" hint-placeholder-val="{{ false }}">
+<div class="br">
+  <div class="brc">
+    <span class="brl"><lu-i name="relay" style="width:12px"></lu-i>relay · interlock</span>
+    <span class="brv">neutral</span>
+    <div class="relay"><span class="rn">2400</span><span class="rw"></span><span class="rn">device</span><span class="rw"></span><span class="rn">amp</span></div>
+  </div>
+  <div class="brc off"><span class="brl"><lu-i name="bias" style="width:12px"></lu-i>bias 81150A</span><span class="brv">off</span><span class="brs">armed EXT ✓</span></div>
+  <div class="brc off"><span class="brl"><lu-i name="smu" style="width:12px"></lu-i>SMU 2400</span><span class="brv">off</span><span class="brs">cc ≤ 50 mA / 5.0 V</span></div>
+  <div class="brc"><span class="brl"><lu-i name="shutter" style="width:12px"></lu-i>shutter</span><span class="brv">shut</span></div>
+  <div class="brc off"><span class="brl"><lu-i name="led" style="width:12px"></lu-i>LED 33220A</span><span class="brv">off</span><span class="brs">POL INV ✓ · low 0.400 V</span></div>
+  <div class="brc"><span class="brl"><lu-i name="voc" style="width:12px"></lu-i>V_oc</span><span class="brv">1.0423 V</span><span class="brs">@ 1.020 V · jv_bace 20:58</span></div>
+  <div class="brc"><span class="brl"><lu-i name="power" style="width:12px"></lu-i>optical power</span><span class="brv">1.407 mW</span><span class="brs">530 nm · mW cm⁻² —</span></div>
+  <div class="brc warn"><span class="brl"><lu-i name="temp" style="width:12px"></lu-i>T</span><span class="brv">294.8 K <lu-i name="blank" style="width:12px"></lu-i></span><span class="brs">set — · not wired</span></div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isRunning }}" hint-placeholder-val="{{ false }}">
+<div class="br">
+  <div class="brc">
+    <span class="brl"><lu-i name="relay" style="width:12px"></lu-i>relay · interlock</span>
+    <span class="brv">amplifier</span>
+    <div class="relay"><span class="rn">2400</span><span class="rw"></span><span class="rn on">device</span><span class="rw on"></span><span class="rn on">amp</span></div>
+  </div>
+  <div class="brc alert"><span class="brl"><lu-i name="bias" style="width:12px"></lu-i>bias 81150A</span><span class="brv">LIVE</span><span class="brs">1.0723 → −4.00 V</span></div>
+  <div class="brc off"><span class="brl"><lu-i name="smu" style="width:12px"></lu-i>SMU 2400</span><span class="brv">off</span></div>
+  <div class="brc"><span class="brl"><lu-i name="shutter" style="width:12px"></lu-i>shutter</span><span class="brv">open</span></div>
+  <div class="brc"><span class="brl"><lu-i name="led" style="width:12px"></lu-i>LED 33220A</span><span class="brv">1.020 V</span><span class="brs">on · POL INV ✓</span></div>
+  <div class="brc"><span class="brl"><lu-i name="voc" style="width:12px"></lu-i>V_oc</span><span class="brv">1.0723 V</span><span class="brs">@ 1.020 V · this level</span></div>
+  <div class="brc"><span class="brl"><lu-i name="power" style="width:12px"></lu-i>optical power</span><span class="brv">1.407 mW</span><span class="brs">530 nm · mW cm⁻² —</span></div>
+  <div class="brc"><span class="brl"><lu-i name="temp" style="width:12px"></lu-i>T</span><span class="brv">250.1 K <lu-i name="ok" style="width:12px"></lu-i></span><span class="brs">set 250.0 ±0.2</span></div>
+</div>
+</sc-if>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1400,&quot;height&quot;:80},&quot;mode&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;cold&quot;,&quot;armed&quot;,&quot;running&quot;,&quot;bench&quot;,&quot;ready&quot;],&quot;default&quot;:&quot;cold&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const m = this.props.mode || 'cold';
+    return { isCold: m === 'cold', isArmed: m === 'armed', isRunning: m === 'running', isBench: m === 'bench', isReady: m === 'ready' };
+  }
+}
+</script>
+</body>
+</html>

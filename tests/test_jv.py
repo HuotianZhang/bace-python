@@ -218,7 +218,7 @@ def test_abort_stops_before_the_next_illumination():
 
 # -- the shutter ----------------------------------------------------------
 def test_a_light_curve_opens_the_shutter_and_a_dark_curve_shuts_it():
-    """Recorded gap (ui-brief 01-modules section 4): `run_jv` never touched the
+    """Recorded gap (the design pack 01-modules section 4, docs/ui-rules.md): `run_jv` never touched the
     shutter, so a light J-V taken with it shut was a dark J-V wearing a light
     label. This pins the sequence: the shutter position at the moment each
     sweep is taken, the `InstrumentState` the run yields for a console or

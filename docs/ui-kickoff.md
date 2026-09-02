@@ -11,8 +11,8 @@ contract deliberately, never guess) and the design inputs below.
 A static browser front end (plain files — the service serves them, there is no
 build server on the lab PC) implementing the Round 3 design: four tabs,
 **bench** (the five module cards + the pinned rail + the chain strip),
-**pipeline** (the tree editor, Dry run, the schedule), **results** (not yet
-designed — design it in Claude Design first or leave it a stub), **rig** (the
+**pipeline** (the tree editor, Dry run, the schedule), **results** (designed as
+Round 2's R2·3, never carried into Round 3 — see below), **rig** (the
 diagram and the read-back, reference only). The user's standing instruction:
 *not* the shape of the JV console or the 331 controller; iterate the design in
 Claude Design with the user before coding screens that differ from Round 3.
@@ -23,7 +23,8 @@ Claude Design with the user before coding screens that differ from Round 3.
 |---|---|
 | `docs/bace-console-round3.html` | the chosen design, self-contained, open in a browser |
 | artifact `UI mockups: Pipeline bench timeline` (claude.ai/code/artifact/b51c4ebd-…) | the editable canvas of the same design |
-| `D:\BACE\ui-brief\` | the design pack: `02-orchestration.md` (the flow model), `03-states.md` (the rail, the chain, failures-that-look-like-results), `06-visual.md` (type, colour, density), `data/` (real numbers to develop against) |
+| `docs/design/` | the canvas source, openable from a local server, with the chart decisions as working code (`bace-charts*.js`) — and Round 2, whose **R2·3 is the results design** |
+| `docs/ui-rules.md` | how to render it: numbers and their absences, colour with a job, the three time scales, provenance on screen, the failures that look like results |
 
 The bundle and the artifact are the same four artboards, and both were
 corrected on 2026-09-02: the 81150A `:OUTP1:POL` read `INV` in every chain
@@ -34,6 +35,11 @@ pair. **Take no parameter name or value from the mockup**: the names come from
 `GET /modules` and the values from its `{value, source, …}`. The artboards'
 numbers are one operator's session — good examples, and a fair starting point
 for the cards' defaults, but not the recipe.
+
+**The artifact and the canvas are separate stores.** Publishing to the
+artifact URL does not write back to the Claude Design project, and editing
+the canvas there does not update this repo. `docs/design/` is the canvas as
+exported on 2026-09-02, corrected; if you edit the design, export again.
 
 ## Developing
 
@@ -80,7 +86,13 @@ The scripted walk-through of the whole operator flow is
 
 ## Known gaps the UI should not paper over
 
-- The **results tab is undesigned** on both sides.
+- The **results tab has a design but no home**: Round 2's R2·3 (the 9 × 5 grid,
+  the partial cell outlined and never averaged in silently, the flag list where
+  every flag states its reason, `resolved from: run.toml 17 · last-used 2 ·
+  inherited 2 · edited 1`). It was set aside with Round 2 and Round 3 left the
+  tab empty. Two things to settle before building it: it names a `flags.json`
+  the service does not write, and its `saturation` line predates the 2026-09-02
+  correction. `docs/design/README.md` has the detail.
 - `estimate`/cost is a lower bound until settle history exists; `lower_bound:
   true` renders as "at least", never as a promise.
 - σ_Q of 0 means *not recorded*; intensity without the calibration factor is

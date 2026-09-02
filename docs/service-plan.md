@@ -100,7 +100,7 @@ Dry run = `validate` + 返回完整 schedule，不碰任何输出——UI 的 Dr
 6. （2026-09-02 补记，实际做了、计划里没列的）`run_jv` 光曲线开快门、暗曲线
    关快门并 yield `InstrumentState({"shutter"})`；`run_intensity_series` 在
    `measure_dc` 周围开快门；`storage/jv.py` 因此升到 `bace-jv/2`。都是
-   ui-brief 01-modules §4 记过的时序缺口，不是重写测量逻辑；`bace-run/2` 不变。
+   设计包 01-modules §4（见 docs/ui-rules.md）记过的时序缺口，不是重写测量逻辑；`bace-run/2` 不变。
    审阅轮又加了 `run_transient_scan` 每段 yield `StepPhase`（同样的仪器调用、
    同样的顺序，只是多了 yield）。
 

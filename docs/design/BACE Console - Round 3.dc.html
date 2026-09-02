@@ -7,12 +7,12 @@
 </head>
 <body>
 <x-dc>
-<helmet data-dc-atomics>
+<helmet data-dc-atomics="">
 <meta name="design_doc_mode" content="canvas">
 <link rel="stylesheet" href="_ds/modernist-b29601f6-87b1-46fc-8c1f-21927c5d6d4e/styles.css">
 <script src="_ds/modernist-b29601f6-87b1-46fc-8c1f-21927c5d6d4e/_ds_bundle.js"></script>
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
 <script src="icons.js"></script>
 <script src="bace-charts.js"></script>
 <script src="bace-charts-r3.js"></script>
@@ -118,7 +118,7 @@ a{color:#ae1800}a:hover{color:#ec3013}
 <div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname">BACE console — Round 3 · B simplified: the modules are the home</span></div>
 <div class="note">
 <p>Home is the five modules as cards. Each card is parameters, Run and result in one place — the debugging loop is run a card, read its chart, run the next. The pipeline is composed from the cards as they stand. The rig diagram leaves the main screens: a chain-check strip at the bottom, the drawings on their own tab.</p>
-<p>Diagram corrected: LED at 1 kHz, each cycle one scope trigger, n_averages cycles make one trace; the shutter moves twice per shot, the LED never stops.</p>
+<p>Diagram corrected: LED at 1 kHz, 50 % duty, each cycle one scope trigger, n_averages cycles make one trace; the shutter moves twice per shot, the LED never stops. Chain timing from the 2026-09-01 measurement: drive off −380 ns → Sync 0 → bias out at +delay_ns → light off at the sample +122 ns; the drive signal and the light are drawn as separate lanes.</p>
 <sc-if value="{{ ann }}" hint-placeholder-val="{{ true }}"><div class="leg">
 <span class="legi"><span class="lk" style="background:#bab6b6"></span>editable, pre-filled</span>
 <span class="legi"><span class="lk" style="background:#ec3013"></span>edited</span>
@@ -525,7 +525,7 @@ a{color:#ae1800}a:hover{color:#ec3013}
     <div class="card">
       <div class="ch"><span class="cn">one shot · three scales</span><span class="cs">swept · <span style="color:#ae1800">{{ axis }}</span></span></div>
       <div class="cb">
-        <ch-timing axis="{{ axis }}" style="width:100%"></ch-timing>
+        <ch-timing axis="{{ axis }}" style="width: 100%"></ch-timing>
       </div>
     </div>
 
