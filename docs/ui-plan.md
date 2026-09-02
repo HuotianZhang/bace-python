@@ -66,10 +66,29 @@ replays nothing, and then `seq > last seen` discards every numbered frame the
 new process sends — a bench that goes quietly stale until someone reloads the
 page. `Hello` carries what settles it (`data.session.id`, beside `data.seq` and
 `data.bench`), and its envelope `seq` is `null`, so it is exempt from the
-dedupe it configures. Handle `Hello` first: when `data.session.id` differs from
-the one in hand, drop the cursor and the session state and rebuild from
-`data.bench` rather than filtering the new session's frames against the old
-session's numbers. That last one is the subtle branch: a replayed
+dedupe it configures.
+
+But resetting the cursor on that `Hello` is too late by itself, because the
+server has already acted on the stale one:
+
+```python
+await ws.send_text(_dumps(_hello(session)))      # app.py:415
+if since is not None:
+    for frame in session.events_since(since):    # the query value, fixed at open
+```
+
+`since` is a query parameter, decided when the socket opened and unchangeable
+after. So a socket opened with the old session's high `since` gets `Hello`,
+then a replay computed from a cursor that matches nothing in the new session —
+and every frame the new process emitted before the client noticed is gone.
+`data.bench` gives the bench as it is now; it does not give back a completed
+shot or its loop curve.
+
+So the rule is **reconnect, not just reset**: handle `Hello` first, and when
+`data.session.id` differs from the one in hand, drop the cursor and the session
+state, close the socket and reopen it without `since` (or `since=0`). Rebuild
+from the new `Hello`'s `data.bench` and let the ring supply what it still
+holds. That last one is the subtle branch: a replayed
 `StepDone` carries every scalar and its `verdict` with the four traces `null`,
 and a client that blanks the chart instead of redrawing from scalars has a bug
 that only shows up after a reconnect.
@@ -114,7 +133,7 @@ pack is at `D:\BACE\ui-brief\` and is historical — it is not in the repo, and
 nothing in the repo needs it. All three rules survive in `docs/ui-rules.md`,
 §4 and §2, which is where to cite them from.)*
 
-**4 · The UI is testable without the bench, from two fixtures.**
+**4 · The UI is testable without the bench, from three fixtures.**
 
 `acceptance/20260902_service-vs-labview/` holds the rig day of 2026-09-02, and
 it is better test material than anything that could be written by hand. Feed it
@@ -124,6 +143,17 @@ into the same store the WebSocket feeds.
 |---|---|---|
 | `journals/*.jsonl` — 3 files, 58 / 63 / 91 lines | the event and state layer | full `RunQueued → RunStateChanged → NodeStarted → … → RunFinished` lifecycles, the chain `Verdict`s in `20260902_144844.jsonl`, and **two real `RunFailed`** in `20260902_125751.jsonl` |
 | `service_153722/run20260902_153722.h5`, and the LabVIEW `.dat` beside it in `labview_150640/` | the chart layer | the traces, at full precision |
+| a captured `Hello` frame — **to be recorded**, it is not in the acceptance set | the bench snapshot: the rail and the chain | `data.bench`, which is `GET /bench` whole: instruments, `inferred`, `chain`, `rig`, `verdicts`, `queue`, `state` |
+
+The third one is not optional and the journal cannot stand in for it: **a
+journal contains no bench snapshot.** Grepping the acceptance files for
+`bench`, `chain`, `instruments` and `queue` returns nothing, `Hello` is never
+journalled, and `InstrumentState` frames are single values —
+`{"values": {"shutter": "shut"}}` — which say what one step changed, not what
+the bench is. Since M1 is the rail and the chain, a fixture set without this
+would leave the milestone that needs it most with nothing to develop against.
+Capture one `Hello` off a `--sim` service and one off the rig, and check them
+in beside the journals.
 
 **The split is not optional.** The journal payload policy (contract §3) stores
 *"enough to render the session log and the history queries, never the traces"*:
@@ -182,8 +212,9 @@ thing that proves it.
 `api.js` wraps the routes; `stream.js` owns the WebSocket and everything in
 decision 2; `store.js` folds the bench snapshot and the frames into state.
 
-Then the offline replay: both fixtures from decision 4, feeding that same
-store. This is a deliverable, not a test written later — from here on every
+Then the offline replay: all three fixtures from decision 4, feeding that same
+store — including capturing the `Hello` that does not exist yet, which M1
+depends on. This is a deliverable, not a test written later — from here on every
 phase has a deterministic real-data bench to develop against, and the UI can be
 worked on with no service running.
 
