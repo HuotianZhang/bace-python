@@ -53,6 +53,8 @@ export function createStream({
   /** The dedupe cursor. Belongs to `session`, and dies with it. */
   let lastSeq = null;
   let session = null;
+  /** `id` plus `started_at`: which *incarnation* of the service this is. */
+  let incarnation = null;
   /** What we asked this socket to replay from; `null` means "no replay". */
   let asked = null;
 
@@ -120,13 +122,21 @@ export function createStream({
     if (!frame) return;
 
     if (frame.type === 'Hello') {
-      const id = frame.data && frame.data.session && frame.data.session.id;
-      if (session !== null && id !== session) {
+      const who = (frame.data && frame.data.session) || {};
+      const id = who.id;
+      // `session_id` is stamped to the whole second, so two processes started
+      // inside the same second share it — and a cursor kept across that
+      // restart would discard every frame the new process sends until its
+      // counter passed the old high. `started_at` is the float the session
+      // was actually created at, so the pair identifies the incarnation.
+      const now = `${id}@${who.started_at ?? ''}`;
+      if (incarnation !== null && now !== incarnation) {
         // The service restarted under us. Drop the cursor and the session
         // state, and reopen: this socket's replay was computed from a cursor
         // that matches nothing in the new session.
         const previous = session;
         session = id;
+        incarnation = now;
         lastSeq = null;
         onSessionChange({ from: previous, to: id });
         const dead = socket;
@@ -136,6 +146,7 @@ export function createStream({
         return open(0);
       }
       session = id;
+      incarnation = now;
       if (asked === null || asked === undefined) {
         // We asked for no replay, so we are current as of `data.seq`. On a
         // reconnect we did ask, and adopting it here would swallow the replay.
@@ -184,7 +195,7 @@ export function createStream({
       status('closed');
     },
     /** For the status line, and for the tests. */
-    get state() { return { session, lastSeq, asked, stats: { ...stats }, connected: !!socket }; },
+    get state() { return { session, incarnation, lastSeq, asked, stats: { ...stats }, connected: !!socket }; },
     /** Feed a frame in as if it had arrived — the offline replay uses this. */
     inject(frame) { handle(frame); },
   };
