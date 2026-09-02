@@ -127,3 +127,33 @@ test('a client dropped at 1008 comes back without missing a numbered frame',
     replayed.stream.close();
   }
 });
+
+test('a run hydrates from its own endpoints, in the shapes they answer',
+     options, async () => {
+  // The store's hydrate path exists for a run whose opening frames have left
+  // the ring. What it needs is that `GET /runs/{id}` and `GET /runs/{id}/data`
+  // say what it reads — which only a live service can show.
+  const api = createApi({ base });
+  const { store, stream } = connect();
+  try {
+    const posted = await api.startRun('bace', {
+      axis_name: 'delay_ns', axis_start: 0, axis_stop: 200, axis_step: 100,
+      centre_on_voc: false, vpre: 1.0, vcoll: -2.0, n_loops: 2, store_shots: false,
+    });
+    await settle(store, posted.run_id, 120000);
+
+    const fresh = createStore({ schedule: () => {} });
+    fresh.applyRunRecord(await api.run(posted.run_id));
+    fresh.applyRunData(posted.run_id, 'bace', await api.runData(posted.run_id));
+    const run = fresh.getState().runs[posted.run_id];
+
+    assert.equal(run.module, 'bace');
+    assert.equal(run.axis.name, 'delay_ns');
+    assert.equal(run.values.length, 3);
+    assert.equal(run.kept, 6);
+    assert.equal(run.requested, 6);
+    assert.ok(run.hydrated);
+  } finally {
+    stream.close();
+  }
+});
