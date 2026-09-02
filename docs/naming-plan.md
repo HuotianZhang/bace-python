@@ -239,10 +239,18 @@ means the same file names and the second run lands on the first. Under
 the rig they are not.
 
 So a folder that already holds a run is not reused: the next free `-2`, `-3`
-suffix is taken instead. The suffix rides on the last part
+suffix is taken instead. The suffix rides on the last part of *the grid*
 (`…_20260902_183355-2`), so the count stays nine and the stamp stays readable
 at parts 8–9; the files inside keep the plain LabVIEW stamp, because they are
 in a different directory and never clash.
+
+**On the grid, not on the whole name.** A series parent is
+`folder_name() + "_series"`, so suffixing the string would give
+`…_183355_series-2` and break the rule two paragraphs up that an exact trailing
+`_series` names the folder class. The allocator takes the grid and the class
+marker separately and puts the disambiguator between them —
+`…_20260902_183355-2_series` — so both invariants survive a collision: parts
+8–9 carry the stamp with its suffix, and `_series` is still last.
 
 **One helper, called by every `folder_name()` consumer** — not a change inside
 `RunRecorder`. All three callers listed in §3 allocate their own directory and
