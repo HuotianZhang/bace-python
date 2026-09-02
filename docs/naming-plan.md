@@ -155,7 +155,17 @@ Eight fields, every one present, in the 2026-08-07 order:
 <sample>_<material>_<pixel>_<T>K_<LED>mVLED_<VOC>mVVOC_<offset>_<YYYYMMDD>_<HHMMSS>
 ```
 
-Splitting on `_` always gives nine parts. Parts 8 and 9 are always the stamp.
+Splitting on `_` gives nine parts, of which 8 and 9 are the stamp — **for a run
+folder.** One caller appends to that name and the invariant has to say so:
+`SeriesRecorder` builds `f"{metadata.folder_name()}_series"`
+(`storage/series.py:185`), which is ten parts with `series` last. That suffix
+is a folder *class* marker, and it stays: the intensity series writes a parent
+holding one run folder per level, and the name is how you tell the two apart in
+a directory listing.
+
+So the rule, stated so it covers both: **parts 1–9 are the grid, and a trailing
+`_series` marks a series parent.** Read the stamp at parts 8–9 rather than from
+the end.
 
 | field | known | unknown |
 |---|---|---|
@@ -181,12 +191,26 @@ if it does — nothing parses these names (below) — and the metadata still say
 which it was.
 
 `sample`, `material` and `pixel` are reduced with `slug()` on the way in, for
-the reason above. `slug()` already does exactly what is needed — whitespace and
-`_` become `-`, the characters a Windows path segment may not hold are dropped,
-anything merely non-ASCII is kept — so this is a call, not new logic. A limit
-of 24 characters each keeps the identity block under the 66 the 2026-08-07 name
+the reason above: whitespace and `_` become `-`, the characters a Windows path
+segment may not hold are dropped, anything merely non-ASCII is kept. A limit of
+24 characters each keeps the identity block under the 66 the 2026-08-07 name
 budgets for it. `as_dict()` keeps all three verbatim, the same split the comment
 already has.
+
+**A field that reduces to nothing takes the placeholder too.** `slug(" :: ")`,
+`slug("///")` and `slug("...")` all return `""`, and today `folder_name()`
+handles that by dropping the field — which the grid cannot do without producing
+`s4__na_290K_…` and losing the arity it exists to guarantee. So the rule is
+*unknown **or reduced to nothing** → `na`*, and that is the case the new test
+has to carry alongside the three in the table above.
+
+`slug()` does not normalise Windows' reserved device names (`CON`, `PRN`,
+`AUX`, `NUL`, `COM1`…), and does not need to: those are reserved only as a
+*whole* path component, and `folder_name()` never emits one. Even
+`sample = "CON"` with everything else unknown builds
+`CON_na_na_naK_namVLED_namVVOC_offsetraw_20260902_183355`. Nothing in the
+metadata reaches a name of its own — the `.dat` stems and `run<stamp>.h5` are
+fixed strings — so there is no path on which a bare `CON` can be created.
 
 ### The comment leaves the name
 
