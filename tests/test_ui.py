@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 
@@ -142,6 +143,24 @@ def test_the_journals_have_no_seq_gaps():
         with open(os.path.join(folder, name), encoding="utf-8") as fh:
             seqs = [json.loads(line)["seq"] for line in fh if line.strip()]
         assert seqs == list(range(len(seqs))), f"{name} is not 0…N"
+
+
+def test_every_offline_fixture_is_registered_and_present():
+    """`ui/lib/replay.js` lists what the offline page can load. A fixture that
+    is in the repo but not in that list cannot be opened without a service, and
+    an entry pointing at a file that is not there is a 404 in the browser --
+    both are silent, so they are asserted here instead.
+    """
+    listed = re.findall(r"url:\s*'([^']+)'", open(os.path.join(UI, "lib", "replay.js"),
+                                                  encoding="utf-8").read())
+    assert listed, "the fixture list is empty"
+    for url in listed:
+        path = os.path.normpath(os.path.join(UI, url))
+        assert os.path.exists(path), f"{url} is listed and not there"
+
+    on_disk = {n for n in os.listdir(FIXTURES) if n.endswith((".jsonl", ".json"))}
+    registered = {os.path.basename(u) for u in listed}
+    assert on_disk <= registered, f"recorded but not loadable offline: {sorted(on_disk - registered)}"
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="no Node on this machine (the lab PC has none)")
