@@ -326,6 +326,33 @@ class SimulatedDigitizer:
             i += b.rng.normal(0.0, b.noise_a / math.sqrt(n_averages), n)
         return i * b.sense_resistor_ohm        # amps -> volts at the scope
 
+    SYNC_SOURCE = "CHAN3"
+    SYNC_HIGH_V = 1.2
+    """What the 81150A sync looks like at the scope: a positive step of about
+    1.2 V (the bench sessions of 2026-09-01 calibrated 0.115 V thresholds from
+    0.23 V of it seen through the 1/R division) arriving at the trigger
+    position and staying high for the rest of the record. The real CHAN3
+    carries this, not a current, and `run_transient_scan` calibrates its
+    threshold from it -- a simulator that answered the transient for every
+    source let the 2026-09-02 sign flip pass every test while the rig set a
+    0.25 mV threshold."""
+
+    def _sync_volts(self, n_averages: int) -> np.ndarray:
+        b = self.bench
+        n, dt = self.n_points, self.dt
+        t = np.arange(n) * dt
+        v = np.where(t >= self.trigger_position_s, self.SYNC_HIGH_V, 0.0)
+        if n_averages > 0:
+            v = v + b.rng.normal(0.0, 2e-3 / math.sqrt(n_averages), n)
+        return v
+
+    def _volts_for(self, source: str, n_averages: int) -> np.ndarray:
+        """Volts at the scope input for `source`: the sync on its channel,
+        the device current through the sense resistor on any other."""
+        if str(source).upper() == self.SYNC_SOURCE:
+            return self._sync_volts(n_averages)
+        return self._ideal_volts(n_averages)
+
     def autorange(self, source: str = "CHAN2", *, scale_factor: float = 1.5,
                   offset_divisor: float = 2.0, channel: int = 2,
                   passes: int = 6, growth: float = 1.8,
@@ -336,7 +363,7 @@ class SimulatedDigitizer:
         trace already limited by the window in force. `passes`, `growth` and
         `max_range_v` are accepted and ignored so the two are interchangeable.
         """
-        v = self._ideal_volts(16)
+        v = self._volts_for(source, 16)
         hi, lo = float(v.max()), float(v.min())
         pk = hi - lo
         if abs(pk) < 1e-3:
@@ -357,7 +384,7 @@ class SimulatedDigitizer:
                 "no vertical range set — the light trace must autorange before the "
                 "dark trace acquires, or the channel must be configured explicitly"
             )
-        v = self._ideal_volts(max(1, int(n_averages)))
+        v = self._volts_for(source, max(1, int(n_averages)))
         top = self._offset_v + self._range_v / 2.0
         bottom = self._offset_v - self._range_v / 2.0
         self._clipped = bool((v > top).any() or (v < bottom).any())

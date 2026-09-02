@@ -577,3 +577,87 @@ def test_every_shot_announces_its_phases_in_order():
     assert [(p.phase, p.of) for p in phases][:6] == [
         ("levels", 6), ("light settle", 6), ("acquire light", 6), ("dark settle", 6),
         ("acquire dark", 6), ("process", 6)]
+
+
+# -- trigger calibration ----------------------------------------------------
+def test_the_trigger_threshold_is_calibrated_in_volts_whatever_the_sign_convention():
+    """The first service run on the rig (2026-09-02, session 103857) set a
+    0.25 mV trigger threshold and averaged twenty untriggered records into a
+    flat trace and a charge of 1e-12 C. `acquire` returns amps in the rig's
+    convention -- divided by R and, since that day, multiplied by
+    `current_sign = -1` -- and the calibration took max() of that, so the
+    positive sync read as a negative pulse whose maximum is the baseline. The
+    threshold has to come from the scope-input volts, whichever sign the
+    charges carry."""
+    from bace.experiment.transient import MIN_SYNC_SWING_V
+
+    thresholds = {}
+    for sign in (-1.0, 1.0):
+        sim = make_bench(seed=1, current_sign=sign)
+        sim.led.set_pulse(1.020, 0.4)
+        rig = Rig(bias=sim.bias, scope=sim.scope, shutter=sim.shutter,
+                  config=RigConfig(current_sign=sign), power=sim.power)
+        cfg = RunConfig(n_averages=50, settle_s=0.0, dark_settle_s=0.0,
+                        t0_int_s=2.71e-7, calibrate_trigger=True)
+        evs = run(rig, bace_sweep(0.90, 0.90, 0.0, n_loops=1), cfg=cfg)
+        note = next(e for e in evs if isinstance(e, E.Notice)
+                    and e.text.startswith("trigger threshold set to"))
+        thresholds[sign] = float(note.text.split()[4])
+        assert " V " in note.text, "the threshold is a voltage and should say so"
+    assert thresholds[-1.0] == pytest.approx(thresholds[1.0], rel=0.2), (
+        "the same sync must give the same threshold under either sign")
+    assert thresholds[-1.0] > MIN_SYNC_SWING_V / 2
+
+
+class _NoSync:
+    """A digitizer whose trigger channel carries nothing but noise."""
+
+    def __init__(self, inner, source: str = "CHAN3"):
+        self._inner, self._source = inner, source
+
+    def acquire(self, n_averages, *, source="CHAN2", autorange_first=False, timeout_s=30.0):
+        tr = self._inner.acquire(n_averages, source=source,
+                                 autorange_first=autorange_first, timeout_s=timeout_s)
+        if source == self._source:
+            rng = np.random.default_rng(0)
+            return type(tr)(y=rng.normal(0.0, 1e-4, tr.y.size) / 5.192, dt=tr.dt, t0=tr.t0)
+        return tr
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+def test_a_trigger_channel_with_no_sync_refuses_to_measure_noise_under_auto():
+    """With `trigger_sweep = AUTO` a missing sync is not an error the scope
+    reports: it sweeps anyway, the dark subtraction cancels the noise, and a
+    plausible charge comes out of a disconnected cable. The run stops before
+    the first shot and says why, instead."""
+    from bace.experiment.transient import SyncError
+
+    sim, rig = build()
+    rig = Rig(bias=sim.bias, scope=_NoSync(sim.scope), shutter=sim.shutter,
+              config=RigConfig(), power=sim.power)
+    cfg = RunConfig(n_averages=50, settle_s=0.0, dark_settle_s=0.0,
+                    t0_int_s=2.71e-7, calibrate_trigger=True, trigger_sweep="AUTO")
+    seen = []
+    with pytest.raises(SyncError, match="no sync on CHAN3"):
+        for ev in run_transient_scan(rig, bace_sweep(0.9, 0.9, 0.0), cfg, sleep=NO_SLEEP):
+            seen.append(ev)
+    assert any(isinstance(e, E.Notice) and e.level == "warning"
+               and "no sync on CHAN3" in e.text for e in seen)
+    assert not any(isinstance(e, E.StepDone) for e in seen), "nothing was acquired"
+    assert sim.bias.output_enabled is False, "the finally still parks the generator"
+
+
+def test_a_trigger_channel_with_no_sync_only_warns_under_trig():
+    """TRIG waits for a real edge and times out on its own; the warning is
+    still worth having on the stream, the refusal is not."""
+    sim, rig = build()
+    rig = Rig(bias=sim.bias, scope=_NoSync(sim.scope), shutter=sim.shutter,
+              config=RigConfig(), power=sim.power)
+    cfg = RunConfig(n_averages=50, settle_s=0.0, dark_settle_s=0.0,
+                    t0_int_s=2.71e-7, calibrate_trigger=True, trigger_sweep="TRIG")
+    evs = run(rig, bace_sweep(0.9, 0.9, 0.0), cfg=cfg)
+    assert any(isinstance(e, E.Notice) and e.level == "warning"
+               and "no sync on CHAN3" in e.text for e in evs)
+    assert any(isinstance(e, E.RunFinished) for e in evs)

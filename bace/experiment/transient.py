@@ -299,6 +299,19 @@ def resolve_t0_int(config: RunConfig, trace_t0: float,
     return config.t0_int_s - trace_t0
 
 
+MIN_SYNC_SWING_V = 0.1
+"""The least peak-to-peak swing on the trigger channel that counts as a sync.
+The 81150A sync into the scope is about 1.2 V (bench sessions of 2026-09-01
+calibrated 0.115 V thresholds from 0.23 V of it seen through the 1/R
+division); noise on an open CHAN3 is under a millivolt. A tenth of the
+real thing is a generous floor, and anything under it is not a trigger."""
+
+
+class SyncError(RuntimeError):
+    """The trigger channel carried no sync at calibration, and the run refused
+    to acquire untriggered noise as data."""
+
+
 AbortCheck = Callable[[], bool]
 Sleep = Callable[[float], None]
 
@@ -344,9 +357,38 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
             probe = rig.scope.acquire(16, source=cfg.trigger_source,
                                       autorange_first=True,
                                       timeout_s=config.acquisition_timeout_s)
-            threshold = float(np.max(probe.y)) * 0.5 * cfg.probe_attenuation
-            yield Notice("info", f"trigger threshold set to {threshold:.3g} "
-                                 f"from {cfg.trigger_source}")
+            # `acquire` returns amps in the rig's sign convention: the
+            # digitizer divides by the sense resistor and multiplies by
+            # `current_sign`. The sync on CHAN3 is a voltage, and the scope
+            # wants a voltage threshold, so undo both. Until 2026-09-02 this
+            # took max() of the amps directly: a factor 1/R nobody noticed
+            # (0.115 V on a 1.2 V sync still triggers), and then, the day
+            # `current_sign = -1` landed, a sign flip that turned the sync
+            # into a negative pulse whose max() is the baseline noise -- the
+            # first service run on the rig set a 0.25 mV threshold and, with
+            # `trigger_sweep = AUTO`, averaged twenty untriggered records
+            # into a flat trace and a charge of 1e-12 C.
+            volts = np.asarray(probe.y) * cfg.sense_resistor_ohm * cfg.current_sign
+            peak = float(np.max(volts) if cfg.trigger_positive else -np.min(volts))
+            threshold = peak * 0.5 * cfg.probe_attenuation
+            swing = float(np.max(volts) - np.min(volts))
+            if swing < MIN_SYNC_SWING_V:
+                text = (f"no sync on {cfg.trigger_source}: the trigger channel swings "
+                        f"{swing * 1e3:.2g} mV peak to peak during calibration, against "
+                        f"the ~1 V the 81150A sync gives. The generator is not being "
+                        f"armed, its output is not reaching the device, or the sync "
+                        f"cable is off. ")
+                yield Notice("warning", text)
+                if config.trigger_sweep.upper() == "AUTO":
+                    # AUTO would sweep anyway, average untriggered records
+                    # and report a plausible, meaningless charge; TRIG would
+                    # at least time out. Refuse rather than measure noise.
+                    raise SyncError(text + "With trigger_sweep = AUTO every trace "
+                                    "would be untriggered noise, so this run stops "
+                                    "before the first shot. Set calibrate_trigger = "
+                                    "false to acquire regardless.")
+            yield Notice("info", f"trigger threshold set to {threshold:.3g} V "
+                                 f"from {cfg.trigger_source} (sync peak {peak:.3g} V)")
         rig.scope.configure_edge_trigger(cfg.trigger_source,
                                          positive=cfg.trigger_positive,
                                          high_threshold=threshold,

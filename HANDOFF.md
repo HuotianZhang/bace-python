@@ -225,6 +225,17 @@ Nine, and they are the reason the harness exists. Each is documented at its site
 9. **`--dio` bypassed the relay interlock.** `routing.Relay` refuses to move the
    relay while a source drives; `stage_dio` drove the DIO line directly and never
    went through that class.
+10. **`current_sign = -1` broke the trigger calibration.** `calibrate_trigger`
+    took `max()` of the CHAN3 trace as `acquire` returns it -- amps, in the
+    rig's sign convention -- so the day the sign flipped, the positive sync
+    became a negative pulse whose maximum is the baseline: the first service
+    run on the rig (2026-09-02, session 103857) set a 0.25 mV threshold, and
+    with `trigger_sweep = AUTO` the scope averaged twenty untriggered records
+    into a flat trace and Q = 1e-12 C. The calibration now works in scope
+    volts, and a channel swinging under 0.1 V refuses to run under AUTO
+    (`transient.SyncError`) rather than measure noise. The 1/R factor had
+    been there all along, unnoticed because 0.115 V still triggers a 1.2 V
+    sync.
 
 ---
 
