@@ -23,9 +23,10 @@ class FakeSocket {
   drop(code) { this.onclose({ code }); }
 }
 
-const hello = (session, seq) => ({
+const hello = (session, seq, startedAt = 1) => ({
   seq: null, ts: 1, run_id: null, node_path: '', type: 'Hello',
-  data: { session: { id: session }, seq, bench: { session: { id: session }, state: 'idle' } },
+  data: { session: { id: session, started_at: startedAt }, seq,
+          bench: { session: { id: session }, state: 'idle' } },
 });
 const frame = (seq, type = 'Notice') => ({ seq, ts: 1, run_id: null, node_path: '', type,
                                            data: { level: 'info', text: String(seq) }, decimated: {} });
@@ -121,6 +122,22 @@ test('a socket we have replaced is not listened to any more', () => {
   FakeSocket.last.deliver(hello('S2', 3));
   FakeSocket.last.deliver(frame(1));
   assert.deepEqual(frames.map((f) => f.seq), [1], 'and the replay from 0 still arrives');
+});
+
+test('a service restarted inside one second is still a new service', () => {
+  // `session_id` is stamped to the whole second, so two processes started in
+  // the same second share it — and a cursor kept across that restart would
+  // discard every frame the new process sends until its counter passed the
+  // old high: a bench that goes quietly stale. `started_at` separates them.
+  const { stream, changes } = harness();
+  stream.start(null);
+  FakeSocket.last.deliver(hello('20260902_212747', 900, 1788384467.54));
+  assert.equal(stream.state.lastSeq, 900);
+
+  FakeSocket.last.deliver(hello('20260902_212747', 2, 1788384467.91));
+  assert.equal(changes.length, 1, 'the same id, a different process');
+  assert.equal(FakeSocket.last.url, 'ws://bench/events?since=0');
+  assert.equal(stream.state.lastSeq, 0);
 });
 
 test('being dropped at 1008 reconnects at once, from the notice the service sent', () => {

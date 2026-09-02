@@ -109,14 +109,22 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
       state.bench = bench;
       state.session = bench.session || state.session;
       state.readAt = bench.read_at || null;
-      // The startup read-back's verdicts are on the snapshot and nowhere else:
-      // a socket opened after them replays nothing, so a console that only
-      // folded `Verdict` frames would show a clean bench with a warning on it.
-      // Keyed per (code, node_path), so a frame for the same check replaces
-      // this copy rather than doubling it.
-      for (const verdict of bench.verdicts || []) {
-        replaceVerdict(state.verdicts, { ...verdict, node_path: verdict.node_path || '' });
+      // The read-back's verdicts are on the snapshot and nowhere else: a socket
+      // opened after them replays nothing, so a console that only folded
+      // `Verdict` frames would show a clean bench with a warning on it.
+      //
+      // And the snapshot is the *whole* answer, not an addition to one:
+      // `chain_verdicts()` omits a check that now reads ok, so a warning the
+      // operator has just fixed disappears by being absent. Merging into the
+      // list we hold would leave it on screen for the life of the page. So the
+      // snapshot is the base, and only what the stream said *after* this
+      // read-back was taken survives on top of it.
+      const readAt = bench.read_at || 0;
+      const merged = (bench.verdicts || []).map((v) => ({ ...v, node_path: v.node_path || '', ts: readAt }));
+      for (const verdict of state.verdicts) {
+        if ((verdict.ts || 0) > readAt) replaceVerdict(merged, verdict);
       }
+      state.verdicts = merged;
       if (!readBack) {
         state.queue = bench.queue || [];
         state.benchState = bench.state || 'idle';
@@ -462,7 +470,17 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
  * that only appears after being dropped at 1008.
  */
 function foldStepDone(record, node, frame, data) {
+  // Two ways a shot arrives without its arrays, and they mean the same thing
+  // on screen: the ring dropped them (`decimated[…].replay`, after a
+  // reconnect), or the journal never stored them at all
+  // (`decimated[…].omitted`, which is every shot in an offline replay — the
+  // payload policy keeps "enough to render the session log and the history
+  // queries, never the traces"). Either way there is no curve to draw and the
+  // loop point comes from the scalars; a `traces` object of four nulls would
+  // just be a chart's null dereference waiting to happen.
   const replay = hasReplayedTraces(frame);
+  const arrays = data.light || data.dark || data.photo || data.photo_averaged;
+  const gone = replay || !arrays;
   // A pipeline is one `run_id` over many nodes and each module node numbers
   // its own shots from one, so `loop:index` alone is not an identity: the
   // second `bace` would overwrite the first's shots and a shorter node would
@@ -476,12 +494,12 @@ function foldStepDone(record, node, frame, data) {
     q: data.q, q_mean: data.q_mean, q_std: data.q_std,
     intensity_w: data.intensity_w, clipped: data.clipped,
     verdict: data.verdict || null, ts: frame.ts,
-    traces: replay ? (previous ? previous.traces : null) : {
+    traces: gone ? (previous ? previous.traces : null) : {
       light: data.light || null, dark: data.dark || null,
       photo: data.photo || null, photo_averaged: data.photo_averaged || null,
       decimated: frame.decimated || {},
     },
-    tracesGone: replay && !(previous && previous.traces),
+    tracesGone: gone && !(previous && previous.traces),
   };
   record.shotsByKey[key] = shot;
   if (previous) {

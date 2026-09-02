@@ -235,6 +235,44 @@ test('a J-V counts its curves as they complete, not at the end', () => {
                    'requested at JVStarted, kept as each curve arrives');
 });
 
+test('a journalled shot has no traces to draw, and says so', () => {
+  // The journal keeps "enough to render the session log and the history
+  // queries, never the traces": a journalled StepDone carries the scalars and
+  // `decimated[…].omitted`. A `traces` object of four nulls would count as a
+  // shot with traces on the offline page and be a null dereference in a chart.
+  const s = store();
+  replayInto(s, journal('20260902_153357.jsonl'));
+  const bace = s.getState().runs['20260902_153357-003'];
+  assert.equal(bace.shots.length, 2);
+  for (const shot of bace.shots) {
+    assert.equal(shot.traces, null);
+    assert.equal(shot.tracesGone, true);
+    assert.equal(typeof shot.q, 'number', 'the scalars are all there');
+  }
+  assert.equal(bace.shots.filter((shot) => shot.traces).length, 0);
+});
+
+test('a resolved chain warning disappears with the read-back that resolved it', () => {
+  // `chain_verdicts()` omits a check that now reads ok, so a warning the
+  // operator has just fixed goes away by being absent from the next snapshot.
+  const s = store();
+  const warned = { session: { id: 'S1' }, state: 'idle', queue: [], run: null, instruments: {},
+                   read_at: 100, verdicts: [{ level: 'warn', code: 'chain.led-polarity',
+                                             text: 'reads NORM', node_path: '' }] };
+  s.applyBench(warned);
+  assert.equal(s.getState().verdicts.length, 1);
+
+  // The operator clicks the fix; the read-back afterwards no longer lists it.
+  s.applyBench({ ...warned, read_at: 200, verdicts: [] });
+  assert.deepEqual(s.getState().verdicts, [], 'the warning goes with the check');
+
+  // But something the stream said after that read-back was taken survives it.
+  s.applyFrame({ seq: 5, ts: 250, run_id: null, node_path: '', type: 'Verdict',
+                 data: { level: 'warn', code: 'power.console', text: ':8918 is silent', node_path: '' } });
+  s.applyBench({ ...warned, read_at: 200, verdicts: [] });
+  assert.deepEqual(s.getState().verdicts.map((v) => v.code), ['power.console']);
+});
+
 test('the Hello frame carries the whole bench', () => {
   const s = store();
   const hello = JSON.parse(fixture('hello_sim.json'));
