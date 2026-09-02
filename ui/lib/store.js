@@ -230,6 +230,17 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
           if (!TERMINAL.has(record.state)) record.state = 'parked';
           break;
         }
+        if (record.state === 'stopping' && (data.state === 'preflight' || data.state === 'running')) {
+          // A stop accepted during preflight: the session says `stopping` the
+          // moment it is accepted, and the worker's start-of-run reports
+          // follow it. The service refuses to let them displace it
+          // (`Session._apply_state`) and so must this — a rail that went back
+          // to `running` would be telling the operator their stop had lapsed.
+          // The transitions are still recorded, exactly as the journal keeps
+          // them, because they did happen.
+          log(frame, 'info', `${data.state} · after the stop was accepted`);
+          break;
+        }
         record.state = data.state;
         record.reason = data.reason || '';
         if (data.state === 'running' && !record.started_at) record.started_at = frame.ts;

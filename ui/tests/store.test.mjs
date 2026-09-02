@@ -273,6 +273,29 @@ test('a resolved chain warning disappears with the read-back that resolved it', 
   assert.deepEqual(s.getState().verdicts.map((v) => v.code), ['power.console']);
 });
 
+test('a stop accepted during preflight is not undone by the worker catching up', () => {
+  // The session says `stopping` the moment a stop is accepted — for a long
+  // shot the job's next event is seconds away — and the worker's own
+  // start-of-run reports follow it. The service refuses to let them displace
+  // it (`Session._apply_state`); a rail that went back to `running` would be
+  // telling the operator their stop had lapsed.
+  const s = store();
+  const at = (state) => ({ seq: 1, ts: 1, run_id: 'r', node_path: '', type: 'RunStateChanged',
+                           data: { state }, decimated: {} });
+  s.applyFrame(at('queued'));
+  s.applyFrame(at('preflight'));
+  s.applyFrame(at('stopping'));
+  s.applyFrame(at('running'));            // the worker, already on its way
+  assert.equal(s.getState().runs.r.state, 'stopping');
+  assert.equal(s.getState().benchState, 'stopping');
+  assert.deepEqual(s.getState().runs.r.states.map((entry) => entry.state),
+                   ['queued', 'preflight', 'stopping', 'running'],
+                   'the transitions are still recorded, as the journal keeps them');
+
+  s.applyFrame(at('stopped'));
+  assert.equal(s.getState().runs.r.state, 'stopped');
+});
+
 test('the Hello frame carries the whole bench', () => {
   const s = store();
   const hello = JSON.parse(fixture('hello_sim.json'));
