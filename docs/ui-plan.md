@@ -10,11 +10,16 @@ The goal, plainly: **the designed screens, driven by the measurement modules
 that already exist.** The service is finished and rig-proven; nothing below
 asks it for a new measurement.
 
+Two sessions planned this independently and arrived at the same shape — no
+build step, generated parameter rows, self-drawn charts, the event layer
+before the bench, results last behind a design pass. Where they differed this
+file takes the better of the two, and says so.
+
 ---
 
 ## Direction
 
-### Three structural decisions
+### Four structural decisions
 
 Everything else follows from these, and each one turns a rule in
 `docs/ui-rules.md` from a discipline into a property of the code.
@@ -46,17 +51,26 @@ state every view subscribes to. Not per-view fetching.
 This is what makes `ui-rules` §8 — *"a manual run and a pipeline step share the
 same live monitor"* — true by construction: they are the same `run_id` on the
 same stream, and a manual run **is** a one-node pipeline in the service, same
-code path. The reconnect discipline (`since=`, `seq` dedupe, `StepPhase`
-arriving with `seq: null`, the 1008 drop under `--fast`) lives in one module and
-no view knows about it.
+code path.
+
+The whole reconnect discipline lives in one module and no view knows about it:
+`since=` replay, `seq` dedupe, `StepPhase` arriving with `seq: null` and never
+entering the ring, the 1008 drop that `--sim --fast` *will* cause on a long
+scan — and `decimated[name].replay === true`, which means *redraw the loop
+curve, the trace is gone*. That last one is the subtle branch: a replayed
+`StepDone` carries every scalar and its `verdict` with the four traces `null`,
+and a client that blanks the chart instead of redrawing from scalars has a bug
+that only shows up after a reconnect.
 
 **3 · The charts need one foundation, then six components.**
 
 `docs/design/bace-charts*.js` is not a chart library. Its sixteen elements are
 `def(tag, w, h, html)` — a fixed SVG string per tag, every path a pre-computed
-pixel coordinate, no attributes and no data input. They are an excellent visual
-specification (colours, the sequential J–V ramp, the shaded integration window,
-the ±σ band, the −4 V layout, the axis wording) and they are not an
+pixel coordinate, no attributes and no data input. (The self-contained
+`bace-console-round3.html` embeds the same two files byte for byte, so it is
+not a second implementation to reach for.) They are an excellent visual
+specification — colours, the sequential J–V ramp, the shaded integration
+window, the ±σ band, the −4 V layout, the axis wording — and they are not an
 implementation.
 
 Grouped by what they actually are, the work is smaller than sixteen:
@@ -74,20 +88,66 @@ Grouped by what they actually are, the work is smaller than sixteen:
 All six sit on one scale/axis module. That module is the only thing in `ui/`
 being written from nothing.
 
+No charting library can do this job: the domain rules are the point.
+`ui-rules` §4 — a zero-width axis plots Q *per loop*, not a curve, **and the
+switch must be visible rather than silent**; light, dark and photocurrent
+belong in one frame, because photocurrent alone hides the failure where both
+parents sit on the digitiser's rail; §2 — `σ_Q = 0` means *not recorded* and
+needs its own rendering, since a zero-length error bar drawn as a bare dot is
+a lie. **Load the `dataviz` skill before writing the first chart** (`ui-rules`
+§4 asks for it).
+
+*(An earlier plan cited these rules to `06-visual.md` of the design pack. That
+pack is at `D:\BACE\ui-brief\` and is historical — it is not in the repo, and
+nothing in the repo needs it. All three rules survive in `docs/ui-rules.md`,
+§4 and §2, which is where to cite them from.)*
+
+**4 · The UI is testable without the bench, from two fixtures.**
+
+`acceptance/20260902_service-vs-labview/` holds the rig day of 2026-09-02, and
+it is better test material than anything that could be written by hand. Feed it
+into the same store the WebSocket feeds.
+
+| fixture | drives | what is in it |
+|---|---|---|
+| `journals/*.jsonl` — 3 files, 58 / 63 / 91 lines | the event and state layer | full `RunQueued → RunStateChanged → NodeStarted → … → RunFinished` lifecycles, the chain `Verdict`s in `20260902_144844.jsonl`, and **two real `RunFailed`** in `20260902_125751.jsonl` |
+| `service_153722/run20260902_153722.h5`, and the LabVIEW `.dat` beside it in `labview_150640/` | the chart layer | the traces, at full precision |
+
+**The split is not optional.** The journal payload policy (contract §3) stores
+*"enough to render the session log and the history queries, never the traces"*:
+a journalled `StepDone` is `index, loop, step, setpoint, axis_value, q, q_mean,
+q_std, intensity_w, clipped, verdict` with `decimated: {light: {omitted:
+true}, …}`, and a journalled `JVCurveDone` has `metrics` and no voltage or
+current arrays. So the jsonl replay exercises every run semantic and cannot
+draw a single curve. Charts take the HDF5.
+
+The third shape — a live WebSocket frame, traces decimated with `stride` and
+`n_full` — comes only from a running `--sim` service, or from a fixture built
+by hand from the HDF5.
+
+**The fixtures do not exercise the reconnect path**, and one line of
+`docs/ui-kickoff.md` implies they do. Its "real `seq` gaps" is not so: `seq` in
+all three files runs 0…N with no gap at all, which is what the journal is —
+one monotonic counter, and `StepPhase`, the only unjournalled frame, consumes
+no number. Gaps and `decimated.replay` belong to the *socket*, where a client
+falls behind and is dropped at 1008. Test that against a live `--sim --fast`
+scan, which the service README says will cause it; the journals cannot.
+
 ### What the front end is made of
 
-Plain ES modules and plain CSS, served by `--ui DIR` — `StaticFiles(html=True)`
-mounted at `/ui`, after every API route, same origin, so `fetch('/bench')`
-works with no CORS and no proxy. No bundler, because the lab PC has no build
-step. Hash routing, because a static mount has no SPA fallback.
+Plain ES modules and hand-written DOM, served by `--ui DIR` —
+`StaticFiles(html=True)` mounted at `/ui`, after every API route, same origin,
+so `fetch('/bench')` works with no CORS and no proxy. No bundler, because the
+lab PC has no build step. Hash routing, because a static mount has no SPA
+fallback. Anything third-party is vendored into `ui/vendor/`; nothing is
+fetched from a network at runtime.
 
 The React in `docs/bace-console-round3.html` is the Claude Design canvas
 runtime, not a decision about the console. The artboard CSS is flex and grid
 with zero absolute positioning, so it ports as layout rather than as pictures.
 
 IBM Plex Sans and Mono come out of `bace-console-round3.html` itself — 24 woff2
-files, 387 KB, already in the repo — and go into `ui/fonts/`. Nothing loads
-from a network.
+files, 387 KB, already in the repo — and go into `ui/fonts/`.
 
 ### What it is not
 
@@ -101,90 +161,110 @@ comfortable, it is probably hiding something the operator needs."*
 ## Phases
 
 Cut vertically, not horizontally: each phase drives a real path end to end
-against `--sim --fast` rather than finishing one layer across all four tabs.
-Every phase names the thing that proves it.
+rather than finishing one layer across all four tabs. Every phase names the
+thing that proves it.
 
-### Phase 0 · One pipe
+### M0 · The event layer, and the fixtures
 
-`ui/` exists, fonts land, four empty tabs behind a hash router. `api.js` wraps
-the routes; `stream.js` owns the WebSocket, `since=` replay, `seq` dedupe and
-the 1008 reconnect; `store.js` folds the bench snapshot and the frames.
+`ui/` exists, fonts and vendor land, four empty tabs behind a hash router.
+`api.js` wraps the routes; `stream.js` owns the WebSocket and everything in
+decision 2; `store.js` folds the bench snapshot and the frames into state.
 
-No charts, no forms — a button that posts `{"module": "jv_dark"}` and a list of
-frames as they arrive.
+Then the offline replay: both fixtures from decision 4, feeding that same
+store. This is a deliverable, not a test written later — from here on every
+phase has a deterministic real-data bench to develop against, and the UI can be
+worked on with no service running.
 
-**Proves:** the run reaches `done`, `kept`/`requested` come back, and a client
-killed mid-run reconnects with `since=` and misses no numbered frame.
+**Proves:** a `jv_dark` posted to a live `--sim` reaches `done` with
+`kept`/`requested` back; the three acceptance journals replay into the same
+store, `RunFailed` included; and — against a live `--fast` scan, not the
+fixtures — a client dropped at 1008 reconnects with `since=`, misses no
+numbered frame, and redraws from `decimated.replay`.
 
-### Phase 1 · The bench card does work
+### M1 · The pinned rail and the chain strip
 
-The generated field and card components. The five module cards, the pinned
-rail, the chain strip with a button per `fix` calling
-`POST /bench/actions/{name}`. Editing writes the `edited` layer through `PUT`;
-`null` resets.
+They come before the cards because they are in *every* view — a cross-cutting
+requirement, not part of one tab — and because finishing them exercises the
+hardest semantics in `/bench` straight away.
+
+Two of those are worth stating as the acceptance:
+
+- **`how: "inferred"` must be visually distinct from a read-back.** While a run
+  holds the worker, the snapshot is the one Start took, with the running step's
+  implications overlaid (`service/live.py`). During a `bace`, the bias being
+  LIVE and the relay being on the amplifier are *inferred*, not read. A screen
+  that shows them identically is telling the operator something it does not
+  know.
+- **The relay gets its own visual treatment.** `ui-rules` §3: it is the
+  interlock, not "info", and the two positions are physically different
+  circuits.
+
+The chain strip carries a button per `fix`, calling
+`POST /bench/actions/{name}`.
+
+### M2 · The bench cards do work
+
+The generated field and card components from decision 1, the five module cards.
+Editing writes the `edited` layer through `PUT`; `null` resets one;
+`POST …/params/reset` drops the layer.
+
+Verdicts render three-tier and behave accordingly: only hardware safety is
+`crit` and only `crit` blocks Start; `warn` states evidence and never blocks;
+the fix is the bench action `fix` names, which the operator clicks.
 
 **Proves:** `ui-rules` §8's bar — a dark J–V in **fifteen seconds** by someone
 who has not seen the UI before. This is the first phase whose output an
-operator could actually use.
+operator could use.
 
-### Phase 2 · Results become visible
+### M3 · Results become visible, and so does the shot
 
-The scale/axis foundation, then J–V and transient. The transient carries the
-shaded integration window and the running integral — the one plot the LabVIEW
+The scale/axis foundation, then J–V and transient — the transient carrying the
+shaded integration window and the running integral, the one plot the LabVIEW
 panel had that the operator will look for.
 
-**Proves:** the run from phase 1 draws. Replaying the real journals in
-`acceptance/20260902_service-vs-labview/` produces readable charts, including
-the `RunFailed` and the `seq` gaps.
+Then the timing diagram, which belongs here because it pairs with M2's form: it
+redraws as the form is edited, and it is where a wrong `V_coll` sign or an
+absurd delay becomes visible **before** the run.
 
-### Phase 3 · What a run looks like while it runs
+**Proves:** the run from M2 draws; the HDF5 fixture draws; an operator can
+reject a bad shot definition without running it.
 
-The live monitor: `StepPhase` as the shot-segment indicator, decimated traces,
-the per-shot `verdict`, the inferred-instrument overlay (`how: "inferred"`)
-shown as distinct from the Start read-back. Stop after-shot, abort, and the
-`NeedsOperator` resume with a typed `temperature_k`.
+### M4 · What a run looks like while it runs
+
+The live monitor: `StepPhase` as the shot-segment indicator, decimated traces
+arriving, the per-shot `verdict`, the inferred overlay from M1 now moving as
+the run moves. Stop after-shot, abort, and the `NeedsOperator` resume with a
+typed `temperature_k`. Then Q per loop and Q(axis), with the zero-width-axis
+switch visible rather than silent, and error bars reflecting the loops that
+actually ran.
 
 **Proves:** a 2 T × 2 level tree on the simulator stays readable start to
-finish, and a client dropped at 1008 during it comes back without losing the
-loop curve.
+finish, and a client dropped at 1008 during it comes back — via
+`decimated.replay` — without losing the loop curve.
 
-### Phase 4 · Seeing it before and during
-
-The timing diagram, updating as the form is edited — where a wrong `V_coll`
-sign or an absurd delay becomes visible *before* the run. Then Q per loop and
-Q(axis), with the zero-width-axis switch made visible rather than silent, and
-error bars that reflect the loops that actually ran.
-
-**Proves:** an operator can reject a bad shot definition without running it,
-and watch σ tighten while it runs.
-
-### Phase 5 · The pipeline tab
+### M5 · The pipeline tab
 
 The tree editor, Dry run against `POST /pipelines/validate`, the schedule as
 "what it will do, in order" — including a `temperature` module binding the
 **rest of the run** rather than the rest of one iteration — the check list
 collapsed to `16 checks · 15 ok · 1 warn · show`, and the cost with
-`lower_bound` rendering as "at least".
+`lower_bound: true` rendered as "at least", never as a promise.
 
 **Proves:** the canonical 9 T × 5 level tree can be built, dry-run and
 submitted, and the three counters at three scales read correctly against a
 4.5-hour sweep's ETA.
 
-### Phase 6 · The results tab
+### M6 · The results tab
 
-Preceded by a design pass, because R2·3 is a Round 2 artboard and Round 3 left
-the tab empty — the standing instruction is to iterate in Claude Design before
-coding a screen that differs from Round 3.
+A stub until here. Preceded by a design pass, because R2·3 is a Round 2
+artboard and Round 3 left the tab empty — the standing instruction is to
+iterate in Claude Design before coding a screen that differs from Round 3. By
+this point bench and pipeline are running and the requirements put to that pass
+are drawn from real result shapes rather than guessed.
 
 What the view needs decides what gets written, not the other way round: the run
-folders on disk today are artefacts of back-end debugging, and the file list in
-R2·3 predates all of it. Settle the grid's data source from the view's
-requirements and from what an operator actually needs to find later.
-
-**Blocked by:** the journal changes in `docs/naming-plan.md`. The grid groups
-by device and reads `GET /runs?session=all`, and the journal currently records
-no `sample`, and no temperature provenance on any node without a temperature
-loop above it. A view cannot render provenance the record does not carry.
+folders on disk today are artefacts of back-end debugging, and R2·3's file list
+predates all of it.
 
 ### Alongside · The rig tab
 
@@ -199,18 +279,18 @@ phase runs short.
 | before | must be done |
 |---|---|
 | anything on the rig | the folder-name defect in `docs/naming-plan.md` §2 — `material = "PTQ10:IT-4F"` builds a path segment with a colon, which fails on Windows and passes on Linux |
-| phase 6 | `docs/naming-plan.md` rule 1 — the journal carries the sample block and the temperature triple on every node |
-| phase 6 | a Round 3 design pass on results, with the user, in Claude Design |
-| phase 2 | nothing — the chart foundation is new code with no service dependency |
+| M6 | `docs/naming-plan.md` rule 1 — the journal carries the sample block and the temperature triple on every node |
+| M6 | a Round 3 design pass on results, with the user, in Claude Design |
+| M3 | nothing — the chart foundation is new code with no service dependency |
 
 Nothing else in the service is on the critical path. The API is complete for
-phases 0–5 as it stands.
+M0–M5 as it stands.
 
 ## What this plan deliberately does not decide
 
 - **Which parameters sit above the fold on each card.** A table produced during
-  phase 1, from the Round 3 artboard plus what `GET /modules` actually returns,
+  M2, from the Round 3 artboard plus what `GET /modules` actually returns,
   reviewed then rather than guessed now.
-- **The results grid's data source.** Phase 6, from the view's needs.
+- **The results grid's data source.** M6, from the view's needs.
 - **Whether to keep `[sample] temperature_k = 290.0` in the recipes.**
   `docs/naming-plan.md` §4 states the problem; it is a bench-habit decision.
