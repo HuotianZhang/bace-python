@@ -1,0 +1,105 @@
+# One measurement. Copied verbatim into the output, so a result carries its own
+# recipe. Change freely; nothing here describes the hardware.
+
+[axis]
+name = "vpre"                   # vpre | delay_ns | vcoll
+start = 0.0                     # offsets from V_oc when centre_on_voc = true
+stop = 0.0
+step = 0.0
+centre_on_voc = true
+# start = stop is a single point. Repeats come from loops, not from axis points:
+# "Q at V_oc, five times" is this block with n_loops = 5, which has no curvature
+# bias. The original's three points straddling V_oc are start = -0.001,
+# stop = 0.001, step = 0.001.
+
+[pinned]
+vcoll = -1.0                    # V at the device
+delay_ns = 88.0                 # after the LED falling edge
+
+[acquisition]
+n_loops = 100
+n_averages = 20                 # hardware averages per trace
+timebase_ns_per_div = 200.0     # ten divisions -> 2 us screen, which is what a
+                                # screenshot of the LabVIEW panel (2026-09-01)
+                                # actually shows: Timebase (200 ns) = 200E+0
+                                # *and* Pulse Width (ns) 5e3 = 5E+3. They are
+                                # not equal, so the "timebase*10 = pulse width"
+                                # reading that briefly put 500 here was wrong.
+                                # 200 is also what the 2026-08 archive used, and
+                                # what makes t0_int_s below land on the panel's
+                                # own 320 ns of record time.
+record_length = 5000            # a request, not a promise: the instrument gives
+                                # window x sample rate. 2 us at 2 GSa/s gave
+                                # 4000; 5 us may give 10000, or the scope may
+                                # drop to 1 GSa/s and give 5000 at dt = 1 ns.
+                                # Nothing downstream assumes either.
+t0_int_reference = "trigger"    # "trigger" or "record".
+t0_int_s = 1.185e-7             # ns after the trigger, NOT into the record.
+                                # :TIM:POS is timebase*4 and is the screen
+                                # centre, so the trigger sits range/2 - TIM:POS
+                                # into the record: 200 ns at 200 ns/div, 500 ns
+                                # at 500 ns/div. A record-time window keeps its
+                                # number and changes its meaning every time the
+                                # timebase moves. Referenced to the trigger it
+                                # does not: the driver reads :WAV:XOR? and the
+                                # window follows. Same window as before at the
+                                # archive's geometry -- 118.5 after a trigger
+                                # 199.5 ns in is 318.0 ns of record time, which
+                                # is the old 3.18e-7 exactly.
+pulse_width_ns = 5000.0
+pulse_frequency_hz = 500.0        # read off the rig 2026-08-31: both
+                                # generators were at 500 Hz, not the
+                                # 1 kHz assumed from the old code
+duty_percent = 50.0
+offset_correct = true           # subtract the mean of the last 10 %
+inverted_output = false         # `:OUTP1:POL INV`. The 81150A's LOW level is
+                                # what the device sits at between pulses, so with
+                                # NORM and LoLvl = Vcoll it is held in extraction
+                                # and pulsed to Vpre; with INV it is held at Vpre
+                                # and pulsed to Vcoll, which is BACE as described.
+                                # First light on 2026-09-01 gave Q = -2.07e-10 C
+                                # where the archive at the same Vcoll and delay
+                                # gives +3.65e-10 C -- see BENCH.md.
+invert_polarity = false         # the original's "New Sample?": swaps and negates
+                                # both levels for an inverted device. A sign
+                                # convention — wrong here flips every charge.
+settle_s = 0.2
+dark_settle_s = 0.2
+read_intensity = true
+trigger_sweep = "AUTO"          # AUTO or TRIG. AUTO is what the LabVIEW driver
+                                # used, and it sweeps even when no trigger
+                                # arrives — so a loose sync cable gives
+                                # untriggered noise that subtracts to ~0 charge
+                                # and looks like a real (bad) result. TRIG waits
+                                # instead and times out. Switch once the trigger
+                                # path is known good.
+calibrate_trigger = true        # threshold = max(CHAN3) * 0.5 * attenuation
+store_shots = false             # per-shot traces: 163 MB for a 51-point,
+                                # 100-loop run. The honest version of "Big File?"
+
+[sourcemeter]
+# Adjustable per run: the right compliance depends on the pixel, not the bench.
+# rig.toml carries the ceiling these may not exceed.
+current_compliance_a = 0.01     # while sourcing voltage (J_sc, J_sat, J-V)
+voltage_compliance_v = 2.0      # while sourcing current (V_oc, at 0 A)
+settle_jsc_ms = 500
+settle_voc_ms = 500             # a slow cell settles far more slowly here
+settle_jsat_ms = 500
+nplc = 1.0                      # integration time in power-line cycles
+averaging = 1
+terminals = "FRON"
+four_wire = false
+
+[illumination]
+level_v = 1.020                 # 33220A output; the SAME number is used for the
+                                # DC V_oc measurement and the pulse high level
+low_level_v = 0.4               # below the LED threshold, so fully dark
+v_sat = -1.0                    # bias at which J_sat is measured
+
+[sample]
+sample = ""
+material = ""
+pixel = ""
+temperature_k = 290.0           # typed, until the controller is integrated
+operator = ""
+comment = ""

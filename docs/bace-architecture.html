@@ -1,0 +1,397 @@
+<title>BACE Software Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+:root{
+  --paper:#f4f6f7;--surface:#fff;--surface-2:#eaeef0;
+  --ink:#141c23;--ink-2:#48585f;--ink-3:#74848d;
+  --rule:#d6dde1;--rule-strong:#b9c4ca;
+  --accent:#14586b;--accent-soft:#e0edf1;
+  --signal:#b8791f;--signal-soft:#f6ecdb;
+  --ok:#42663a;--ok-soft:#e5eddf;
+  --warn:#a2461e;--warn-soft:#f6e6dd;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#0e141a;--surface:#151d24;--surface-2:#1c262e;
+  --ink:#e5ebef;--ink-2:#a5b3bd;--ink-3:#7a8a95;
+  --rule:#27333c;--rule-strong:#3a4952;
+  --accent:#68b3c8;--accent-soft:#142b34;
+  --signal:#e0aa5c;--signal-soft:#2a2015;
+  --ok:#9cc08b;--ok-soft:#1d2a1b;
+  --warn:#e2946d;--warn-soft:#33221a;}}
+:root[data-theme="dark"]{
+  --paper:#0e141a;--surface:#151d24;--surface-2:#1c262e;
+  --ink:#e5ebef;--ink-2:#a5b3bd;--ink-3:#7a8a95;
+  --rule:#27333c;--rule-strong:#3a4952;
+  --accent:#68b3c8;--accent-soft:#142b34;
+  --signal:#e0aa5c;--signal-soft:#2a2015;
+  --ok:#9cc08b;--ok-soft:#1d2a1b;
+  --warn:#e2946d;--warn-soft:#33221a;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:"Source Serif 4",Georgia,serif;font-size:17px;line-height:1.6;-webkit-font-smoothing:antialiased}
+h1,h2,h3,figcaption,.ui{font-family:Archivo,"Helvetica Neue",Arial,sans-serif}
+code{font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace;background:var(--surface-2);
+  padding:1.5px 5px;border-radius:2px;font-size:.84em;color:var(--ink)}
+.wrap{max-width:1000px;margin:0 auto;padding:0 28px 96px}
+header.top{border-bottom:1px solid var(--rule);margin-bottom:38px;padding:52px 0 26px}
+.eyebrow{font-family:Archivo,sans-serif;font-size:11.5px;font-weight:600;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--accent);margin:0 0 14px}
+h1{font-size:clamp(30px,4.4vw,44px);font-weight:700;letter-spacing:-.02em;line-height:1.08;margin:0 0 16px;text-wrap:balance}
+.standfirst{font-size:19px;color:var(--ink-2);max-width:64ch;margin:0}
+h2{font-size:22px;font-weight:600;letter-spacing:-.01em;margin:0 0 10px;padding-bottom:10px;border-bottom:1px solid var(--rule)}
+h3{font-size:15.5px;font-weight:600;margin:26px 0 8px}
+section{margin:0 0 54px}
+p{margin:0 0 14px;max-width:70ch}
+ul,ol{max-width:70ch;padding-left:20px}li{margin:0 0 9px}
+figure{margin:24px 0 8px}
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:22px 20px 14px;overflow-x:auto}
+.frame svg{display:block;width:100%;min-width:660px;height:auto}
+figcaption{font-size:12.5px;color:var(--ink-3);margin-top:12px;max-width:70ch;line-height:1.55}
+svg text{font-family:Archivo,sans-serif;fill:var(--ink-2)}
+.t-key{font-size:10px;letter-spacing:.11em;text-transform:uppercase;fill:var(--ink-3);font-weight:600}
+.t-hd{font-size:13px;font-weight:600;fill:var(--ink)}
+.t-lab{font-size:11.5px;fill:var(--ink-2)}
+.t-mono{font-family:"IBM Plex Mono",monospace;font-size:10.5px;fill:var(--ink-2)}
+.t-sm{font-size:10px;fill:var(--ink-3)}
+.box{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1.2}
+.box-a{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.4}
+.box-o{fill:var(--ok-soft);stroke:var(--ok);stroke-width:1.3}
+.box-s{fill:var(--signal-soft);stroke:var(--signal);stroke-width:1.3}
+.box-d{fill:var(--surface-2);stroke:var(--rule-strong);stroke-width:1}
+.dep{stroke:var(--ink-3);stroke-width:1.5;fill:none}
+.bus{stroke:var(--signal);stroke-width:2.4;fill:none}
+.swap{stroke:var(--ok);stroke-width:1.4;fill:none;stroke-dasharray:5 3}
+.scroll{overflow-x:auto;margin:18px 0;border:1px solid var(--rule);border-radius:3px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;font-family:Archivo,sans-serif}
+th{text-align:left;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);
+  font-weight:600;padding:10px 13px;background:var(--surface-2);border-bottom:1px solid var(--rule-strong);white-space:nowrap}
+td{padding:10px 13px;border-bottom:1px solid var(--rule);vertical-align:top;color:var(--ink-2)}
+tr:last-child td{border-bottom:none}
+td.k{font-weight:600;color:var(--ink);white-space:nowrap}
+td code{background:none;padding:0;font-size:12px;color:var(--ink-2)}
+pre{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--accent);border-radius:2px;
+  padding:14px 16px;overflow-x:auto;font-size:12.5px;line-height:1.62;color:var(--ink);margin:14px 0;
+  font-family:"IBM Plex Mono",monospace}
+pre .c{color:var(--ink-3)}
+pre .kw{color:var(--accent);font-weight:500}
+.note{border-left:3px solid var(--signal);background:var(--surface);border-radius:2px;padding:13px 17px;margin:18px 0;font-size:15.5px;color:var(--ink-2)}
+.note b{display:block;font-family:Archivo,sans-serif;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--signal);margin-bottom:5px}
+.note p:last-child{margin-bottom:0}
+.rule{border-left:3px solid var(--ok);background:var(--surface);border-radius:2px;padding:13px 17px;margin:18px 0;font-size:15.5px;color:var(--ink-2)}
+.rule b{display:block;font-family:Archivo,sans-serif;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ok);margin-bottom:5px}
+.rule p:last-child{margin-bottom:0}
+footer{border-top:1px solid var(--rule);padding-top:20px;font-family:Archivo,sans-serif;font-size:13px;color:var(--ink-3)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+
+<div class="wrap">
+<header class="top">
+  <p class="eyebrow">Design</p>
+  <h1>BACE Software Architecture</h1>
+  <p class="standfirst">One program, four layers, and a short list of places you touch when something changes. Designed so a new instrument, a new axis or a new output is an addition rather than an edit.</p>
+</header>
+
+<section>
+<h2>Four principles</h2>
+<p>Every structural decision below follows from one of these. Where two pull against each other, the earlier one wins.</p>
+<ol>
+<li><strong>Dependencies point inward, and the centre is pure.</strong> <code>core/</code> knows physics and nothing else — no VISA, no files, no sockets. It is the part that is already validated against your data, and it stays testable without a rig forever.</li>
+<li><strong>Modular does not mean many programs.</strong> One package, one service, one UI. The modules are seams inside it, not separate tools to maintain. A seam earns its place by being somewhere change actually arrives.</li>
+<li><strong>Swap by substitution, not by editing.</strong> Anything that might be replaced — an instrument, a storage format, a transport — sits behind a small contract with at least two implementations, one of which is a simulator. If there is only ever one implementation, it does not need a contract.</li>
+<li><strong>One event stream, many listeners.</strong> The experiment says what happened; storage, the UI, the legacy writer and the log all listen. Adding a consumer never touches the experiment.</li>
+</ol>
+</section>
+
+<section>
+<h2>The shape</h2>
+
+<figure>
+<div class="frame">
+<svg viewBox="0 0 900 560" role="img" aria-label="Layered architecture: a browser UI talks to a service, which drives the experiment layer; the experiment uses pure core numerics and instrument drivers behind protocols; every step emits an event onto a stream consumed by HDF5 storage, a legacy dat writer, the live UI and a log.">
+  <defs>
+    <marker id="aD" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+  </defs>
+
+  <text class="t-key" x="0" y="14">Process boundary</text>
+
+  <!-- UI -->
+  <rect class="box-d" x="16" y="28" width="230" height="44" rx="3"/>
+  <text class="t-hd" x="131" y="49" text-anchor="middle">ui/</text>
+  <text class="t-sm" x="131" y="63" text-anchor="middle">browser — plots, controls, progress</text>
+
+  <g color="var(--ink-3)"><line class="dep" x1="131" y1="74" x2="131" y2="100" marker-end="url(#aD)"/></g>
+  <text class="t-sm" x="138" y="91">WebSocket</text>
+
+  <!-- service -->
+  <rect class="box-a" x="16" y="102" width="230" height="60" rx="3"/>
+  <text class="t-hd" x="131" y="124" text-anchor="middle">service/</text>
+  <text class="t-sm" x="131" y="139" text-anchor="middle">start · pause · abort</text>
+  <text class="t-sm" x="131" y="152" text-anchor="middle">five session states, fan-out</text>
+
+  <g color="var(--ink-3)"><line class="dep" x1="131" y1="164" x2="131" y2="192" marker-end="url(#aD)"/></g>
+
+  <!-- experiment -->
+  <rect class="box-a" x="16" y="194" width="230" height="76" rx="3"/>
+  <text class="t-hd" x="131" y="216" text-anchor="middle">experiment/</text>
+  <text class="t-sm" x="131" y="231" text-anchor="middle">the run generator</text>
+  <text class="t-sm" x="131" y="245" text-anchor="middle">binds physics to instruments</text>
+  <text class="t-sm" x="131" y="259" text-anchor="middle">owns the unwind</text>
+
+  <!-- core -->
+  <g color="var(--ink-3)"><line class="dep" x1="248" y1="222" x2="300" y2="222" marker-end="url(#aD)"/></g>
+  <rect class="box-o" x="302" y="182" width="196" height="100" rx="3"/>
+  <text class="t-hd" x="400" y="204" text-anchor="middle">core/</text>
+  <text class="t-sm" x="400" y="219" text-anchor="middle">pure — no I/O of any kind</text>
+  <text class="t-mono" x="316" y="238">axis · sequence · pulses</text>
+  <text class="t-mono" x="316" y="253">process · illumination</text>
+  <text class="t-mono" x="316" y="268">simulate</text>
+
+  <!-- drivers -->
+  <g color="var(--ink-3)"><line class="dep" x1="131" y1="272" x2="131" y2="300" marker-end="url(#aD)"/></g>
+  <rect class="box" x="16" y="302" width="482" height="118" rx="3"/>
+  <text class="t-hd" x="30" y="324">drivers/</text>
+  <text class="t-sm" x="96" y="324">one contract per role, two or more implementations each</text>
+
+  <rect class="box-o" x="30" y="334" width="120" height="34" rx="2"/>
+  <text class="t-lab" x="90" y="355" text-anchor="middle">protocols</text>
+  <rect class="box-d" x="160" y="334" width="150" height="34" rx="2"/>
+  <text class="t-lab" x="235" y="355" text-anchor="middle">real instruments</text>
+  <rect class="box-d" x="320" y="334" width="164" height="34" rx="2"/>
+  <text class="t-lab" x="402" y="355" text-anchor="middle">simulated</text>
+
+  <text class="t-mono" x="30" y="388">81150a · infiniium · keithley24xx</text>
+  <text class="t-mono" x="30" y="404">newport1918c · shutter · routing</text>
+
+  <!-- transports -->
+  <g color="var(--ink-3)"><line class="dep" x1="131" y1="422" x2="131" y2="448" marker-end="url(#aD)"/></g>
+  <rect class="box-d" x="16" y="450" width="150" height="40" rx="3"/>
+  <text class="t-lab" x="91" y="468" text-anchor="middle">pyvisa</text>
+  <text class="t-sm" x="91" y="482" text-anchor="middle">64-bit, in process</text>
+  <g color="var(--ink-3)"><line class="dep" x1="270" y1="422" x2="270" y2="448" marker-end="url(#aD)"/></g>
+  <rect class="box-d" x="186" y="450" width="182" height="40" rx="3"/>
+  <text class="t-lab" x="277" y="468" text-anchor="middle">win32bridge</text>
+  <text class="t-sm" x="277" y="482" text-anchor="middle">32-bit helper — delib, usbdll</text>
+
+  <!-- event bus -->
+  <rect class="box-s" x="560" y="28" width="46" height="392" rx="4"/>
+  <text class="t-hd" x="583" y="200" text-anchor="middle" transform="rotate(-90 583 200)">event stream</text>
+  <g color="var(--signal)"><path class="bus" d="M248,232 L556,232" marker-end="url(#aD)"/></g>
+  <text class="t-sm" x="404" y="150" style="fill:var(--signal)">one typed event per step</text>
+
+  <text class="t-key" x="640" y="14">Listeners</text>
+  <rect class="box" x="640" y="28" width="240" height="46" rx="3"/>
+  <text class="t-lab" x="654" y="48">storage/hdf5</text>
+  <text class="t-sm" x="654" y="64">traces, parameters, instrument state</text>
+  <rect class="box" x="640" y="82" width="240" height="46" rx="3"/>
+  <text class="t-lab" x="654" y="102">storage/legacy_dat</text>
+  <text class="t-sm" x="654" y="118">the engine's 8-file layout, unchanged</text>
+  <rect class="box" x="640" y="136" width="240" height="46" rx="3"/>
+  <text class="t-lab" x="654" y="156">service/live</text>
+  <text class="t-sm" x="654" y="172">downsampled push to the browser</text>
+  <rect class="box" x="640" y="190" width="240" height="46" rx="3"/>
+  <text class="t-lab" x="654" y="210">log</text>
+  <text class="t-sm" x="654" y="226">every command, replayable</text>
+  <g color="var(--signal)">
+    <line class="bus" x1="608" y1="51" x2="636" y2="51" marker-end="url(#aD)"/>
+    <line class="bus" x1="608" y1="105" x2="636" y2="105" marker-end="url(#aD)"/>
+    <line class="bus" x1="608" y1="159" x2="636" y2="159" marker-end="url(#aD)"/>
+    <line class="bus" x1="608" y1="213" x2="636" y2="213" marker-end="url(#aD)"/>
+  </g>
+
+  <!-- config -->
+  <rect class="box-o" x="640" y="264" width="240" height="70" rx="3"/>
+  <text class="t-hd" x="654" y="286">config</text>
+  <text class="t-mono" x="654" y="304">rig.toml</text>
+  <text class="t-sm" x="712" y="304">hardware — changes rarely</text>
+  <text class="t-mono" x="654" y="322">run.toml</text>
+  <text class="t-sm" x="712" y="322">the measurement — every run</text>
+  <g color="var(--ok)"><path class="swap" d="M636,300 L520,300 L520,360 L500,360"/></g>
+
+  <!-- swap legend -->
+  <text class="t-key" x="640" y="368" style="fill:var(--ok)">Swap points</text>
+  <text class="t-sm" x="640" y="386">green outline = contract with</text>
+  <text class="t-sm" x="640" y="400">more than one implementation</text>
+  <text class="t-sm" x="640" y="418">these are where change lands</text>
+</svg>
+</div>
+<figcaption><strong>The layers, and where change arrives.</strong> Arrows are dependencies, so nothing below ever imports anything above. <code>core/</code> sits to the side because <code>experiment/</code> uses it but it uses nothing — that is what keeps it testable against archived data forever. The event stream runs across the whole thing: the experiment emits, four listeners consume, and adding a fifth touches no existing code.</figcaption>
+</figure>
+</section>
+
+<section>
+<h2>Package layout</h2>
+<pre>bace/
+  core/                 <span class="c"># pure numerics — already written and validated</span>
+    axis.py             <span class="c"># NEW: what is swept. Vpre | delay | Vcoll, one mechanism</span>
+    sequence.py         <span class="c"># the grid and its loop repetition</span>
+    pulses.py           <span class="c"># bias -> generator levels, gain, trigger offset</span>
+    process.py          <span class="c"># subtraction, baseline, running average, charge</span>
+    illumination.py     <span class="c"># LED levels and the DC/pulse invariant</span>
+    simulate.py         <span class="c"># synthetic transients</span>
+
+  drivers/
+    protocols.py        <span class="c"># NEW: the six contracts. No implementation.</span>
+    agilent81150.py     agilent33220a.py
+    infiniium.py        keithley24xx.py
+    newport1918c.py     shutter.py        routing.py
+    simulated.py        <span class="c"># NEW: a stand-in for every protocol, one file</span>
+    win32bridge/        <span class="c"># 32-bit helper for delib and usbdll</span>
+
+  experiment/
+    events.py           <span class="c"># NEW: the typed event vocabulary</span>
+    rig.py              <span class="c"># NEW: builds instruments from rig.toml, owns teardown</span>
+    transient.py        <span class="c"># NEW: the standalone measurement (the engine)</span>
+    intensity_series.py <span class="c"># NEW: the wrapper — LED sweep, SourceMeter, relay</span>
+
+  storage/
+    hdf5.py             <span class="c"># NEW: primary — traces, parameters, instrument state</span>
+    legacy_dat.py       <span class="c"># NEW: the engine's 8-file layout, byte-compatible</span>
+    naming.py           <span class="c"># NEW: folder mode, file numbering, temp-then-zip</span>
+
+  service/
+    app.py              <span class="c"># NEW: FastAPI, session state, WebSocket fan-out</span>
+    session.py          <span class="c"># NEW: idle/running/paused/aborting/error</span>
+
+ui/                     <span class="c"># NEW: browser front end</span>
+config/
+  rig.toml              <span class="c"># addresses, module numbers, resistor, gain, thresholds</span>
+  run.toml              <span class="c"># axis, ranges, loops, averages, integration start</span>
+tests/                  <span class="c"># regression against archived measurements</span>
+tools/                  <span class="c"># identify_dio.py and friends</span></pre>
+<div class="rule">
+<b>The one rule that keeps this honest</b>
+<p><code>core/</code> may not import from <code>drivers/</code>, <code>experiment/</code>, <code>storage/</code> or <code>service/</code>. A three-line test asserts it. That single constraint is what guarantees the validated numerics stay validated — and what lets the whole physics layer run against your 2026-08-07 archive on any machine, with no instruments and no LabVIEW.</p>
+</div>
+</section>
+
+<section>
+<h2>The contracts</h2>
+<p>Six roles, each a <code>Protocol</code>. A driver satisfies one by having the right methods — no base classes, no registration, no inheritance to fight later.</p>
+<pre><span class="kw">class</span> BiasSource(Protocol):        <span class="c"># 81150A, or whatever replaces it</span>
+    <span class="kw">def</span> set_levels(high_v, low_v, *, delay_s, width_s) -> <span class="kw">None</span>: ...
+    <span class="kw">def</span> enable_output(on: bool = <span class="kw">True</span>) -> <span class="kw">None</span>: ...
+    <span class="kw">def</span> disable_output() -> <span class="kw">None</span>: ...
+    output_enabled: bool               <span class="c"># the router reads this before switching</span>
+
+<span class="kw">class</span> Digitizer(Protocol):          <span class="c"># Infiniium</span>
+    <span class="kw">def</span> acquire(n_averages, *, autorange_first: bool) -> Trace: ...
+    <span class="kw">def</span> configure_timebase(ns_per_div, record_length) -> <span class="kw">None</span>: ...
+
+<span class="kw">class</span> SourceMeter(Protocol):         <span class="c"># Keithley 2400</span>
+    <span class="kw">def</span> measure_voc() -> float: ...
+    <span class="kw">def</span> measure_jsc() -> float: ...
+    <span class="kw">def</span> sweep(start_v, end_v, step_v, **kw) -> tuple[array, array]: ...
+    output_enabled: bool
+
+<span class="kw">class</span> Shutter(Protocol):
+    <span class="kw">def</span> unblock() -> <span class="kw">None</span>: ...
+    <span class="kw">def</span> shut() -> <span class="kw">None</span>: ...
+    <span class="kw">def</span> dark() -> ContextManager: ...
+
+<span class="kw">class</span> Router(Protocol):             <span class="c"># the relay</span>
+    <span class="kw">def</span> dc() -> ContextManager: ...
+    <span class="kw">def</span> transient() -> ContextManager: ...
+
+<span class="kw">class</span> PowerMeter(Protocol):         <span class="c"># Ophir yesterday, Newport 1918-C today</span>
+    <span class="kw">def</span> read() -> float: ...</pre>
+<p>Two implementations exist for each from day one: the real driver and a simulated one. That is not test scaffolding — it is how the experiment layer gets built and debugged before the drivers are trusted, and how you reproduce a fault later without occupying the bench.</p>
+</section>
+
+<section>
+<h2>The axis, as a parameter</h2>
+<p>The original computed <code>Vcoll1Loop</code> and <code>Delay1Loop</code> as per-step arrays and then filled both with a constant. Making the axis data rather than code is finishing that, not adding to it.</p>
+<pre><span class="kw">from</span> dataclasses <span class="kw">import</span> dataclass
+
+<span class="kw">@dataclass</span>(frozen=<span class="kw">True</span>)
+<span class="kw">class</span> Axis:
+    name: Literal[<span class="kw">"vpre"</span>, <span class="kw">"delay_ns"</span>, <span class="kw">"vcoll"</span>]
+    start: float
+    stop: float
+    step: float
+    centre_on_voc: bool = <span class="kw">False</span>   <span class="c"># vpre only: start/stop are offsets from Voc</span>
+
+<span class="c"># the three experiments, as three values rather than three code paths</span>
+BACE      = Axis(<span class="kw">"vpre"</span>,     -0.001, +0.001, 0.001, centre_on_voc=<span class="kw">True</span>)
+BACE_wide = Axis(<span class="kw">"vpre"</span>,       0.0,    1.0,   0.02)
+TDCF      = Axis(<span class="kw">"delay_ns"</span>,  10.0, 1000.0,  10.0)
+FIELD     = Axis(<span class="kw">"vcoll"</span>,     -4.0,   -0.5,   0.25)</pre>
+<p>The sequencer builds the grid; <code>pulses.py</code> reads whichever of the three is varying and holds the other two at their pinned values. Nothing in the acquisition path knows which axis it is on.</p>
+<div class="note">
+<b>Where repeats come from</b>
+<p>Loops, not the axis. That makes "Q at V<sub>oc</sub>" an axis of zero width with N loops — no curvature bias, no special case, and the same code path as a 50-point sweep. It also means the three-points-around-V<sub>oc</sub> convention becomes a choice you make in <code>run.toml</code> rather than a shape baked into the program.</p>
+</div>
+</section>
+
+<section>
+<h2>Extension points</h2>
+<p>The test of a modular design is what you have to touch. For each likely change:</p>
+<div class="scroll">
+<table>
+<thead><tr><th>Change</th><th>You add</th><th>You edit</th></tr></thead>
+<tbody>
+<tr><td class="k">Swap the power meter</td><td><code>drivers/newport1918c.py</code></td><td>one line in <code>rig.toml</code></td></tr>
+<tr><td class="k">A different oscilloscope</td><td><code>drivers/&lt;model&gt;.py</code> satisfying <code>Digitizer</code></td><td>one line in <code>rig.toml</code></td></tr>
+<tr><td class="k">Sweep delay instead of V<sub>pre</sub></td><td>nothing</td><td><code>run.toml</code></td></tr>
+<tr><td class="k">A two-dimensional sweep</td><td>a nested plan in <code>experiment/</code></td><td>nothing in <code>core/</code> or <code>drivers/</code></td></tr>
+<tr><td class="k">A new output format</td><td>a listener in <code>storage/</code></td><td>one registration line</td></tr>
+<tr><td class="k">Relay module or polarity changes</td><td>nothing</td><td><code>rig.toml</code></td></tr>
+<tr><td class="k">64-bit vendor DLL appears</td><td>nothing</td><td>drop the bridge from <code>rig.toml</code></td></tr>
+<tr><td class="k">A second sample holder or stage</td><td>a driver plus a protocol</td><td><code>rig.toml</code>, and the plan that uses it</td></tr>
+<tr><td class="k">New processing (different baseline, trapezoid)</td><td>a function in <code>core/process.py</code></td><td><code>run.toml</code> selects it; archives still reproduce</td></tr>
+</tbody>
+</table>
+</div>
+<p>Nothing in that table requires editing <code>core/</code> or the experiment generator. That is the whole point of the layering, and it is worth checking any future change against this table — if a change forces an edit in two layers, the seam is in the wrong place.</p>
+</section>
+
+<section>
+<h2>Two config files, not one</h2>
+<p>They change on completely different timescales, and mixing them is how rig constants end up copied into measurement records and drift.</p>
+<pre><span class="c"># config/rig.toml — the hardware. Changes when the bench changes.</span>
+[scope]      resource = <span class="kw">"TCPIP0::..."</span>   channel = 2   trigger_channel = 3
+             probe_attenuation = 1.0   sense_resistor_ohm = 5.192
+[pulse_gen]  resource = <span class="kw">"GPIB0::12::INSTR"</span>   channel = 1
+             amplifier_gain = 4.0   trigger_offset_s = 0.0  
+             trigger_level_v = 1.0   leading_edge_s = 2.5e-9
+[led_gen]    resource = <span class="kw">"..."</span>   threshold_v = 1.0   low_level_v = 0.4
+[dio]        shutter_module = 0   relay_module = 1   module_id = 9
+             relay_sourcemeter = 1   relay_amplifier = 0
+[bridge]     enabled = <span class="kw">true</span>   port = 8731
+
+<span class="c"># config/run.toml — the measurement. Changes every run, and is copied</span>
+<span class="c"># verbatim into the output file, so a result always carries its own recipe.</span>
+[axis]       name = <span class="kw">"vpre"</span>   start = -0.001   stop = 0.001   step = 0.001
+             centre_on_voc = <span class="kw">true</span>
+[pinned]     vcoll = -1.0   delay_ns = 88.0   pulse_width_ns = 5000
+[acquire]    averages = 20   loops = 100   timebase_ns_per_div = 200
+             record_length = 5000   settle_s = 0.2
+[process]    offset_correct = <span class="kw">true</span>   t0_integration_s = 3.18e-7</pre>
+</section>
+
+<h2>One correction to the control structure</h2>
+<p>The plan above called the experiment an <strong>async</strong> generator. Building it showed that is wrong, for a concrete reason.</p>
+<p>Every call inside the run loop is blocking VISA I/O, and VISA sessions are not thread-safe, so the loop has to run on the one thread that owns the instruments. An <code>async def</code> generator whose body blocks for two seconds while a scope averages would stall the service's event loop for two seconds — every other client, every heartbeat, every abort request, waiting on an oscilloscope.</p>
+<p>So the run is a <strong>synchronous</strong> generator executed on the instrument thread, and <code>service/</code> adapts it to <code>async</code> at its own edge by pumping events into an asyncio queue. Nothing else about the design changes: it still yields typed events, still has many listeners, and abort still works two ways — a consumer that stops iterating raises <code>GeneratorExit</code> at the yield and the <code>finally</code> parks the bias, or a consumer that wants a reported stop passes an <code>abort</code> callable polled once per step. <em>Async belongs where the waiting is on sockets, not where it is on an oscilloscope.</em></p>
+</section>
+
+<section>
+<section>
+<h2>Build order</h2>
+<p>Each step leaves something runnable, and nothing waits on the bench that does not have to.</p>
+<ol>
+<li><strong><code>core/axis.py</code> and the protocols.</strong> <em>Done.</em> Small, pure, and they fix the shape everything else fits. All four real drivers and all six simulated ones satisfy their contracts, and a three-line test asserts <code>core/</code> never reaches outward.</li>
+<li><strong><code>drivers/simulated.py</code> and <code>experiment/transient.py</code>.</strong> <em>Done.</em> The standalone measurement runs end to end against simulated instruments; abort, walk-away and a mid-run instrument failure all unwind to a parked bias and a closed shutter. Thirty tests pass, the archive regression among them.</li>
+<li><strong><code>storage/</code>.</strong> Both writers, verified by round-tripping your 7 August archive: read it, write it, diff it.</li>
+<li><strong>The remaining real drivers.</strong> Smoke test each against its instrument alone, then substitute them for the simulated ones one at a time.</li>
+<li><strong><code>experiment/intensity_series.py</code>.</strong> The wrapper — SourceMeter, LED sweep, relay. Last, because it is the only part where a mistake reaches the sample.</li>
+<li><strong><code>service/</code> and <code>ui/</code>.</strong></li>
+</ol>
+</section>
+
+<footer>
+Ported code in <code>D:\BACE\bace-python\</code>. Companion pages: <em>BACE Port: Current State</em>, <em>Anatomy of a BACE Run</em>, <em>BACE Instrument Chain</em>.
+</footer>
+</div>

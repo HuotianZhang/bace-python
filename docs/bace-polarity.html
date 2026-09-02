@@ -1,0 +1,270 @@
+<title>四种极性组合的瞬态</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@500;600&display=swap">
+<style>
+:root{
+  --ground:#F1F3F2; --surface:#FBFCFB; --sunken:#E4E9E7;
+  --ink:#141A19; --ink-2:#4C5A57; --ink-3:#71807C;
+  --rule:#C8D2CF; --rule-soft:#DDE4E2;
+  --a1:#9A6B0E; --a2:#3D7A2C; --a3:#2A57A0; --a4:#AC3549;
+  --light:#7A5AA8; --bad:#AC3549;
+  --shadow:0 1px 2px rgba(20,26,25,.05), 0 8px 24px -16px rgba(20,26,25,.25);
+  --measure:38rem;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0D1211; --surface:#131A18; --sunken:#0A0F0E;
+    --ink:#E3E9E7; --ink-2:#A0AEAA; --ink-3:#7C8A86;
+    --rule:#26332F; --rule-soft:#1C2624;
+    --a1:#E0B44A; --a2:#7FC96C; --a3:#7FA8E8; --a4:#E98096;
+    --light:#B79BE0; --bad:#E98096;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0D1211; --surface:#131A18; --sunken:#0A0F0E;
+  --ink:#E3E9E7; --ink-2:#A0AEAA; --ink-3:#7C8A86;
+  --rule:#26332F; --rule-soft:#1C2624;
+  --a1:#E0B44A; --a2:#7FC96C; --a3:#7FA8E8; --a4:#E98096;
+  --light:#B79BE0; --bad:#E98096;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.7);
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);
+  font-family:"IBM Plex Sans SC","IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  font-size:16px;line-height:1.75;-webkit-font-smoothing:antialiased}
+.page{max-width:var(--measure);margin:0 auto;padding:3.5rem 1.5rem 6rem}
+.wide{max-width:min(62rem,100%);width:100%}
+@media (min-width:64rem){
+  .wide{width:min(62rem,calc(100vw - 3rem));
+    margin-left:calc((var(--measure) - min(62rem,calc(100vw - 3rem))) / 2)}
+}
+h1,h2{font-family:"Noto Serif SC","IBM Plex Serif",Georgia,serif;
+  text-wrap:balance;margin:0;font-weight:600}
+h1{font-size:2.3rem;line-height:1.2;letter-spacing:-.01em}
+h2{font-size:1.35rem;line-height:1.35}
+p{margin:0}
+strong{font-weight:600}
+code,.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+code{font-size:.85em;background:var(--sunken);padding:.1em .34em;border-radius:3px}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:.7rem;font-weight:500;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+header{display:flex;flex-direction:column;gap:1rem;margin-bottom:2.5rem}
+.standfirst{font-size:1.06rem;color:var(--ink-2);max-width:34rem}
+.facts{display:flex;flex-wrap:wrap;gap:0 1.7rem;border-top:1px solid var(--rule);
+  border-bottom:1px solid var(--rule);padding:.8rem 0;margin-top:.3rem}
+.fact{display:flex;flex-direction:column;padding:.15rem 0}
+.fact dt{font-family:"IBM Plex Mono",monospace;font-size:.64rem;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-3)}
+.fact dd{margin:0;font-family:"IBM Plex Mono",monospace;font-size:.88rem;font-weight:500;
+  font-variant-numeric:tabular-nums}
+section{margin-top:3rem;display:flex;flex-direction:column;gap:1rem}
+section > .eyebrow{margin-bottom:-.5rem}
+.lede{color:var(--ink-2)}
+figure{margin:.5rem 0 0;display:flex;flex-direction:column;gap:.7rem}
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:5px;
+  padding:1rem .9rem;overflow-x:auto;box-shadow:var(--shadow)}
+.frame svg{display:block;width:100%;min-width:620px;height:auto;color:var(--ink)}
+figcaption{font-size:.87rem;color:var(--ink-3);line-height:1.6}
+.legend{display:flex;flex-wrap:wrap;gap:.3rem 1.1rem;font-family:"IBM Plex Mono",monospace;
+  font-size:.7rem;color:var(--ink-2)}
+.legend i{display:inline-block;width:1.1rem;height:0;border-top:2.5px solid;
+  vertical-align:middle;margin-right:.35rem}
+.callout{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--bad);
+  border-radius:4px;padding:1.1rem 1.2rem;display:flex;flex-direction:column;gap:.7rem;
+  box-shadow:var(--shadow)}
+.callout .tag{align-self:flex-start;font-family:"IBM Plex Mono",monospace;font-size:.64rem;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--bad)}
+.callout p{color:var(--ink-2)}
+.ok{border-left-color:var(--a2)}
+.ok .tag{color:var(--a2)}
+ul.plain{margin:0;padding-left:1.15rem;display:flex;flex-direction:column;gap:.5rem;color:var(--ink-2)}
+ul.plain li::marker{color:var(--ink-3)}
+.note{border-left:2px solid var(--rule);padding-left:1rem;color:var(--ink-2);font-size:.96rem}
+pre{margin:0;background:var(--sunken);border:1px solid var(--rule-soft);border-radius:5px;
+  padding:.85rem .95rem;overflow-x:auto;font-family:"IBM Plex Mono",monospace;
+  font-size:.78rem;line-height:1.65}
+footer{margin-top:4rem;padding-top:1.1rem;border-top:1px solid var(--rule);
+  font-family:"IBM Plex Mono",monospace;font-size:.71rem;color:var(--ink-3);line-height:1.8}
+
+table{border-collapse:collapse;font-size:.85rem;width:100%}
+th,td{border:1px solid var(--rule);padding:.5rem .6rem;text-align:left;vertical-align:top}
+th{font-family:"IBM Plex Mono",monospace;font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);font-weight:500}
+td.mono{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+tr.missing td{color:var(--ink-3);background:var(--sunken)}
+</style>
+
+<div class="page">
+  <header>
+    <p class="eyebrow">2026-09-01 · delay = +80 ns · 原始 light − dark，未做基线校正</p>
+    <h1>四种极性组合的瞬态</h1>
+    <p class="standfirst">表里四格，跑过三格。同一张 y 轴放在一起看，形状差别一目了然：①②互为镜像（<code>:OUTP1:POL</code> 换基线），②在两组电压下等比放大，④几乎是一条平线。</p>
+    <dl class="facts">
+      <div class="fact"><dt>① 脉冲前</dt><dd>+2.04 mA</dd></div>
+      <div class="fact"><dt>② 脉冲后</dt><dd>+1.91 / +4.45 mA</dd></div>
+      <div class="fact"><dt>④ 全程</dt><dd>|I| &lt; 0.7 mA</dd></div>
+      <div class="fact"><dt>③ true+NORM</dt><dd>没跑过</dd></div>
+    </dl>
+  </header>
+
+  <div class="callout">
+    <span class="tag">2026-09-02 更正</span>
+    <p>本页有两处收回：<strong>「器件可能损坏」</strong>——不成立，JV 给出 V_oc 1.02771 V、J_sc −126.127 A/m²、FF 0.5505，是好片子；<strong>「光不关」</strong>——也不成立，功率计实测低电平输出是导通电平的 0.009 %。</p>
+    <p>判据后来收窄为：<strong>亮态减暗态在稳态必须回到零</strong>（不是「V_oc 在哪」）。按这条，四个组合里只有 <strong>④（纯取负）</strong>是正常的；② 稳态停在 4.45 mA 恰恰说明它不对。另外「亮暗共享极值 = 削顶」也不成立——两者的电流极值本来就应该一样，真正的削顶证据是同一条平均轨里连续 7–8 个采样点落在同一个浮点数上。</p>
+  </div>
+
+  <section>
+    <p class="eyebrow">一 · 全记录</p>
+    <h2>同一张 y 轴上的四条曲线</h2>
+    <p class="lede">整条 5 µs 记录。① 的大信号在脉冲<strong>之前</strong>，② 在<strong>之后</strong>——这就是 <code>:OUTP1:POL</code> 把基线从一个电平换到另一个电平。② 的两条只差 vcoll（−1.00 → −2.00），台阶后的稳态跟着从 1.91 涨到 4.45 mA。④ 在这个尺度上基本贴着零。</p>
+    <figure class="wide">
+      <div class="frame">
+        <svg viewBox="0 0 700 218" role="img" aria-label="四种极性组合的光暗差电流，整条五微秒记录，共用同一纵轴。组合一的大电流在脉冲之前，组合二在脉冲之后，组合四几乎是平线。">
+          <g transform="translate(48,16)">
+            <line x1="-4" y1="5.3" x2="640" y2="5.3" stroke="currentColor" stroke-width="0.6" opacity="0.12"></line>
+            <text x="-8" y="8.8" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">5</text>
+            <line x1="-4" y1="31.9" x2="640" y2="31.9" stroke="currentColor" stroke-width="0.6" opacity="0.12"></line>
+            <text x="-8" y="35.4" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">4</text>
+            <line x1="-4" y1="58.4" x2="640" y2="58.4" stroke="currentColor" stroke-width="0.6" opacity="0.12"></line>
+            <text x="-8" y="61.9" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">3</text>
+            <line x1="-4" y1="85.0" x2="640" y2="85.0" stroke="currentColor" stroke-width="0.6" opacity="0.12"></line>
+            <text x="-8" y="88.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">2</text>
+            <line x1="-4" y1="111.6" x2="640" y2="111.6" stroke="currentColor" stroke-width="0.6" opacity="0.12"></line>
+            <text x="-8" y="115.1" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">1</text>
+            <line x1="-4" y1="138.1" x2="640" y2="138.1" stroke="currentColor" stroke-width="1.2" opacity="0.38"></line>
+            <text x="-8" y="141.6" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">0</text>
+            <line x1="-4" y1="164.7" x2="640" y2="164.7" stroke="currentColor" stroke-width="0.6" opacity="0.12"></line>
+            <text x="-8" y="168.2" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">−1</text>
+            <polyline fill="none" stroke="var(--a1)" stroke-width="1.5" stroke-linejoin="round" points="0,89 7,89 13,89 20,89 26,89 33,89 39,89 46,65 52,142 59,144 65,141 72,142 79,143 85,143 92,144 98,144 105,145 111,146 118,145 124,145 131,145 137,145 144,145 150,145 157,145 164,144 170,144 177,144 183,144 190,144 196,144 203,143 209,144 216,143 222,143 229,143 235,143 242,143 248,143 255,142 262,142 268,142 275,142 281,142 288,142 294,142 301,142 307,141 314,142 320,141 327,141 333,141 340,141 347,141 353,141 360,141 366,141 373,141 379,141 386,141 392,141 399,140 405,140 412,141 418,140 425,140 431,140 438,140 445,140 451,140 458,140 464,140 471,140 477,140 484,140 490,140 497,139 503,140 510,140 516,140 523,139 530,140 536,140 543,140 549,140 556,139 562,140 569,140 575,140 582,140 588,139 595,139 601,139 608,139 615,139 621,139 628,139 634,139"></polyline>
+            <polyline fill="none" stroke="var(--a3)" stroke-width="1.5" stroke-linejoin="round" points="0,137 7,137 13,137 20,137 26,137 33,137 39,137 46,137 52,120 59,106 65,96 72,93 79,91 85,90 92,90 98,89 105,89 111,89 118,89 124,88 131,88 137,88 144,88 150,88 157,88 164,88 170,88 177,88 183,88 190,88 196,88 203,88 209,88 216,87 222,88 229,87 235,88 242,88 248,87 255,87 262,87 268,88 275,87 281,87 288,87 294,88 301,88 307,87 314,87 320,87 327,87 333,87 340,87 347,88 353,87 360,87 366,87 373,87 379,87 386,88 392,87 399,87 405,87 412,87 418,87 425,87 431,88 438,87 445,87 451,87 458,87 464,87 471,88 477,88 484,88 490,87 497,87 503,87 510,88 516,87 523,87 530,88 536,88 543,88 549,87 556,88 562,88 569,87 575,88 582,88 588,87 595,88 601,87 608,88 615,88 621,87 628,87 634,88"></polyline>
+            <polyline fill="none" stroke="var(--a2)" stroke-width="1.5" stroke-linejoin="round" points="0,137 7,137 13,136 20,136 26,136 33,136 39,136 46,146 52,103 59,10 65,13 72,17 79,19 85,19 92,20 98,20 105,19 111,19 118,19 124,19 131,19 137,19 144,19 150,19 157,19 164,19 170,19 177,19 183,19 190,19 196,19 203,19 209,19 216,19 222,19 229,19 235,19 242,19 248,19 255,19 262,19 268,19 275,19 281,19 288,19 294,19 301,19 307,19 314,19 320,19 327,19 333,19 340,19 347,20 353,19 360,20 366,19 373,19 379,19 386,19 392,20 399,20 405,19 412,19 418,19 425,19 431,20 438,19 445,20 451,19 458,20 464,19 471,19 477,19 484,19 490,20 497,20 503,20 510,19 516,19 523,19 530,20 536,20 543,20 549,20 556,20 562,20 569,20 575,20 582,20 588,20 595,20 601,20 608,20 615,20 621,20 628,20 634,20"></polyline>
+            <polyline fill="none" stroke="var(--a4)" stroke-width="1.5" stroke-linejoin="round" points="0,137 7,137 13,137 20,137 26,137 33,137 39,137 46,138 52,147 59,154 65,151 72,148 79,147 85,146 92,145 98,144 105,144 111,143 118,143 124,143 131,143 137,143 144,142 150,142 157,142 164,142 170,142 177,141 183,141 190,141 196,141 203,141 209,141 216,141 222,141 229,140 235,140 242,141 248,140 255,140 262,140 268,140 275,141 281,140 288,140 294,140 301,140 307,140 314,140 320,140 327,140 333,139 340,140 347,140 353,140 360,140 366,140 373,140 379,139 386,139 392,140 399,140 405,139 412,139 418,140 425,140 431,139 438,139 445,139 451,140 458,139 464,140 471,139 477,139 484,139 490,140 497,139 503,139 510,139 516,139 523,139 530,139 536,139 543,139 549,139 556,139 562,139 569,139 575,139 582,139 588,139 595,139 601,139 608,139 615,139 621,139 628,139 634,139"></polyline>
+            <text x="95.3" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">1000</text>
+            <text x="231.5" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">2000</text>
+            <text x="367.7" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">3000</text>
+            <text x="503.8" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">4000</text>
+            <text x="640.0" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">5000</text>
+            <text x="320" y="210" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">记录时间 / ns　（触发在 500 ns，偏压沿在 ~675 ns）</text>
+            <text x="-42" y="-4" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">mA</text>
+          </g>
+        </svg>
+      </div>
+      <p class="legend">
+        <span><i style="border-color:var(--a1)"></i>① false + NORM · 18:05 · 0.92 / −1.00</span>
+        <span><i style="border-color:var(--a3)"></i>② false + INV · 17:59 · 0.92 / −1.00</span>
+        <span><i style="border-color:var(--a2)"></i>② false + INV · 18:11 · 0.80 / −2.00</span>
+        <span><i style="border-color:var(--a4)"></i>④ true + INV · 18:15 · 0.80 / −2.00</span>
+      </p>
+      <figcaption>四条都是 delay = +80 ns 那一点，20 次平均、3 圈。纵轴是<strong>原始</strong> <code>light − dark</code>；存进文件的 <code>photo</code> 做过尾部基线校正，在光不关的情况下会把稳态信号当基线减掉，所以这里不用它。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <p class="eyebrow">二 · 台阶附近</p>
+    <h2>放大到 550–1250 ns</h2>
+    <p class="lede">同样的纵轴，只把时间轴拉开。四条都在同一时刻转折——<code>:PULS:DEL1</code> 一样，转折点就一样，和电平无关。② 在台阶处先往下冲一下再升上去（位移电流的残差），① 反过来。</p>
+    <figure class="wide">
+      <div class="frame">
+        <svg viewBox="0 0 700 218" role="img" aria-label="同样四条曲线在偏压沿附近的放大图，四者转折点重合，转折方向相反。">
+          <g transform="translate(48,16)">
+            <line x1="-4" y1="5.3" x2="640" y2="5.3" stroke="currentColor" stroke-width="0.6" opacity="0.12"></line>
+            <text x="-8" y="8.8" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">5</text>
+            <line x1="-4" y1="31.9" x2="640" y2="31.9" stroke="currentColor" stroke-width="0.6" opacity="0.12"></line>
+            <text x="-8" y="35.4" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">4</text>
+            <line x1="-4" y1="58.4" x2="640" y2="58.4" stroke="currentColor" stroke-width="0.6" opacity="0.12"></line>
+            <text x="-8" y="61.9" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">3</text>
+            <line x1="-4" y1="85.0" x2="640" y2="85.0" stroke="currentColor" stroke-width="0.6" opacity="0.12"></line>
+            <text x="-8" y="88.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">2</text>
+            <line x1="-4" y1="111.6" x2="640" y2="111.6" stroke="currentColor" stroke-width="0.6" opacity="0.12"></line>
+            <text x="-8" y="115.1" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">1</text>
+            <line x1="-4" y1="138.1" x2="640" y2="138.1" stroke="currentColor" stroke-width="1.2" opacity="0.38"></line>
+            <text x="-8" y="141.6" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">0</text>
+            <line x1="-4" y1="164.7" x2="640" y2="164.7" stroke="currentColor" stroke-width="0.6" opacity="0.12"></line>
+            <text x="-8" y="168.2" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">−1</text>
+            <polyline fill="none" stroke="var(--a1)" stroke-width="1.5" stroke-linejoin="round" points="0,89 8,89 15,89 22,89 30,89 37,89 44,89 52,89 59,88 66,85 74,83 81,56 88,40 95,35 103,88 110,143 117,145 125,142 132,146 139,147 147,146 154,145 161,146 169,143 176,142 183,142 191,141 198,141 205,142 212,141 220,141 227,141 234,141 242,141 249,142 256,142 264,142 271,142 278,142 286,142 293,142 300,143 308,143 315,143 322,143 330,143 337,143 344,143 351,143 359,144 366,144 373,144 381,144 388,144 395,144 403,144 410,144 417,144 425,144 432,144 439,144 447,145 454,145 461,144 468,145 476,145 483,145 490,145 498,145 505,145 512,145 520,145 527,145 534,145 542,145 549,145 556,145 564,145 571,145 578,145 586,145 593,145 600,145 607,145 615,145 622,145 629,145 637,145"></polyline>
+            <polyline fill="none" stroke="var(--a3)" stroke-width="1.5" stroke-linejoin="round" points="0,137 8,137 15,137 22,137 30,137 37,137 44,137 52,137 59,137 66,137 74,137 81,137 88,140 95,171 103,148 110,133 117,116 125,122 132,121 139,119 147,114 154,113 161,108 169,106 176,104 183,101 191,100 198,99 205,97 212,96 220,96 227,94 234,94 242,94 249,93 256,93 264,92 271,92 278,92 286,92 293,91 300,91 308,91 315,91 322,91 330,90 337,90 344,90 351,90 359,90 366,90 373,90 381,90 388,90 395,89 403,90 410,89 417,90 425,90 432,89 439,89 447,89 454,89 461,89 468,89 476,89 483,89 490,89 498,89 505,89 512,89 520,89 527,89 534,89 542,89 549,89 556,89 564,89 571,89 578,89 586,89 593,89 600,89 607,88 615,88 622,89 629,88 637,89"></polyline>
+            <polyline fill="none" stroke="var(--a2)" stroke-width="1.5" stroke-linejoin="round" points="0,136 8,136 15,137 22,136 30,136 37,137 44,136 52,136 59,136 66,137 74,137 81,150 88,158 95,146 103,125 110,123 117,117 125,99 132,75 139,50 147,30 154,19 161,13 169,9 176,10 183,10 191,10 198,12 205,12 212,14 220,15 227,15 234,16 242,17 249,17 256,17 264,17 271,17 278,18 286,19 293,19 300,19 308,19 315,19 322,19 330,19 337,19 344,19 351,19 359,19 366,20 373,19 381,20 388,20 395,20 403,20 410,19 417,19 425,20 432,20 439,20 447,20 454,20 461,19 468,19 476,19 483,20 490,20 498,19 505,19 512,19 520,19 527,20 534,19 542,19 549,19 556,19 564,19 571,19 578,19 586,19 593,19 600,19 607,19 615,19 622,19 629,19 637,19"></polyline>
+            <polyline fill="none" stroke="var(--a4)" stroke-width="1.5" stroke-linejoin="round" points="0,137 8,137 15,137 22,137 30,137 37,137 44,137 52,137 59,137 66,137 74,137 81,137 88,138 95,129 103,138 110,138 117,144 125,148 132,153 139,155 147,154 154,156 161,155 169,154 176,155 183,152 191,152 198,152 205,150 212,151 220,151 227,149 234,149 242,148 249,148 256,148 264,148 271,147 278,148 286,147 293,147 300,147 308,146 315,146 322,146 330,146 337,146 344,146 351,145 359,145 366,145 373,145 381,145 388,145 395,145 403,145 410,145 417,144 425,145 432,144 439,144 447,144 454,144 461,144 468,144 476,144 483,144 490,143 498,144 505,144 512,143 520,144 527,144 534,144 542,143 549,143 556,143 564,143 571,143 578,143 586,143 593,143 600,143 607,143 615,143 622,143 629,143 637,143"></polyline>
+            <text x="45.7" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">600</text>
+            <text x="137.1" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">700</text>
+            <text x="228.6" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">800</text>
+            <text x="320.0" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">900</text>
+            <text x="411.4" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">1000</text>
+            <text x="502.9" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">1100</text>
+            <text x="594.3" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">1200</text>
+            <text x="320" y="210" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">记录时间 / ns</text>
+            <text x="-42" y="-4" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">mA</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption>② 的两条在台阶处的下冲被裁到画面外（&lt; −1.2 mA）。转折时刻一致说明轴本身没问题；差别全在转折的方向和终点。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <p class="eyebrow">三 · ④ 单独放大</p>
+    <h2>18:15 那条，纵轴放大六倍</h2>
+    <p class="lede">这就是你在示波器上觉得对的那条形状：脉冲前平，台阶处一个尖，然后衰减回零。形状确实是 BACE 该有的样子——但注意纵轴：峰值 0.69 mA，是 ② 在同样电压下（4.45 mA）的 <strong>1/6</strong>，而且它衰减到的是零，② 衰减到的是 4.45 mA 的平台。</p>
+    <figure class="wide">
+      <div class="frame">
+        <svg viewBox="0 0 700 178" role="img" aria-label="组合四单独放大：脉冲前平坦，台阶处一个负向尖峰约零点七毫安，随后在几微秒内衰减回零。">
+          <g transform="translate(48,16)">
+            <line x1="-4" y1="11.3" x2="640" y2="11.3" stroke="currentColor" stroke-width="0.6" opacity="0.12"></line>
+            <text x="-8" y="14.8" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">0.2</text>
+            <line x1="-4" y1="33.9" x2="640" y2="33.9" stroke="currentColor" stroke-width="1.2" opacity="0.38"></line>
+            <text x="-8" y="37.4" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">0</text>
+            <line x1="-4" y1="56.5" x2="640" y2="56.5" stroke="currentColor" stroke-width="0.6" opacity="0.12"></line>
+            <text x="-8" y="60.0" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">−0.2</text>
+            <line x1="-4" y1="79.1" x2="640" y2="79.1" stroke="currentColor" stroke-width="0.6" opacity="0.12"></line>
+            <text x="-8" y="82.6" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">−0.4</text>
+            <line x1="-4" y1="101.7" x2="640" y2="101.7" stroke="currentColor" stroke-width="0.6" opacity="0.12"></line>
+            <text x="-8" y="105.2" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">−0.6</text>
+            <line x1="-4" y1="124.3" x2="640" y2="124.3" stroke="currentColor" stroke-width="0.6" opacity="0.12"></line>
+            <text x="-8" y="127.8" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">−0.8</text>
+            <polyline fill="none" stroke="var(--a4)" stroke-width="1.6" stroke-linejoin="round" points="0,29 4,28 9,28 13,28 18,28 22,29 26,29 31,28 35,29 39,29 44,30 48,15 52,72 57,112 61,97 65,87 70,79 74,72 79,71 83,66 87,66 92,63 96,61 100,59 105,57 109,58 113,57 118,55 122,54 126,54 131,53 135,52 140,53 144,50 148,49 153,50 157,51 161,48 166,48 170,49 174,48 179,47 183,47 187,47 192,46 196,47 201,47 205,46 209,46 214,45 218,45 222,45 227,43 231,44 235,44 240,43 244,42 248,44 253,44 257,43 262,42 266,42 270,42 275,44 279,41 283,44 288,43 292,42 296,42 301,42 305,41 309,41 314,41 318,42 323,42 327,41 331,43 336,41 340,41 344,41 349,41 353,41 357,42 362,41 366,40 370,41 375,41 379,39 384,41 388,39 392,40 397,39 401,39 405,39 410,40 414,39 418,41 423,39 427,40 431,39 436,40 440,40 445,39 449,39 453,40 458,39 462,39 466,40 471,40 475,40 479,40 484,39 488,38 493,38 497,39 501,39 506,39 510,39 514,39 519,39 523,38 527,38 532,38 536,38 540,38 545,36 549,39 554,38 558,39 562,37 567,37 571,37 575,38 580,38 584,37 588,38 593,38 597,38 601,38 606,38 610,39 615,37 619,38 623,38 628,38 632,38 636,38"></polyline>
+            <text x="150" y="20" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--a4)">④ true + INV · 18:15 · 0.80 / −2.00</text>
+            <text x="95.3" y="152" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">1000</text>
+            <text x="231.5" y="152" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">2000</text>
+            <text x="367.7" y="152" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">3000</text>
+            <text x="503.8" y="152" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">4000</text>
+            <text x="640.0" y="152" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">5000</text>
+            <text x="320" y="170" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">记录时间 / ns</text>
+            <text x="-42" y="-4" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">mA</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption>7 个 delay 点里有 3 个（−40 / +40 / +80）在峰顶撞了量程底——单条轨内部出现 7–8 个连续采样点取到同一个浮点数，宽约 11 ns 的平顶。这一点（+80）就是其中之一，所以峰高偏小。但"衰减回零"不是削顶造成的，另外 4 个没削顶的点形状一样。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <p class="eyebrow">四 · 对照表</p>
+    <h2>哪一格是哪一轮</h2>
+    <table>
+      <tr><th>#</th><th>invert_polarity</th><th>:OUTP1:POL</th><th>运行</th><th>名义（放大器输出）基线 → 脉冲</th><th>实测 脉冲前 → 脉冲后</th></tr>
+      <tr><td class="mono">①</td><td class="mono">false</td><td class="mono">NORM</td><td class="mono">17:27 / 18:05</td><td class="mono">−1.00 → +0.92</td><td class="mono">+2.04 → −0.05 mA</td></tr>
+      <tr><td class="mono">②</td><td class="mono">false</td><td class="mono">INV</td><td class="mono">17:59</td><td class="mono">+0.92 → −1.00</td><td class="mono">+0.04 → +1.91 mA</td></tr>
+      <tr><td class="mono">②</td><td class="mono">false</td><td class="mono">INV</td><td class="mono">18:09 / 18:11</td><td class="mono">+0.80 → −2.00</td><td class="mono">+0.06 → +4.45 mA</td></tr>
+      <tr class="missing"><td class="mono">③</td><td class="mono">true</td><td class="mono">NORM</td><td class="mono">——</td><td class="mono">−0.80 → +2.00</td><td class="mono">没跑过</td></tr>
+      <tr><td class="mono">④</td><td class="mono">true</td><td class="mono">INV</td><td class="mono">18:15</td><td class="mono">+2.00 → −0.80</td><td class="mono">+0.05 → −0.04 mA</td></tr>
+    </table>
+    <p class="note">③ 和 ② 在器件上互为负号，是同一个实验的两个符号版本。所以<strong>把 ③ 跑一遍，符号就直接测出来了</strong>——不用再从 JV 推。哪一个给出"脉冲前 ≈ 0、台阶后进入抽取"，哪一个就是对的。</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">五 · 曲线对符号说了什么</p>
+    <h2>两轮数据互相矛盾</h2>
+    <p>你说 Keithley 反接、放大器正常，所以器件电极是反的。曲线里有两条独立线索，指向相反：</p>
+    <p><strong>支持"器件正接"（放大器的正 = 代码假设的正）：</strong>17:59 那一轮基线在放大器输出 +0.92 V，实测 <code>light − dark</code> = +0.04 mA ≈ 0。而 0.92 正是当时 Keithley 量到的 |V_oc|（0.9187 / 0.9222）。同一轮台阶后到 −1.00 V 就给出 1.91 mA。器件若是反接的，+0.92 V 处应该是反偏、满抽取，不可能是零。这条只用了绝对值，跟电流的符号约定无关。</p>
+    <p><strong>支持"器件反接"：</strong>18:15 暗态基线在放大器输出 +2.80 V，实测只有 0.13 mA。若器件正接，那是 +2.80 V 正偏——JV 上 +1.5 V 就已经是 2034 A/m²（≈16 × Jsc），电流该是几十 mA。反接的话是 −2.80 V 反偏，小电流才说得通。同样的账在 18:05 上算出来却是反的：那一轮暗态基线 −1.92 V，实测 −2.6 mA，正接（反偏漏电）说得通，反接（+1.92 V 正偏）说不通。</p>
+    <p class="note">所以这几个文件定不了符号，两轮互相打架。可能的出口：放大器在某些电平上根本没输出到位（限流），"电流很小"这个证据就不可靠。<strong>最干净的办法还是跑 ③</strong>，或者直接把探头放在放大器输出上，给 81150A 一个已知的正电平，看那里是正是负——一个数字，全部歧义结束。</p>
+    <p class="note">另外，我之前说 18:15 那个组合"暗态把器件推到 +2.80 V 正偏、有损坏风险"——如果器件确实是反接的，那就是 −2.80 V 反偏，没有这个风险。那句警告我收回，等符号确定再说。JV 也证明器件好着。</p>
+  </section>
+
+  <footer>
+    数据：<code>runs/…_20260901_{180546, 175932, 181143, 181536}</code>，delay = +80 ns，20 平均 × 3 圈。<br>
+    纵轴一律是原始 <code>light − dark</code>（<code>traces/light</code> − <code>traces/dark</code>），没有基线校正。<br>
+    ② 在两组电压下都跑过，图里两条都画了，正好显示 vcoll 从 −1.00 到 −2.00 时稳态抽取电流的变化。
+  </footer>
+</div>

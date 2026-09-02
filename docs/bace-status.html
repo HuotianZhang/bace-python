@@ -1,0 +1,810 @@
+<title>BACE Port: Current State</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+:root{
+  --paper:#f4f6f7;--surface:#fff;--surface-2:#eaeef0;
+  --ink:#141c23;--ink-2:#48585f;--ink-3:#74848d;
+  --rule:#d6dde1;--rule-strong:#b9c4ca;
+  --accent:#14586b;--accent-soft:#e0edf1;
+  --signal:#b8791f;--signal-soft:#f6ecdb;
+  --ok:#42663a;--ok-soft:#e5eddf;
+  --warn:#a2461e;--warn-soft:#f6e6dd;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#0e141a;--surface:#151d24;--surface-2:#1c262e;
+  --ink:#e5ebef;--ink-2:#a5b3bd;--ink-3:#7a8a95;
+  --rule:#27333c;--rule-strong:#3a4952;
+  --accent:#68b3c8;--accent-soft:#142b34;
+  --signal:#e0aa5c;--signal-soft:#2a2015;
+  --ok:#9cc08b;--ok-soft:#1d2a1b;
+  --warn:#e2946d;--warn-soft:#33221a;}}
+:root[data-theme="dark"]{
+  --paper:#0e141a;--surface:#151d24;--surface-2:#1c262e;
+  --ink:#e5ebef;--ink-2:#a5b3bd;--ink-3:#7a8a95;
+  --rule:#27333c;--rule-strong:#3a4952;
+  --accent:#68b3c8;--accent-soft:#142b34;
+  --signal:#e0aa5c;--signal-soft:#2a2015;
+  --ok:#9cc08b;--ok-soft:#1d2a1b;
+  --warn:#e2946d;--warn-soft:#33221a;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:"Source Serif 4",Georgia,serif;font-size:17px;line-height:1.6;-webkit-font-smoothing:antialiased}
+h1,h2,h3,.ui{font-family:Archivo,"Helvetica Neue",Arial,sans-serif}
+code{font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace;background:var(--surface-2);
+  padding:1.5px 5px;border-radius:2px;font-size:.84em;color:var(--ink)}
+.wrap{max-width:1000px;margin:0 auto;padding:0 28px 96px}
+header.top{border-bottom:1px solid var(--rule);margin-bottom:38px;padding:52px 0 26px}
+.eyebrow{font-family:Archivo,sans-serif;font-size:11.5px;font-weight:600;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--accent);margin:0 0 14px}
+h1{font-size:clamp(30px,4.4vw,44px);font-weight:700;letter-spacing:-.02em;line-height:1.08;margin:0 0 16px;text-wrap:balance}
+.standfirst{font-size:19px;color:var(--ink-2);max-width:64ch;margin:0}
+h2{font-size:22px;font-weight:600;letter-spacing:-.01em;margin:0 0 10px;padding-bottom:10px;border-bottom:1px solid var(--rule)}
+h3{font-size:15.5px;font-weight:600;margin:26px 0 8px}
+section{margin:0 0 54px}
+p{margin:0 0 14px;max-width:70ch}
+ul,ol{max-width:70ch;padding-left:20px}li{margin:0 0 8px}
+a{color:var(--accent)}
+.scroll{overflow-x:auto;margin:18px 0;border:1px solid var(--rule);border-radius:3px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;font-family:Archivo,sans-serif}
+th{text-align:left;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);
+  font-weight:600;padding:10px 13px;background:var(--surface-2);border-bottom:1px solid var(--rule-strong);white-space:nowrap}
+td{padding:10px 13px;border-bottom:1px solid var(--rule);vertical-align:top;color:var(--ink-2)}
+tr:last-child td{border-bottom:none}
+td.k{font-weight:600;color:var(--ink)}
+td code{background:none;padding:0;font-size:12px;color:var(--ink-2);white-space:nowrap;display:block}
+.chip{display:inline-block;font-family:Archivo,sans-serif;font-size:10px;font-weight:600;letter-spacing:.07em;
+  text-transform:uppercase;padding:3px 8px;border-radius:2px;white-space:nowrap}
+.v{background:var(--ok-soft);color:var(--ok);border:1px solid color-mix(in srgb,var(--ok) 34%,transparent)}
+.i{background:var(--accent-soft);color:var(--accent);border:1px solid color-mix(in srgb,var(--accent) 32%,transparent)}
+.u{background:var(--warn-soft);color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 34%,transparent)}
+.d{background:var(--surface-2);color:var(--ink-3);border:1px solid var(--rule-strong)}
+pre{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--accent);border-radius:2px;
+  padding:14px 16px;overflow-x:auto;font-size:12.5px;line-height:1.65;color:var(--ink);margin:14px 0;
+  font-family:"IBM Plex Mono",monospace}
+pre .c{color:var(--ink-3)}
+.fix{border-left:3px solid var(--warn);background:var(--surface);border-radius:2px;padding:13px 17px;margin:16px 0;font-size:15.5px;color:var(--ink-2)}
+.fix b{display:block;font-family:Archivo,sans-serif;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--warn);margin-bottom:5px}
+.fix p:last-child{margin-bottom:0}
+.note{border-left:3px solid var(--signal);background:var(--surface);border-radius:2px;padding:13px 17px;margin:16px 0;font-size:15.5px;color:var(--ink-2)}
+.note b{display:block;font-family:Archivo,sans-serif;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--signal);margin-bottom:5px}
+.note p:last-child{margin-bottom:0}
+.phases{list-style:none;padding:0;margin:20px 0;counter-reset:ph}
+.phases li{counter-increment:ph;position:relative;padding:0 0 20px 50px;margin:0;border-left:1px solid var(--rule);margin-left:14px}
+.phases li:last-child{border-left-color:transparent;padding-bottom:0}
+.phases li::before{content:counter(ph);position:absolute;left:-14px;top:-2px;width:28px;height:28px;display:grid;
+  place-items:center;border-radius:50%;background:var(--surface);border:1px solid var(--rule-strong);color:var(--accent);
+  font-family:Archivo,sans-serif;font-size:12.5px;font-weight:700}
+.phases h3{margin:1px 0 4px}.phases p{margin:0;font-size:15.5px}
+.q{counter-reset:qq;list-style:none;padding:0}
+.q li{counter-increment:qq;position:relative;padding-left:34px;margin-bottom:14px}
+.q li::before{content:"Q" counter(qq);position:absolute;left:0;top:1px;font-family:Archivo,sans-serif;
+  font-size:11px;font-weight:700;color:var(--warn);letter-spacing:.05em}
+footer{border-top:1px solid var(--rule);padding-top:20px;font-family:Archivo,sans-serif;font-size:13px;color:var(--ink-3)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+
+<div class="wrap">
+<header class="top">
+  <p class="eyebrow">Consolidated · 31 August 2026</p>
+  <h1>BACE Port: Current State</h1>
+  <p class="standfirst">Everything verified, everything still inferred, what the audit changed, and what remains to build. Steps 1&#8211;8 are done: the full intensity series runs end to end on simulated instruments, writes files your analysis can already read, and every real driver is written against a confirmed address. The rig now acquires: every instrument answers, the record geometry is measured, a real transient has been fetched and scaled, and ten defects in this code have been found and fixed. What is left is the rest of the bench, then the service and the UI. This supersedes the earlier plan pages; the two figure pages stay current.</p>
+</header>
+
+<div class="note">
+<b>Read this first &mdash; written 2026-09-02</b>
+<p>This page is the running record <strong>through 31 August 2026</strong>. The two decisive days came after it, and three things below have since been overturned: the trigger offset is <strong>0</strong>, not 47&nbsp;ns (corrected in place); <code>timebase_ns_per_div</code> is <strong>200</strong>, not 500; and the suspicion that the LED never went dark was wrong &mdash; the power meter measured its off level at 0.009&nbsp;% of the on level.</p>
+<p><strong>Where it stands now:</strong> the port reproduces the LabVIEW engine. Against a LabVIEW run taken eight minutes away, peak current agrees to 6&nbsp;%, the decay constant to 3&nbsp;% and the extracted charge to 4&nbsp;%. The earlier &ldquo;the port is 3&times; low&rdquo; was the sample drifting between runs three hours apart, not a defect. 212 tests pass; both copies of the tree fingerprint <code>d7daadac0cc1</code>.</p>
+<p>Start at <code>HANDOVER-2026-09-02.md</code> in the repository root, then <code>bace-wrapup.html</code> and <code>bace-drift.html</code> in this folder.</p>
+</div>
+
+<section>
+<h2>The maths core is validated against real data</h2>
+<p>One archived measurement — <code>s4_PTQ10IT4F_pxa_290K_1020mVLED_906mVVOC_offsetcorr_20260807_111521</code> — contains both the engine's inputs and its outputs. Recomputing the outputs from the inputs with the ported code:</p>
+<pre>  Vpre        LabVIEW Q         ported Q   traces/ulp   photoC/ulp
+ 0.905   3.65257000e-10   3.65256953e-10         0.05         0.01
+ 0.906   3.65316000e-10   3.65315421e-10         0.58         0.41
+ 0.907   3.65578000e-10   3.65578319e-10         0.32         0.40
+
+ last-10% mean, raw light − dark : −2.513e-05 A
+ last-10% mean, engine output    : −9.722e-14 A   <span class="c">baseline removed</span></pre>
+<p>Agreement is within <strong>0.6 of one unit in the last written place</strong>. The archive stores six significant figures, so a half-ulp rounding of the reference alone permits ~1.4 × 10⁻⁶ of apparent disagreement — the port sits inside that. Recomputed from the stored photocurrent rather than from light and dark, it lands at 2 × 10⁻⁸. The test derives its tolerance from the file's own precision rather than a chosen number.</p>
+<p>This validates, on real data: the dark subtraction, the last-10 % baseline, the rectangular charge integral and the integration window. The one thing it cannot test is the acquisition itself — that still needs the rig.</p>
+<div class="note">
+<b>The rectangular sum was worth keeping</b>
+<p>Replacing <code>sum(...)·dt</code> with a trapezoid changes Q by 3.8 × 10⁻⁵ — the fourth significant figure. Small, but 30× larger than the agreement just demonstrated, so it would have shown up as a systematic offset against every historical value. Deliberate beats tidy.</p>
+</div>
+</section>
+
+<section>
+<h2>Two programs, not one</h2>
+<p>This distinction was blurred in the earlier pages and it matters for the port.</p>
+<div class="scroll">
+<table>
+<thead><tr><th></th><th>The engine</th><th>The wrapper</th></tr></thead>
+<tbody>
+<tr><td class="k">File</td><td><code>TDCF-BACE.vi</code> (2016)<br><code>TDCF-BACE_20160223.vi</code> (2025)</td><td><code>BACE_jv.vi</code> (2019)<br><code>BACE_Mehrdad.vi</code> (2025)</td></tr>
+<tr><td class="k">Is</td><td><strong>The normal BACE measurement.</strong> Standalone, run from its own panel.</td><td>Automation around the engine — the intensity series.</td></tr>
+<tr><td class="k">Instruments</td><td>81150A, shutter, Infiniium, Ophir meter</td><td>adds 33220A, Keithley 2400, the relay</td></tr>
+<tr><td class="k">Illumination</td><td>Not commanded — set up outside the program</td><td>Drives the 33220A; DC for V<sub>oc</sub>, pulsed for the transient</td></tr>
+<tr><td class="k">Relay</td><td><span class="chip d">none</span> nothing to switch</td><td>Needed, because the Keithley shares the device node</td></tr>
+<tr><td class="k">Sweeps</td><td>V<sub>pre1</sub> → V<sub>pre2</sub> step dV, × loops</td><td>LED level, and V<sub>pre</sub> in three steps around V<sub>oc</sub></td></tr>
+<tr><td class="k">Writes</td><td>8 data files + 1 text + 7 images, zipped to <code>DataPath</code></td><td>one summary <code>.dat</code> per intensity series</td></tr>
+</tbody>
+</table>
+</div>
+<p>So the relay is a <em>wrapper</em> problem, not an engine problem — which also means the standalone measurement can be ported and used before the relay question is settled.</p>
+</section>
+
+<section>
+<h2>Correction: the traces are saved after all</h2>
+<div class="fix">
+<b>8 · I said the raw transients were never written to disk. Wrong.</b>
+<p>That was true of the wrapper's folder, which holds only the summary. The <strong>engine</strong> registers eight data files and writes them to its own <code>DataPath</code> (<code>expConfig.xml</code> points at <code>D:\DATA\TDCF-BACE\data</code>), folder-per-measurement, zipped:</p>
+<pre><span class="c"># text</span>
+0_parameters
+<span class="c"># per-step, streamed inside the loop</span>
+3_allLoopsPhotoCurrent      <span class="c"># every loop's photocurrent trace</span>
+<span class="c"># written once after the loop</span>
+1_allLoopsQ      1_averagesQ
+1b_allLoopsIntensity        1b_averagesIntensity
+2_averagesPhotoCurrent
+4_averagesLightCurrent      4_averagesDarkCurrent</pre>
+<p>Light, dark and photocurrent traces are all there, per loop and averaged. So the processing chain <strong>can</strong> be validated offline against real data — the reason I could not was that the folder is outside <code>D:\BACE</code> and my access request for it was refused. Worth connecting: it turns phase 1 from "port and hope" into a numerical regression test.</p>
+</div>
+</section>
+
+<section>
+<h2>The engine's state machine</h2>
+<p>A queue-driven handler with ten states, all reachable from the UI event loop. Recovered names and what each does:</p>
+<div class="scroll">
+<table>
+<thead><tr><th>State</th><th>Does</th></tr></thead>
+<tbody>
+<tr><td class="k">Initialize</td><td>Builds the UI object, the Experiment object, and registers the file set — 1 text, 8 data, 7 images.</td></tr>
+<tr><td class="k">Update Controls</td><td>Pushes panel values into the model; recomputes the loop parameters.</td></tr>
+<tr><td class="k">Reset File Number</td><td>File numbering back to 1.</td></tr>
+<tr><td class="k">Pre-measure</td><td>Creates every file in <code>TmpPath</code>; runs the polarity MathScript and <code>calcLoopParameters</code>; sets the 81150A, the shutter and the scope for the run.</td></tr>
+<tr><td class="k">Measure</td><td>The FOR loop over all steps. Per step: light levels → shutter → Ophir read + light acquisition → dark levels → shutter → dark acquisition → processing → one streaming write → graph and progress updates.</td></tr>
+<tr><td class="k">Update GUI</td><td>Fired as an event so the panel refreshes without blocking the loop.</td></tr>
+<tr><td class="k">Copy Data</td><td>Zips the temp folder and copies it to <code>DataPath</code>.</td></tr>
+<tr><td class="k">Error / Idle / Exit</td><td>Housekeeping; <code>Exit</code> destroys the queue, unregisters events and collects the G# objects.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Seven of the eight data-file writes happen <em>after</em> the loop; only <code>3_allLoopsPhotoCurrent</code> streams. In the port that becomes one event stream with two subscribers — a streaming writer and an end-of-run summary writer — rather than two different call sites.</p>
+</section>
+
+<section>
+<h2>Where it stands</h2>
+<p>All 907 VIs of the dependency hierarchy have been decompiled without LabVIEW. Every instrument's command set is recovered verbatim. The measurement core is ported and runs against synthetic data; the shutter and oscilloscope drivers are written from the recovered commands. The architecture is settled: 64-bit Python service, 32-bit helper for the two vendor DLLs, experiment as an async generator emitting typed events.</p>
+<p>This audit re-checked every claim. Seven were wrong. They are listed below rather than quietly fixed, because two of them would have produced wrong numbers rather than obvious failures.</p>
+</section>
+
+<section>
+<h2>What the audit changed</h2>
+
+<div class="fix">
+<b>1 · "Blocked" and "unblocked" mean the shutter, not VISA</b>
+<p><code>Read unblocked TDCF.vi</code> takes the <strong>light</strong> trace; <code>Read blocked.vi</code> takes the <strong>dark</strong> one. Both are called, in that order. I had read the names as a VISA blocking mode and claimed only one was used. The distinction matters because the two VIs are deliberately asymmetric — see the next item.</p>
+</div>
+
+<div class="fix">
+<b>2 · Auto-range on the light trace only, never between light and dark</b>
+<p>The light read runs <code>scale to maximum</code> and sets the vertical range from the trace it just took. The dark read does not range at all — it inherits that setting. Re-ranging between the pair would change the digitiser scaling and make the subtraction meaningless. A naive port that called the same "acquire" for both would introduce exactly that error, and the result would look plausible.</p>
+</div>
+
+<div class="fix">
+<b>3 · The scope driver already returns amps</b>
+<p><code>Fetch (Waveform).vi</code> with <code>50 Ohm? = TRUE</code> divides the scaled voltage by the sense resistor before returning it. My <code>to_current()</code> would have divided by R a second time, scaling every charge by 1/R². Corrected: the driver returns current, and <code>to_current</code> is now documented as being for manually captured voltage traces only.</p>
+</div>
+
+<div class="fix">
+<b>4 · Timebase is nanoseconds per division, not full screen</b>
+<p>The panel value is divided by 1e8 before reaching <code>:TIM:RANG</code> — a ns→s conversion times ten divisions. So <code>Timebase = 200</code> means 200 ns/div and a <strong>2 µs full screen</strong>, with <code>:TIM:POS</code> at four divisions in. I had passed the raw number, which would have given a 200 ns window: ten times too short, and the transient would have run off the screen.</p>
+</div>
+
+<div class="fix">
+<b>5 · My own extractor was dropping flat-sequence contents</b>
+<p>A LabVIEW <code>flatSequence</code> holds its frames under <code>sequenceList</code>, not <code>diagramList</code>. My renderer looked only for the latter, so every flat sequence rendered empty. Fixed and everything regenerated. What was hidden turned out to be mostly <code>Wait (ms)</code> nodes — but the light-trace acquisition was in one of them, which is how finding 1 surfaced.</p>
+</div>
+
+<div class="fix">
+<b>6 · The "latent truncation bug" is real but rarer than I said</b>
+<p>I demonstrated it with V<sub>oc</sub> = 0.720555, dV = 10 mV — but computing the endpoints as LabVIEW does (V<sub>oc</sub> ∓ dV, as doubles) that case gives three points, not two. Measured over V<sub>oc</sub> from 0.5 to 1.1 V at microvolt resolution, the fraction of runs that lose a point is <strong>1.7 % at dV = 20 mV</strong>, <strong>0.8 % at 10 mV</strong> and <strong>17.1 % at 5 mV</strong>. A real hazard, sharply worse at fine dV, and worth a look in the archives if you have ever run at 5 mV. (An earlier version of this page had the 10 mV and 20 mV figures the wrong way round; the rates are now pinned by a test rather than quoted.)</p>
+</div>
+
+<div class="fix">
+<b>7 · Vpre1/2/3 is a wrapper sweep, not an encoded correction</b>
+<p>The wrapper's innermost loop sweeps <code>Vpre_Start → Vpre_End</code> in steps of <code>dV</code> and calls the engine once per step; the three column groups in the parameter file are simply its three iterations. <code>Vcoll1/2/3</code> and <code>Delay time1/2/3</code> are the (constant) V<sub>coll</sub> and delay at each of those points, which is why they repeat. So there is no hidden capacitance correction in the file format — the mechanism is plain. Why <em>three</em> points around V<sub>oc</sub> is still a physics question (Q1 below).</p>
+</div>
+</section>
+
+<section>
+<h2>A bug found in my own driver</h2>
+<p>Reading the wire graph of <code class="k">scale to maximum.vi</code> node by node to write the simulator turned up a mistake in the scope driver I had already written.</p>
+<p>The auto-range VI calls <code class="k">Fetch (Waveform).vi</code> with its <code>50 Ohm?</code> input <strong>unwired</strong>, so it works in <strong>volts</strong>. Only <code class="k">Read (Single Waveform).vi</code> wires <code>50 Ohm? = TRUE</code> with <code>Resistor = 5.192</code>, which is why the engine's arrays are currents. My <code class="k">autorange()</code> was computing the vertical range from the resistor-divided trace — it would have written <code>:CHAN2:RANG</code> a factor of 5.192 too small and clipped every light trace on the first real run.</p>
+<p>Fixed: <code class="k">_fetch_volts</code> and <code class="k">_fetch</code> are now separate, and the simulated scope reports clipping so a range that is too small fails a test rather than quietly flattening a peak.</p>
+<p>The same reading settled the algorithm itself: Array Max &amp; Min → Subtract → Divide by <code>Scale off.</code> → Multiply by <code>Scale_fac.</code> → Absolute Value → vertical range; and Add → Divide by <code>Scale off.</code> → vertical offset. With the panel's 1.5 and 2, that is <code>range = |1.5·(max−min)|</code>, <code>offset = (max+min)/2</code>, with a 10 mV floor when the peak-to-peak falls below 1 mV.</p>
+<p>And it confirmed the light-only ranging from the other side: <code class="k">Read blocked.vi</code> contains the same auto-range call behind a <strong>hard-coded FALSE</strong> selector, so the dark trace inherits the light trace's range by construction, not by convention.</p>
+</section>
+
+<section>
+<h2>Verified rig parameters</h2>
+<p>Read out of the saved front-panel defaults in <code>BACE_jv.vi</code>, decoded against the type table. These are real operating values, not labels.</p>
+<div class="scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Value</th><th>Reaches the instrument as</th></tr></thead>
+<tbody>
+<tr><td class="k">Oscilloscope</td><td>Agilent <strong>DSO9054H</strong></td><td><code>TCPIP0::PwM-DSO9054H.local::inst0::INSTR</code></td></tr>
+<tr><td class="k">SourceMeter</td><td>Keithley <strong>2400</strong>, firmware C34 <span class="chip v">*IDN? confirmed</span></td><td><code>GPIB0::24::INSTR</code></td></tr>
+<tr><td class="k">Collection field</td><td>Agilent 81150A</td><td><code>GPIB0::12::INSTR</code></td></tr>
+<tr><td class="k">LED drive</td><td>Agilent 33220A</td><td><code>GPIB0::15::INSTR</code></td></tr>
+<tr><td class="k"># Averages</td><td>200 default; <strong>20</strong> in the 2026 run</td><td><code>:ACQ:AVER:COUN N</code> (after a reset pass at 64)</td></tr>
+<tr><td class="k">Record Length</td><td>5000 <span class="chip d">label says 1000</span></td><td><code>:ACQ:POIN 5000</code>, unmodified</td></tr>
+<tr><td class="k">Timebase</td><td>200 ns/div <span class="chip v">panel says "timebase*10"</span></td><td><code>:TIM:RANG 2e-06</code>, <code>:TIM:POS 8e-07</code></td></tr>
+<tr><td class="k">Sense resistor</td><td>5.192 Ω <span class="chip d">panel: "50 old big Amp / 5.192 new Amp"</span></td><td>applied inside the fetch — traces come back in amps</td></tr>
+<tr><td class="k">Probe attenuation</td><td>1.0</td><td><code>:CHAN%d:PROB:EXT:GAIN 1</code></td></tr>
+<tr><td class="k">Pulse Amp</td><td>4</td><td>divisor on the 81150A levels</td></tr>
+<tr><td class="k">V<sub>coll</sub> / Delay</td><td>−1 V / 90 ns</td><td>81150A low level / <code>:PULS:DEL1</code> — no offset, measured 2026-09-02</td></tr>
+<tr><td class="k">Pulse width</td><td>5 µs</td><td><code>:FUNC1:PULS:WIDT 5e-06</code></td></tr>
+<tr><td class="k">t0 integration</td><td>3.18 × 10⁻⁷ s in the 2026 run</td><td>software only; panel notes "set before"</td></tr>
+<tr><td class="k">Scale factor / offset</td><td>1.5 / 2</td><td>range = |1.5·(max−min)|, offset = (max+min)/2</td></tr>
+<tr><td class="k">Trigger</td><td>CHAN3, positive slope, external</td><td><code>:TRIG:EDGE:SOUR CHAN3</code>, threshold = max(CHAN3)·0.5·atten</td></tr>
+<tr><td class="k">Runt-window trigger</td><td>off</td><td><code>:ISC:MODE OFF</code></td></tr>
+<tr><td class="k">Shutter / relay</td><td>module 0 / module 1, ID 9</td><td>relay: 1 = Keithley, 0 = amplifier</td></tr>
+</tbody>
+</table>
+</div>
+<div class="note">
+<b>The scope triggers on a signal, not a sync line</b>
+<p>This closes one of the earlier unknowns. <code>config oszi</code> configures CHAN3 at 2 V range / 0.15 V offset, takes <strong>one probe acquisition on it</strong>, and sets the edge-trigger high threshold to <code>max(CHAN3) × 0.5 × probe attenuation</code>. So channel 3 carries a real waveform whose amplitude is measured and used to place the threshold — self-calibrating rather than a fixed level. <code>Read blocked.vi</code> also returns <code>Trig-Chan3 Data Y</code>, so that channel is recorded alongside the signal. What is physically on CHAN3 is still worth confirming (Q3).</p>
+</div>
+<div class="fix">
+<b>Address correction</b>
+<p>Earlier versions of this page put the SourceMeter at <code>GPIB0::20::INSTR</code>, taken from a stale saved panel default. It answers on <strong>24</strong>. And it is a plain <strong>2400</strong> — <code>KEITHLEY INSTRUMENTS INC.,MODEL 2400,4473504,C34 Sep 21 2016</code> — so the 200&nbsp;V / 1&nbsp;A / 20&nbsp;W envelope, not a 2401 or 2440.</p>
+<p>The scope is on LAN and also answers on <code>::hislip0::INSTR</code> and <code>::5025::SOCKET</code>; <code>inst0</code> is what the rig selects. <code>GPIB0::7::INSTR</code> and <code>COM3</code> are enumerated too and belong to nothing in this program.</p>
+</div>
+</section>
+
+<section>
+<h2>The per-point sequence, as actually executed</h2>
+<pre><span class="c"># once per axis point</span>
+Wait  "Wait before measure"  0.2 s
+81150A  ← light levels   (VOLT1:HIGH = Vpre/4, VOLT1:LOW = Vcoll/4, PULS:DEL1 = t)
+shutter ← open
+Wait
+<b>Read unblocked TDCF.vi</b>   <span class="c"># LIGHT</span>
+    :RUN;:WMEM1:CLE;:FUNC1:DISPLAY OFF;:FUNC2:DISPLAY OFF;:WAV:FORM WORD;
+    :ACQ:AVER ON; :ACQ:AVER:COUN 64;          <span class="c"># restart the averager</span>
+    scale to maximum          <span class="c"># AUTO-RANGE — light trace only</span>
+    :RUN;
+    :ACQ:AVER ON; :ACQ:AVER:COUN 200;
+    :RUN; poll :ADER?; :WAV:SOUR …; :WAV:DATA?
+    :WMEM1:SAVE &lt;src&gt;;        <span class="c"># vestigial — scope-side subtraction, now dead</span>
+    :STOP; :MEAS:CLE;
+
+81150A  ← dark levels    (HIGH = 0, LOW = −|Vpre−Vcoll|/4)
+Wait
+shutter ← close
+<b>Read blocked.vi</b>          <span class="c"># DARK — inherits the range set above</span>
+    :RUN;:WAV:FORM WORD;
+    :ACQ:AVER OFF; :ACQ:AVER:COUN 64;   :RUN;
+    :ACQ:AVER ON;  :ACQ:AVER:COUN 200;
+    sleep( N / 190 )          <span class="c"># ≈ 1.05 s at N=200 — a blind wait</span>
+    :RUN; poll :ADER?; :WAV:DATA?
+    :STOP; :MEAS:CLE;
+Wait</pre>
+<div class="note">
+<b>A free speed-up</b>
+<p>That <code>sleep(N/190)</code> is a heuristic, and it sits <em>in addition to</em> the <code>:ADER?</code> polling that already waits for the acquisition properly. At 200 averages it costs about a second per dark trace for nothing. Dropping it and trusting the poll saves roughly <strong>five minutes on a 300-point run</strong> — the largest single time saving available, and it changes no physics. Worth measuring both ways once on the rig before committing.</p>
+</div>
+<p>Realistic budget per axis point with the sleep retained: ~2 s. A 3-point × 5-loop × 20-intensity run is therefore around 10 minutes of acquisition, plus the DC characterisations. Without the sleep, closer to 5.</p>
+</section>
+
+<section>
+<h2>Evidence grading</h2>
+<div class="scroll">
+<table>
+<thead><tr><th>Claim</th><th>Standing</th><th>Basis</th></tr></thead>
+<tbody>
+<tr><td>SCPI command strings for all four VISA instruments</td><td><span class="chip v">verified</span></td><td>Literal format strings decoded from driver block diagrams</td></tr>
+<tr><td>MathScript algorithms (sweep, levels, processing)</td><td><span class="chip v">verified</span></td><td>Source text, verbatim</td></tr>
+<tr><td>Front-panel parameter set and saved values</td><td><span class="chip v">verified</span></td><td>FP heap plus default-data block matched against the type table</td></tr>
+<tr><td>Timebase arithmetic, averaging restart, range-once rule</td><td><span class="chip v">verified</span></td><td>Wire-traced through the driver diagrams</td></tr>
+<tr><td>Deditec shutter prototypes and module/channel</td><td><span class="chip v">verified</span></td><td>Call Library Node declarations plus diagram constants</td></tr>
+<tr><td>File and folder naming scheme</td><td><span class="chip v">verified</span></td><td>Helpers classes plus <code>expConfig.xml</code>, cross-checked against 1011 archived files</td></tr>
+<tr><td>Which generator receives which inline command</td><td><span class="chip i">inferred</span></td><td>Channel-index syntax; structurally sound, not wire-traced</td></tr>
+<tr><td>Node execution order within a frame</td><td><span class="chip i">inferred</span></td><td>Diagram geometry, left to right</td></tr>
+<tr><td>Signal path: R<sub>sense</sub> placement, ×4 amplifier position</td><td><span class="chip u">unknown</span></td><td>Panel labels only — Q2</td></tr>
+<tr><td>What is physically on CHAN3</td><td><span class="chip u">unknown</span></td><td>Q3</td></tr>
+<tr><td>How SourceMeter and 81150A share the device node</td><td><span class="chip u">unknown</span></td><td>No switching found anywhere — Q4</td></tr>
+<tr><td>agilentDSO class behaviour</td><td><span class="chip d">n/a</span></td><td>Empty G# skeleton — every method is a stub. Not portable, nothing to port</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<section>
+<h2>Storage: byte-compatible, and verified that way</h2>
+<p>Your analysis reads the engine's <code>.dat</code> files directly, so the port writes them <strong>byte for byte</strong> rather than approximately. The test is not that the output looks right — it reads the 7 August archive, writes it straight back out, and compares bytes. All five files match exactly.</p>
+<p>Three details a &ldquo;looks right&rdquo; writer would have missed:</p>
+<ol>
+<li><strong>The exponent is unpadded.</strong> LabVIEW writes <code>9.05000E-1</code>, not <code>9.05000E-01</code>. Python's <code>%E</code> always pads to two digits, so a naive port differs in nearly every cell.</li>
+<li><strong>The format is <code>%10.5e</code>, not <code>%.5e</code>.</strong> The field width never shows on a real number — <code>9.05000E-1</code> is already ten characters — so it is invisible until a value is not finite. <code>NaN</code> comes out right-aligned as <code>'&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;NaN'</code>.</li>
+<li><strong>The matrix files have a blank second line.</strong> Not decoration: a script that skips exactly one header line would read it as a row. Header text is copied verbatim, trailing spaces included, because those are what the parsers on the other side match against.</li>
+</ol>
+<div class="note">
+<b>The archive is a partial run</b>
+<p>Which is how the NaN padding surfaced. 100 loops planned, <strong>20 completed</strong>, the remaining 80 rows written as NaN, and <code>1_averagesQ</code> holding the nan-aware mean and sample &sigma; over the 20 — which the ported accumulator reproduces exactly.</p>
+<p>So partial runs are the normal case, not an edge case. A fault at loop 7 of 100 must still leave every completed loop on disk. The recorder flushes whatever it has on any exit path, and a test interrupts a five-loop run mid-way and checks the folder is readable, the unrun loops are NaN, and the bias was parked.</p>
+</div>
+<p><strong>HDF5 is the primary store; the flat files are an export.</strong> Six significant figures is lossy — visible in that &sigma; comparison, where rounding propagates about a hundred times harder into a spread of 3.6&times;10<sup>&minus;12</sup> than into a mean of 3.7&times;10<sup>&minus;10</sup> — and the flat files carry no record of which instrument was set to what. One <code>.h5</code> per run holds the arrays at full precision plus the complete rig and run configuration, so a file is sufficient to reconstruct its own run.</p>
+<p>Per-shot traces are <strong>opt-in</strong>. At 51 axis points &times; 100 loops &times; 4000 samples that is 163 MB per run — the honest version of <code>Big File?</code>: a choice about disk, made explicitly, rather than a switch nobody remembered.</p>
+</section>
+
+<section>
+<h2>Two open questions closed from the files</h2>
+<p>Both looked like they would need a bench answer. Neither did.</p>
+<p><strong><code>New Sample?</code></strong> does exactly one thing — MathScript node 9 swaps and negates the two levels and nothing else:</p>
+<pre>if NewSample == 0
+  LoLvl = Vcoll;   HiLvl = Vpre1;
+else <span class="c">% invert &amp; switch</span>
+  LoLvl = -Vpre1;  HiLvl = -Vcoll;
+end</pre>
+<p>It also sits on <code>scale to maximum.vi</code>'s front panel, but that VI's three case selectors are <code>auto scale?</code>, the loop's own shift register, and the peak-to-peak floor comparison — so it is a passthrough there and changes no scaling. Already correctly implemented.</p>
+<p><strong><code>positive jSC?</code> is dead.</strong> The label is on the front panel of every version, but the string appears in no block diagram — the only <code>jsc</code> anywhere is the subVI filename <code>measJsc,Voc.vi</code>. It is displayed and saved and never read. Moved to the drop list.</p>
+</section>
+
+<section>
+<h2>Temperature: deferred, with the seam left open</h2>
+<p>There is <strong>no temperature control anywhere in the 907 VIs</strong> — the <code>290K</code> in the archive folder name was typed by hand. The controller is a <strong>Lake Shore 331 at <code>GPIB0::7::INSTR</code></strong>, and it already has its own console with the same shape as this project and an HTTP API on <code>127.0.0.1:8331</code>. Integration is the step after this one, and the seam is now the same one the power meter uses: <strong>ask the console, do not open the instrument</strong>. <code>RigConfig.temperature_console</code> exists and is empty; filling it in is the whole integration on this side.</p>
+<p>Two cheap consequences taken now. <code>temperature_k</code> is already a metadata field, written into the folder name and the HDF5 metadata, so when the controller arrives it fills itself in and neither the naming nor the stored schema changes. And <strong>temperature will not be an <code>Axis</code></strong> — the three axis quantities are per-shot bias conditions set in nanoseconds; temperature settles in minutes. It belongs at the session layer as an outer loop beside the LED level, which is also where the V<sub>oc</sub>-centring dependency already lives, since V<sub>oc</sub> moves with temperature exactly as it moves with intensity. The existing layering absorbs it without touching <code>core/axis.py</code>.</p>
+</section>
+
+<section>
+<h2>The DC and illumination drivers</h2>
+<p>Written from the recovered command sets, with two deliberate departures from the original — both in the SourceMeter, both about limits.</p>
+<div class="fix">
+<b>Compliance is now set before the output is enabled</b>
+<p><code>measJsc,Voc.vi</code> enabled the output and <em>then</em> set the compliance. Between those two commands the SMU sits at whatever <code>*RST</code> left, which is not a limit anyone chose. Reordered, and pinned by a test that asserts the transcript order.</p>
+</div>
+<div class="fix">
+<b>The V<sub>oc</sub> measurement limits voltage, not current</b>
+<p>The recovered routine sets <code>:SENS:CURR:PROT:LEV</code> in both branches, but while sourcing current a current protection does nothing. Sourcing 0&nbsp;A, the limit that matters is <code>:SENS:VOLT:PROT:LEV</code> — it is what bounds the output if a contact opens mid-measurement.</p>
+</div>
+<p>Everything else is the original's sequence: <code>*RST</code> before each of the three quantities, J<sub>sc</sub> then V<sub>oc</sub> then J<sub>sat</sub>, separate settle times for each (three separate panel controls, because a slow cell settles far more slowly at V<sub>oc</sub> than at J<sub>sc</sub>), and the output off again after each — which matters, because the router reads <code>output_enabled</code> before it will move the relay.</p>
+<p>The 33220A driver sends the inline strings verbatim and <strong>unindexed</strong> — that absence of a channel index is how it was told apart from the 81150A in the first place. <code>identify()</code> now refuses an 81150A explicitly, because swapping the two addresses would drive the LED with the collection-field waveform.</p>
+<p>The Newport 1918-C goes through the 32-bit bridge and uses the meter's own data store, so a statistic costs one round trip rather than N. It raises rather than returning a mean over however many samples happened to arrive — a silently short average is the kind of error that survives into a published number.</p>
+<p>The instruments are not reachable from here, so what these tests pin is <em>what is sent and in what order</em>. That is not a substitute for a bench smoke test; it is what makes the smoke test short, because by then the only unknown left is whether the instrument agrees.</p>
+</section>
+
+<section>
+<h2>Two config files, written</h2>
+<p><code>rig.toml</code> is the bench — addresses, sense resistor, amplifier gain, module numbers. <code>run.toml</code> is the measurement, copied verbatim into the output so a result carries its own recipe. They fail differently, which is why they are separate: a stale <code>rig.toml</code> silently rescales every charge, while a stale <code>run.toml</code> merely repeats a measurement you did not mean to repeat.</p>
+<p>The loader <strong>refuses unknown keys</strong> rather than falling back to defaults. A typo in <code>sense_resistor_ohm</code> that quietly defaulted would produce data wrong by a factor of five with no symptom, and the point of a config file is that someone can read what the run actually used. It also refuses a <code>rig.toml</code> that puts the shutter and the relay on the same DIO module.</p>
+</section>
+
+<section>
+<h2>J&ndash;V is its own module now</h2>
+<p>It runs with or without BACE, and needs only the SourceMeter — the LED and the relay are used when present, and their absence just means &ldquo;the illumination is whatever it is&rdquo; and &ldquo;nothing is contending for the device&rdquo;. When a router exists the sweep happens inside <code>router.dc()</code>, so the interlock still applies.</p>
+<p>Three things it does that the original did not:</p>
+<ul>
+<li><strong>Dark and light in one run.</strong> The original swept the Keithley under whatever the 33220A happened to be doing. Here a dark scan switches the LED output <strong>off</strong> rather than setting it low — a sub-threshold level is right for the transient, where the generator must keep producing a waveform, but for a dark J&ndash;V there is nothing to keep and an output that is off cannot leak. Both land in the same file set, because a dark curve is only interpretable beside the light curve it belongs to.</li>
+<li><strong>Both sweep directions, optionally.</strong> Curves that differ forward and reverse are hysteresis, which for many chemistries is the most interesting thing in the measurement and is invisible if you only sweep one way. Off by default: it doubles the run and makes &ldquo;the&rdquo; curve ambiguous.</li>
+<li><strong>Derived numbers refuse to be meaningless.</strong> A <strong>dark</strong> curve reports no V<sub>oc</sub> at all. It still crosses zero — on noise, or on the shunt — and calling that a V<sub>oc</sub> invents a plausible number from nothing. Current density is omitted rather than defaulted to 1&nbsp;cm², because defaulting the area silently mislabels A as A/cm².</li>
+</ul>
+<div class="note">
+<b>The simulator cannot disagree with itself</b>
+<p>The simulated device now carries a single-diode model whose saturation current is <em>derived</em> from the same V<sub>oc</sub> the transient axis centres on: I<sub>0</sub> = J<sub>sc,ref</sub>·exp(&minus;V<sub>oc,ref</sub>/nkT). So a simulated J&ndash;V V<sub>oc</sub> and a simulated BACE V<sub>oc</sub> cannot describe different devices, and a test asserts they agree.</p>
+</div>
+<p>Storage writes <code>BACE_JV_Data_*.dat</code> and <code>BACE_JV_Parameters_*.dat</code> in the house format with the recovered column names, plus an HDF5 keeping every curve of a run in one file. <strong>Not byte-verified</strong> — unlike the BACE writer, no J&ndash;V output folder has been read, so this one is a reconstruction. One sample pair would settle it.</p>
+</section>
+
+<section>
+<h2>Compliance: adjustable, under a ceiling</h2>
+<p><code>current_compliance_a</code> moved out of <code>rig.toml</code> into <code>run.toml</code>, because the right compliance depends on the pixel rather than on the bench.</p>
+<p>What stayed in <code>rig.toml</code> is a <strong>ceiling</strong> no run file may exceed. A 2400 will happily push 1&nbsp;A into a small cell, and a typo in a measurement recipe is a far more likely route to that than a deliberate decision. The loader refuses the run rather than clamping it, so anyone who wants more has to raise the ceiling on purpose.</p>
+</section>
+
+<section>
+<h2>Correction: the power meter needs no bridge, and no second driver</h2>
+<p>Reading the existing 1918-C project changed this driver completely, and two of its findings overturn what these pages previously said.</p>
+<div class="fix">
+<b>The meter is not 32-bit-only</b>
+<p>Newport's package installs both 32- and 64-bit <code>usbdll.dll</code>; the build matching the interpreter just has to be picked deliberately. Only <code>delib.dll</code> — the shutter and relay — is genuinely 32-bit-only, so the helper process carries one target, not two.</p>
+</div>
+<div class="fix">
+<b>Only one process can hold the USB device</b>
+<p>And on this rig that process is the 1918-C console. A second driver opening it fails in the confusing way: a bare &ldquo;no Newport device found&rdquo; that looks like a cable fault. So the driver here contains <strong>no transport code</strong> — it is an HTTP client to the console's localhost API, with a direct backend that imports the tested driver for when nothing else holds the meter.</p>
+</div>
+<p>Facts from that project that my first attempt had wrong: the meter <strong>echoes the command back</strong> before its reply; the terminator is <code>\r</code>, not <code>\r\n</code>; <code>PM:DS:INT</code> is in <strong>milliseconds</strong> on this firmware, not the 0.1&nbsp;ms a widely-copied driver claims; <code>PM:DS:BUFFER 0</code> is needed or the store wraps into a rolling window; and <code>PM:PWS?</code> carries a saturation/overrange status that <code>PM:P?</code> does not. A clipped intensity reading biases every normalisation and looks entirely reasonable, so the status is read and surfaced — but a bad sample is reported rather than raised, because one saturated reading should not abort an hour of transients.</p>
+</section>
+
+<section>
+<h2>The wrapper, and the interlock proved rather than described</h2>
+<p>For each LED level: measure V<sub>oc</sub>, J<sub>sc</sub> and J<sub>sat</sub> on the SourceMeter under steady illumination, switch the LED to pulsed mode <strong>at the same level</strong>, and run a transient scan whose prebias axis is centred on the V<sub>oc</sub> just measured. That last dependency is the whole reason this layer exists — V<sub>oc</sub> moves with illumination, so the axis cannot be built until the light is on and the SourceMeter has read it.</p>
+<p>This is the only place a software mistake reaches the sample, so three things are guarded rather than documented.</p>
+<div class="note">
+<b>The relay test does not just check that nothing raised</b>
+<p>It wraps the router and records the state of <em>both</em> sources at the instant each move is requested, then asserts both were quiet. An interlock that is never exercised is an interlock nobody knows works.</p>
+</div>
+<p><strong>The coupling invariant</strong> is fed the level the program actually measured at, not the level it intended to. A test runs two illumination points whose V<sub>oc</sub> differ by more than 20 mV and asserts each axis is centred on its own — a stale V<sub>oc</sub> could not pass.</p>
+<p><strong>Preflight</strong> checks everything checkable before the first instrument is touched: no router, no SourceMeter, a &ldquo;sub-threshold&rdquo; low level that is not sub-threshold, and the one that would otherwise look like a normal run — an axis centred on V<sub>oc</sub> with the DC measurement switched off, which would centre on nothing. A series is hours long; finding that at step 40 is the expensive way to learn it.</p>
+<p>Unwinding runs on completion, abort, exception and walk-away, in that order of priority: the sources come down first, because the interlock will refuse to act while one is live. Four tests exercise those four exits and assert bias, SourceMeter, shutter and LED are all off afterwards.</p>
+</section>
+
+<section>
+<h2>Series output</h2>
+<p>Each illumination point gets a <strong>complete run folder</strong> — the same five <code>.dat</code> files and the same HDF5 as a standalone run — so any single intensity can be re-analysed alone without knowing it was part of a series. The names come out exactly like your archives:</p>
+<pre>s9_SIM_pxa_290K_1010mVLED_894mVVOC_offsetcorr_20260831_212212/
+s9_SIM_pxa_290K_1030mVLED_919mVVOC_offsetcorr_20260831_212212/
+...
+series_20260831_212212.dat        <span class="c">one row per (LED level, axis point)</span>
+series_20260831_212212.h5
+260831_212212_LED_Voc_Jsc_BACE Parameters.dat     <span class="c">three-point axis only</span></pre>
+<p>That last filename is recovered from the block diagram — <code>%y%m%d_%H%M%S_</code> as a <em>prefix</em>, a two-digit year, and a space in the name — and reproduced as found. The legacy wide format is written <strong>only when the axis has exactly three points</strong>, because its <code>Vpre1/2/3</code> columns cannot express anything else. That shape is precisely the assumption the axis parameter removes, so the long format is always written alongside.</p>
+<div class="fix">
+<b>Uncalibrated columns are NaN, not guesses</b>
+<p>J<sub>sc</sub> and J<sub>sat</sub> in mA/cm² need the pixel area; the intensity column needs the factor converting meter watts to irradiance at the sample. The original had a <code>Factor</code> control whose value is not in the binaries. A number that looks calibrated and is not is worse than a gap.</p>
+</div>
+<p>Two writers are <strong>reconstructions, not verifications</strong>: the J&ndash;V files and this series summary. The BACE per-run writer is byte-verified against a real archive; these two have no sample to check against. One of each would pin them.</p>
+</section>
+
+<section>
+<h2>The bench harness</h2>
+<p>Every SCPI string in this port was recovered from a binary and has never been sent to an instrument. So the harness sends each one and reads the error queue <strong>immediately afterwards</strong> — that is the whole design, and it turns &ldquo;does my SCPI work&rdquo; from a guess into a table of exactly which commands were rejected and what the instrument said about them.</p>
+<p><code>RecordingResource</code> wraps a pyvisa resource and presents the same interface, so the real drivers are pointed at it <strong>unmodified</strong>. The transcript is of the code that will actually run, not of a test double.</p>
+<div class="scroll">
+<table>
+<thead><tr><th>Stage</th><th>Flag</th><th>What it does</th></tr></thead>
+<tbody>
+<tr><td class="k">offline</td><td><span class="chip d">always</span></td><td>The package on that machine: simulated transient, J&ndash;V and series runs, the numerical regression against a real archive, the byte round-trip of the legacy files</td></tr>
+<tr><td class="k">discover</td><td><span class="chip d">always</span></td><td>Enumerate VISA, <code>*IDN?</code> each address, flag a surprising identity</td></tr>
+<tr><td class="k">local</td><td><span class="chip d">always</span></td><td><code>delib.dll</code> and its bitness, the 1918-C console, the 331 console</td></tr>
+<tr><td class="k">read</td><td><code>--read</code></td><td>Read back instrument state; sends no settings</td></tr>
+<tr><td class="k">configure</td><td><code>--configure</code></td><td>Send every configuration command. <strong>Outputs stay off</strong></td></tr>
+<tr><td class="k">acquire</td><td><code>--acquire</code></td><td>One acquisition; needs the trigger running</td></tr>
+<tr><td class="k">dio</td><td><code>--dio</code></td><td>Toggle the shutter and relay lines and ask what moved</td></tr>
+<tr><td class="k">outputs</td><td><code>--outputs</code></td><td>Enable outputs at 0 V, <strong>no sample connected</strong></td></tr>
+<tr><td class="k">measure</td><td><code>--measure</code></td><td>One real transient. Needs a sample</td></tr>
+</tbody>
+</table>
+</div>
+<p>Two hypotheses are marked in the code and reported as <strong>warnings with the numbers</strong> rather than failures, because a disagreement is information: that <code>:TIM:RANG</code> wants <code>timebase_ns / 1e8</code> (200 → 2&nbsp;µs full screen), and that <code>:ACQ:POIN 5000</code> comes back as 4000 points.</p>
+<p><code>--measure</code> supports <code>--manual-shutter</code>, which prompts a person to open and close the shutter — four prompts for a two-loop run, and the only way to get first light on 64-bit Python where <code>delib.dll</code> cannot load. It records through the ordinary writer, so first light produces a real run folder that opens in the same analysis as any other measurement.</p>
+<div class="note">
+<b>It has already earned itself</b>
+<p>Exercising the harness against a fake VISA layer found a real inconsistency before any hardware was involved: <code>drivers/infiniium.py</code> defined its own <code>Trace</code> dataclass instead of using the one in <code>drivers/protocols.py</code>, so the two had drifted and the scope driver's traces lacked <code>.n</code> and <code>.duration_s</code>. There is now one <code>Trace</code>.</p>
+</div>
+</section>
+
+<section>
+<h2>First bench session &mdash; 31 August 2026</h2>
+<p>Passes 1 and 2 ran on the rig. <strong>Every instrument answered at the address <code>rig.toml</code> claims</strong>, and the VISA enumeration matches the program's own address ring exactly:</p>
+<pre>KEYSIGHT TECHNOLOGIES,DSO9054H,MY53310104,06.74.01819   <span class="c">TCPIP0::...inst0::INSTR</span>
+Agilent Technologies,81150A,MY41C11932,2.0.9.0-4.6      <span class="c">GPIB0::12::INSTR</span>
+KEITHLEY INSTRUMENTS INC.,MODEL 2400,4473504,C34        <span class="c">GPIB0::24::INSTR</span>
+Agilent Technologies,33220A,MY44002460,2.00-2.00-22-2   <span class="c">GPIB0::15::INSTR</span></pre>
+<p>Four defects in my own code, one of them serious.</p>
+<div class="fix">
+<b>1 &middot; The report's headline section was wrong</b>
+<p>All 28 &ldquo;commands the instruments rejected&rdquo; were phantoms. <code>:SYST:ERR?</code> on the DSO9054H, with <code>:SYST:HEAD OFF</code>, answers a bare <code>0</code> &mdash; not the <code>0,"No error"</code> a Keithley gives &mdash; and the drain loop matched on the prefix <code>"0,"</code>. Every scope command therefore looked rejected. It now parses the leading integer.</p>
+</div>
+<div class="fix">
+<b>2 &middot; The configure stage changed levels on a live output</b>
+<p>The 81150A was sitting at <code>:OUTP1? = 1</code>, left on by the LabVIEW program, and the stage reconfigured it anyway &mdash; high from 1.263&nbsp;V to 0.225&nbsp;V, which at the device is 5.05&nbsp;V to 0.9&nbsp;V, into whatever was connected. It had asserted only that <em>its own</em> driver's flag was False, which it trivially was, because this session had never enabled anything. <strong>Ask the instrument, not the object.</strong> Configure now reads <code>:OUTP?</code> first and skips that instrument loudly; <code>--force-configure</code> overrides it for a disconnected bench.</p>
+</div>
+<div class="fix">
+<b>3 &middot; A missing optional dependency threw away a run</b>
+<p><code>h5py</code> was absent, and the recorder raised out of the HDF5 write <em>after</em> the five <code>.dat</code> files were already on disk &mdash; losing them from the written list and failing the check. An hour of measurement must not be lost to an optional dependency. The HDF5 write is now caught and recorded; the <code>.dat</code> files always survive.</p>
+</div>
+<div class="fix">
+<b>4 &middot; One genuine instrument complaint</b>
+<p><code>:FREQ 1000</code> answered <code>-221,"Settings conflict; pulse width decreased due to period"</code>. The 33220A was holding the pulse <em>width</em>, so raising the frequency squeezed it. Fixed by sending <code>FUNC:PULS:HOLD DCYC</code> first. Benign in itself &mdash; but a settings conflict that is always present is one nobody reads, and the next real one would be lost in it.</p>
+</div>
+
+<h3>What the rig actually says</h3>
+<p><strong>The generators run at 500&nbsp;Hz, not 1&nbsp;kHz.</strong> Both read 500 &mdash; and they must match, since the 81150A is armed from the 33220A sync. The 1&nbsp;kHz in the port came from the recovered code, not from the bench. That makes the on-phase 1&nbsp;ms rather than the 500&nbsp;µs assumed until now.</p>
+<p><strong>The 5000 → 4000 question is answered, and the hypothesis was in the wrong register.</strong> <code>:ACQ:POIN?</code> answers <strong>5000</strong>, so the reduction is not there. The record the scope can deliver is the time window times the sample rate, and 2&nbsp;µs at 2&nbsp;GSa/s is 4000 points. <code>record_length</code> is a <em>request</em>; the check now reports <code>:ACQ:SRAT?</code> and the implied count so this is visible rather than inferred.</p>
+<div class="note">
+<b>Two confirmations, free</b>
+<p><code>:CHAN2:RANG? = 5.14E-01</code> with <code>:CHAN2:OFFS? = 8.13E-02</code> &mdash; an auto-ranged state, in <strong>volts</strong>, of exactly the order the recovered algorithm predicts. Independent support for the auto-range units fix. And <code>:ACQ:AVER:COUN? = 64</code> with averaging on is the reset pass of the double-configure, left behind by the last LabVIEW run.</p>
+</div>
+
+<h3>One thing to resolve before first light</h3>
+<p>The 81150A was found at <code>:VOLT1:HIGH? = 1.263102 V</code>, <code>:VOLT1:LOW? = 0</code>, <code>:PULS:DEL1? = 60 ns</code>, output ON. With <code>pulse_amp = 4</code> that is <strong>5.05&nbsp;V at the device</strong> from a 0&nbsp;V baseline &mdash; not a prebias near V<sub>oc</sub> in either the light or the dark configuration, and the delay is 60&nbsp;ns rather than the archive's 88&nbsp;ns. Either the generator was left from a different experiment, or something about the amplifier path is not what these pages assume.</p>
+</section>
+
+<section>
+<h2>Second bench session &mdash; the record geometry</h2>
+<p><code>--acquire</code> reached the instrument and returned the fetch preamble. Six numbers, and together they close the timing question that had been open since the port began.</p>
+<pre>:WAV:POIN?;:WAV:XOR?;:WAV:XINC?;:WAV:YOR?;:WAV:YINC?;:WAV:YREF?;
+  <span class="c">-></span> 4000; -1.99500000000E-07; 5.00000000E-10; 2.18878E-03; 2.47582E-06; 0</pre>
+<p><strong><code>:TIM:POS</code> is the time at the screen centre.</strong> The record spans <code>TIM:POS ± range/2</code>: with 2&nbsp;µs and <code>:TIM:POS 8e-7</code> that is &minus;200&nbsp;ns to +1800&nbsp;ns, and the scope reported its first sample at &minus;199.5&nbsp;ns. So the trigger sits about <strong>200&nbsp;ns into the record</strong> — not at its start, and not the 800&nbsp;ns assumed until now.</p>
+<p><strong><code>:ACQ:POIN</code> is a request, not a promise.</strong> It answered 5000 while <code>:WAV:POIN?</code> returned <strong>4000</strong>, with <code>:WAV:XINC? = 5.0e-10</code>. The record the scope can deliver is the window times the sample rate — 2&nbsp;µs at 2&nbsp;GSa/s is 4000 points. Exactly the archive's shape, this time from the instrument rather than inferred.</p>
+<div class="note">
+<b>And the integration window is correct &mdash; checkable for the first time</b>
+<p><code>t0_int = 318 ns</code> is measured from the first sample, so it is 118&nbsp;ns after the trigger. <strong>Corrected 2026-09-02:</strong> the trigger offset on the scan path is <strong>0</strong>, not 47&nbsp;ns, so the field arrives at <code>delay</code> = 88&nbsp;ns after the trigger, 287.5&nbsp;ns into the record; the current spike follows it by about 38&nbsp;ns (the device and bias-path response), landing near 326&nbsp;ns. <strong>The integral still starts just before the transient &mdash; by about 8&nbsp;ns rather than 16.</strong></p>
+<p>Measured directly: at the same <code>Delay(ns) = 90</code>, LabVIEW and the Python port both put the displacement spike at <strong>328&nbsp;ns</strong> of record time. That the recovered <code>t0_int</code> and the instrument's own record origin agree to a few nanoseconds remains the strongest evidence that the timing chain came out of the binaries intact — only the offset's value was wrong.</p>
+</div>
+
+<h3>The fetch came back empty &mdash; and my explanation was wrong</h3>
+<p><code>:WAV:DATA?</code> returned an empty array while the preamble promised 4000 points, with nothing in the instrument's error queue.</p>
+<div class="fix">
+<b>The obvious diagnosis was false</b>
+<p>I said <code>:WAV:STR ON</code> produces an indefinite <code>#0</code> block that pyvisa cannot parse. It parses it fine — checked directly against <code>from_ieee_block</code> in pyvisa 1.16.2. The cause is still unknown.</p>
+<p>So the driver stopped depending on the diagnosis. <code>_read_waveform</code> takes pyvisa's answer when it is the length the preamble promised, and otherwise reads the bytes itself and parses the IEEE block by hand — both definite and indefinite headers. <code>last_fetch_method</code> records which route was used, so the report says whether the fallback was needed.</p>
+</div>
+<p>Alongside that, three changes that are right regardless:</p>
+<ol>
+<li><strong><code>:WAV:STR OFF</code>.</strong> The LabVIEW driver set streaming ON and I copied it. Streaming is for records too large for a definite-length block header (&gt;999,999,999 bytes); a 4000-point WORD record is 8000 bytes. A definite header also lets the reader notice a short transfer, which an indefinite one cannot.</li>
+<li><strong><code>:STOP</code> before fetching.</strong> Both <code>autorange</code> and <code>acquire</code> read the channel while the scope was still running. The average is only complete once acquisition has ended anyway.</li>
+<li><strong>The driver now says what went wrong.</strong> An empty block, or one shorter than its preamble declares, raises an error naming the two things to check rather than failing inside numpy.</li>
+</ol>
+<p>And a <code>raw waveform transfer</code> check now reads <code>:WAV:DATA?</code> byte by byte and reports the block header, the declared payload length and the actual one — so if it is still empty, the next report distinguishes an indefinite block from a truncated transfer from something else, instead of prompting another guess.</p>
+
+<h3>The <code>:ADER?</code> latch</h3>
+<p>The acquire transcript showed <code>:ADER?</code> answering <code>+1</code> about a millisecond after <code>:RUN</code>. The Acquisition Done Event Register is a <strong>latch, cleared on read</strong>: one left set by a previous acquisition returns immediately and the wait ends before anything has been captured. With 200 hardware averages that means fetching a partial average and never knowing — no error, no symptom, a quietly noisier trace. It is now read and discarded before every <code>:RUN</code>.</p>
+
+<h3>A question about the trigger sweep</h3>
+<p>The recovered driver sets <code>:TRIG:SWE AUTO</code>, which sweeps <em>even when no trigger arrives</em>. If the 81150A sync came loose, every trace would be untriggered noise, the dark subtraction would cancel it, and Q would come out near zero — a plausible-looking result produced by a disconnected cable. <code>TRIG</code> waits instead, turning that into a timeout.</p>
+<p>That is a change to acquisition behaviour rather than a bug fix, so it is exposed as a run setting and left at the original's <code>AUTO</code>. Worth switching once the trigger path is known good.</p>
+
+<h3>Three process notes</h3>
+<div class="note">
+<b>Third session: zero failures</b>
+<p>With <code>:WAV:STR OFF</code> in place and the live-output guard working, the run came back clean. Both generators were still on and their configure stages were skipped with the intended message — the guard doing its job, not a fault. The acquire stage was not requested, so the fetch question is still open.</p>
+</div>
+<div class="fix">
+<b>The session ran a different copy of the code</b>
+<p>The report's package path was <code>Q:\Huotian\bace-python</code> while the fixes had been written to <code>D:\BACE\bace-python</code>, so it repeated three defects that were already fixed. Worth settling which path is canonical.</p>
+</div>
+<div class="fix">
+<b>The rig's original generator settings were overwritten</b>
+<p>By the previous session's configure stage, before the live-output guard existed. The 81150A now sits at 0.225/&minus;0.25&nbsp;V, 135&nbsp;ns, 1&nbsp;kHz; it was found at 1.263/0&nbsp;V, 60&nbsp;ns, 500&nbsp;Hz. The 33220A now reads 1.02/0.4&nbsp;V at 1&nbsp;kHz; it was 1.03/0.4&nbsp;V at 500&nbsp;Hz. The 500&nbsp;Hz that <code>run.toml</code> now follows comes from the first session, before anything of mine had touched it.</p>
+</div>
+</section>
+
+<section>
+<h2>First real acquisition</h2>
+<p><code>--acquire</code> completed with <strong>zero failures</strong>: 4000 points fetched and correctly scaled. And the report says which fix did it — <code>fetch route: query_binary_values</code>, with <code>:WAV:STR? = 0</code>.</p>
+<div class="fix">
+<b>So the empty fetch was never a block-header problem</b>
+<p>It was <strong>reading the channel while the scope was still running</strong>. <code>:STOP</code> before the fetch is the whole fix. The manual block parser stays as a fallback that is now known not to be needed on this instrument — two wrong diagnoses before the right one, which is the argument for the fallback rather than against it.</p>
+</div>
+<p>The geometry came back exactly as the preamble predicted: 4000 points, dt 0.5&nbsp;ns, <code>t0 = &minus;199.5 ns</code>, trigger 199.5&nbsp;ns into the record, <code>t0_int</code> 118.5&nbsp;ns after the trigger.</p>
+<p><strong>The <code>:ADER?</code> latch fix is visibly working.</strong> The transcript now reads <code>+0</code> (the clearing read) → <code>:RUN</code> → <code>+0</code> → <code>+1</code>. Before the fix it went straight to <code>+1</code> — the stale event ending the wait before anything had been captured.</p>
+
+<h3>The auto-range was clipping — and the peak was 26&nbsp;% larger than reported</h3>
+<p>The one real defect this acquisition exposed, and the reason the first run's headline number was wrong.</p>
+<pre>channel before ranging : 0.15 V about 0 V      <span class="c">-> window [-0.0750, +0.0750] V</span>
+true signal peak       : 0.1270 V              <span class="c">-> the first acquisition CLIPPED</span>
+range computed from it : 0.118 V about 0.0389  <span class="c">-> window [-0.0202, +0.0979] V</span>
+true peak 0.1270 V     : still above the top</pre>
+<p>Max and min taken from a clipped trace are <em>lower bounds</em>, so a range computed from one is too small — and a single pass cannot escape that. <strong><code>scale to maximum.vi</code> wraps its ranging in a FOR loop</strong>, which I had flattened to one pass when porting it.</p>
+<p>Report 7, with the loop restored, converged and showed exactly how far off the single pass had been:</p>
+<pre>start          range 0.1500 offset 0.0000  window [-0.0750, +0.0750] <span class="c">-> CLIPPED</span>
+after pass 1   range 0.1181 offset 0.0389  window [-0.0202, +0.0979] <span class="c">-> CLIPPED</span>
+after pass 2   range 0.1518 offset 0.0498  window [-0.0260, +0.1257] <span class="c">-> CLIPPED</span>
+after pass 3   range 0.1911 offset 0.0630  window [-0.0325, +0.1585] <span class="c">-> fits</span>
+after pass 4   range 0.1916 offset 0.0631  window [-0.0327, +0.1589] <span class="c">-> fits</span></pre>
+<div class="fix">
+<b>The measurement the clipped run reported was 26&nbsp;% low</b>
+<p>Peak current from the clipped window: <strong>19.3&nbsp;mA</strong>. Peak current once the window holds the signal: <strong>24.4&nbsp;mA</strong>. A clipped trace does not look broken — it looks like a slightly smaller transient, and every extracted charge downstream of it is quietly an underestimate. This is the class of bug that produces publishable-looking numbers that are wrong, which is why the driver now reports <code>autorange passes</code>, the window sequence it tried, and a warning if it ever gives up while still clipping.</p>
+</div>
+
+<h3>Then: two passes instead of four — confirmed on the rig</h3>
+<p>Converging is right; taking four acquisitions to do it is waste. The original applies its formula on every pass, clipped or not — but a clipped trace carries <em>no information</em> about how far past the rail the signal went, only that it went. So while clipped, <code>autorange</code> now ignores the reported max and min and grows the window geometrically (×1.8), anchored on whichever edge did <em>not</em> clip so the new span is spent on the side the signal actually ran off. The formula is applied once, to the first acquisition that fits.</p>
+<p>Report 8, one minute later on the same rig with nothing else changed, ran exactly the sequence predicted from the cloud:</p>
+<pre>autorange passes         : 2
+autorange windows tried  : 0.1500 @ +0.0000 -> clipped
+                           0.2700 @ +0.0600 -> fits
+autorange range/offset   : 0.191 / 0.063        <span class="c">-- identical to the four-pass answer</span>
+current min/max (A)      : -1.5683e-04 / 2.4440e-02</pre>
+<p><strong>A deliberate deviation from the original,</strong> and the first one in the acquisition path that changes timing rather than correctness. At ~150&nbsp;ms per acquisition and 300 steps a run, two saved passes is about three minutes. It also stops as soon as the instrument refuses a wider window — at its own ceiling, another pass would clip identically and cost 150&nbsp;ms to learn nothing.</p>
+
+<div class="fix">
+<b>And report 8 caught a regression I had introduced four minutes earlier</b>
+<p>Along with the growth I had added a readback — <em>report what the instrument took, not what it was asked for</em> — sound reasoning for a scope that quantises its ranges. This one does not quantise; it <strong>rounds its reply to three significant figures</strong>. Asked for 0.191561&nbsp;V it answers <code>1.91E-01</code>, and the readback was quietly throwing away precision rather than gaining it. Worse, the ceiling test compared the reply to the request for equality, so a request for 1.5746&nbsp;V coming back as <code>1.57</code> would have read as <em>the scope refusing to go wider</em> and abandoned a signal that needed more range.</p>
+<p>Both are fixed: the reply wins only when it disagrees by more than 2&nbsp;% (a quantised step is at least 25&nbsp;% away, display rounding at most 0.5&nbsp;%), and the ceiling test now asks whether the range <em>grew</em>, not whether it matched. Neither would have shown up in simulation — a fake instrument echoes back what you send it.</p>
+</div>
+
+<h3>What the trace itself says</h3>
+<p>The rig was live during both checks — both generators running, the 81150A at +0.9/&minus;1.0&nbsp;V at the device — so this is a real transient, not noise. Two independent acquisitions at the correct range agree closely on the peak and not at all on the baseline:</p>
+<div class="scroll">
+<table>
+<thead><tr><th>Report</th><th>Window</th><th>Peak (mA)</th><th>Floor (mA)</th><th>Tail, last 10 % (A)</th></tr></thead>
+<tbody>
+<tr><td>6</td><td>0.118 V — <strong>clipped</strong></td><td>19.3</td><td>&minus;0.18</td><td>&minus;4.04&times;10<sup>&minus;5</sup></td></tr>
+<tr><td>7</td><td>0.192 V — fits</td><td><strong>24.442</strong></td><td>&minus;0.15</td><td>+6.67&times;10<sup>&minus;6</sup></td></tr>
+<tr><td>8</td><td>0.191 V — fits</td><td><strong>24.440</strong></td><td>&minus;0.16</td><td>&minus;1.88&times;10<sup>&minus;5</sup></td></tr>
+</tbody>
+</table>
+</div>
+<p>The peak reproduces to <strong>1 part in 10<sup>4</sup></strong> across two runs — that number is solid, and the clipped run's 19.3&nbsp;mA was 26&nbsp;% low.</p>
+<div class="fix">
+<b>A claim I made from one sample and had to withdraw an hour later</b>
+<p>On report 7 I wrote that the tail improving to +6.7&times;10<sup>&minus;6</sup>&nbsp;A was itself confirmation that the clipping had been distorting the baseline. Report 8, same rig and same settings, came back at &minus;1.88&times;10<sup>&minus;5</sup>&nbsp;A. So the shot-to-shot scatter of that tail is around ±1.3&times;10<sup>&minus;5</sup>&nbsp;A at 16 averages, the clipped run's &minus;4.0&times;10<sup>&minus;5</sup> is not clearly outside it, and there was never evidence for the claim — one sample cannot show a shift. The first eight samples of each record wander by about the same amount (&minus;1.2&times;10<sup>&minus;4</sup> against &minus;6.2&times;10<sup>&minus;5</sup>&nbsp;A), which says it is a genuine baseline wander, not a processing artefact.</p>
+<p>It does not threaten the measurement — a common-mode offset is removed twice, once by the light&minus;dark subtraction and again by the last-10&nbsp;% baseline — but it does set the noise floor for a single acquisition, and 20 averages of 100 loops is what the recipe uses for a reason.</p>
+</div>
+</section>
+
+<section>
+<h2>First light, and the one hypothesis it killed</h2>
+<p><strong>2026-09-01, 03:20.</strong> Zero failures. Shutter in software, 81150A driven, scope triggered on the real sync, photocurrent extracted, charge integrated, legacy files and HDF5 written. The whole chain, on a real device.</p>
+<p>The transient is textbook: light and dark both spike to +2.53&times;10<sup>&minus;2</sup> and +2.47&times;10<sup>&minus;2</sup>&nbsp;A at the same sample &mdash; the displacement current from the pulse edge &mdash; and the difference decays cleanly.</p>
+<pre>+216 ns  -9.76e-4 A        +800 ns  -1.23e-4 A
++300 ns  -4.88e-4 A       +1300 ns  -5.14e-5 A
++550 ns  -2.45e-4 A       +1750 ns  -4.52e-6 A</pre>
+<p>The baseline arithmetic checks to four digits: light<sub>pre</sub> &minus; dark<sub>pre</sub> &minus; (light<sub>tail</sub> &minus; dark<sub>tail</sub>) is exactly the photo trace's pre-pulse level.</p>
+<div class="fix">
+<b>A hypothesis proposed, tested and discarded in one run</b>
+<p>Q came out &minus;1.9&times;10<sup>&minus;10</sup>&nbsp;C where the 2026-08-07 archive gives +3.65&times;10<sup>&minus;10</sup>&nbsp;C at the same V<sub>coll</sub> and delay. I traced it to output polarity: the 81150A's <em>low</em> level is what the device sits at between pulses, and with <code>:OUTP1:POL NORM</code> and <code>LoLvl = Vcoll</code> the device is held in extraction and pulsed <em>up</em> to V<sub>pre</sub>. The generator VI holds both <code>Polarity 0 (Normal)</code> and <code>Polarity 1 (Inverted)</code> in the two frames of a case structure, so the binary does not say which the original used.</p>
+<p>Rather than switch the default on that reasoning, I added the knob and ran both, back to back, same sample. <strong>INV is wrong</strong>: it moves the transient to 68.5&nbsp;ns, and the harness said so itself &mdash; <em>&ldquo;the peak falls before t0_int, so part of the transient is outside the integration window.&rdquo;</em> NORM stands.</p>
+<p>And the premise was wrong too: <strong>the device on the bench is not the archive's device</strong>, so there was never a sign to reconcile. The comparison set is <code>Q:\Huotian\2026\BACE\20260831\220K</code> &mdash; same device, LabVIEW, 220&nbsp;K.</p>
+</div>
+
+<h2>Code as it stands</h2>
+<div class="scroll">
+<table>
+<thead><tr><th>Module</th><th>State</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td class="k">core/sequence.py</td><td><span class="chip v">done</span></td><td>Prebias grid and loop repetition; rounds N to nearest</td></tr>
+<tr><td class="k">core/pulses.py</td><td><span class="chip v">done</span></td><td>Bias → 81150A levels, ×4 division, the trigger offset in one place (measured 0 on 2026-09-02)</td></tr>
+<tr><td class="k">core/process.py</td><td><span class="chip v">done</span></td><td>Subtraction, last-10 % baseline, running average, Q, sample σ</td></tr>
+<tr><td class="k">core/illumination.py</td><td><span class="chip v">done</span></td><td>LED drive levels; asserts the DC/pulse coupling</td></tr>
+<tr><td class="k">core/simulate.py</td><td><span class="chip v">done</span></td><td>Synthetic transients from the VI's own generator</td></tr>
+<tr><td class="k">drivers/shutter.py</td><td><span class="chip v">done</span></td><td>Direct, bridged and simulated backends</td></tr>
+<tr><td class="k">drivers/win32bridge/</td><td><span class="chip v">done</span></td><td>Helper process and client; transport tested</td></tr>
+<tr><td class="k">core/axis.py</td><td><span class="chip v">done</span></td><td>Axis as a parameter; repeats are loops, not points. Agrees with the validated planner</td></tr>
+<tr><td class="k">drivers/protocols.py</td><td><span class="chip v">done</span></td><td>Six contracts; all four real and all six simulated drivers satisfy theirs</td></tr>
+<tr><td class="k">drivers/simulated.py</td><td><span class="chip v">done</span></td><td>The whole rig on one shared bench; returns what the instruments were told to do</td></tr>
+<tr><td class="k">drivers/routing.py</td><td><span class="chip v">done</span></td><td>Relay with the interlock; refuses to move while either source drives</td></tr>
+<tr><td class="k">experiment/events.py</td><td><span class="chip v">done</span></td><td>Ten typed events; one stream, many listeners</td></tr>
+<tr><td class="k">experiment/rig.py</td><td><span class="chip v">done</span></td><td>Instruments by role, plus <code>RigConfig</code> — the hardware half of the config split</td></tr>
+<tr><td class="k">experiment/transient.py</td><td><span class="chip v">done</span></td><td>The standalone measurement; runs end to end on the simulator, unwinds on abort, walk-away and failure</td></tr>
+<tr><td class="k">drivers/infiniium.py</td><td><span class="chip v">done</span></td><td>Acquires on the rig: 4000 points, geometry as predicted. Units bug, <code>:STOP</code>-before-fetch, <code>:ADER?</code> latch and the iterative auto-range all found and fixed against hardware</td></tr>
+<tr><td class="k">drivers/agilent81150.py</td><td><span class="chip i">written</span></td><td>Command set fully recovered; untested against hardware</td></tr>
+<tr><td class="k">storage/</td><td><span class="chip v">done</span></td><td>Byte-exact <code>.dat</code> export plus HDF5; partial runs written; archive round-trips byte-for-byte</td></tr>
+<tr><td class="k">drivers/agilent33220a.py</td><td><span class="chip i">written</span></td><td>Unindexed commands; refuses an 81150A at <code>*IDN?</code></td></tr>
+<tr><td class="k">drivers/keithley2400.py</td><td><span class="chip i">written</span></td><td>Recovered routine plus two limit corrections; sweep for J&ndash;V</td></tr>
+<tr><td class="k">drivers/newport1918c.py</td><td><span class="chip v">done</span></td><td>HTTP client to the console that owns the device; no transport of its own</td></tr>
+<tr><td class="k">config.py + rig.toml + run.toml</td><td><span class="chip v">done</span></td><td>Bench and recipe, separate; the loader refuses typos</td></tr>
+<tr><td class="k">experiment/jv.py + storage/jv.py</td><td><span class="chip v">done</span></td><td>Standalone J&ndash;V: dark, light, optional hysteresis, derived metrics</td></tr>
+<tr><td class="k">experiment/intensity_series.py</td><td><span class="chip v">done</span></td><td>LED sweep, SourceMeter, relay; preflight and interlock both asserted</td></tr>
+<tr><td class="k">storage/series.py</td><td><span class="chip v">done</span></td><td>Full run folder per level, long summary always, legacy wide when it fits</td></tr>
+<tr><td class="k">bace/bench/ + BENCH.md</td><td><span class="chip v">done</span></td><td>Staged bench harness; records every command and the error queue after it. Eight sessions on the rig; the archive regression now ships with it</td></tr>
+<tr><td class="k">service/ + ui/</td><td><span class="chip u">later</span></td><td>FastAPI and browser front end</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<section>
+<h2>Remaining build order</h2>
+<p><strong>Steps 1–3 are done.</strong> The maths core is validated against the archive; the axis and the six contracts are in; the standalone measurement runs end to end on simulated instruments with abort, walk-away and mid-run instrument failure all unwinding to a parked bias and a closed shutter. Storage writes the legacy set byte-for-byte and an HDF5 alongside, and all six real drivers are written with their command sequences pinned by transcript tests. J&ndash;V runs as its own experiment, and the intensity-series wrapper runs the whole thing end to end. The bench harness is written and waiting. <strong>168 tests pass</strong>, the archive regression and a byte-exact round-trip among them — and those two now run on the lab PC as well, against the deployed copy, where report 9 confirmed them. Nine bench reports from the rig have been through: the scope acquires end to end, and seven defects that only hardware could have shown are fixed.</p>
+<ol class="phases">
+<li><h3>Finish the bench</h3><p><strong>Done.</strong> Identity, configuration, record geometry, acquisition, a converging auto-range, both DIO lines identified by measurement, and first light on a real device. Nine reports plus four measurement runs.</p></li>
+<li><h3>Service and UI</h3><p>FastAPI plus WebSocket; live light/dark/photocurrent, Q versus axis, progress, and a stop that unwinds. The service adapts the synchronous run generator to <code>async</code> at its own edge. <strong>The UI is not to copy the JV console or the 331 controller</strong> &mdash; it wants a shape suited to this measurement, drafted and iterated in Claude Design.</p></li>
+<li><h3>Side-by-side</h3><p>Same sample, same settings, LabVIEW and Python back to back. Agreement on Q within noise is the acceptance test.</p></li>
+</ol>
+</section>
+
+<section>
+<h2>Deliberately not ported</h2>
+<p>Recorded so nobody has to wonder later whether they were missed. Each was recovered, understood, and left out on purpose.</p>
+<div class="scroll">
+<table>
+<thead><tr><th>Feature</th><th>What it did</th><th>Why it goes</th></tr></thead>
+<tbody>
+<tr><td class="k">Ua, Pulse?</td><td>Enabled CHAN1 and CHAN4 and recorded <code>Ua Data</code> — the applied voltage on a second channel.</td><td>Not wanted. Off in every saved state.</td></tr>
+<tr><td class="k">SawTooth</td><td>An alternative stimulus shape on the 81150A.</td><td>Not wanted. Off in every saved state.</td></tr>
+<tr><td class="k">Runt / window trigger</td><td><code>trigger hd-tdcf runt.vi</code>: one probe acquisition, then an IScan runt window at ±10 % of the peak.</td><td>Off in every saved state; edge trigger on CHAN3 is what the rig runs. The commands stay documented in case it is ever wanted back.</td></tr>
+<tr><td class="k">Scope-side subtraction</td><td><code>FUNC1 = WMEM1 SUBT WMEM2</code> — the light/dark difference computed on the instrument.</td><td>Already dead code in the LabVIEW, inside a disabled diagram. Subtraction happens in software, and that is what the archive validates.</td></tr>
+<tr><td class="k"><code>:WMEM1:SAVE</code></td><td>Stored the light trace into scope waveform memory.</td><td>Vestigial — it only fed the scope-side subtraction above.</td></tr>
+<tr><td class="k">Big File?</td><td>A second read path pulling CHAN1 and CHAN3 alongside the signal.</td><td>Belongs with <code>Ua, Pulse?</code>. The trigger trace is captured anyway.</td></tr>
+<tr><td class="k">The <code>N/190</code> sleep</td><td>A blind wait before the dark acquisition, on top of the <code>:ADER?</code> poll.</td><td>Purely defensive. Dropping it halves a run; the poll already waits correctly. Worth one back-to-back check on the rig.</td></tr>
+<tr><td class="k">agilentDSO.lvclass</td><td>An oscilloscope wrapper class.</td><td>Empty G# skeleton — every method is a stub. There is nothing in it.</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<section>
+<h2>Report 9 &mdash; the rig back on its own settings</h2>
+<p>The generators were restored to the LabVIEW configuration between reports 8 and 9 &mdash; 81150A at 1.264/0&nbsp;V, 60&nbsp;ns delay, 500&nbsp;Hz; LED at 1.03/0.40&nbsp;V &mdash; so this is the first acquisition taken with the instrument in the state the original program leaves it. The signal is <strong>2.6&times; larger</strong>: peak 64.7&nbsp;mA, 336&nbsp;mV across the sense resistor.</p>
+<pre>autorange passes        : 3
+autorange windows tried : 0.1500 @ +0.0000 -> clipped
+                          0.2700 @ +0.0600 -> clipped
+                          0.4860 @ +0.1680 -> fits
+final                   : 0.506034 / 0.166549   <span class="c">-- full precision kept, the 3-digit fix working</span>
+current min/max (A)     : -3.7569e-04 / 6.4661e-02</pre>
+<p>Zero failures. And the two strongest checks in the suite &mdash; the numerical regression and the byte round-trip &mdash; ran <strong>on the bench PC</strong> for the first time, against the copy of the 2026-08-07 run now shipped beside the package: worst relative difference <code>1.58e-06</code>, all five legacy files <code>identical</code>. That is the deployed code proving itself, not mine.</p>
+
+<h3>Where 0.15&nbsp;V comes from</h3>
+<p>Every bench session has found <code>:CHAN2:RANG? = 1.50E-01</code> with offset&nbsp;0 &mdash; including report 9, after report 8 had left the channel at 0.191&nbsp;V. Decompiling <code>scale to maximum.vi</code> explains it: <strong>0.15 is a hard constant in that VI's block diagram</strong>, alongside the 0.001&nbsp;V peak-to-peak floor and the 0.01&nbsp;V fallback span I had already recovered, and the literal strings <code>:RUN;:WAV:FORM WORD;</code> and <code>:RUN;</code> my driver sends. So 0.15&nbsp;V is not where the last run happened to leave the scope &mdash; it is where <em>every</em> ranging starts, LabVIEW's and mine alike. The cold start is the normal case, not an accident.</p>
+
+<h3>Three real signals, counted from that start</h3>
+<div class="scroll">
+<table>
+<thead><tr><th>Signal</th><th>Peak</th><th>Original formula</th><th>Geometric growth</th></tr></thead>
+<tbody>
+<tr><td>archive, 2026-08-07</td><td>164 mV</td><td>5 acquisitions</td><td>2</td></tr>
+<tr><td>reports 7&ndash;8</td><td>127 mV</td><td>4</td><td>2</td></tr>
+<tr><td>report 9, LabVIEW settings</td><td>336 mV</td><td><strong>8</strong></td><td><strong>3</strong></td></tr>
+</tbody>
+</table>
+</div>
+<p>On report 9's signal the original's first &ldquo;correction&rdquo; makes the window <em>smaller</em> &mdash; 0.150 to 0.115&nbsp;V &mdash; because the floor never reached the bottom rail, so the clipped peak-to-peak reads narrower than the window it was measured in. It then creeps upward at 1.25&times; a pass.</p>
+<div class="fix">
+<b>My <code>passes = 4</code> would have clipped on the archive's own signal</b>
+<p>The middle column is the argument for both changes at once. Before this session the port did one pass; after the first fix, four. The archive's 164&nbsp;mV run needs <strong>five</strong> passes of that formula from 0.15&nbsp;V &mdash; so a faithful port with a four-pass ceiling would have given up while still clipping on the very measurement I validated the maths against. The ceiling is 6 now, and with geometric growth the largest of the three signals needs 3.</p>
+</div>
+
+<h3>Did the original clip? Not on the run I have.</h3>
+<p>Worth checking directly, since the archive is the reference the whole port is validated against. A clipped trace pins many samples at one value; the archive's three light traces pin <strong>one sample each</strong> at their maximum, and the dark traces two. That is a clean peak, so the 2026-08-07 data is sound &mdash; and since it needed five passes to get there, <strong>the original's FOR loop runs at least five times</strong>. That is a lower bound measured from the data rather than read out of the binary, where the loop's count terminal came back unwired and the wire table parsed with warnings.</p>
+<p>Whether the loop would have reached report 9's 336&nbsp;mV signal in eight I cannot say from what I have. It is worth knowing, and a LabVIEW run at these settings would answer it.</p>
+
+<h3>The readback I added costs 145&nbsp;ms</h3>
+<p>Report 9 timed it. A <code>:CHAN2:RANG?</code> issued right after a range change blocks while the front end settles:</p>
+<pre>:CHAN2:OFFS 0.06;RANG 0.27;    1.3 ms
+:CHAN2:PROB:EXT ON;            1.3 ms
+:CHAN2:RANG?                 <b>145.5 ms</b>
+:CHAN2:OFFS?                  17.9 ms</pre>
+<p>Three times per autorange, and <code>Read unblocked TDCF.vi</code> re-ranges on <em>every step</em>. Removing the readback was the obvious move and it was wrong &mdash; a test with a scope capped at 0.10&nbsp;V showed the driver then testing the trace against a window the instrument did not have, and calling a clipped trace clean. The clip test is computed from those two numbers, so they have to be the instrument's.</p>
+<p>The fix is not to read less but to <strong>write less</strong>: if the computed range is within 2&nbsp;% of what is already in force, leave the channel alone &mdash; no write, no settling query. After the first step of a run that is every step. It is also better physics: the light and dark traces of a step must share a quantisation, which is why the dark trace inherits the light trace's range, and holding the range still across steps extends that to the whole run rather than averaging a hundred loops taken on a hundred slightly different scales.</p>
+</section>
+
+<section>
+<h2>Where the code actually runs — and a claim I withdrew</h2>
+<div class="fix">
+<b>Withdrawn: &ldquo;one store, not two&rdquo;</b>
+<p>The bench reports say <code>Q:\Huotian\bace-python</code>; I had been committing to <code>D:\BACE\bace-python</code>. Report 8 ran <strong>62 seconds</strong> after a commit and contained the field that commit introduced, so I concluded the two paths were one store over the network and said so with more confidence than a timing coincidence can carry.</p>
+<p>They are not. When <code>Q:\Huotian\bace-python</code> was connected directly, it was <strong>ten files behind</strong> — it had stopped tracking at 22:50 while <code>D:</code> went on for another hour. Reports 8 and 9 really did run code committed minutes earlier, so <em>something</em> propagates; it is not reliable and I do not know the mechanism. Both copies were made identical at that point (fingerprint <code>d32791817f17</code>; as of 2026-09-02 it is <code>d7daadac0cc1</code>), his 42 bench reports on the <code>Q:</code> side untouched, and every commit is mirrored explicitly rather than assumed.</p>
+</div>
+<p><strong>So every report now carries a code fingerprint</strong> — a hash over every <code>.py</code> in the package, path and content — beside the package path and the newest source file. Two reports with the same fingerprint ran the same code; two that disagree about a result while sharing one disagree about the <em>rig</em>. That is a one-line check instead of the hour this cost.</p>
+<p><strong>The regression was not running where it mattered.</strong> Every report through 8 skipped the archive regression and the byte round-trip, because <code>D:\DATA\TDCF-BACE\data</code> is a sternwarte path and the harness runs on Keplerplatz. Those two are the strongest checks in the suite — 0.6 ulp against a real 2026-08-07 run, and legacy files reproduced byte for byte — and they were proving my copy of the code, not the deployed one. A 540&nbsp;kB copy of that run now ships in <code>bench-archive/</code> and <code>--archive</code> defaults to it; report 9 is the first to carry both, and both pass.</p>
+
+<h3>Then the question stopped mattering: delib64.dll is installed</h3>
+<p>Deditec ships DELIB under <strong>two names</strong>, and I had only ever looked for one:</p>
+<div class="scroll">
+<table>
+<thead><tr><th>Build</th><th>File</th><th>Installed into</th></tr></thead>
+<tbody>
+<tr><td>32-bit</td><td><code>delib.dll</code></td><td><code>C:\Windows\SysWOW64</code></td></tr>
+<tr><td>64-bit</td><td><code>delib64.dll</code></td><td><code>C:\Windows\System32</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>So the helper, the second interpreter and the whole bridge are unnecessary &mdash; <code>--dio</code> now loads in-process. Nothing hard-codes a name any more: <code>drivers/delib.py</code> looks at what is present, reads each candidate's PE header, and picks the build matching the interpreter, falling back to the bare name so Windows can search its own path. <code>dll_path</code> under <code>[dio]</code> in <code>rig.toml</code> overrides it.</p>
+<p>Deditec's own header confirms nothing else changes. The x64 build is declared <code>extern "C" _declspec(dllexport)</code>, so the exported names are undecorated, and every argument and the module handle stay <code>ULONG</code> &mdash; 32&nbsp;bits in both builds, since Windows keeps <code>long</code> at 32&nbsp;bits on x64. The <code>c_ulong</code> argtypes were already right; only the filename was wrong.</p>
+<div class="fix">
+<b>The one stage with no interlock was the one that moves the relay</b>
+<p>Module 1 is the relay that puts the device on either the ×4 amplifier or the Keithley &mdash; the single place in this system where a software mistake costs hardware rather than a dataset. <code>routing.Relay</code> has always refused to move it while either source is driving. But <code>--dio</code> drives the DIO line <em>directly</em>, bypassing that class entirely, so it was the way around the interlock &mdash; and it was about to be run for the first time with both generator outputs enabled.</p>
+<p>It now reads <code>:OUTP1?</code> from the 81150A and <code>:OUTP?</code> from the Keithley and refuses to move anything while either answers 1. An instrument it cannot reach counts as driving: a timed-out GPIB session is not proof that the generator is off.</p>
+</div>
+
+<h3>Before that: the 32-bit Python question, and why the advice was wrong</h3>
+<p>I told you to start the DIO helper with <code>py -3.11-32</code>. That was a guess dressed as an instruction — nobody had ever started the helper, and the warning I quoted came from a file-bitness scan that never touched it. The check now finds out instead, running each interpreter the launcher knows about to read its real pointer size. Report 9's answer:</p>
+<pre>32-bit Python : none found
+py --list     : -V:3.14[-64] *   C:\Users\PwM\AppData\Local\Python\pythoncore-3.14-64\python.exe</pre>
+<p>One interpreter, 64-bit. That left two routes — a 32-bit Python, or a newer DELIB — and the second turned out to be the right one. I had also concluded there was &ldquo;no 64-bit DELIB to point at&rdquo; because the copy in <code>D:\BACE\DELIB</code> is 32-bit throughout; what I missed is that the 64-bit build ships under a <em>different filename</em>, so the absence of a 64-bit <code>delib.dll</code> proved nothing. The printed helper command now also carries <code>--delib</code>, without which the helper starts with no shutter target at all and every call fails anyway — it remains the fallback for a machine with only the 32-bit library.</p>
+<p>And a correction: this does <em>not</em> gate <code>--measure</code>, as I said earlier. That runs today with <code>--manual-shutter</code>, blocking the beam by hand. What the DIO gates is unattended running and the relay that moves the device between the ×4 amplifier and the Keithley.</p>
+</section>
+
+<section>
+<h2>Open questions</h2>
+<ol class="q">
+<li><strong>Why three prebias points</strong> rather than three repeats at V<sub>oc</sub>? The mechanism is settled; the intent is not. With the axis now a parameter this is a choice in <code>run.toml</code> rather than a constraint, but it decides what the default should be.</li>
+<li><strong><code>trigger_sweep</code>: <code>AUTO</code> or <code>TRIG</code>?</strong> The original leaves the scope in <code>AUTO</code>, and the rig still reads <code>:TRIG:SWE? = AUTO</code>. <code>AUTO</code> free-runs when no trigger arrives, so a dead sync gives you a flat trace rather than a timeout — a silent zero instead of an error. <code>TRIG</code> would fail loudly. The port keeps <code>AUTO</code> as the default to match the original; worth deciding deliberately before the first real run.</li>
+<li><strong>The intensity calibration <code>Factor</code></strong> — recovered as a panel constant, its provenance unknown. It scales logged intensity and nothing else.</li>
+<li><strong>What the 81150A was doing at 1.263&nbsp;V / 60&nbsp;ns / 500&nbsp;Hz</strong> when the first bench session found it. I overwrote those settings during the forced configure and told you at the time; if they were a deliberate setup, they are recorded in report 1 and can be put back.</li>
+</ol>
+</section>
+
+<footer>
+Source material in <code>D:\BACE\_decompiled\</code>; ported code in <code>D:\BACE\bace-python\</code>. Companion figures: <em>Anatomy of a BACE Run</em> and <em>BACE Instrument Chain</em>.
+</footer>
+</div>

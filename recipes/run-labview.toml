@@ -1,0 +1,128 @@
+# 对照 LabVIEW 面板 —— 用 ④ 的极性，其余参数逐项照抄，看能不能对上。
+#
+# 参照面板（BACE Parameter + LED Setup/Pulse Mode）：
+#   Vpre_Start 1.00354   Vpre_End 1.02354   dV 0.01        → 3 个点
+#   Vcoll −1             Delay(ns) 90       Pulse Width 5e3
+#   Timebase 200 ns      Record Length 5e3  t0 Integration 320e−9
+#   # Averages 200       # of Loops 1
+#   LED 1 V / Voltage_Low 0.4 V / 500 Hz / Duty 50 %
+#   offset corr? ON（"Subtract mean of last 200 values"）
+#   Resistor 5.192       Pulse Amp 4        Probe Attenuation 1
+#   scale 1.5 / offset 2（就是 autorange 的 scale_factor / offset_divisor）
+#   Wait before measure 0.2 s
+#
+# 面板给出的参照结果，跑完直接对：
+#   Charge      ≈ −9.2e−10 C（三个 Vpre 点之间只差 ~0.7 %）
+#   PhotoCurrent 峰 ≈ −3.7 mA，2 µs 内回到零
+#   原始亮/暗轨 峰 ≈ −27 mA
+#
+#   py -3 tools\scan.py --run recipes\run-labview.toml --dry
+#   py -3 tools\scan.py --run recipes\run-labview.toml
+#
+# ⚠ 面板上有一个 "positive jSC?"（"if activated, positive voltage is applied to
+#   ITO"），是开着的。这是面板上唯一像极性开关的控件，很可能就是喂给
+#   `:OUTP1:POL` 的那一路。这里我们用 ④（true + INV）—— 如果 Q 对不上而波形形状
+#   对得上，第一个该查的就是这个控件在 VI 里接到哪。
+
+[axis]
+name = "vpre"
+start = 1.00354                 # 逐字照抄面板
+stop = 1.02354
+step = 0.01                     # 3 点：1.00354 / 1.01354 / 1.02354
+centre_on_voc = false           # 面板是手填的绝对值，不是围绕 V_oc
+
+[pinned]
+vpre = 1.00354                  # 被轴覆盖
+vcoll = -1.00                   # 面板 Vcoll(V) = −1
+delay_ns = 90.0                 # 面板 Delay(ns) = 90。
+                                # 2026-09-02 起 trigger_offset_s = 0（rig.toml），
+                                # 所以 :PULS:DEL1 收到的就是 90，和 VI 一样。
+                                # 之前加了 47 ns，实测两边的位移尖峰差 48 ns。
+
+[acquisition]
+n_loops = 1                     # 面板 # of Loops = 1
+n_averages = 200                # 面板 # Averages = 200
+
+# --- 采样：这是这一轮最要紧的改动 -------------------------------------------
+# 面板是 200 ns/div → 满屏 2 µs，配 5000 点 = 0.4 ns/样本。
+# 之前几轮用 500 ns/div + 5000 点，示波器只给了 3125 点 = 1.6 ns/样本，
+# 比面板粗四倍。抽取尖峰的上升沿只有几十 ns，1.6 ns/点是不够的。
+# :ACQ:POIN 是请求不是承诺，runner 会打印实际拿到的 dt，对不上就要降 record_length
+# 之外再想办法（:ACQ:MODE RTIM 是丢样本式抽取，点数不够窄脉冲会整个消失）。
+timebase_ns_per_div = 200.0
+record_length = 5000
+
+# --- 积分窗口：照抄面板的记录参考 ---------------------------------------------
+# 面板的 t0 Integration 是从**记录第一个样本**算起的 320 ns，不是从触发算起。
+# 200 ns/div 时 :TIM:POS = 800 ns，触发落在记录的 200 ns 处，所以 320 ns 相当于
+# 触发后 120 ns。trigger_offset 实测为 0，所以场在触发后 90 ns 到达；而两边
+# 实测的位移尖峰都落在记录的 328 ns（触发后 128 ns）。窗口比尖峰早 8 ns。
+# 这一轮就用 record + 320 ns，才是"照抄"；等对上了再换成 pulse 参考。
+t0_int_reference = "record"
+t0_int_s = 320e-9
+
+offset_correct = true           # 面板 offset corr? ON
+
+# --- 亮暗之间只动快门 ---------------------------------------------------------
+# "translated"（默认，也是这个移植从 VI 重建出来的约定）：暗态重复同样的电压
+# **摆幅**，但整体平移到从 0 V 起步。以这一轮为例（器件上）：
+#     亮  基线 −1.01354 V → 脉冲 +1.00000 V
+#     暗  基线  0.00000 V → 脉冲 +2.01354 V
+# 摆幅一样，绝对区间不一样，所以位移电流只在 C(V) 平坦的地方才抵消干净。
+#
+# "same"：不改电平，**快门是亮暗之间唯一变化的东西**。电压阶跃逐位相同，位移
+# 电流精确抵消。代价是暗态时器件被按在预偏压上（这一轮是器件上 +1.01 V 正偏，
+# 接近 V_oc，正向电流量级约等于 Jsc·A，不危险）。
+#
+# translated 才是 BACE 该有的做法，也是重建出来的约定，所以这个文件用它。
+# same 只是对照用的，见 run-labview-same.toml —— 两个文件除了这一行完全一样。
+dark_reference = "translated"
+
+pulse_width_ns = 5000.0         # 面板 Pulse Width (ns) 5e3
+pulse_frequency_hz = 500.0      # 面板 Freq 500 Hz
+duty_percent = 50.0             # 面板 Duty Cycle 50 %
+
+# --- ④ 的极性 -----------------------------------------------------------------
+invert_polarity = true
+output_polarity = "INV"
+inverted_output = false
+
+# --- 快门与采样之间的等待 -----------------------------------------------------
+# 2026-09-01 修的缺口：以前暗态是 dark_settle_s 睡在**关快门之前**，快门一合上
+# 就立刻采集，机械快门和器件都没有任何稳定时间；而亮态有 settle_s。
+# 两条轨里只有一条被允许安定下来，它们的差值就不可信。
+# 现在 shutter_settle_s 在**两支**的快门动作之后都会生效。
+# 面板的 "Wait before measure 0.2 s" 是它自己的对应物；这里给得更宽。
+settle_s = 0.3
+dark_settle_s = 0.3
+shutter_settle_s = 0.7          # 快门动完之后再等，两支都等
+
+read_intensity = true
+trigger_sweep = "AUTO"
+calibrate_trigger = true
+store_shots = false
+acquisition_timeout_s = 60.0    # 200 次平均 × 2 ms 周期 = 0.4 s，加上传输
+
+[sourcemeter]
+current_compliance_a = 0.01
+voltage_compliance_v = 2.0
+settle_jsc_ms = 1000            # 面板 Settle Time Jsc/Voc/Jsat = 1000 ms
+settle_voc_ms = 1000
+settle_jsat_ms = 1000
+nplc = 1.0
+averaging = 10                  # 面板 Voc/Jsc/Jsat Averages = 10
+terminals = "FRON"
+four_wire = false
+
+[illumination]
+level_v = 1.000                 # 面板 LED Voltage = 1（不是 1.020）
+low_level_v = 0.4               # 面板 Voltage_Low = 0.4
+v_sat = -1.0                    # 面板 Vcoll corresponding to Jsat = −1
+
+[sample]
+sample = ""
+material = ""
+pixel = ""
+temperature_k = 290.0
+operator = ""
+comment = "LabVIEW panel replica - combination 4"

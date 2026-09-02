@@ -1,0 +1,97 @@
+# 组合 ④ 的正式测量 —— invert_polarity = true + :OUTP1:POL = INV。
+#
+# 为什么是 ④：它是四格里唯一一个**衰减到零**的。这不是风格问题，是判据：
+# light − dark 的稳态必须为零，否则抽取期间还在产生载流子，测的就不是抽取电荷。
+# 18:15 那一轮 7 个 delay 点的离线积分（原始 light − dark，从台阶积到记录末尾）：
+#
+#   Q      = −4.05 … −4.41e−10 C     7 个点散布 4%，积分收敛
+#   tau1/e = 248 … 301 ns            一致
+#   末 1 µs 的电平 = −0.035 … −0.045 mA  ≈ 0
+#
+# 同电压的 ②（18:11）对照：末 1 µs 是 +4.455 mA，同样的积分给出 1.9e−8 C，
+# 而且它随积分窗口线性增长——那不是一个电荷，是一个稳态电流乘时间。
+#
+# 基线是较浅的那个电平（预偏压），脉冲是 ±2 V 的深电平（抽取）。亮暗两条曲线
+# 在台阶处都饱和是正常的：那里是位移电流，两支相同，相减掉。
+#
+#   py -3 tools\scan.py --run recipes\run-bace.toml --dry
+#   py -3 tools\scan.py --run recipes\run-bace.toml
+#
+# ⚠ 如果 runner 报 clipped，看一下有几个点：18:15 那一轮 7 个点里有 3 个峰顶
+#   撞了量程底（单条轨内 7–8 个连续采样点同一个浮点数，11 ns 平顶）。
+#   Q 的散布只有 4%，说明削掉的那 11 ns 贡献很小，但峰高不可用。
+#   autorange 目前没有从 run.toml 关掉或加保险的开关——需要就说，我加。
+
+[axis]
+name = "delay_ns"
+start = -40.0
+stop = 400.0                    # :PULS:DEL1 = 7 … 447 ns
+step = 20.0                     # 23 点。tau ≈ 265 ns，这个跨度足够看到衰减
+centre_on_voc = false
+
+[pinned]
+vpre = 0.80
+vcoll = -2.00
+delay_ns = 80.0
+
+[acquisition]
+n_loops = 5                     # 23 x 5 = 115 shots，约 2.5 分钟
+n_averages = 40
+timebase_ns_per_div = 500.0
+record_length = 5000
+
+# --- 积分窗口跟着脉冲走 -------------------------------------------------------
+# 实测（49 点拟合，残差 1.5 ns）：器件上的场 = 触发 + :PULS:DEL1 + 47.1 ns。
+# trace.t0 = :WAV:XOR? = −500 ns（触发落在记录的 500 ns 处），所以
+#
+#   pulse 参考的窗口起点 = t0_int_s + (delay_ns + 47 ns) − t0
+#                        = t0_int_s + delay_ns + 547 ns   （记录时间）
+#
+# 取 t0_int_s = 45 ns，窗口就从台阶前约 2 ns 开始，每个 delay 点待遇一致。
+# 前两轮用 trigger + 0 是因为那时还在**找**瞬态在哪；现在知道了，就该用 pulse。
+t0_int_reference = "pulse"
+t0_int_s = 4.5e-8
+
+# 这一轮尾巴确实是基线（末 1 µs ≈ 0.04 mA），所以基线校正在做它该做的事。
+# run_transient_scan 会用 baseline_is_flat() 自检，尾巴不平会直接告警。
+offset_correct = true
+
+pulse_width_ns = 5000.0
+pulse_frequency_hz = 500.0
+duty_percent = 50.0
+
+# --- 这两行是 ④ ---------------------------------------------------------------
+invert_polarity = true          # 软件层：两个电压取负（大小排序跟着翻）
+output_polarity = "INV"         # 仪器层
+inverted_output = false         # output_polarity 不是 "auto" 时被忽略
+
+settle_s = 0.2
+dark_settle_s = 0.2
+read_intensity = true
+trigger_sweep = "AUTO"
+calibrate_trigger = true
+store_shots = false
+
+[sourcemeter]
+current_compliance_a = 0.01
+voltage_compliance_v = 2.0
+settle_jsc_ms = 500
+settle_voc_ms = 500
+settle_jsat_ms = 500
+nplc = 1.0
+averaging = 1
+terminals = "FRON"
+four_wire = false
+
+[illumination]
+level_v = 1.020
+low_level_v = 0.4
+v_sat = -1.0
+
+[sample]
+sample = ""
+material = ""
+pixel = ""
+temperature_k = 290.0
+operator = ""
+comment = "BACE delay scan - combination 4"

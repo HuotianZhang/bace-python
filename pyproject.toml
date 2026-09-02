@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bace"
+version = "0.2.0"
+description = "Transient charge-extraction measurement (BACE / TDCF), ported from LabVIEW"
+requires-python = ">=3.11"   # tomllib
+dependencies = ["numpy>=1.24", "scipy>=1.10", "h5py>=3.8"]
+
+[project.optional-dependencies]
+rig = ["pyvisa>=1.13", "pyvisa-py>=0.7"]
+dev = ["pytest>=7"]
+
+[tool.setuptools.packages.find]
+include = ["bace*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

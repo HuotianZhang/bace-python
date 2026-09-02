@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="_ds/modernist-b29601f6-87b1-46fc-8c1f-21927c5d6d4e/styles.css">
+<script src="_ds/modernist-b29601f6-87b1-46fc-8c1f-21927c5d6d4e/_ds_bundle.js"></script>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<script src="icons.js"></script>
+<script src="bace-charts.js"></script>
+<script src="bace-charts-r3.js"></script>
+<style>
+body{margin:0;background:#e8e6e1;font-family:'IBM Plex Sans',sans-serif;color:#201e1d}
+a{color:#ae1800}a:hover{color:#ec3013}
+.dv-turn{padding:44px 48px 36px;border-bottom:2px solid rgba(32,30,29,.4);scroll-margin-top:16px}
+.dv-thd{display:flex;align-items:baseline;gap:10px;margin:0 0 8px}
+.dv-tid{font:600 10px 'IBM Plex Mono',monospace;padding:3px 7px;background:#201e1d;color:#fff;text-decoration:none}
+.dv-tname{font:800 14px/1.2 Archivo,sans-serif}
+.dv-opts{display:flex;flex-wrap:nowrap;gap:64px;align-items:flex-start;margin-top:28px}
+.dv-opt{flex:none;display:flex;flex-direction:column;gap:28px;scroll-margin-top:16px}
+.dv-oid{font:600 10.5px 'IBM Plex Mono',monospace;padding:3px 7px;background:rgba(32,30,29,.1);text-decoration:none;color:#201e1d}
+.dv-olabel{display:flex;align-items:baseline;gap:10px;font:400 13px/1.3 'IBM Plex Sans',sans-serif;color:rgba(32,30,29,.62)}
+.dv-opt:target .dv-oid{background:#ec3013;color:#fff}
+.dv-next{margin:26px 0 0;font:12px/1.6 'IBM Plex Sans',sans-serif;color:rgba(32,30,29,.55)}
+.note{max-width:1040px;display:flex;flex-direction:column;gap:8px}
+.note p{margin:0;font:400 13px/1.55 'IBM Plex Sans',sans-serif}
+.abc{display:flex;align-items:baseline;gap:10px;margin-bottom:4px}
+.abt{font:800 15px/1.2 Archivo,sans-serif}
+.abk{font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#7d7979}
+.abnote{font:400 12px/1.3 'IBM Plex Sans',sans-serif;color:rgba(32,30,29,.5);margin-left:6px}
+.leg{display:flex;flex-wrap:wrap;gap:6px 22px;align-items:center;padding:10px 0 2px;border-top:2px solid rgba(32,30,29,.4);margin-top:6px}
+.legi{display:flex;align-items:center;gap:7px;font:400 11.5px/1 'IBM Plex Sans',sans-serif;color:rgba(32,30,29,.62)}
+.ab{width:1920px;height:1080px;display:flex;flex-direction:column;background:#f3f2f2;border:2px solid #201e1d;overflow:hidden;color:#201e1d;box-shadow:0 3px 10px rgba(45,43,43,.16)}
+.bar{display:flex;align-items:center;gap:16px;padding:0 18px;height:46px;background:#201e1d;color:#f3f2f2;flex:0 0 46px}
+.brand{font:800 15px/1 Archivo,sans-serif}
+.chip{font:500 11px/1 'IBM Plex Mono',monospace;padding:4px 7px;border:1px solid rgba(243,242,242,.35);white-space:nowrap}
+.tab{font:600 11px/1 'IBM Plex Sans',sans-serif;letter-spacing:.08em;text-transform:uppercase;padding:6px 9px;color:rgba(243,242,242,.6)}
+.tab.on{background:#f3f2f2;color:#201e1d}
+.body{flex:1;display:grid;min-height:0;padding:14px;gap:12px}
+.m{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+.card{background:#fff;border:1px solid #d7d3d3;display:flex;flex-direction:column;min-height:0;min-width:0}
+.card.live{border:2px solid #ec3013}
+.card.dim{background:#faf9f9}
+.ch{display:flex;align-items:center;gap:12px;padding:0 14px;height:46px;border-bottom:2px solid rgba(32,30,29,.4);flex:none}
+.cn{font:800 16px/1 Archivo,sans-serif}
+.cs{font:400 11px/1.3 'IBM Plex Mono',monospace;color:#7d7979;white-space:nowrap}
+.cb{padding:12px 14px 14px;display:flex;flex-direction:column;gap:12px;flex:1;min-height:0}
+.pr{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end}
+.pf{display:flex;flex-direction:column;gap:4px;min-width:52px}
+.pf .l{font:600 9px/1 'IBM Plex Sans',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#7d7979;white-space:nowrap}
+.pf .v{display:flex;align-items:center;gap:6px;font:500 13px/1.2 'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;border-bottom:1px solid #bab6b6;padding:2px 0 4px;white-space:nowrap}
+.pf .v i{font-style:normal;color:#9b9797;font-size:10.5px;font-weight:400}
+.pf.ed .v{border-bottom:2px solid #ec3013;padding-bottom:3px}
+.pf.inh .v{color:#ae1800;border-bottom:1px dashed #ff9783}
+.pf.ro .v{border-bottom-color:transparent;color:#605d5d;font-weight:400}
+.pf.miss .v{color:#ae1800;border-bottom:1px dashed #ec3013}
+.bool{display:inline-flex;border:1px solid #bab6b6}
+.bool span{font:500 10.5px/1 'IBM Plex Mono',monospace;padding:4px 7px;color:#9b9797}
+.bool span.on{background:#201e1d;color:#fff}
+.bool.acc{border-color:#ec3013}.bool.acc span.on{background:#ec3013}
+.sep{width:1px;background:#eae7e7;align-self:stretch}
+.res{flex:1;min-height:0;display:flex;flex-direction:column;gap:10px}
+.empty{flex:1;border:1px dashed #d7d3d3;display:flex;align-items:center;justify-content:center;font:400 11px 'IBM Plex Mono',monospace;color:#bab6b6;min-height:80px}
+.nums{display:flex;gap:24px;flex-wrap:wrap}
+.nm{display:flex;flex-direction:column;gap:3px}
+.nm .l{font:600 9px/1 'IBM Plex Sans',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#7d7979}
+.nm .v{font:500 16px/1.1 'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;white-space:nowrap}
+.big{font:500 34px/1 'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.btnp{display:inline-flex;align-items:center;gap:7px;background:#ec3013;color:#fff;border:0;padding:9px 13px;font:800 12px/1 Archivo,sans-serif;cursor:pointer;white-space:nowrap}
+.btns{display:inline-flex;align-items:center;gap:7px;background:#fff;color:#201e1d;border:1px solid #201e1d;padding:8px 12px;font:800 11.5px/1 Archivo,sans-serif;cursor:pointer;white-space:nowrap}
+.btng{display:inline-flex;align-items:center;gap:6px;background:transparent;border:0;color:#605d5d;padding:6px 4px;font:600 11px/1 'IBM Plex Sans',sans-serif;cursor:pointer;white-space:nowrap}
+.dis{opacity:.38;pointer-events:none}
+.tag{font:500 9.5px/1 'IBM Plex Mono',monospace;padding:3px 5px;border:1px solid #bab6b6;color:#605d5d;white-space:nowrap}
+.tag.ok{border-color:#201e1d;color:#201e1d}
+.tag.part{border-color:#c94b39;color:#ae1800}
+.tag.nb{border-style:dashed}
+.tag.live{background:#ec3013;border-color:#ec3013;color:#fff}
+.warn1{display:flex;align-items:center;gap:10px;border-left:3px solid #c94b39;background:#fff2ef;padding:7px 10px;font:500 12px/1.2 'IBM Plex Mono',monospace}
+.strip{display:flex;align-items:center;gap:18px;padding:0 14px;height:44px;background:#fff;border:1px solid #d7d3d3}
+.sk{font:600 9.5px/1 'IBM Plex Sans',sans-serif;letter-spacing:.11em;text-transform:uppercase;color:#3f3c3c}
+.st{display:flex;align-items:center;gap:6px;font:500 11.5px/1 'IBM Plex Mono',monospace;white-space:nowrap}
+.st.bad{color:#ae1800}
+.seg{display:inline-flex;border:1px solid #201e1d}
+.sego{font:600 10px/1 'IBM Plex Sans',sans-serif;letter-spacing:.06em;text-transform:uppercase;padding:6px 9px;border-left:1px solid #201e1d;background:#fff;color:#605d5d}
+.sego:first-child{border-left:0}
+.sego.on{background:#201e1d;color:#fff}
+.dots{display:inline-flex;gap:3px}
+.dots span{width:9px;height:9px;border:1px solid #bab6b6;display:block}
+.dots span.d{background:#201e1d;border-color:#201e1d}
+.dots span.c{background:#ec3013;border-color:#ec3013}
+.lst{display:grid;grid-template-columns:auto auto auto;gap:3px 16px;font:400 12px/1.4 'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;align-content:start;justify-content:start}
+.lst .h{font:600 9px/1.4 'IBM Plex Sans',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:#7d7979;border-bottom:1px solid #201e1d;padding-bottom:3px}
+.lst .hl{color:#ae1800;font-weight:500}
+.log{display:grid;grid-template-columns:48px 1fr auto;gap:8px 12px;font:400 12px/1.4 'IBM Plex Mono',monospace;align-items:center}
+.log .t{color:#7d7979}
+.nk{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;background:#201e1d;color:#fff;flex:none}
+.nk.mod{background:#fff;color:#201e1d;border:1px solid #201e1d}
+.tr{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #d7d3d3;background:#fff}
+.tr .n{font:500 13px/1 'IBM Plex Mono',monospace}
+.tr .d{font:400 11px/1 'IBM Plex Mono',monospace;color:#7d7979;white-space:nowrap}
+.inh{display:inline-flex;align-items:center;gap:4px;font:500 10.5px/1 'IBM Plex Mono',monospace;padding:3px 6px;background:#fff2ef;border:1px dashed #ff9783;color:#ae1800;white-space:nowrap}
+.tl{display:flex;gap:2px;align-items:stretch;height:30px}
+.tl span{display:flex;align-items:center;justify-content:center;font:500 10px/1 'IBM Plex Mono',monospace;white-space:nowrap;overflow:hidden}
+.tl .jv{flex:8;background:#fff;border:1px solid #201e1d}
+.tl .ba{flex:80;background:#ec3013;color:#fff}
+.lk{display:inline-flex;align-items:center;justify-content:center;width:22px;height:2px}
+</style>
+</helmet>
+
+<section class="dv-turn" id="t3">
+<div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname">BACE console — Round 3 · B simplified: the modules are the home</span></div>
+<div class="note">
+<p>Home is the five modules as cards. Each card is parameters, Run and result in one place — the debugging loop is run a card, read its chart, run the next. The pipeline is composed from the cards as they stand. The rig diagram leaves the main screens: a chain-check strip at the bottom, the drawings on their own tab.</p>
+<p>Diagram corrected: LED at 1 kHz, each cycle one scope trigger, n_averages cycles make one trace; the shutter moves twice per shot, the LED never stops.</p>
+<sc-if value="{{ ann }}" hint-placeholder-val="{{ true }}"><div class="leg">
+<span class="legi"><span class="lk" style="background:#bab6b6"></span>editable, pre-filled</span>
+<span class="legi"><span class="lk" style="background:#ec3013"></span>edited</span>
+<span class="legi"><span class="lk" style="border-top:1px dashed #ff9783"></span>inherited from another card</span>
+<span class="legi"><span class="tag live">live</span><span class="tag ok">done</span><span class="tag nb">not wired</span></span>
+<span class="legi"><lu-i name="ok" style="width:13px"></lu-i>read back as configured</span>
+<span class="legi"><lu-i name="warn" style="width:13px;color:#ae1800"></lu-i>warn · one-click fix, never automatic</span>
+</div></sc-if>
+</div>
+<div class="dv-opts">
+
+<div class="dv-opt" id="3a">
+<div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a><strong>B · round 3</strong> — bench of modules · the same bench mid-check · pipeline from the cards · rig tab.</div>
+
+<div>
+<div class="abc"><span class="abk">R3·1</span><span class="abt">Home · cold bench</span><sc-if value="{{ ann }}" hint-placeholder-val="{{ true }}"><span class="abnote">Everything pre-filled from the last run. bace waits for a V_oc.</span></sc-if></div>
+<div class="ab">
+  <div class="bar">
+    <span class="brand">BACE</span>
+    <span class="tab on">bench</span><span class="tab">pipeline</span><span class="tab">results</span><span class="tab">rig</span>
+    <span style="flex:1"></span>
+    <sc-if value="{{ chainTop }}" hint-placeholder-val="{{ false }}"><span class="chip" style="border-color:#ff9783;color:#ffc4b8">chain 3 / 4 · 33220A POL NORM</span></sc-if>
+    <span class="chip">s4 · PTQ10:IT-4F · pixel a</span>
+    <span class="chip m">20:49</span>
+    <span class="chip">parked</span>
+  </div>
+  <dc-import name="BenchRail" mode="cold" hint-size="100%,84px"></dc-import>
+  <div class="body" style="grid-template-columns:480px 520px 1fr;grid-template-rows:1fr 240px 44px">
+
+    <div class="card">
+      <div class="ch"><span class="cn">jv_dark</span><span class="cs">≈ 12 s · relay → 2400</span><span style="flex:1"></span><button class="btnp"><lu-i name="play" style="width:10px"></lu-i>Run</button></div>
+      <div class="cb">
+        <div class="pr">
+          <div class="pf"><span class="l">start_v</span><span class="v">−0.20</span></div>
+          <div class="pf"><span class="l">stop_v</span><span class="v">1.20</span></div>
+          <div class="pf"><span class="l">step_v</span><span class="v">0.02</span></div>
+          <div class="pf"><span class="l">settle_s</span><span class="v">0.05</span></div>
+          <div class="pf"><span class="l">both_directions</span><span class="bool"><span>true</span><span class="on">false</span></span></div>
+        </div>
+        <div class="res"><div class="empty">not run this session</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><span class="cn">jv_bace</span><span class="cs">≈ 48 s · relay → 2400</span><span style="flex:1"></span><button class="btnp"><lu-i name="play" style="width:10px"></lu-i>Run</button></div>
+      <div class="cb">
+        <div class="pr">
+          <div class="pf"><span class="l">led_levels_v</span><span class="v">1.010 → 1.030<i>step 0.005 · 5</i></span></div>
+          <div class="pf"><span class="l">led_settle_s</span><span class="v">2.0</span></div>
+          <div class="pf"><span class="l">start_v</span><span class="v">−4.00</span></div>
+          <div class="pf"><span class="l">stop_v</span><span class="v">2.00</span></div>
+          <div class="pf"><span class="l">step_v</span><span class="v">0.04</span></div>
+          <div class="pf ro"><span class="l">shutter</span><span class="v">shut</span></div>
+        </div>
+        <div class="res"><div class="empty">not run this session</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><span class="cn">bace</span><span class="cs">one shot ≈ 0.8 s · relay → amplifier</span><span style="flex:1"></span><button class="btns dis"><lu-i name="play" style="width:10px"></lu-i>Shot</button><button class="btnp dis"><lu-i name="play" style="width:10px"></lu-i>Scan · {{ scanTime }}</button></div>
+      <div class="cb">
+        <div class="pr">
+          <div class="pf"><span class="l">axis</span><span class="seg"><span class="sego {{ segVpre }}">vpre</span><span class="sego {{ segDelay }}">delay_ns</span><span class="sego {{ segVcoll }}">vcoll</span></span></div>
+          <div class="pf"><span class="l">start</span><span class="v">{{ axisStart }}<i>{{ axisUnit }}</i></span></div>
+          <div class="pf"><span class="l">stop</span><span class="v">{{ axisStop }}<i>{{ axisUnit }}</i></span></div>
+          <div class="pf ro"><span class="l">step · points</span><span class="v">{{ axisStep }}<i>{{ axisPts }}</i></span></div>
+          <sc-if value="{{ isVpre }}" hint-placeholder-val="{{ true }}"><div class="pf"><span class="l">centre_on_voc</span><span class="bool"><span class="on">true</span><span>false</span></span></div></sc-if>
+          <div class="pf miss"><span class="l">V_oc</span><span class="v"><lu-i name="warn" style="width:11px"></lu-i>none · run jv_bace first</span></div>
+        </div>
+        <div class="pr">
+          <sc-if value="{{ pinVpre }}" hint-placeholder-val="{{ false }}"><div class="pf inh"><span class="l">vpre</span><span class="v">V_oc + 0.000<i>V</i></span></div></sc-if>
+          <sc-if value="{{ pinVcoll }}" hint-placeholder-val="{{ true }}"><div class="pf"><span class="l">vcoll</span><span class="v">−4.00<i>V</i></span></div></sc-if>
+          <sc-if value="{{ pinDelay }}" hint-placeholder-val="{{ true }}"><div class="pf"><span class="l">delay_ns</span><span class="v">60<i>ns</i></span></div></sc-if>
+          <div class="pf"><span class="l">n_loops</span><span class="v">20</span></div>
+          <div class="pf"><span class="l">n_averages</span><span class="v">100</span></div>
+          <span class="sep"></span>
+          <div class="pf"><span class="l" style="color:#ae1800">invert_polarity</span><span class="bool acc"><span>true</span><span class="on">false</span></span></div>
+          <div class="pf"><span class="l" style="color:#ae1800">inverted_output</span><span class="bool acc"><span>NORM</span><span class="on">INV</span></span></div>
+          <span style="flex:1"></span>
+          <button class="btng">17 more · run.toml <lu-i name="down" style="width:10px"></lu-i></button>
+        </div>
+        <div class="res" style="flex-direction:row;gap:12px"><div class="empty" style="flex:1.5">transient</div><div class="empty" style="flex:1">Q · loop</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><span class="cn">power</span><span class="cs">1918-C · 530 nm</span><span style="flex:1"></span><button class="btns dis">Read</button><button class="btnp dis">Monitor</button></div>
+      <div class="cb">
+        <div class="pr">
+          <div class="pf"><span class="l">wavelength_nm</span><span class="v">530</span></div>
+          <div class="pf"><span class="l">samples</span><span class="v">0<i>one reading</i></span></div>
+        </div>
+        <div class="big" style="color:#9b9797">— W</div>
+        <div class="warn1"><lu-i name="warn" style="width:13px;color:#ae1800"></lu-i><span>:8918 not answering</span><span style="flex:1"></span><button class="btns" style="padding:5px 9px">retry</button></div>
+      </div>
+    </div>
+
+    <div class="card dim">
+      <div class="ch"><span class="cn">temperature</span><span class="tag nb">not wired</span><span style="flex:1"></span><button class="btnp dis">Hold</button></div>
+      <div class="cb">
+        <div class="pr">
+          <div class="pf"><span class="l">setpoint_k</span><span class="v">220.0</span></div>
+          <div class="pf"><span class="l">tolerance_k</span><span class="v">0.2</span></div>
+          <div class="pf"><span class="l">hold_s</span><span class="v">60</span></div>
+          <div class="pf"><span class="l">timeout_s</span><span class="v">1800</span></div>
+        </div>
+        <div class="big">294.8 K</div>
+        <div class="cs">331 reads · set from its own panel</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><span class="cn">this session</span><span class="cs">nothing run</span><span style="flex:1"></span><button class="btns">Compose a pipeline <lu-i name="right" style="width:11px"></lu-i></button></div>
+      <div class="cb">
+        <div class="empty">manual runs land here</div>
+        <div class="cs" style="white-space:normal">previous · s4_PTQ10IT4F_pxa_295K_1020mVLED_1040mVVOC_4Vextract_offsetcorr_20260901_120825</div>
+      </div>
+    </div>
+
+    <div class="strip" style="grid-column:1/-1">
+      <sc-if value="{{ chainBottom }}" hint-placeholder-val="{{ true }}">
+        <span class="sk">trigger chain</span>
+        <span class="st bad">33220A POL NORM <lu-i name="warn" style="width:12px"></lu-i></span><button class="btns" style="padding:5px 9px">set INV</button>
+        <span class="st">81150A ARM EXT <lu-i name="ok" style="width:12px"></lu-i></span>
+        <span class="st">SLOP POS <lu-i name="ok" style="width:12px"></lu-i></span>
+        <span class="st">POL INV <lu-i name="ok" style="width:12px"></lu-i></span>
+      </sc-if>
+      <span style="flex:1"></span>
+      <span class="st" style="color:#7d7979">rig.toml · R_sense 5.192 Ω · gain ×4</span>
+      <button class="btns">Park</button>
+      <button class="btng">rig diagram <lu-i name="right" style="width:11px"></lu-i></button>
+    </div>
+  </div>
+</div>
+</div>
+
+<div>
+<div class="abc"><span class="abk">R3·2 · hero</span><span class="abt">Checking the bench · dark J-V done, light J-V done, a 20-loop BACE scan running · 21:03</span><sc-if value="{{ ann }}" hint-placeholder-val="{{ true }}"><span class="abnote">V_oc flows from the jv_bace card into bace. The running card is the live monitor; a pipeline step looks the same.</span></sc-if></div>
+<div class="ab">
+  <div class="bar">
+    <span class="brand">BACE</span>
+    <span class="tab on">bench</span><span class="tab">pipeline</span><span class="tab">results</span><span class="tab">rig</span>
+    <span style="flex:1"></span>
+    <sc-if value="{{ chainTop }}" hint-placeholder-val="{{ false }}"><span class="chip">chain 4 / 4 ✓</span></sc-if>
+    <span class="chip">s4 · PTQ10:IT-4F · pixel a</span>
+    <span class="chip m">21:03</span>
+    <span class="chip" style="background:#ec3013;border-color:#ec3013;color:#fff">bias LIVE</span>
+  </div>
+  <dc-import name="BenchRail" mode="bench" hint-size="100%,84px"></dc-import>
+  <div class="body" style="grid-template-columns:480px 520px 1fr;grid-template-rows:1fr 240px 44px">
+
+    <div class="card">
+      <div class="ch"><span class="cn">jv_dark</span><span class="tag ok">done 20:52 · 12 s</span><span style="flex:1"></span><button class="btns"><lu-i name="play" style="width:10px"></lu-i>Run</button></div>
+      <div class="cb">
+        <div class="pr">
+          <div class="pf"><span class="l">start_v</span><span class="v">−0.20</span></div>
+          <div class="pf"><span class="l">stop_v</span><span class="v">1.20</span></div>
+          <div class="pf"><span class="l">step_v</span><span class="v">0.02</span></div>
+          <div class="pf"><span class="l">settle_s</span><span class="v">0.05</span></div>
+          <div class="pf"><span class="l">both_directions</span><span class="bool"><span>true</span><span class="on">false</span></span></div>
+        </div>
+        <div class="res">
+          <ch-jvdark style="width:100%"></ch-jvdark>
+          <div class="nums"><div class="nm"><span class="l">J at −0.2 V</span><span class="v">−2.0e-5 mA cm⁻²</span></div><div class="nm"><span class="l">J at +1.2 V</span><span class="v">52 mA cm⁻²</span></div><div class="nm"><span class="l"> </span><span class="tag">derived</span></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><span class="cn">jv_bace</span><span class="tag ok">done 20:58 · 48 s</span><span style="flex:1"></span><button class="btns"><lu-i name="play" style="width:10px"></lu-i>Run</button></div>
+      <div class="cb">
+        <div class="pr">
+          <div class="pf"><span class="l">led_levels_v</span><span class="v">1.010 → 1.030<i>step 0.005 · 5</i></span></div>
+          <div class="pf"><span class="l">led_settle_s</span><span class="v">2.0</span></div>
+          <div class="pf"><span class="l">start_v</span><span class="v">−4.00</span></div>
+          <div class="pf"><span class="l">stop_v</span><span class="v">2.00</span></div>
+          <div class="pf"><span class="l">step_v</span><span class="v">0.04</span></div>
+          <div class="pf ro"><span class="l">shutter</span><span class="v">was open <lu-i name="ok" style="width:11px"></lu-i></span></div>
+        </div>
+        <div class="res">
+          <ch-jv style="width:100%"></ch-jv>
+          <div style="display:flex;gap:18px;align-items:flex-start">
+            <div class="lst">
+              <span class="h">led_v</span><span class="h">V_oc / V</span><span class="h">J_sc / mA cm⁻²</span>
+              <span>1.010</span><span>1.0269</span><span>−13.388</span>
+              <span>1.015</span><span>1.0378</span><span>−16.998</span>
+              <span class="hl">1.020</span><span class="hl">1.0423</span><span class="hl">−20.277</span>
+              <span>1.025</span><span>1.0461</span><span>−24.233</span>
+              <span>1.030</span><span>1.0479</span><span>−26.947</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px;padding-top:22px"><span class="inh"><lu-i name="inherit" style="width:11px"></lu-i>1.0423 V → bace</span><span class="cs">derived · intensity —</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card live">
+      <div class="ch"><span class="cn">bace</span><span class="tag live">scan · loop 12 of 20</span><span class="dots"><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="c"></span><span></span><span></span><span></span><span></span><span></span></span><span class="cs">5 · acquire light</span><span style="flex:1"></span><button class="btns">Stop after this shot</button><button class="btnp">Abort now</button></div>
+      <div class="cb">
+        <div class="pr">
+          <div class="pf"><span class="l">axis</span><span class="seg"><span class="sego {{ segVpre }}">vpre</span><span class="sego {{ segDelay }}">delay_ns</span><span class="sego {{ segVcoll }}">vcoll</span></span></div>
+          <div class="pf"><span class="l">start</span><span class="v">{{ axisStart }}<i>{{ axisUnit }}</i></span></div>
+          <div class="pf"><span class="l">stop</span><span class="v">{{ axisStop }}<i>{{ axisUnit }}</i></span></div>
+          <div class="pf ro"><span class="l">step · points</span><span class="v">{{ axisStep }}<i>{{ axisPts }}</i></span></div>
+          <sc-if value="{{ isVpre }}" hint-placeholder-val="{{ true }}"><div class="pf"><span class="l">centre_on_voc</span><span class="bool"><span class="on">true</span><span>false</span></span></div></sc-if>
+          <div class="pf inh"><span class="l">V_oc</span><span class="v"><lu-i name="inherit" style="width:11px"></lu-i>1.0423 V<i style="color:#ae1800">@ 1.020 · jv_bace 20:58</i></span></div>
+        </div>
+        <div class="pr">
+          <sc-if value="{{ pinVpre }}" hint-placeholder-val="{{ false }}"><div class="pf inh"><span class="l">vpre</span><span class="v">V_oc + 0.000<i>V</i></span></div></sc-if>
+          <sc-if value="{{ pinVcoll }}" hint-placeholder-val="{{ true }}"><div class="pf"><span class="l">vcoll</span><span class="v">−4.00<i>V</i></span></div></sc-if>
+          <sc-if value="{{ pinDelay }}" hint-placeholder-val="{{ true }}"><div class="pf"><span class="l">delay_ns</span><span class="v">60<i>ns</i></span></div></sc-if>
+          <div class="pf"><span class="l">n_loops</span><span class="v">20</span></div>
+          <div class="pf"><span class="l">n_averages</span><span class="v">100</span></div>
+          <span class="sep"></span>
+          <div class="pf"><span class="l" style="color:#ae1800">invert_polarity</span><span class="bool acc"><span>true</span><span class="on">false</span></span></div>
+          <div class="pf"><span class="l" style="color:#ae1800">inverted_output</span><span class="bool acc"><span>NORM</span><span class="on">INV</span></span></div>
+          <span style="flex:1"></span>
+          <button class="btng">17 more · run.toml <lu-i name="down" style="width:10px"></lu-i></button>
+        </div>
+        <div class="res" style="flex-direction:row;gap:16px;align-items:flex-start">
+          <div style="width:610px;flex:none;display:flex;flex-direction:column;gap:10px">
+            <ch-transient style="width:100%"></ch-transient>
+            <ch-qloop20 style="width:100%"></ch-qloop20>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;gap:14px;min-width:0;padding-top:4px">
+            <div class="nm"><span class="l">Q · shot 12</span><span class="v">8.355e-10 C</span></div>
+            <div class="nm"><span class="l">running mean · 12</span><span class="v">8.520e-10 C</span></div>
+            <div class="nm"><span class="l">σ · 12</span><span class="v">1.83e-11 C</span></div>
+            <div class="nm"><span class="l">peak · light</span><span class="v">−9.58 mA</span></div>
+            <div style="height:1px;background:#eae7e7"></div>
+            <div class="nm"><span class="l">digitiser</span><span class="v" style="font-size:12px;line-height:1.5;white-space:normal">autorange pass 2<br>no shared extreme<br>0 rail samples</span></div>
+            <div class="nm"><span class="l">trigger</span><span class="v" style="font-size:12px">TRIG · 4 / 4 <lu-i name="ok" style="width:11px"></lu-i></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><span class="cn">power</span><span class="tag live">monitor</span><span style="flex:1"></span><button class="btns">Read</button><button class="btns"><lu-i name="stop" style="width:10px"></lu-i>Stop</button></div>
+      <div class="cb">
+        <div style="display:flex;align-items:baseline;gap:14px"><span class="big">1.407 mW</span><span class="cs">530 nm · mW cm⁻² — · factor unknown</span></div>
+        <ch-spark style="width:100%"></ch-spark>
+      </div>
+    </div>
+
+    <div class="card dim">
+      <div class="ch"><span class="cn">temperature</span><span class="tag nb">not wired</span><span style="flex:1"></span><button class="btnp dis">Hold</button></div>
+      <div class="cb">
+        <div class="pr">
+          <div class="pf"><span class="l">setpoint_k</span><span class="v">220.0</span></div>
+          <div class="pf"><span class="l">tolerance_k</span><span class="v">0.2</span></div>
+          <div class="pf"><span class="l">hold_s</span><span class="v">60</span></div>
+          <div class="pf"><span class="l">timeout_s</span><span class="v">1800</span></div>
+        </div>
+        <div class="big">294.8 K</div>
+        <div class="cs">331 reads · set from its own panel</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><span class="cn">this session</span><span class="cs">3 runs · 1 fix</span><span style="flex:1"></span><button class="btnp">Compose a pipeline from these cards <lu-i name="right" style="width:11px"></lu-i></button></div>
+      <div class="cb">
+        <div class="log">
+          <span class="t">20:52</span><span>jv_dark</span><span class="tag ok">12 s</span>
+          <span class="t">20:58</span><span>jv_bace · V_oc 1.0269 … 1.0479 V</span><span class="tag ok">48 s</span>
+          <span class="t">21:01</span><span>33220A :OUTP:POL NORM → INV</span><span class="tag">by hand</span>
+          <span class="t">21:03</span><span>bace · vpre 0 → 0 · 20 loops</span><span class="tag live">12 / 20</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="strip" style="grid-column:1/-1">
+      <sc-if value="{{ chainBottom }}" hint-placeholder-val="{{ true }}">
+        <span class="sk">trigger chain</span>
+        <span class="st">33220A POL INV <lu-i name="ok" style="width:12px"></lu-i></span>
+        <span class="st">81150A ARM EXT <lu-i name="ok" style="width:12px"></lu-i></span>
+        <span class="st">SLOP POS <lu-i name="ok" style="width:12px"></lu-i></span>
+        <span class="st">POL INV <lu-i name="ok" style="width:12px"></lu-i></span>
+        <span class="cs">read back 21:03</span>
+      </sc-if>
+      <span style="flex:1"></span>
+      <span class="st" style="color:#7d7979">rig.toml · R_sense 5.192 Ω · gain ×4</span>
+      <button class="btns dis">Park</button>
+      <button class="btng">rig diagram <lu-i name="right" style="width:11px"></lu-i></button>
+    </div>
+  </div>
+</div>
+</div>
+
+<div>
+<div class="abc"><span class="abk">R3·3</span><span class="abt">Pipeline · composed from the cards · 9 temperatures × 5 levels</span><sc-if value="{{ ann }}" hint-placeholder-val="{{ true }}"><span class="abnote">Module rows carry the bench parameters; only what differs is typed here. Cost from measured settle times.</span></sc-if></div>
+<div class="ab">
+  <div class="bar">
+    <span class="brand">BACE</span>
+    <span class="tab">bench</span><span class="tab on">pipeline</span><span class="tab">results</span><span class="tab">rig</span>
+    <span style="flex:1"></span>
+    <sc-if value="{{ chainTop }}" hint-placeholder-val="{{ false }}"><span class="chip">chain 4 / 4 ✓</span></sc-if>
+    <span class="chip">s4 · PTQ10:IT-4F · pixel a</span>
+    <span class="chip m">4 h 32 · finish 01:36</span>
+    <span class="chip" style="border-color:#ff9783;color:#ffc4b8">1 warn</span>
+  </div>
+  <dc-import name="BenchRail" mode="ready" hint-size="100%,84px"></dc-import>
+  <div class="body" style="grid-template-columns:640px 1fr;grid-template-rows:1fr 44px">
+
+    <div class="card">
+      <div class="ch"><span class="cn">structure</span><span class="cs">2 loops · 2 modules · 90 runs</span><span style="flex:1"></span><button class="btng"><lu-i name="plus" style="width:11px"></lu-i>add</button></div>
+      <div class="cb" style="gap:6px">
+        <div class="tr"><span class="nk"><lu-i name="loop" style="width:13px"></lu-i></span><span class="n">temperature</span><span class="d">295 → 220 K · 9 · tol 0.2</span><span style="flex:1"></span><span class="tag nb">not wired</span></div>
+        <div class="tr" style="margin-left:26px"><span class="nk"><lu-i name="loop" style="width:13px"></lu-i></span><span class="n">illumination</span><span class="d">1.010 → 1.030 V · 5</span><span class="inh">owns led_v</span></div>
+        <div class="tr" style="margin-left:52px"><span class="nk mod"><lu-i name="module" style="width:11px"></lu-i></span><span class="n">jv_bace</span><span class="d">as on the bench · 8 s</span><span style="flex:1"></span><span class="inh">V_oc ↓</span></div>
+        <div class="tr" style="margin-left:52px;border-color:#201e1d"><span class="nk mod"><lu-i name="module" style="width:11px"></lu-i></span><span class="n">bace</span><span class="d">as on the bench · 80 s</span><div class="pf ed" style="min-width:0"><span class="l">n_loops</span><span class="v">100<i>bench 20</i></span></div><span style="flex:1"></span><span class="inh"><lu-i name="inherit" style="width:11px"></lu-i>V_oc</span></div>
+        <div style="height:1px;background:#eae7e7;margin:8px 0"></div>
+        <div class="cs">temperature · 9 values · settle from the last run at each</div>
+        <div class="lst" style="grid-template-columns:repeat(9,auto);gap:3px 14px">
+          <span class="h">295</span><span class="h">290</span><span class="h">280</span><span class="h">270</span><span class="h">260</span><span class="h">250</span><span class="h">240</span><span class="h">230</span><span class="h">220</span>
+          <span>—</span><span>113 m</span><span>7 m</span><span>22 m</span><span>10 m</span><span>37 m</span><span>2 m</span><span>11 m</span><span>4 m</span>
+        </div>
+        <div class="cs" style="margin-top:6px">illumination · 5 values · V_oc re-measured at each</div>
+        <div class="lst" style="grid-template-columns:repeat(5,auto);gap:3px 14px">
+          <span class="h">1.010</span><span class="h">1.015</span><span class="h">1.020</span><span class="h">1.025</span><span class="h">1.030</span>
+          <span>jv_bace → bace</span><span>jv_bace → bace</span><span>jv_bace → bace</span><span>jv_bace → bace</span><span>jv_bace → bace</span>
+        </div>
+        <div style="flex:1"></div>
+        <div class="nums" style="gap:32px">
+          <div class="nm"><span class="l">total</span><span class="big" style="font-size:30px">4 h 32</span></div>
+          <div class="nm"><span class="l">measuring</span><span class="big" style="font-size:30px">66 min</span></div>
+          <div class="nm"><span class="l">waiting for T</span><span class="big" style="font-size:30px">3 h 26</span></div>
+        </div>
+        <div style="height:1px;background:#eae7e7"></div>
+        <div style="display:flex;align-items:center;gap:10px"><span class="m" style="font-size:13px">16 checks</span><span class="tag ok">15 ok</span><span class="tag part">1 warn</span><span style="flex:1"></span><button class="btng">show</button></div>
+        <div class="warn1"><lu-i name="warn" style="width:13px;color:#ae1800"></lu-i><span>331 not wired → pauses at each T for a manual set</span></div>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:4px"><button class="btnp" style="padding:12px 18px;font-size:14px"><lu-i name="play" style="width:11px"></lu-i>Start · 4 h 32</button><button class="btns">Save recipe</button><button class="btns">Dry run</button></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><span class="cn">what it will do, in order</span><span class="cs">settle from 2026-08-31 · measurement from the bench</span></div>
+      <div class="cb" style="gap:16px">
+        <ch-schedule style="width:100%"></ch-schedule>
+        <div style="display:flex;gap:18px"><span class="legi"><span class="lk" style="background:#7d7979;opacity:.5;height:10px"></span>settle · cryostat</span><span class="legi"><span class="lk" style="background:#ec3013;height:10px"></span>measure · 5 levels · 7 min</span></div>
+        <div style="height:1px;background:#eae7e7"></div>
+        <div class="cs">at each temperature · relay 2400 → amplifier at every jv_bace → bace boundary</div>
+        <div class="tl"><span class="jv">jv</span><span class="ba">bace · 1.010 V</span><span class="jv">jv</span><span class="ba">bace · 1.015 V</span><span class="jv">jv</span><span class="ba">bace · 1.020 V</span><span class="jv">jv</span><span class="ba">bace · 1.025 V</span><span class="jv">jv</span><span class="ba">bace · 1.030 V</span></div>
+        <div style="display:flex;gap:14px;flex-wrap:wrap"><span class="inh">led_v ← illumination</span><span class="inh"><lu-i name="inherit" style="width:11px"></lu-i>V_oc ← jv_bace at the same led_v</span><span class="inh">V_oc drive = pulse high <lu-i name="ok" style="width:11px"></lu-i></span></div>
+        <div style="height:1px;background:#eae7e7"></div>
+        <div class="cs">the grid it fills · Q at V_pre = V_oc · 45 cells · V_oc from the last run in grey</div>
+        <div class="lst" style="grid-template-columns:auto repeat(5,1fr);gap:2px 10px;flex:1;align-content:start">
+          <span class="h">T / K</span><span class="h">1.010</span><span class="h">1.015</span><span class="h">1.020</span><span class="h">1.025</span><span class="h">1.030</span>
+          <sc-for list="{{ gridRows }}" as="r" hint-placeholder-count="9">
+            <span style="font-weight:500">{{ r.t }}</span>
+            <sc-for list="{{ r.v }}" as="c" hint-placeholder-count="5"><span style="color:#9b9797">{{ c }}</span></sc-for>
+          </sc-for>
+        </div>
+        <div class="cs" style="white-space:normal">writes 90 folders under 20260901_Txill/ · raw light + dark kept · a run that stops early says kept of requested</div>
+      </div>
+    </div>
+
+    <div class="strip" style="grid-column:1/-1">
+      <sc-if value="{{ chainBottom }}" hint-placeholder-val="{{ true }}">
+        <span class="sk">trigger chain</span>
+        <span class="st">33220A POL INV <lu-i name="ok" style="width:12px"></lu-i></span>
+        <span class="st">81150A ARM EXT <lu-i name="ok" style="width:12px"></lu-i></span>
+        <span class="st">SLOP POS <lu-i name="ok" style="width:12px"></lu-i></span>
+        <span class="st">POL INV <lu-i name="ok" style="width:12px"></lu-i></span>
+        <span class="cs">read back 21:10 · re-read at Start</span>
+      </sc-if>
+      <span style="flex:1"></span>
+      <span class="st" style="color:#7d7979">rig.toml · R_sense 5.192 Ω · gain ×4</span>
+      <button class="btns">Park</button>
+      <button class="btng">rig diagram <lu-i name="right" style="width:11px"></lu-i></button>
+    </div>
+  </div>
+</div>
+</div>
+
+<div>
+<div class="abc"><span class="abk">R3·4</span><span class="abt">Rig · the chain and one shot at three scales</span><sc-if value="{{ ann }}" hint-placeholder-val="{{ true }}"><span class="abnote">Reference, not a work surface. Pick the swept axis in the tweaks to see it highlighted.</span></sc-if></div>
+<div class="ab">
+  <div class="bar">
+    <span class="brand">BACE</span>
+    <span class="tab">bench</span><span class="tab">pipeline</span><span class="tab">results</span><span class="tab on">rig</span>
+    <span style="flex:1"></span>
+    <span class="chip m">rig.toml · loaded 19:52</span>
+    <span class="chip m">read back 20:49</span>
+  </div>
+  <dc-import name="BenchRail" mode="cold" hint-size="100%,84px"></dc-import>
+  <div class="body" style="grid-template-columns:940px 1fr;grid-template-rows:1fr 44px">
+
+    <div class="card">
+      <div class="ch"><span class="cn">the chain</span><span class="cs">who is wired to what</span></div>
+      <div class="cb">
+        <ch-rig style="width:100%"></ch-rig>
+        <div style="flex:1"></div>
+        <div style="display:flex;gap:22px;flex-wrap:wrap">
+          <span class="legi"><span class="lk" style="background:#201e1d"></span>drive · DC · signal</span>
+          <span class="legi"><span class="lk" style="border-top:2px dotted #201e1d"></span>light</span>
+          <span class="legi"><span class="lk" style="border-top:2px dashed #ec3013"></span>trigger</span>
+          <span class="legi"><span class="lk" style="background:#ec3013"></span>bias</span>
+          <span class="legi"><span class="lk" style="border-top:1px dashed #7d7979"></span>not wired</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><span class="cn">one shot · three scales</span><span class="cs">swept · <span style="color:#ae1800">{{ axis }}</span></span></div>
+      <div class="cb">
+        <ch-timing axis="{{ axis }}" style="width:100%"></ch-timing>
+      </div>
+    </div>
+
+    <div class="strip" style="grid-column:1/-1">
+      <span class="sk">read back 20:49</span>
+      <span class="st bad">33220A :OUTP:POL NORM <lu-i name="warn" style="width:12px"></lu-i></span><button class="btns" style="padding:5px 9px">set INV</button>
+      <span class="st">81150A :ARM:SOUR1 EXT <lu-i name="ok" style="width:12px"></lu-i></span>
+      <span class="st">:ARM:SLOP POS <lu-i name="ok" style="width:12px"></lu-i></span>
+      <span class="st">:OUTP1:POL INV <lu-i name="ok" style="width:12px"></lu-i></span>
+      <button class="btng"><lu-i name="reset" style="width:11px"></lu-i>re-read</button>
+      <span style="flex:1"></span>
+      <span class="st" style="color:#7d7979">rig.toml · R_sense 5.192 Ω · gain ×4 · + 47 ns</span>
+      <button class="btng">back to bench</button>
+    </div>
+  </div>
+</div>
+</div>
+
+</div>
+</div>
+<p class="dv-next">Try next: "show the bace card when Shot is pressed instead of Scan" · "what the pipeline looks like mid-run on this bench" · "the results tab for this session" · "delay_ns as the swept axis on the bench"</p>
+</section>
+
+<section class="dv-turn" id="t2" style="padding-top:28px">
+<div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Round 2</span><span class="abnote">set aside · kept as <a href="BACE Console - Round 2.dc.html">BACE Console - Round 2</a></span></div>
+</section>
+<section class="dv-turn" id="t1" style="padding-top:28px">
+<div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">Round 1 — three directions</span><span class="abnote">kept as <a href="BACE Console - Round 1.dc.html">BACE Console - Round 1</a> · verdict: B</span></div>
+</section>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;baceAxis&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;vpre&quot;,&quot;delay_ns&quot;,&quot;vcoll&quot;],&quot;default&quot;:&quot;vpre&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;bace card&quot;},&quot;chainCheck&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;bottom strip&quot;,&quot;top bar&quot;],&quot;default&quot;:&quot;bottom strip&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Where the chain check lives&quot;},&quot;annotations&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Board&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const p = this.props;
+    const axis = p.baceAxis ?? 'vpre';
+    const ax = {
+      vpre:     { start: '0.000', stop: '0.000', step: '—', pts: '1 · zero width', unit: 'V', scan: '16 s' },
+      delay_ns: { start: '0',     stop: '140',   step: '20', pts: '8 points',     unit: 'ns', scan: '2 min' },
+      vcoll:    { start: '−1.00', stop: '−4.00', step: '−0.50', pts: '7 points',  unit: 'V', scan: '1.9 min' }
+    }[axis];
+    const place = p.chainCheck ?? 'bottom strip';
+    const voc = [[295,1.0322,1.0373,1.0399,1.0413,1.0424],[290,1.0398,1.0435,1.0455,1.0466,1.0474],[280,1.0423,1.0470,1.0501,1.0526,1.0544],[270,1.0512,1.0557,1.0587,1.0608,1.0625],[260,1.0599,1.0635,1.0663,1.0685,1.0698],[250,1.0661,1.0697,1.0723,1.0741,1.0753],[240,1.0727,1.0763,1.0787,1.0804,1.0816],[230,1.0812,1.0843,1.0862,1.0878,1.0889],[220,1.0941,1.0969,1.0984,1.0998,1.1005]];
+    const gridRows = voc.map(r => ({ t: r[0], v: r.slice(1).map(x => x.toFixed(4)) }));
+    return {
+      ann: p.annotations ?? true,
+      axis, isVpre: axis === 'vpre',
+      segVpre: axis === 'vpre' ? 'on' : '', segDelay: axis === 'delay_ns' ? 'on' : '', segVcoll: axis === 'vcoll' ? 'on' : '',
+      axisStart: ax.start, axisStop: ax.stop, axisStep: ax.step, axisPts: ax.pts, axisUnit: ax.unit, scanTime: ax.scan,
+      pinVpre: axis !== 'vpre', pinDelay: axis !== 'delay_ns', pinVcoll: axis !== 'vcoll',
+      chainBottom: place === 'bottom strip', chainTop: place === 'top bar',
+      gridRows
+    };
+  }
+}
+</script>
+</body>
+</html>

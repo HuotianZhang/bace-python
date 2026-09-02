@@ -1,0 +1,28 @@
+# Measurement output. Stays on disk; deliberately out of git — 32 MB of
+# scope traces per session, and .h5/.dat blobs do not diff usefully.
+# The one run that IS tracked is bench-archive/, which the regression test reads.
+runs/
+bench-reports/
+
+# Scratch exports left by the plotting steps
+.tr.json
+.tr_export_tmp.json
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# Environments
+.venv/
+venv/
+env/
+
+# Editors and OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

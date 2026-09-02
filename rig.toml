@@ -1,0 +1,89 @@
+# The bench. Change this file when someone rewires something.
+#
+# Everything here is a property of the hardware, not of a measurement, and every
+# value is copied into each run's HDF5 file so a result carries the bench it came
+# from. The measurement recipe lives in run.toml instead — the split matters
+# because a stale rig.toml silently rescales every charge, while a stale run.toml
+# merely repeats a measurement you did not mean to repeat.
+#
+# Confirmed on 'sternwarte', 2026-08-31.
+
+[electrical]
+sense_resistor_ohm = 5.192      # between the device and CHAN2. Q is proportional
+                                # to 1/R, so this is the most consequential
+                                # number in the file. Panel note: "(50 old big
+                                # Amp) (5.192 new Amp)"
+pulse_amp = 4.0                 # voltage gain of the amplifier in the bias path
+                                # only; the measured current does not pass it
+probe_attenuation = 1.0
+trigger_offset_s = 0.0          # added to delay_ns before :PULS:DEL1.
+                                # Measured 2026-09-02 against the LabVIEW
+                                # engine: same Delay(ns)=90, the dark trace's
+                                # displacement spike landed 48 ns apart, which
+                                # is exactly the 47 ns this used to add. The
+                                # original's looping path — the one a scan
+                                # takes — has no offset. See core/pulses.py.
+
+[scope]
+address = "TCPIP0::PwM-DSO9054H.local::inst0::INSTR"
+current_source = "CHAN2"        # device current through the sense resistor
+channel = 2
+trigger_source = "CHAN3"        # 81150A sync — the only in-band record of when
+                                # the field actually arrived
+trigger_positive = true
+
+[bias]
+address = "GPIB0::12::INSTR"    # Agilent 81150A
+
+[sourcemeter]
+address = "GPIB0::24::INSTR"    # Keithley 2400, firmware C34
+# Bench ceilings, not working values. The compliance a measurement actually uses
+# depends on the pixel and lives in run.toml; these are the limits no recipe may
+# exceed, because a 2400 will happily push 1 A into a small cell.
+max_current_compliance_a = 0.05
+max_voltage_compliance_v = 5.0
+
+[led]
+address = "GPIB0::15::INSTR"    # Agilent 33220A
+threshold_v = 1.0               # generator voltage at which the LED lights,
+                                # referred back through its fixed amplifier
+
+[power_meter]
+console = "http://127.0.0.1:8918"   # the 1918-C console owns the USB device —
+                                    # only one process can hold it, so we ask it
+                                    # over HTTP rather than opening it ourselves
+wavelength_nm = 530.0           # responsivity is wavelength dependent; a meter
+                                # left at the wrong value returns a plausible
+                                # number that is wrong by tens of percent
+on_beam_splitter = true         # so it can be read during a run
+
+[dio]
+# Both assignments and both polarities MEASURED on the rig, 2026-09-01, by
+# walking all four states and reading the Keithley in each (`--dio`):
+#
+#   module 0 = 1 : photocurrent appears        -> module 0 moves the LIGHT
+#   module 1 = 1 : the device conducts at all  -> module 1 moves the PATH
+#
+#   probe current at +0.5 V, module 1 = 0 : 4.75e-11, 4.76e-11 A  (open input,
+#                                           the two agree to 0.26 %)
+#   probe current at +0.5 V, module 1 = 1 : 4.76e-07 A dark, -7.78e-05 A lit
+#
+# Four decades between them, so this is not a close call. Before that it rested
+# on `shutter_lv2012.vi` (which does hard-code module 0) plus my reading of
+# `open/close shutter 2` in BACE_Mehrdad.vi, which the binary never calls a relay.
+module_id = 9
+shutter_module_nr = 0           # 1 = open, 0 = closed
+relay_module_nr = 1             # 1 = Keithley 2400, 0 = amplifier
+channel = 0
+dll_path = ""                   # empty = pick the DELIB build matching this
+                                # interpreter. Deditec ships 32-bit as
+                                # delib.dll in SysWOW64 and 64-bit as
+                                # delib64.dll in System32; ctypes can only load
+                                # the matching one. Set a path to override.
+
+# Lake Shore 331 at GPIB0::7::INSTR, with its own console on 127.0.0.1:8331.
+# Integration is the step after this one — leave `console` empty and temperature
+# stays metadata that someone types.
+[temperature]
+console = ""                    # "http://127.0.0.1:8331" when integrated
+address = "GPIB0::7::INSTR"     # for reference; this program does not open it

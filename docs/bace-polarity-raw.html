@@ -1,0 +1,292 @@
+<title>四种组合的原始亮暗电流</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@500;600&display=swap">
+<style>
+:root{
+  --ground:#F1F3F2; --surface:#FBFCFB; --sunken:#E4E9E7;
+  --ink:#141A19; --ink-2:#4C5A57; --ink-3:#71807C;
+  --rule:#C8D2CF; --rule-soft:#DDE4E2;
+  --a1:#9A6B0E; --a2:#3D7A2C; --a3:#2A57A0; --a4:#AC3549;
+  --light:#7A5AA8; --bad:#AC3549;
+  --shadow:0 1px 2px rgba(20,26,25,.05), 0 8px 24px -16px rgba(20,26,25,.25);
+  --measure:38rem;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0D1211; --surface:#131A18; --sunken:#0A0F0E;
+    --ink:#E3E9E7; --ink-2:#A0AEAA; --ink-3:#7C8A86;
+    --rule:#26332F; --rule-soft:#1C2624;
+    --a1:#E0B44A; --a2:#7FC96C; --a3:#7FA8E8; --a4:#E98096;
+    --light:#B79BE0; --bad:#E98096;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0D1211; --surface:#131A18; --sunken:#0A0F0E;
+  --ink:#E3E9E7; --ink-2:#A0AEAA; --ink-3:#7C8A86;
+  --rule:#26332F; --rule-soft:#1C2624;
+  --a1:#E0B44A; --a2:#7FC96C; --a3:#7FA8E8; --a4:#E98096;
+  --light:#B79BE0; --bad:#E98096;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.7);
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);
+  font-family:"IBM Plex Sans SC","IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  font-size:16px;line-height:1.75;-webkit-font-smoothing:antialiased}
+.page{max-width:var(--measure);margin:0 auto;padding:3.5rem 1.5rem 6rem}
+.wide{max-width:min(62rem,100%);width:100%}
+@media (min-width:64rem){
+  .wide{width:min(62rem,calc(100vw - 3rem));
+    margin-left:calc((var(--measure) - min(62rem,calc(100vw - 3rem))) / 2)}
+}
+h1,h2{font-family:"Noto Serif SC","IBM Plex Serif",Georgia,serif;
+  text-wrap:balance;margin:0;font-weight:600}
+h1{font-size:2.3rem;line-height:1.2;letter-spacing:-.01em}
+h2{font-size:1.35rem;line-height:1.35}
+p{margin:0}
+strong{font-weight:600}
+code,.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+code{font-size:.85em;background:var(--sunken);padding:.1em .34em;border-radius:3px}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:.7rem;font-weight:500;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+header{display:flex;flex-direction:column;gap:1rem;margin-bottom:2.5rem}
+.standfirst{font-size:1.06rem;color:var(--ink-2);max-width:34rem}
+.facts{display:flex;flex-wrap:wrap;gap:0 1.7rem;border-top:1px solid var(--rule);
+  border-bottom:1px solid var(--rule);padding:.8rem 0;margin-top:.3rem}
+.fact{display:flex;flex-direction:column;padding:.15rem 0}
+.fact dt{font-family:"IBM Plex Mono",monospace;font-size:.64rem;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-3)}
+.fact dd{margin:0;font-family:"IBM Plex Mono",monospace;font-size:.88rem;font-weight:500;
+  font-variant-numeric:tabular-nums}
+section{margin-top:3rem;display:flex;flex-direction:column;gap:1rem}
+section > .eyebrow{margin-bottom:-.5rem}
+.lede{color:var(--ink-2)}
+figure{margin:.5rem 0 0;display:flex;flex-direction:column;gap:.7rem}
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:5px;
+  padding:1rem .9rem;overflow-x:auto;box-shadow:var(--shadow)}
+.frame svg{display:block;width:100%;min-width:620px;height:auto;color:var(--ink)}
+figcaption{font-size:.87rem;color:var(--ink-3);line-height:1.6}
+.legend{display:flex;flex-wrap:wrap;gap:.3rem 1.1rem;font-family:"IBM Plex Mono",monospace;
+  font-size:.7rem;color:var(--ink-2)}
+.legend i{display:inline-block;width:1.1rem;height:0;border-top:2.5px solid;
+  vertical-align:middle;margin-right:.35rem}
+.callout{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--bad);
+  border-radius:4px;padding:1.1rem 1.2rem;display:flex;flex-direction:column;gap:.7rem;
+  box-shadow:var(--shadow)}
+.callout .tag{align-self:flex-start;font-family:"IBM Plex Mono",monospace;font-size:.64rem;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--bad)}
+.callout p{color:var(--ink-2)}
+.ok{border-left-color:var(--a2)}
+.ok .tag{color:var(--a2)}
+ul.plain{margin:0;padding-left:1.15rem;display:flex;flex-direction:column;gap:.5rem;color:var(--ink-2)}
+ul.plain li::marker{color:var(--ink-3)}
+.note{border-left:2px solid var(--rule);padding-left:1rem;color:var(--ink-2);font-size:.96rem}
+pre{margin:0;background:var(--sunken);border:1px solid var(--rule-soft);border-radius:5px;
+  padding:.85rem .95rem;overflow-x:auto;font-family:"IBM Plex Mono",monospace;
+  font-size:.78rem;line-height:1.65}
+footer{margin-top:4rem;padding-top:1.1rem;border-top:1px solid var(--rule);
+  font-family:"IBM Plex Mono",monospace;font-size:.71rem;color:var(--ink-3);line-height:1.8}
+
+table{border-collapse:collapse;font-size:.84rem;width:100%}
+th,td{border:1px solid var(--rule);padding:.45rem .6rem;text-align:left}
+th{font-family:"IBM Plex Mono",monospace;font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);font-weight:500}
+td.mono{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+</style>
+
+<div class="page">
+  <header>
+    <p class="eyebrow">2026-09-01 · delay = +80 ns · <code>traces/light</code> 和 <code>traces/dark</code>，未做任何处理</p>
+    <h1>四种组合的原始亮暗电流</h1>
+    <p class="standfirst">不是差值，是两条曲线本身。位移电流的尖峰在亮暗两支里几乎重合——这本来就该重合；真正区分四种组合的是尖峰的<strong>方向</strong>，以及台阶前后两条曲线各自停在哪里。</p>
+    <p class="legend"><span><i style="border-color:var(--a3)"></i>亮态 light</span><span><i style="border-color:var(--a1);border-top-style:dashed"></i>暗态 dark</span></p>
+  </header>
+
+  <section>
+    <p class="eyebrow">一 · 台阶附近</p>
+    <h2>550–950 ns，每格自己的量程</h2>
+    <p class="lede">纵轴按每一格自己的极值定，所以能看清尖峰。① 的尖峰是<strong>正向</strong>（+20 mA），另外三格都是负向——这就是纯变号。④ 的两条在峰顶完全重合并压平：那是撞了量程底，11 ns 宽的平顶，7–8 个连续采样点同一个浮点数。</p>
+    <figure class="wide">
+      <div class="frame">
+        <svg viewBox="0 0 700 380" role="img" aria-label="四种组合在偏压沿附近的原始亮态与暗态电流，每格独立纵轴。组合一的尖峰向上，其余三格向下；组合四的两条曲线在峰顶重合并被削平。">
+          <g transform="translate(56,26)">
+            <rect x="0" y="0" width="292.0" height="120.0" fill="none" stroke="currentColor" stroke-width=".6" opacity=".18"></rect>
+            <text x="-6" y="3.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">20</text>
+            <line x1="0" y1="104.3" x2="292.0" y2="104.3" stroke="currentColor" stroke-width="1" opacity=".3"></line>
+            <text x="-6" y="107.8" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">0</text>
+            <text x="-6" y="123.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">−3</text>
+            <clipPath id="clip-A-c1"><rect x="0" y="0" width="292.0" height="120.0"></rect></clipPath>
+            <g clip-path="url(#clip-A-c1)">
+              <polyline fill="none" stroke="var(--a1)" stroke-width="1.6" stroke-dasharray="4 2.5" points="0,118 5,117 10,118 15,117 20,118 24,118 29,118 34,118 39,118 44,118 48,118 53,117 58,117 63,116 68,111 72,109 77,105 82,53 87,32 92,11 96,17 101,43 106,57 111,62 116,68 120,71 125,76 130,78 135,78 140,82 144,84 149,85 154,85 159,87 164,88 168,88 173,89 178,90 183,90 188,90 192,92 197,92 202,91 207,92 212,93 216,93 221,94 226,94 231,95 236,94 240,95 245,95 250,95 255,95 260,95 264,96 269,96 274,96 279,96 284,96 288,97 293,97 298,97"></polyline>
+              <polyline fill="none" stroke="var(--a3)" stroke-width="1.6" points="0,108 5,108 10,108 15,108 20,108 24,108 29,108 34,108 39,108 44,108 48,108 53,106 58,106 63,105 68,94 72,90 77,84 82,39 87,25 92,14 96,18 101,44 106,58 111,64 116,70 120,72 125,78 130,79 135,79 140,83 144,84 149,85 154,86 159,87 164,88 168,89 173,90 178,91 183,91 188,91 192,92 197,92 202,92 207,93 212,93 216,94 221,94 226,95 231,95 236,95 240,96 245,96 250,96 255,96 260,96 264,97 269,97 274,97 279,97 284,97 288,98 293,98 298,98"></polyline>
+            </g>
+            <text x="0" y="-12" font-family="IBM Plex Mono, monospace" font-size="10.5" font-weight="500" fill="var(--ink-2)">① false + NORM · 18:05 · 0.92 / −1.00</text>
+            <text x="36.5" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">600</text>
+            <text x="109.5" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">700</text>
+            <text x="182.5" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">800</text>
+            <text x="255.5" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">900</text>
+          </g>
+          <g transform="translate(404,26)">
+            <rect x="0" y="0" width="292.0" height="120.0" fill="none" stroke="currentColor" stroke-width=".6" opacity=".18"></rect>
+            <text x="-6" y="3.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">0.5</text>
+            <line x1="0" y1="2.4" x2="292.0" y2="2.4" stroke="currentColor" stroke-width="1" opacity=".3"></line>
+            <text x="-6" y="5.9" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">0</text>
+            <text x="-6" y="123.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">−25</text>
+            <clipPath id="clip-A-c2a"><rect x="0" y="0" width="292.0" height="120.0"></rect></clipPath>
+            <g clip-path="url(#clip-A-c2a)">
+              <polyline fill="none" stroke="var(--a1)" stroke-width="1.6" stroke-dasharray="4 2.5" points="0,3 5,3 10,3 15,3 20,3 24,3 29,3 34,3 39,3 44,3 48,3 53,3 58,3 63,3 68,3 72,4 77,9 82,60 87,82 92,99 96,85 101,55 106,40 111,33 116,28 120,25 125,22 130,22 135,23 140,20 144,19 149,19 154,19 159,18 164,18 168,19 173,18 178,18 183,18 188,18 192,18 197,18 202,18 207,18 212,18 216,18 221,18 226,18 231,18 236,18 240,17 245,17 250,17 255,17 260,17 264,17 269,17 274,18 279,17 284,17 288,17 293,17 298,17"></polyline>
+              <polyline fill="none" stroke="var(--a3)" stroke-width="1.6" points="0,3 5,3 10,3 15,3 20,3 24,3 29,3 34,3 39,3 44,3 48,3 53,3 58,3 63,3 68,3 72,4 77,14 82,62 87,84 92,98 96,81 101,52 106,37 111,30 116,24 120,21 125,17 130,17 135,17 140,14 144,13 149,13 154,12 159,12 164,11 168,12 173,11 178,11 183,11 188,11 192,10 197,10 202,10 207,10 212,10 216,10 221,10 226,9 231,9 236,9 240,9 245,9 250,9 255,9 260,9 264,9 269,9 274,9 279,9 284,9 288,9 293,9 298,9"></polyline>
+            </g>
+            <text x="0" y="-12" font-family="IBM Plex Mono, monospace" font-size="10.5" font-weight="500" fill="var(--ink-2)">② false + INV · 17:59 · 0.92 / −1.00</text>
+            <text x="36.5" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">600</text>
+            <text x="109.5" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">700</text>
+            <text x="182.5" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">800</text>
+            <text x="255.5" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">900</text>
+          </g>
+          <g transform="translate(56,214)">
+            <rect x="0" y="0" width="292.0" height="120.0" fill="none" stroke="currentColor" stroke-width=".6" opacity=".18"></rect>
+            <text x="-6" y="3.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">0.5</text>
+            <line x1="0" y1="1.5" x2="292.0" y2="1.5" stroke="currentColor" stroke-width="1" opacity=".3"></line>
+            <text x="-6" y="5.0" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">0</text>
+            <text x="-6" y="123.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">−40</text>
+            <clipPath id="clip-A-c2b"><rect x="0" y="0" width="292.0" height="120.0"></rect></clipPath>
+            <g clip-path="url(#clip-A-c2b)">
+              <polyline fill="none" stroke="var(--a1)" stroke-width="1.6" stroke-dasharray="4 2.5" points="0,1 5,1 10,1 15,1 20,1 24,1 29,1 34,1 39,1 44,1 48,1 53,1 58,1 63,1 68,2 72,2 77,4 82,78 87,103 92,80 96,55 101,45 106,43 111,35 116,28 120,35 125,36 130,29 135,31 140,34 144,31 149,29 154,32 159,33 164,30 168,30 173,33 178,31 183,29 188,32 192,32 197,30 202,31 207,32 212,31 216,30 221,31 226,32 231,30 236,31 240,31 245,30 250,30 255,31 260,31 264,30 269,31 274,31 279,31 284,30 288,31 293,31 298,30"></polyline>
+              <polyline fill="none" stroke="var(--a3)" stroke-width="1.6" points="0,1 5,1 10,1 15,1 20,1 24,1 29,1 34,1 39,1 44,1 48,1 53,1 58,1 63,1 68,4 72,4 77,6 82,78 87,102 92,79 96,52 101,41 106,37 111,27 116,18 120,23 125,23 130,16 135,17 140,20 144,17 149,14 154,18 159,19 164,16 168,16 173,19 178,17 183,15 188,18 192,18 197,16 202,17 207,18 212,18 216,16 221,18 226,18 231,16 236,17 240,18 245,17 250,17 255,18 260,18 264,17 269,17 274,18 279,17 284,17 288,18 293,18 298,17"></polyline>
+            </g>
+            <text x="0" y="-12" font-family="IBM Plex Mono, monospace" font-size="10.5" font-weight="500" fill="var(--ink-2)">② false + INV · 18:11 · 0.80 / −2.00</text>
+            <text x="36.5" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">600</text>
+            <text x="109.5" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">700</text>
+            <text x="182.5" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">800</text>
+            <text x="255.5" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">900</text>
+          </g>
+          <g transform="translate(404,214)">
+            <rect x="0" y="0" width="292.0" height="120.0" fill="none" stroke="currentColor" stroke-width=".6" opacity=".18"></rect>
+            <text x="-6" y="3.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">0.5</text>
+            <line x1="0" y1="2.4" x2="292.0" y2="2.4" stroke="currentColor" stroke-width="1" opacity=".3"></line>
+            <text x="-6" y="5.9" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">0</text>
+            <text x="-6" y="123.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">−25</text>
+            <clipPath id="clip-A-c4"><rect x="0" y="0" width="292.0" height="120.0"></rect></clipPath>
+            <g clip-path="url(#clip-A-c4)">
+              <polyline fill="none" stroke="var(--a1)" stroke-width="1.6" stroke-dasharray="4 2.5" points="0,2 5,2 10,2 15,2 20,2 24,2 29,2 34,2 39,2 44,2 48,2 53,2 58,2 63,2 68,2 72,2 77,7 82,95 87,98 92,97 96,75 101,58 106,50 111,32 116,15 120,23 125,22 130,8 135,10 140,15 144,8 149,3 154,9 159,10 164,4 168,4 173,9 178,6 183,2 188,7 192,7 197,3 202,5 207,7 212,5 216,3 221,5 226,6 231,2 236,4 240,5 245,4 250,3 255,4 260,4 264,3 269,4 274,5 279,4 284,3 288,4 293,4 298,3"></polyline>
+              <polyline fill="none" stroke="var(--a3)" stroke-width="1.6" points="0,1 5,1 10,1 15,1 20,2 24,1 29,2 34,2 39,1 44,2 48,2 53,2 58,2 63,2 68,2 72,2 77,6 82,94 87,98 92,98 96,76 101,60 106,52 111,35 116,18 120,26 125,25 130,11 135,13 140,18 144,11 149,6 154,11 159,12 164,6 168,6 173,11 178,8 183,4 188,9 192,9 197,5 202,6 207,8 212,7 216,4 221,7 226,7 231,4 236,5 240,7 245,5 250,4 255,6 260,6 264,4 269,5 274,6 279,5 284,4 288,5 293,5 298,4"></polyline>
+            </g>
+            <text x="0" y="-12" font-family="IBM Plex Mono, monospace" font-size="10.5" font-weight="500" fill="var(--ink-2)">④ true + INV · 18:15 · 0.80 / −2.00</text>
+            <text x="36.5" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">600</text>
+            <text x="109.5" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">700</text>
+            <text x="182.5" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">800</text>
+            <text x="255.5" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">900</text>
+          </g>
+          <text x="350" y="372" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">记录时间 / ns　·　纵轴 mA</text>
+        </svg>
+      </div>
+      <figcaption>亮暗两条在尖峰处贴在一起是<strong>正常</strong>的：那里是电压阶跃充放器件电容的位移电流，两支的摆幅相同，所以电流几乎相同，相减之后正好抵消。真正的信息在尖峰之外。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <p class="eyebrow">二 · 整条记录</p>
+    <h2>300–5000 ns，纵轴压到平台量级</h2>
+    <p class="lede">同样四格，纵轴改成能看清平台的量级（尖峰因此跑出画面，这是故意的）。看两条曲线各自<strong>停在哪里</strong>：只有 ④ 的亮暗两条在台阶之后都回到零附近，其余三格都停在一个明显非零的电平上。</p>
+    <figure class="wide">
+      <div class="frame">
+        <svg viewBox="0 0 700 380" role="img" aria-label="四种组合的整条五微秒记录，纵轴压到平台量级。只有组合四的亮态与暗态在台阶后都回到零附近，其余三组都停在非零电平。">
+          <g transform="translate(56,26)">
+            <rect x="0" y="0" width="292.0" height="120.0" fill="none" stroke="currentColor" stroke-width=".6" opacity=".18"></rect>
+            <text x="-6" y="3.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">4</text>
+            <line x1="0" y1="60.0" x2="292.0" y2="60.0" stroke="currentColor" stroke-width="1" opacity=".3"></line>
+            <text x="-6" y="63.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">0</text>
+            <text x="-6" y="123.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">−4</text>
+            <clipPath id="clip-B-c1"><rect x="0" y="0" width="292.0" height="120.0"></rect></clipPath>
+            <g clip-path="url(#clip-B-c1)">
+              <polyline fill="none" stroke="var(--a1)" stroke-width="1.6" stroke-dasharray="4 2.5" points="0,98 5,98 9,98 14,98 18,98 23,-10 28,-10 32,22 37,33 41,38 46,42 51,45 55,48 60,49 64,50 69,52 74,52 78,53 83,53 87,54 92,55 97,56 101,56 106,56 110,56 115,57 120,57 124,58 129,58 133,58 138,59 143,59 147,59 152,59 156,59 161,59 165,59 170,60 175,60 179,60 184,60 188,60 193,60 198,60 202,60 207,60 211,61 216,61 221,60 225,60 230,60 234,61 239,61 244,61 248,61 253,61 257,61 262,61 267,61 271,61 276,61 280,61 285,62 290,61 294,61 299,61"></polyline>
+              <polyline fill="none" stroke="var(--a3)" stroke-width="1.6" points="0,71 5,70 9,70 14,70 18,70 23,-10 28,-7 32,24 37,36 41,41 46,46 51,49 55,52 60,53 64,54 69,55 74,56 78,56 83,57 87,58 92,58 97,59 101,59 106,59 110,59 115,59 120,59 124,60 129,60 133,60 138,61 143,61 147,61 152,60 156,60 161,61 165,61 170,61 175,61 179,61 184,61 188,61 193,61 198,61 202,61 207,62 211,62 216,62 221,61 225,61 230,61 234,62 239,62 244,62 248,62 253,62 257,62 262,62 267,62 271,62 276,62 280,62 285,62 290,62 294,62 299,62"></polyline>
+            </g>
+            <text x="0" y="-12" font-family="IBM Plex Mono, monospace" font-size="10.5" font-weight="500" fill="var(--ink-2)">① false + NORM · 18:05 · 0.92 / −1.00</text>
+            <text x="43.5" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">1000</text>
+            <text x="105.6" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">2000</text>
+            <text x="167.7" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">3000</text>
+            <text x="229.9" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">4000</text>
+            <text x="292.0" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">5000</text>
+          </g>
+          <g transform="translate(404,26)">
+            <rect x="0" y="0" width="292.0" height="120.0" fill="none" stroke="currentColor" stroke-width=".6" opacity=".18"></rect>
+            <text x="-6" y="3.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">4</text>
+            <line x1="0" y1="60.0" x2="292.0" y2="60.0" stroke="currentColor" stroke-width="1" opacity=".3"></line>
+            <text x="-6" y="63.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">0</text>
+            <text x="-6" y="123.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">−4</text>
+            <clipPath id="clip-B-c2a"><rect x="0" y="0" width="292.0" height="120.0"></rect></clipPath>
+            <g clip-path="url(#clip-B-c2a)">
+              <polyline fill="none" stroke="var(--a1)" stroke-width="1.6" stroke-dasharray="4 2.5" points="0,62 5,62 9,62 14,62 18,62 23,130 28,120 32,110 37,108 41,107 46,106 51,105 55,105 60,105 64,105 69,104 74,104 78,104 83,104 87,104 92,104 97,104 101,104 106,103 110,103 115,103 120,103 124,103 129,103 133,103 138,103 143,103 147,103 152,102 156,102 161,102 165,103 170,103 175,103 179,102 184,102 188,102 193,102 198,102 202,102 207,102 211,102 216,102 221,102 225,101 230,102 234,102 239,102 244,102 248,102 253,102 257,102 262,101 267,101 271,101 276,102 280,102 285,102 290,101 294,101 299,101"></polyline>
+              <polyline fill="none" stroke="var(--a3)" stroke-width="1.6" points="0,62 5,61 9,61 14,62 18,62 23,130 28,101 32,85 37,81 41,80 46,78 51,78 55,77 60,77 64,77 69,76 74,76 78,75 83,75 87,75 92,75 97,75 101,75 106,75 110,75 115,74 120,74 124,74 129,74 133,74 138,74 143,74 147,74 152,74 156,74 161,74 165,74 170,74 175,74 179,74 184,74 188,73 193,73 198,73 202,73 207,74 211,73 216,73 221,73 225,73 230,73 234,73 239,73 244,73 248,73 253,73 257,73 262,73 267,73 271,73 276,73 280,73 285,73 290,73 294,73 299,73"></polyline>
+            </g>
+            <text x="0" y="-12" font-family="IBM Plex Mono, monospace" font-size="10.5" font-weight="500" fill="var(--ink-2)">② false + INV · 17:59 · 0.92 / −1.00</text>
+            <text x="43.5" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">1000</text>
+            <text x="105.6" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">2000</text>
+            <text x="167.7" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">3000</text>
+            <text x="229.9" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">4000</text>
+            <text x="292.0" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">5000</text>
+          </g>
+          <g transform="translate(56,214)">
+            <rect x="0" y="0" width="292.0" height="120.0" fill="none" stroke="currentColor" stroke-width=".6" opacity=".18"></rect>
+            <text x="-6" y="3.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">15</text>
+            <line x1="0" y1="60.0" x2="292.0" y2="60.0" stroke="currentColor" stroke-width="1" opacity=".3"></line>
+            <text x="-6" y="63.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">0</text>
+            <text x="-6" y="123.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">−15</text>
+            <clipPath id="clip-B-c2b"><rect x="0" y="0" width="292.0" height="120.0"></rect></clipPath>
+            <g clip-path="url(#clip-B-c2b)">
+              <polyline fill="none" stroke="var(--a1)" stroke-width="1.6" stroke-dasharray="4 2.5" points="0,59 5,59 9,59 14,59 18,59 23,130 28,103 32,102 37,99 41,99 46,99 51,99 55,99 60,99 64,99 69,99 74,99 78,99 83,99 87,99 92,99 97,99 101,99 106,99 110,99 115,99 120,99 124,99 129,99 133,99 138,99 143,99 147,99 152,98 156,99 161,98 165,98 170,99 175,98 179,98 184,98 188,98 193,98 198,98 202,98 207,98 211,98 216,98 221,98 225,98 230,98 234,98 239,98 244,98 248,98 253,98 257,98 262,98 267,98 271,98 276,98 280,98 285,98 290,98 294,98 299,98"></polyline>
+              <polyline fill="none" stroke="var(--a3)" stroke-width="1.6" points="0,59 5,59 9,59 14,59 18,59 23,130 28,84 32,83 37,81 41,81 46,81 51,81 55,81 60,81 64,81 69,81 74,81 78,81 83,81 87,81 92,81 97,81 101,81 106,81 110,81 115,81 120,81 124,81 129,81 133,81 138,81 143,81 147,81 152,80 156,81 161,81 165,81 170,81 175,81 179,80 184,80 188,80 193,80 198,80 202,80 207,80 211,80 216,80 221,80 225,80 230,80 234,80 239,80 244,80 248,80 253,80 257,80 262,80 267,80 271,80 276,80 280,80 285,80 290,80 294,80 299,80"></polyline>
+            </g>
+            <text x="0" y="-12" font-family="IBM Plex Mono, monospace" font-size="10.5" font-weight="500" fill="var(--ink-2)">② false + INV · 18:11 · 0.80 / −2.00</text>
+            <text x="43.5" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">1000</text>
+            <text x="105.6" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">2000</text>
+            <text x="167.7" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">3000</text>
+            <text x="229.9" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">4000</text>
+            <text x="292.0" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">5000</text>
+          </g>
+          <g transform="translate(404,214)">
+            <rect x="0" y="0" width="292.0" height="120.0" fill="none" stroke="currentColor" stroke-width=".6" opacity=".18"></rect>
+            <text x="-6" y="3.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">0.8</text>
+            <line x1="0" y1="60.0" x2="292.0" y2="60.0" stroke="currentColor" stroke-width="1" opacity=".3"></line>
+            <text x="-6" y="63.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">0</text>
+            <text x="-6" y="123.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">−0.8</text>
+            <clipPath id="clip-B-c4"><rect x="0" y="0" width="292.0" height="120.0"></rect></clipPath>
+            <g clip-path="url(#clip-B-c4)">
+              <polyline fill="none" stroke="var(--a1)" stroke-width="1.6" stroke-dasharray="4 2.5" points="0,50 5,50 9,49 14,51 18,53 23,130 28,130 32,130 37,80 41,64 46,71 51,72 55,70 60,67 64,65 69,63 74,60 78,61 83,61 87,60 92,60 97,61 101,60 106,59 110,58 115,58 120,58 124,58 129,59 133,59 138,58 143,57 147,57 152,57 156,57 161,57 165,58 170,57 175,57 179,57 184,56 188,56 193,56 198,56 202,57 207,57 211,57 216,56 221,56 225,55 230,55 234,56 239,56 244,56 248,56 253,55 257,55 262,55 267,56 271,56 276,56 280,56 285,56 290,56 294,56 299,55"></polyline>
+              <polyline fill="none" stroke="var(--a3)" stroke-width="1.6" points="0,47 5,46 9,46 14,47 18,49 23,130 28,130 32,130 37,104 41,85 46,89 51,88 55,83 60,80 64,77 69,74 74,71 78,70 83,68 87,69 92,69 97,70 101,68 106,66 110,64 115,64 120,63 124,64 129,66 133,66 138,63 143,63 147,62 152,61 156,61 161,61 165,62 170,62 175,62 179,61 184,60 188,60 193,60 198,60 202,60 207,60 211,61 216,59 221,60 225,58 230,59 234,59 239,59 244,60 248,59 253,59 257,59 262,57 267,58 271,58 276,59 280,60 285,59 290,58 294,58 299,58"></polyline>
+            </g>
+            <text x="0" y="-12" font-family="IBM Plex Mono, monospace" font-size="10.5" font-weight="500" fill="var(--ink-2)">④ true + INV · 18:15 · 0.80 / −2.00</text>
+            <text x="43.5" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">1000</text>
+            <text x="105.6" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">2000</text>
+            <text x="167.7" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">3000</text>
+            <text x="229.9" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">4000</text>
+            <text x="292.0" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">5000</text>
+          </g>
+          <text x="350" y="372" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">记录时间 / ns　·　纵轴 mA（注意每格量程不同）</text>
+        </svg>
+      </div>
+      <figcaption>④ 的纵轴是 ±0.8 mA，其余是 ±4 / ±4 / ±15 mA。也就是说 ④ 那一格里"回到零"是在一个比别人细 5–19 倍的尺度上看的，仍然是零。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <p class="eyebrow">三 · 数字</p>
+    <h2>台阶前后各自的电平</h2>
+    <table>
+      <tr><th>组合</th><th>时间</th><th>台阶前 亮 / 暗 (mA)</th><th>台阶后 &gt;3 µs 亮 / 暗 (mA)</th><th>尖峰</th></tr>
+      <tr><td class="mono">① false + NORM</td><td class="mono">18:05</td><td class="mono">−0.703 / −2.556</td><td class="mono">−0.111 / −0.047</td><td class="mono">+20 (正向)</td></tr>
+      <tr><td class="mono">② false + INV</td><td class="mono">17:59</td><td class="mono">−0.115 / −0.158</td><td class="mono">−0.875 / −2.783</td><td class="mono">−20 (负向)</td></tr>
+      <tr><td class="mono">② false + INV</td><td class="mono">18:11</td><td class="mono">0.267 / 0.204</td><td class="mono">−5.089 / −9.552</td><td class="mono">−34 (负向)</td></tr>
+      <tr><td class="mono">④ true + INV</td><td class="mono">18:15</td><td class="mono">0.178 / 0.131</td><td class="mono">0.01 / 0.055</td><td class="mono">−20.27 (两条相同 → 撞底)</td></tr>
+    </table>
+    <p class="note">① 台阶<strong>前</strong>亮暗差 1.85 mA、台阶后都归零；② 反过来，台阶后亮暗差 1.9 / 4.5 mA 且不衰减；④ 台阶前差 0.047 mA、台阶后亮 0.010 暗 0.055 mA——<strong>两条各自都回零，差值自然也回零</strong>。这是四格里唯一一个"抽取结束后什么都不剩"的。</p>
+    <p class="note">另外注意 ④ 的亮暗最小值精确相同（−20.27 mA）。这不是巧合也不是物理：两条独立平均的采集不会在浮点数上完全一致，是两条都压在同一条量程底线上。所以 ④ 的<strong>峰高不可用</strong>，但被削掉的只有 11 ns，7 个 delay 点的电荷积分散布仍然只有 4%。</p>
+  </section>
+
+  <footer>
+    数据：<code>runs/…_20260901_{180546, 175932, 181143, 181536}</code>，delay = +80 ns，20 次平均 × 3 圈。<br>
+    画的是 <code>traces/light</code> 和 <code>traces/dark</code> 本身，没有相减、没有基线校正。<br>
+    每一轮的绝对偏置由 autorange 决定，各轮不可直接比较；同一轮内亮暗共用量程，所以同一格里的两条可以比。
+  </footer>
+</div>

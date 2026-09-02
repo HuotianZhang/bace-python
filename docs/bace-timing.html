@@ -1,0 +1,411 @@
+<title>BACE 触发链时序</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@500;600&display=swap">
+<style>
+:root{
+  --ground:#F1F3F2;
+  --surface:#FBFCFB;
+  --sunken:#E4E9E7;
+  --ink:#141A19;
+  --ink-2:#4C5A57;
+  --ink-3:#71807C;
+  --rule:#C8D2CF;
+  --rule-soft:#DDE4E2;
+  --ch1:#9A6B0E;
+  --ch2:#3D7A2C;
+  --ch3:#2A57A0;
+  --ch4:#AC3549;
+  --light:#7A5AA8;
+  --band:rgba(61,122,44,.14);
+  --shadow:0 1px 2px rgba(20,26,25,.05), 0 8px 24px -16px rgba(20,26,25,.25);
+  --measure:38rem;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0D1211;
+    --surface:#131A18;
+    --sunken:#0A0F0E;
+    --ink:#E3E9E7;
+    --ink-2:#A0AEAA;
+    --ink-3:#7C8A86;
+    --rule:#26332F;
+    --rule-soft:#1C2624;
+    --ch1:#E0B44A;
+    --ch2:#7FC96C;
+    --ch3:#7FA8E8;
+    --ch4:#E98096;
+    --light:#B79BE0;
+    --band:rgba(127,201,108,.16);
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0D1211;
+  --surface:#131A18;
+  --sunken:#0A0F0E;
+  --ink:#E3E9E7;
+  --ink-2:#A0AEAA;
+  --ink-3:#7C8A86;
+  --rule:#26332F;
+  --rule-soft:#1C2624;
+  --ch1:#E0B44A;
+  --ch2:#7FC96C;
+  --ch3:#7FA8E8;
+  --ch4:#E98096;
+  --light:#B79BE0;
+  --band:rgba(127,201,108,.16);
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.7);
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--ground);
+  color:var(--ink);
+  font-family:"IBM Plex Sans SC","IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  font-size:16px;
+  line-height:1.75;
+  -webkit-font-smoothing:antialiased;
+}
+.page{max-width:var(--measure);margin:0 auto;padding:3.5rem 1.5rem 6rem;
+  display:flex;flex-direction:column;gap:0}
+.wide{max-width:min(62rem,100%);margin-left:auto;margin-right:auto;width:100%}
+@media (min-width:64rem){
+  .wide{width:min(62rem,calc(100vw - 3rem));
+    margin-left:calc((var(--measure) - min(62rem,calc(100vw - 3rem))) / 2)}
+}
+
+h1,h2,h3{font-family:"Noto Serif SC","IBM Plex Serif",Georgia,serif;
+  text-wrap:balance;margin:0;font-weight:600}
+h1{font-size:2.4rem;line-height:1.2;letter-spacing:-.01em}
+h2{font-size:1.4rem;line-height:1.35}
+h3{font-size:1rem;line-height:1.45}
+p{margin:0}
+strong{font-weight:600;color:var(--ink)}
+code,.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-variant-numeric:tabular-nums}
+code{font-size:.85em;background:var(--sunken);padding:.1em .34em;border-radius:3px}
+a{color:var(--ink);text-underline-offset:2px}
+:focus-visible{outline:2px solid var(--ch3);outline-offset:3px;border-radius:2px}
+
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:.7rem;font-weight:500;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+
+header{display:flex;flex-direction:column;gap:1rem;margin-bottom:2.5rem}
+.standfirst{font-size:1.06rem;color:var(--ink-2);max-width:34rem}
+.facts{display:flex;flex-wrap:wrap;gap:0 1.7rem;border-top:1px solid var(--rule);
+  border-bottom:1px solid var(--rule);padding:.8rem 0;margin-top:.3rem}
+.fact{display:flex;flex-direction:column;padding:.15rem 0}
+.fact dt{font-family:"IBM Plex Mono",monospace;font-size:.64rem;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-3)}
+.fact dd{margin:0;font-family:"IBM Plex Mono",monospace;font-size:.88rem;
+  font-weight:500;font-variant-numeric:tabular-nums}
+
+section{margin-top:3rem;display:flex;flex-direction:column;gap:1rem}
+section > .eyebrow{margin-bottom:-.5rem}
+.lede{color:var(--ink-2)}
+
+figure{margin:.5rem 0 0;display:flex;flex-direction:column;gap:.7rem}
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:5px;
+  padding:1rem .9rem;overflow-x:auto;box-shadow:var(--shadow)}
+.frame svg{display:block;width:100%;min-width:640px;height:auto;color:var(--ink)}
+figcaption{font-size:.87rem;color:var(--ink-3);line-height:1.6}
+.legend{display:flex;flex-wrap:wrap;gap:.3rem 1.1rem;
+  font-family:"IBM Plex Mono",monospace;font-size:.7rem;color:var(--ink-2)}
+.legend i{display:inline-block;width:1.1rem;height:0;border-top:2.5px solid;
+  vertical-align:middle;margin-right:.35rem}
+
+.tablewrap{overflow-x:auto;border:1px solid var(--rule);border-radius:5px;
+  background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.83rem;
+  font-variant-numeric:tabular-nums}
+th,td{padding:.55rem .75rem;text-align:left;border-bottom:1px solid var(--rule-soft);
+  vertical-align:top}
+th{font-family:"IBM Plex Mono",monospace;font-size:.63rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3);font-weight:500;background:var(--sunken);
+  white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+td.n{font-family:"IBM Plex Mono",monospace;white-space:nowrap;font-weight:500}
+tr.total td{background:var(--sunken);font-weight:600}
+
+pre{margin:0;background:var(--sunken);border:1px solid var(--rule-soft);border-radius:5px;
+  padding:.85rem .95rem;overflow-x:auto;
+  font-family:"IBM Plex Mono",monospace;font-size:.78rem;line-height:1.65;color:var(--ink)}
+pre .dim{color:var(--ink-3)}
+pre .bad{color:var(--ch4)}
+pre .ok{color:var(--ch2)}
+
+.note{border-left:2px solid var(--rule);padding-left:1rem;color:var(--ink-2);font-size:.96rem}
+.callout{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--ch4);
+  border-radius:4px;padding:1.1rem 1.2rem;display:flex;flex-direction:column;gap:.7rem;
+  box-shadow:var(--shadow)}
+.callout .tag{align-self:flex-start;font-family:"IBM Plex Mono",monospace;font-size:.64rem;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--ch4)}
+.callout p{color:var(--ink-2)}
+ul.plain{margin:0;padding-left:1.15rem;display:flex;flex-direction:column;gap:.5rem;
+  color:var(--ink-2)}
+ul.plain li::marker{color:var(--ink-3)}
+footer{margin-top:4rem;padding-top:1.1rem;border-top:1px solid var(--rule);
+  font-family:"IBM Plex Mono",monospace;font-size:.71rem;color:var(--ink-3);line-height:1.8}
+</style>
+
+<div class="page">
+
+  <header>
+    <p class="eyebrow">2026-09-01 · 台上实测 · fingerprint 9d82c97d6427</p>
+    <h1>BACE 触发链时序</h1>
+    <p class="standfirst">光从 33220A 的驱动沿走到样品要 <strong>502 ns</strong>，其中 419 ns 是 85 m 光纤。代码里只有一个 47 ns 的常数代表这整条链——而它真正扮演的角色，是 delay 轴的零点标定。</p>
+    <dl class="facts">
+      <div class="fact"><dt>零点</dt><dd>81150A Sync</dd></div>
+      <div class="fact"><dt>光路延迟</dt><dd>502 ns</dd></div>
+      <div class="fact"><dt>匹配的 :PULS:DEL1</dt><dd>60–75 ns</dd></div>
+      <div class="fact"><dt>代码当前值</dt><dd>135 ns</dd></div>
+    </dl>
+  </header>
+
+  <div class="callout">
+    <span class="tag">2026-09-02 后续</span>
+    <p><strong>第六节说的那个 delay 扫描做了，结论支持本页：<code>TRIGGER_OFFSET_S</code> 现在是 0。</strong>在同样的 <code>Delay(ns) = 90</code> 下，LabVIEW 和 Python 端口的位移尖峰都落在记录的 328 ns——扫描路径上 <code>:PULS:DEL1</code> 收到的就是 <code>delay_ns</code> 本身，没有任何偏移。原来那 47 ns 是从另一条路径量出来的。</p>
+    <p>所以本页第四节的判断成立（47 ns 既不是线缆延迟、数值也不对），只是最终答案不是 60–75 ns 而是 0。第五节的 <code>[timing]</code> 块仍未实现。完整对照见 <code>HANDOVER-2026-09-02.md</code>。</p>
+  </div>
+
+  <section>
+    <p class="eyebrow">一 · 时间轴</p>
+    <h2>五个信号，一个零点</h2>
+    <p class="lede">全部以示波器看到的时间为准，零点取 81150A 的 Sync——也就是正式测量时示波器的触发源。<code>:PULS:DEL1</code> 只延迟输出，不延迟 Sync：把它调到 0，红蓝两条边沿重合。</p>
+
+    <figure class="wide">
+      <div class="frame">
+        <svg viewBox="0 0 900 448" role="img" aria-label="以 81150A Sync 为零点的时间轴：33220A 驱动在 −380 ns 关闭，81150A 输出在 :PULS:DEL1 = +60 ns 上升，样品处的光在 +122 ns 才真正关闭，器件电流在输出之后 47 到 62 ns 响应。驱动沿到样品光关闭之间是 502 ns 的光路延迟。">
+          <defs>
+            <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"
+                    markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,1 L9,5 L0,9 z" fill="currentColor"></path>
+            </marker>
+          </defs>
+
+          <!-- t_led span -->
+          <line x1="211.5" y1="30" x2="794.3" y2="30" stroke="currentColor" stroke-width="1"
+                marker-start="url(#ar)" marker-end="url(#ar)" opacity=".75"></line>
+          <text x="502" y="22" text-anchor="middle" font-family="IBM Plex Mono, monospace"
+                font-size="12.5" font-weight="600" fill="currentColor">t_led = 502 ns</text>
+          <text x="502" y="45" text-anchor="middle" font-family="IBM Plex Sans SC, sans-serif"
+                font-size="11.5" fill="currentColor" opacity=".62">LED 驱动放大器 ≈ 83 ns  +  85 m 光纤 419 ns</text>
+
+          <!-- guides -->
+          <g stroke="currentColor" stroke-width="1" stroke-dasharray="2 4" opacity=".28">
+            <line x1="211.5" y1="52" x2="211.5" y2="400"></line>
+            <line x1="652.7" y1="52" x2="652.7" y2="400"></line>
+            <line x1="722.4" y1="52" x2="722.4" y2="400"></line>
+          </g>
+          <line x1="794.3" y1="52" x2="794.3" y2="400" stroke="var(--light)" stroke-width="1.5"
+                stroke-dasharray="3 3" opacity=".9"></line>
+
+          <!-- CH2 onset uncertainty band -->
+          <rect x="776.9" y="316" width="17.4" height="62" fill="var(--band)"></rect>
+
+          <!-- lanes -->
+          <g font-family="IBM Plex Mono, monospace" font-size="11.5" text-anchor="end"
+             fill="currentColor">
+            <text x="152" y="66">CH1</text>
+            <text x="152" y="82" opacity=".6">33220A 驱动</text>
+            <text x="152" y="130">CH3</text>
+            <text x="152" y="146" opacity=".6">81150A Sync</text>
+            <text x="152" y="190">CH4</text>
+            <text x="152" y="206" opacity=".6">81150A 输出</text>
+            <text x="152" y="256">样品处的光</text>
+            <text x="152" y="272" opacity=".6">Si 探测器实测</text>
+            <text x="152" y="340">CH2</text>
+            <text x="152" y="356" opacity=".6">器件电流</text>
+          </g>
+
+          <polyline points="165,62 211.5,62 211.5,92 885,92" fill="none"
+                    stroke="var(--ch1)" stroke-width="2.4" stroke-linejoin="round"></polyline>
+          <polyline points="165,152 652.7,152 652.7,122 664,122 664,152 885,152" fill="none"
+                    stroke="var(--ch3)" stroke-width="2.4" stroke-linejoin="round"></polyline>
+          <polyline points="165,212 722.4,212 722.4,182 885,182" fill="none"
+                    stroke="var(--ch4)" stroke-width="2.4" stroke-linejoin="round"></polyline>
+          <polyline points="165,262 794.3,262 794.3,292 885,292" fill="none"
+                    stroke="var(--light)" stroke-width="2.4" stroke-dasharray="7 4"
+                    stroke-linejoin="round"></polyline>
+          <polyline points="165,372 776.9,372 790,326 802,338 818,352 845,364 885,368" fill="none"
+                    stroke="var(--ch2)" stroke-width="2.4" stroke-linejoin="round"></polyline>
+
+          <!-- moment labels -->
+          <g font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor">
+            <text x="216" y="108" opacity=".8">−380</text>
+            <text x="657" y="168" opacity=".8">0</text>
+            <text x="727" y="176" fill="var(--ch4)">:PULS:DEL1 = 60</text>
+            <text x="799" y="256" fill="var(--light)">+122  光灭</text>
+          </g>
+
+          <!-- t_bias span -->
+          <line x1="722.4" y1="404" x2="785" y2="404" stroke="currentColor" stroke-width="1"
+                marker-start="url(#ar)" marker-end="url(#ar)" opacity=".75"></line>
+          <text x="714" y="408" text-anchor="end" font-family="IBM Plex Mono, monospace"
+                font-size="11.5" fill="currentColor">t_bias 47–62 ns</text>
+
+          <!-- axis -->
+          <line x1="165" y1="428" x2="885" y2="428" stroke="currentColor" stroke-width="1"
+                opacity=".45"></line>
+          <g font-family="IBM Plex Mono, monospace" font-size="10.5" text-anchor="middle"
+             fill="currentColor" opacity=".6">
+            <text x="188" y="444">−400</text>
+            <text x="304" y="444">−300</text>
+            <text x="421" y="444">−200</text>
+            <text x="537" y="444">−100</text>
+            <text x="653" y="444">0</text>
+            <text x="761" y="444">100</text>
+            <text x="880" y="444">200 ns</text>
+          </g>
+        </svg>
+      </div>
+      <div class="legend">
+        <span><i style="border-color:var(--ch1)"></i>CH1 驱动</span>
+        <span><i style="border-color:var(--ch3)"></i>CH3 Sync</span>
+        <span><i style="border-color:var(--ch4)"></i>CH4 输出</span>
+        <span><i style="border-color:var(--light)"></i>样品处的光</span>
+        <span><i style="border-color:var(--ch2)"></i>CH2 器件电流</span>
+      </div>
+      <figcaption>驱动沿在 −380 ns，而光要到 +122 ns 才在样品处熄灭——中间隔着 502 ns 的光路。绿色的响应落在紫色虚线上（带内），说明当前的 <code>:PULS:DEL1 = 60 ns</code> 已经把抽取对准了光灭。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <p class="eyebrow">二 · 为什么是这些数</p>
+    <h2>两条路从同一个沿出发，长度差 500 ns</h2>
+
+    <figure class="wide">
+      <div class="frame">
+        <svg viewBox="0 0 900 262" role="img" aria-label="链条图：33220A 的输出沿同时走两条路，一条经 Sync 臂触发 81150A 再经 ×4 放大器到器件，另一条经 LED 驱动放大器和 85 m 光纤变成样品上的光。两条路在器件处汇合，长度相差约 500 纳秒。">
+          <defs>
+            <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"
+                    markerHeight="7" orient="auto">
+              <path d="M0,1 L9,5 L0,9 z" fill="currentColor"></path>
+            </marker>
+          </defs>
+          <g fill="none" stroke="currentColor" stroke-width="1.4">
+            <rect x="34" y="104" width="118" height="54" rx="4"></rect>
+            <rect x="316" y="26" width="118" height="54" rx="4" stroke="var(--ch3)"></rect>
+            <rect x="530" y="26" width="112" height="54" rx="4"></rect>
+            <rect x="272" y="182" width="146" height="54" rx="4"></rect>
+            <rect x="496" y="182" width="146" height="54" rx="4"></rect>
+            <rect x="734" y="104" width="132" height="54" rx="4" stroke-width="2"></rect>
+          </g>
+          <g font-family="IBM Plex Sans SC, sans-serif" font-size="12.5" text-anchor="middle"
+             fill="currentColor">
+            <text x="93" y="136">33220A</text>
+            <text x="375" y="50" fill="var(--ch3)">81150A</text>
+            <text x="375" y="68" font-size="10.5" opacity=".65">臂触发 EXT / POS</text>
+            <text x="586" y="58">×4 放大器</text>
+            <text x="345" y="207">LED 驱动放大器</text>
+            <text x="345" y="225" font-size="10.5" opacity=".65">≈ 83 ns</text>
+            <text x="569" y="207">85 m 光纤</text>
+            <text x="569" y="225" font-size="10.5" opacity=".65">419 ns  (n ≈ 1.48)</text>
+            <text x="800" y="130">器件</text>
+            <text x="800" y="148" font-size="10.5" opacity=".65">5.192 Ω → CH2</text>
+          </g>
+          <g fill="none" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar2)">
+            <path d="M152,120 L232,120 L232,53 L316,53"></path>
+            <path d="M434,53 L530,53"></path>
+            <path d="M642,53 L700,53 L700,120 L734,120"></path>
+            <path d="M152,142 L212,142 L212,209 L272,209"></path>
+            <path d="M418,209 L496,209"></path>
+            <path d="M642,209 L700,209 L700,142 L734,142"></path>
+          </g>
+          <g font-family="IBM Plex Mono, monospace" font-size="10.5" fill="currentColor">
+            <text x="238" y="86" opacity=".75">Sync</text>
+            <text x="238" y="100" opacity=".55">380 ns</text>
+            <text x="440" y="44" fill="var(--ch4)">:PULS:DEL1</text>
+            <text x="646" y="44" opacity=".75">47–62 ns 到响应</text>
+            <text x="158" y="176" opacity=".75">输出</text>
+          </g>
+          <line x1="272" y1="252" x2="734" y2="252" stroke="var(--light)" stroke-width="1.2"
+                marker-start="url(#ar2)" marker-end="url(#ar2)" opacity=".85"></line>
+          <text x="503" y="248" text-anchor="middle" font-family="IBM Plex Mono, monospace"
+                font-size="11" fill="var(--light)">光路合计 502 ns</text>
+        </svg>
+      </div>
+      <figcaption>同一个驱动沿分两路：上面一路几十纳秒就把场送到器件，下面一路要 502 ns 才把「光灭」送到。<code>:PULS:DEL1</code> 存在的意义就是补上这个差。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <p class="eyebrow">三 · 数字</p>
+    <h2>每一个是怎么来的</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>量</th><th>值</th><th>来源</th></tr></thead>
+        <tbody>
+          <tr><td>驱动关闭 → 81150A Sync</td><td class="n">380 ns</td><td>示波器，黄 → 蓝</td></tr>
+          <tr><td><code>:PULS:DEL1</code> → 红色输出沿</td><td class="n">≈ 1 : 1</td><td>改 delay 观察；设 0 时红蓝重合</td></tr>
+          <tr><td>Sync → 样品处光关闭</td><td class="n">+122 ns</td><td><strong>快速 Si 探测器</strong>放在器件位置</td></tr>
+          <tr class="total"><td>驱动 → 样品处光关闭　<code>t_led</code></td><td class="n">502 ns</td><td>122 − (−380)</td></tr>
+          <tr><td>　其中 85 m 石英光纤</td><td class="n">419 ns</td><td>计算，n<sub>g</sub> ≈ 1.48 @ 530 nm</td></tr>
+          <tr><td>　其中 LED 驱动放大器 + 短线</td><td class="n">≈ 83 ns</td><td>502 − 419（残差）</td></tr>
+          <tr><td>81150A 输出 → 器件光电荷响应　<code>t_bias</code></td><td class="n">47–62 ns</td><td>亮暗相减后的特征，非硬边沿</td></tr>
+          <tr class="total"><td>匹配的 <code>:PULS:DEL1</code></td><td class="n">60–75 ns</td><td>122 − t_bias</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note"><code>t_bias</code> 的 15 ns 展宽直接传进零点，因为「光电荷信号」是亮暗两条曲线相减推出来的特征，不是一个可以卡阈值的边沿。所以零点自带 ±15 ns 不确定度。</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">四 · 推导</p>
+    <h2>那个 47 ns 常数不是线缆延迟</h2>
+
+    <p>真实的「光灭之后多久开始抽取」是</p>
+<pre>τ = (:PULS:DEL1 + t_bias) − 122
+
+    :PULS:DEL1 = τ + <span class="ok">delay_zero</span>
+    <span class="ok">delay_zero</span> = 122 − t_bias = <span class="ok">60…75 ns</span></pre>
+
+    <p><code>delay_zero</code> 就是代码里 <code>trigger_offset_s</code> 扮演的角色——但名字、定义和数值都不对。</p>
+
+    <div class="callout">
+      <span class="tag">要改</span>
+      <h3><code>TRIGGER_OFFSET_S</code> 的含义是错的，值也是错的</h3>
+<pre><span class="dim">core/pulses.py — 现在</span>
+TRIGGER_OFFSET_S = <span class="bad">47e-9</span>
+"""Fixed delay between the generator trigger and the field arriving at
+the device — <span class="bad">cable plus instrument latency</span>."""
+
+delay_s = delay_ns * 1e-9 + TRIGGER_OFFSET_S     <span class="dim"># → :PULS:DEL1</span></pre>
+      <p>它不是线缆延迟，而是 <strong>delay 轴的零点标定</strong>：让 <code>delay_ns = 0</code> 真的等于「场恰好在光灭时到达器件」。</p>
+      <p><strong>而且它是大数的残差。</strong>122 本身 = 502 − 380，两个四五百纳秒量的差。光纤长度、LED 放大器、偏压线缆任何一项改动，这个「小常数」的变化都可能是它自身的数倍。写成 <em>cable plus instrument latency</em> 会让后来的人以为它不会动。</p>
+      <p>当前 <code>run.toml</code> 的 <code>delay_ns = 88</code> 给出 <code>:PULS:DEL1 = 135</code>，比匹配值高 60–75 ns——标称的「88 ns」实际是光灭后约 <strong>150–160 ns</strong>。</p>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">五 · 落到代码</p>
+    <h2>接线属性进 rig.toml，不进配方</h2>
+    <p class="lede">跟 <code>current_sign</code> 同一类：会随台面改动而变的物理常数不能只活在注释里，而且每组数据必须自带它是在哪套时序下测的。</p>
+<pre><span class="dim">rig.toml</span>
+[timing]
+led_path_delay_s     = 5.02e-7   <span class="dim"># 驱动放大器 + 85 m 光纤。实测</span>
+bias_response_s      = 5.5e-8    <span class="dim"># 81150A 输出 → 器件响应，47–62 ns</span>
+arm_latency_s        = 3.80e-7   <span class="dim"># 33220A 驱动沿 → 81150A Sync</span>
+delay_zero_offset_s  = 6.7e-8    <span class="dim"># 派生：光灭(+122) − bias_response</span></pre>
+    <ul class="plain">
+      <li><code>:PULS:DEL1 = delay_ns + delay_zero_offset_s</code>，把 <code>TRIGGER_OFFSET_S</code> 从 <code>core/pulses.py</code> 移走——它是台面属性，不是脉冲计算的一部分。</li>
+      <li>四个数和派生的零点全部写进输出元数据（HDF5 + <code>.dat</code> 表头），这样一组数据看得出它假设了什么时序。</li>
+      <li><code>--sync</code> 已经在报告 <code>:PULS:DEL1?</code>；再加一条：把实测的 Sync→输出、驱动→Sync 和配置里的值对照，不一致就 warn。</li>
+    </ul>
+  </section>
+
+  <section>
+    <p class="eyebrow">六 · 复核</p>
+    <h2>delay 扫描是更强的标定</h2>
+    <p>上面的零点是 <code>122 − t_bias</code>，依赖对「光电荷响应在哪」的判读，带 ±15 ns。</p>
+    <p><strong>Q(delay) 扫描不需要知道 <code>t_bias</code>。</strong>曲线的拐点直接就是「场恰好在光灭时到达」的那个设定值——一次测量给出整个偏移，而且用的是最终要用的那个量（电荷），不是中间信号。</p>
+    <p class="note">扫之前必须先做削顶上报（待改清单第一批已完成）：信号最大的那几个 delay 点最容易削顶，压平的恰好是拐点区域，会给出一个看起来像物理饱和的平台。</p>
+  </section>
+
+  <footer>
+    实测于 2026-09-01，示波器 DSO9054H。零点 = 81150A Sync = 正式测量时的示波器触发源。<br>
+    <code>t_led</code> 由放在器件位置的快速 Si 探测器测得；<code>t_bias</code> 由亮暗曲线相减判读，带 ±15 ns。<br>
+    更早的一份记录说「Sync 和输出一起被 <code>:PULS:DEL1</code> 延迟」，以及「Sync → 输出 = 47 ns 已被确认」——两条都不成立，已由本页取代。
+  </footer>
+</div>

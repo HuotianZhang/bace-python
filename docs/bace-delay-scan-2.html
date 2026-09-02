@@ -1,0 +1,212 @@
+<title>第二次 delay 扫描</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@500;600&display=swap">
+<style>
+:root{
+  --ground:#F1F3F2; --surface:#FBFCFB; --sunken:#E4E9E7;
+  --ink:#141A19; --ink-2:#4C5A57; --ink-3:#71807C;
+  --rule:#C8D2CF; --rule-soft:#DDE4E2;
+  --a1:#9A6B0E; --a2:#3D7A2C; --a3:#2A57A0; --a4:#AC3549;
+  --light:#7A5AA8; --bad:#AC3549;
+  --shadow:0 1px 2px rgba(20,26,25,.05), 0 8px 24px -16px rgba(20,26,25,.25);
+  --measure:38rem;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0D1211; --surface:#131A18; --sunken:#0A0F0E;
+    --ink:#E3E9E7; --ink-2:#A0AEAA; --ink-3:#7C8A86;
+    --rule:#26332F; --rule-soft:#1C2624;
+    --a1:#E0B44A; --a2:#7FC96C; --a3:#7FA8E8; --a4:#E98096;
+    --light:#B79BE0; --bad:#E98096;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0D1211; --surface:#131A18; --sunken:#0A0F0E;
+  --ink:#E3E9E7; --ink-2:#A0AEAA; --ink-3:#7C8A86;
+  --rule:#26332F; --rule-soft:#1C2624;
+  --a1:#E0B44A; --a2:#7FC96C; --a3:#7FA8E8; --a4:#E98096;
+  --light:#B79BE0; --bad:#E98096;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.7);
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);
+  font-family:"IBM Plex Sans SC","IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  font-size:16px;line-height:1.75;-webkit-font-smoothing:antialiased}
+.page{max-width:var(--measure);margin:0 auto;padding:3.5rem 1.5rem 6rem}
+.wide{max-width:min(62rem,100%);width:100%}
+@media (min-width:64rem){
+  .wide{width:min(62rem,calc(100vw - 3rem));
+    margin-left:calc((var(--measure) - min(62rem,calc(100vw - 3rem))) / 2)}
+}
+h1,h2{font-family:"Noto Serif SC","IBM Plex Serif",Georgia,serif;
+  text-wrap:balance;margin:0;font-weight:600}
+h1{font-size:2.3rem;line-height:1.2;letter-spacing:-.01em}
+h2{font-size:1.35rem;line-height:1.35}
+p{margin:0}
+strong{font-weight:600}
+code,.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+code{font-size:.85em;background:var(--sunken);padding:.1em .34em;border-radius:3px}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:.7rem;font-weight:500;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+header{display:flex;flex-direction:column;gap:1rem;margin-bottom:2.5rem}
+.standfirst{font-size:1.06rem;color:var(--ink-2);max-width:34rem}
+.facts{display:flex;flex-wrap:wrap;gap:0 1.7rem;border-top:1px solid var(--rule);
+  border-bottom:1px solid var(--rule);padding:.8rem 0;margin-top:.3rem}
+.fact{display:flex;flex-direction:column;padding:.15rem 0}
+.fact dt{font-family:"IBM Plex Mono",monospace;font-size:.64rem;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-3)}
+.fact dd{margin:0;font-family:"IBM Plex Mono",monospace;font-size:.88rem;font-weight:500;
+  font-variant-numeric:tabular-nums}
+section{margin-top:3rem;display:flex;flex-direction:column;gap:1rem}
+section > .eyebrow{margin-bottom:-.5rem}
+.lede{color:var(--ink-2)}
+figure{margin:.5rem 0 0;display:flex;flex-direction:column;gap:.7rem}
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:5px;
+  padding:1rem .9rem;overflow-x:auto;box-shadow:var(--shadow)}
+.frame svg{display:block;width:100%;min-width:620px;height:auto;color:var(--ink)}
+figcaption{font-size:.87rem;color:var(--ink-3);line-height:1.6}
+.legend{display:flex;flex-wrap:wrap;gap:.3rem 1.1rem;font-family:"IBM Plex Mono",monospace;
+  font-size:.7rem;color:var(--ink-2)}
+.legend i{display:inline-block;width:1.1rem;height:0;border-top:2.5px solid;
+  vertical-align:middle;margin-right:.35rem}
+.callout{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--bad);
+  border-radius:4px;padding:1.1rem 1.2rem;display:flex;flex-direction:column;gap:.7rem;
+  box-shadow:var(--shadow)}
+.callout .tag{align-self:flex-start;font-family:"IBM Plex Mono",monospace;font-size:.64rem;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--bad)}
+.callout p{color:var(--ink-2)}
+.ok{border-left-color:var(--a2)}
+.ok .tag{color:var(--a2)}
+ul.plain{margin:0;padding-left:1.15rem;display:flex;flex-direction:column;gap:.5rem;color:var(--ink-2)}
+ul.plain li::marker{color:var(--ink-3)}
+.note{border-left:2px solid var(--rule);padding-left:1rem;color:var(--ink-2);font-size:.96rem}
+pre{margin:0;background:var(--sunken);border:1px solid var(--rule-soft);border-radius:5px;
+  padding:.85rem .95rem;overflow-x:auto;font-family:"IBM Plex Mono",monospace;
+  font-size:.78rem;line-height:1.65}
+footer{margin-top:4rem;padding-top:1.1rem;border-top:1px solid var(--rule);
+  font-family:"IBM Plex Mono",monospace;font-size:.71rem;color:var(--ink-3);line-height:1.8}
+</style>
+
+<div class="page">
+  <header>
+    <p class="eyebrow">2026-09-01 17:59 · :OUTP1:POL INV · 49 点 × 3 loops</p>
+    <h1>第二次 delay 扫描</h1>
+    <p class="standfirst">翻成 INV 是对的——原始波形直接给出证明，不是推断。但同一批波形也说明光仍然没关；而 <code>offset_correct</code> 恰好在这种情况下把信号当基线减掉，存进文件的 <code>photo</code> 是真实波形的镜像。</p>
+    <dl class="facts">
+      <div class="fact"><dt>脉冲前</dt><dd>0.04 mA</dd></div>
+      <div class="fact"><dt>脉冲后</dt><dd>1.91 mA 恒定</dd></div>
+      <div class="fact"><dt>4 µs 内衰减</dt><dd>没有</dd></div>
+      <div class="fact"><dt>存进文件的 Q</dt><dd>不可用</dd></div>
+    </dl>
+  </header>
+
+  <div class="callout">
+    <span class="tag">2026-09-02 更正</span>
+    <p><strong>本页「光还是没关」那一节的结论不成立。</strong>Newport 1918-C 实测：LED 低电平 0.4 V 时的输出是导通电平的 <strong>0.009 %</strong>，灯是灭的。当时看到的「抽取电流 4 µs 内不衰减」另有原因——器件停在 V_oc、极性组合不对。</p>
+    <p>本页「基线校正把信号减掉了」那一节<strong>成立</strong>，并已落到代码：<code>core.process.baseline_is_flat()</code> 现在会在记录的头尾不一致时告警（不改任何数字）。<code>trigger_offset_s</code> 也已由 47 ns 改为实测的 <strong>0</strong>。</p>
+  </div>
+
+  <section>
+    <p class="eyebrow">一 · 证明</p>
+    <h2>INV 让器件停在 V_oc</h2>
+    <p class="lede">两轮的<strong>原始</strong> <code>light − dark</code>（未做基线校正），同一个 delay = +80 ns。NORM 那条脉冲前一直在抽取、脉冲把抽取关掉；INV 那条脉冲前是零、脉冲把抽取打开。后者才是 BACE。</p>
+    <figure class="wide">
+      <div class="frame">
+        <svg viewBox="0 0 700 205" role="img" aria-label="两轮的原始光暗差电流对比：NORM 那轮脉冲前是 1.9 毫安、脉冲后归零；INV 那轮脉冲前是零、脉冲后升到 1.9 毫安并保持不变。">
+          <g transform="translate(46,16)">
+            <line x1="-4" y1="29.0" x2="640" y2="29.0" stroke="currentColor" stroke-width="0.6" opacity="0.13"></line>
+            <text x="-8" y="32.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">2</text>
+            <line x1="-4" y1="77.4" x2="640" y2="77.4" stroke="currentColor" stroke-width="0.6" opacity="0.13"></line>
+            <text x="-8" y="80.9" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">1</text>
+            <line x1="-4" y1="125.8" x2="640" y2="125.8" stroke="currentColor" stroke-width="1.2" opacity="0.35"></line>
+            <text x="-8" y="129.3" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">0</text>
+            <line x1="200.0" y1="-6" x2="200.0" y2="150" stroke="var(--a1)" stroke-width="1.2" stroke-dasharray="4 3" opacity=".65"></line>
+            <line x1="225.1" y1="-6" x2="225.1" y2="150" stroke="var(--a3)" stroke-width="1.2" stroke-dasharray="4 3" opacity=".65"></line>
+            <polyline fill="none" stroke="var(--a1)" stroke-width="1.5" points="0,33 12,33 23,33 34,33 45,33 56,33 67,33 78,33 89,33 100,33 111,34 122,33 134,33 145,33 156,33 167,33 178,34 189,-6 200,88 211,126 222,126 233,123 244,123 256,124 267,124 278,125 289,125 300,126 311,127 322,127 333,128 344,128 355,129 367,130 378,130 389,130 400,131 411,131 422,131 433,131 444,131 455,131 466,132 477,132 489,132 500,132 511,132 522,132 533,132 544,132 555,132 566,132 577,132 588,132 599,132 611,132 622,132 633,132"></polyline>
+            <polyline fill="none" stroke="var(--a3)" stroke-width="1.5" points="0,124 12,124 23,124 34,124 45,124 56,124 67,124 78,124 89,124 100,124 111,123 122,123 134,124 145,124 156,124 167,124 178,124 189,156 200,95 211,92 222,80 233,66 244,56 256,50 267,46 278,43 289,41 300,41 311,39 322,40 333,39 344,38 355,38 367,38 378,37 389,37 400,37 411,36 422,37 433,36 444,36 455,36 466,36 477,36 489,35 500,35 511,35 522,35 533,35 544,34 555,35 566,35 577,35 588,35 599,35 611,35 622,34 633,34"></polyline>
+            <text x="6" y="24" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--a1)">NORM：脉冲前就在抽取</text>
+            <text x="352" y="24" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--a3)">INV：脉冲后才抽取 —— 但不衰减</text>
+            <text x="6" y="118" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--a3)">INV：停在 V_oc，0.04 mA</text>
+            <text x="352" y="146" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--a1)">NORM：脉冲后 ≈ 0</text>
+            <text x="53.3" y="172" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">400</text>
+            <text x="160.0" y="172" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">600</text>
+            <text x="266.7" y="172" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">800</text>
+            <text x="373.3" y="172" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">1000</text>
+            <text x="480.0" y="172" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">1200</text>
+            <text x="586.7" y="172" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">1400</text>
+            <text x="320" y="190" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">记录时间 / ns　（触发在 500 ns）</text>
+            <text x="-40" y="-5" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">mA</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption>原始 <code>light − dark</code>，未做基线校正；竖虚线是各自的偏压沿。判定不依赖器件接线：<code>photo ≈ 0</code> 的那个电平按定义就是 V_oc，而独立测得 V_oc = 0.906–0.922 V ≈ vpre = +0.92 V。INV 把它放在了脉冲前，正是 BACE 要的。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <p class="eyebrow">二 · 陷阱</p>
+    <h2>基线校正把信号减掉了</h2>
+    <p class="lede">同一条 INV 曲线的两个版本：实线是原始差值，虚线是实际存进 HDF5 的 <code>photo</code>。<code>photocurrent(offset_correct=True)</code> 减掉记录最后 10 % 的平均值——而这里最后 10 % 不是基线，是稳态抽取电流本身。</p>
+    <figure class="wide">
+      <div class="frame">
+        <svg viewBox="0 0 700 205" role="img" aria-label="同一条曲线的两个版本：原始差值从零升到正 1.9 毫安并保持；基线校正之后变成从负 1.9 毫安升到零，即原波形的镜像。">
+          <g transform="translate(46,16)">
+            <line x1="-4" y1="6.3" x2="640" y2="6.3" stroke="currentColor" stroke-width="0.6" opacity="0.13"></line>
+            <text x="-8" y="9.8" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">2</text>
+            <line x1="-4" y1="68.8" x2="640" y2="68.8" stroke="currentColor" stroke-width="1.2" opacity="0.35"></line>
+            <text x="-8" y="72.3" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">0</text>
+            <line x1="-4" y1="131.2" x2="640" y2="131.2" stroke="currentColor" stroke-width="0.6" opacity="0.13"></line>
+            <text x="-8" y="134.7" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">-2</text>
+            <line x1="225.1" y1="-6" x2="225.1" y2="150" stroke="currentColor" stroke-width="1.2" stroke-dasharray="4 3" opacity=".3"></line>
+            <polyline fill="none" stroke="var(--a3)" stroke-width="1.6" points="0,68 12,67 23,67 34,67 45,67 56,67 67,67 78,67 89,67 100,67 111,67 122,67 134,67 145,67 156,68 167,67 178,68 189,108 200,49 211,47 222,39 233,30 244,23 256,20 267,17 278,16 289,14 300,14 311,13 322,13 333,13 344,12 355,12 367,12 378,12 389,11 400,11 411,11 422,11 433,11 444,11 455,11 466,11 477,11 489,10 500,10 511,10 522,10 533,10 544,10 555,10 566,10 577,10 588,10 599,10 611,10 622,10 633,10"></polyline>
+            <polyline fill="none" stroke="var(--a4)" stroke-width="1.6" stroke-dasharray="5 3" points="0,127 12,127 23,127 34,127 45,127 56,127 67,127 78,127 89,127 100,127 111,127 122,127 134,127 145,127 156,127 167,127 178,127 189,156 200,108 211,107 222,99 233,90 244,83 256,79 267,77 278,75 289,74 300,74 311,73 322,73 333,72 344,72 355,72 367,72 378,71 389,71 400,71 411,70 422,71 433,70 444,70 455,70 466,70 477,70 489,70 500,70 511,70 522,70 533,70 544,69 555,70 566,70 577,69 588,70 599,69 611,70 622,69 633,69"></polyline>
+            <text x="330" y="18" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--a3)">原始 light − dark</text>
+            <text x="330" y="126" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--a4)">存进文件的 photo（offset_correct）</text>
+            <text x="53.3" y="172" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">400</text>
+            <text x="160.0" y="172" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">600</text>
+            <text x="266.7" y="172" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">800</text>
+            <text x="373.3" y="172" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">1000</text>
+            <text x="480.0" y="172" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">1200</text>
+            <text x="586.7" y="172" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">1400</text>
+            <text x="320" y="190" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">记录时间 / ns</text>
+            <text x="-40" y="-5" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">mA</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption>校正后的曲线是真实波形上下翻转再平移——脉冲前读成 −1.9 mA、脉冲后读成 0，正好把结论说反。积出来的 Q 是 −3.0e−10 C，一个完全像样的数字。</figcaption>
+    </figure>
+
+    <div class="callout" style="margin-top:.4rem">
+      <span class="tag">这是什么级别的问题</span>
+      <p>基线校正本身没错，归档的 LabVIEW 也是这么做的：瞬态衰减到零之后，尾巴确实是基线。它只在<strong>尾巴还是信号</strong>时失效——而那正是「光没关」的症状。两种毛病叠在一起，产生的是一个看不出异常的错误答案。</p>
+      <p>已加 <code>core.process.baseline_is_flat()</code>：比较记录的头和尾，按最大摆幅衡量。<strong>它不改任何数字</strong>，只在运行时发一条 warning——尾巴不是基线，<code>offset_correct</code> 正在减掉信号，Q 会看起来合理但是错的，两条原始轨都存着、可以离线补救。三个测试钉住它，其中一个直接用这次的数值。</p>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">三 · 仍然不成立</p>
+    <h2>光还是没关</h2>
+    <p>脉冲之后的抽取电流在 4 µs 内<strong>一点都不衰减</strong>：1.80 → 1.91 mA，然后一直平到记录末尾。BACE 里这条曲线应该在载流子被抽干之后回到零。它没有——器件是在稳态光照下被从 V_oc 打到 −1 V，测到的是稳态光电流，不是瞬态光电荷。</p>
+    <p>这和第一轮的结论一致（第一轮是从「记录里找不到关光台阶，上界 1.3 %」得到的），只是这一轮从另一个方向又看到一次：<strong>没有衰减 = 光源没有关</strong>。</p>
+    <p class="note">附带确认：<code>bias_output_polarity = INV</code>、<code>bias_polarity_source = set by this run</code>、<code>led_output_polarity = INV</code>、<code>bias_arm_source = EXT</code>、<code>bias_arm_slope = POS</code> 都写进了 HDF5 的 <code>/config/resolved</code>（schema <code>bace-run/2</code>）。上一轮暴露的「文件说不清自己在哪套约定下测的」那个缺口，在真实硬件上验证过了。</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">四 · 下一步</p>
+    <h2>先把光看清楚</h2>
+    <ul class="plain">
+      <li><strong>看一整个 LED 周期。</strong>做一个单点 recipe：<code>timebase_ns_per_div = 250000</code>（满屏 2.5 ms）、<code>record_length = 500000</code>（5 ns/样本）、一个 axis 点。<code>configure_timebase</code> 把触发放在记录的 1/10 处，窗口覆盖触发前 250 µs、触发后 2.25 ms——完整一个 2 ms 周期。<code>light − dark</code> 会直接画出<strong>器件看到的光波形</strong>，以及 5 µs 窗口落在它的哪一段。电荷数字没意义，波形才是目的。</li>
+      <li><strong>把 33220A 低电平从 0.4 V 降到 0</strong>，重复上一步。若稳态光电流塌下去，就是 0.4 V 一直在发光。</li>
+      <li><strong>这两步跑之前把 <code>offset_correct</code> 关掉</strong>，否则波形又会被镜像。新的 warning 会提醒，但这两步本来就不该开。</li>
+      <li>光的调制确认之后再重扫 delay：范围先窄到 0–60 ns（按时序链预测零点在 <strong>28 ns</strong>，即 <code>:PULS:DEL1 = 75 ns</code>），圈数 3 → 20，平均 20 → 100，确认不削顶后 vcoll → −4 V。</li>
+    </ul>
+  </section>
+
+  <footer>
+    数据：<code>runs/290K_1020mVLED_offsetcorr_delay scan…_20260901_175932</code>（INV）与 <code>…_172737</code>（NORM），delay = +80 ns 那一点。<br>
+    时序链（第一轮实测，残差 1.5 ns）：器件上的场 = 触发 + <code>:PULS:DEL1</code> + 47.1 ns；光实际关闭在触发后 122 ns。<br>
+    测试：206 passed / 7 skipped。
+  </footer>
+</div>

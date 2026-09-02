@@ -1,0 +1,269 @@
+<title>参考本身在漂</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@500;600&display=swap">
+<style>
+:root{
+  --ground:#F1F3F2; --surface:#FBFCFB; --sunken:#E4E9E7;
+  --ink:#141A19; --ink-2:#4C5A57; --ink-3:#71807C;
+  --rule:#C8D2CF; --rule-soft:#DDE4E2;
+  --a1:#9A6B0E; --a2:#3D7A2C; --a3:#2A57A0; --a4:#AC3549;
+  --light:#7A5AA8; --bad:#AC3549;
+  --shadow:0 1px 2px rgba(20,26,25,.05), 0 8px 24px -16px rgba(20,26,25,.25);
+  --measure:38rem;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0D1211; --surface:#131A18; --sunken:#0A0F0E;
+    --ink:#E3E9E7; --ink-2:#A0AEAA; --ink-3:#7C8A86;
+    --rule:#26332F; --rule-soft:#1C2624;
+    --a1:#E0B44A; --a2:#7FC96C; --a3:#7FA8E8; --a4:#E98096;
+    --light:#B79BE0; --bad:#E98096;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0D1211; --surface:#131A18; --sunken:#0A0F0E;
+  --ink:#E3E9E7; --ink-2:#A0AEAA; --ink-3:#7C8A86;
+  --rule:#26332F; --rule-soft:#1C2624;
+  --a1:#E0B44A; --a2:#7FC96C; --a3:#7FA8E8; --a4:#E98096;
+  --light:#B79BE0; --bad:#E98096;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.7);
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);
+  font-family:"IBM Plex Sans SC","IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  font-size:16px;line-height:1.75;-webkit-font-smoothing:antialiased}
+.page{max-width:var(--measure);margin:0 auto;padding:3.5rem 1.5rem 6rem}
+.wide{max-width:min(62rem,100%);width:100%}
+@media (min-width:64rem){
+  .wide{width:min(62rem,calc(100vw - 3rem));
+    margin-left:calc((var(--measure) - min(62rem,calc(100vw - 3rem))) / 2)}
+}
+h1,h2{font-family:"Noto Serif SC","IBM Plex Serif",Georgia,serif;
+  text-wrap:balance;margin:0;font-weight:600}
+h1{font-size:2.3rem;line-height:1.2;letter-spacing:-.01em}
+h2{font-size:1.35rem;line-height:1.35}
+p{margin:0}
+strong{font-weight:600}
+code,.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+code{font-size:.85em;background:var(--sunken);padding:.1em .34em;border-radius:3px}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:.7rem;font-weight:500;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+header{display:flex;flex-direction:column;gap:1rem;margin-bottom:2.5rem}
+.standfirst{font-size:1.06rem;color:var(--ink-2);max-width:34rem}
+.facts{display:flex;flex-wrap:wrap;gap:0 1.7rem;border-top:1px solid var(--rule);
+  border-bottom:1px solid var(--rule);padding:.8rem 0;margin-top:.3rem}
+.fact{display:flex;flex-direction:column;padding:.15rem 0}
+.fact dt{font-family:"IBM Plex Mono",monospace;font-size:.64rem;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-3)}
+.fact dd{margin:0;font-family:"IBM Plex Mono",monospace;font-size:.88rem;font-weight:500;
+  font-variant-numeric:tabular-nums}
+section{margin-top:3rem;display:flex;flex-direction:column;gap:1rem}
+section > .eyebrow{margin-bottom:-.5rem}
+.lede{color:var(--ink-2)}
+figure{margin:.5rem 0 0;display:flex;flex-direction:column;gap:.7rem}
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:5px;
+  padding:1rem .9rem;overflow-x:auto;box-shadow:var(--shadow)}
+.frame svg{display:block;width:100%;min-width:620px;height:auto;color:var(--ink)}
+figcaption{font-size:.87rem;color:var(--ink-3);line-height:1.6}
+.legend{display:flex;flex-wrap:wrap;gap:.3rem 1.1rem;font-family:"IBM Plex Mono",monospace;
+  font-size:.7rem;color:var(--ink-2)}
+.legend i{display:inline-block;width:1.1rem;height:0;border-top:2.5px solid;
+  vertical-align:middle;margin-right:.35rem}
+.callout{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--bad);
+  border-radius:4px;padding:1.1rem 1.2rem;display:flex;flex-direction:column;gap:.7rem;
+  box-shadow:var(--shadow)}
+.callout .tag{align-self:flex-start;font-family:"IBM Plex Mono",monospace;font-size:.64rem;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--bad)}
+.callout p{color:var(--ink-2)}
+.ok{border-left-color:var(--a2)}
+.ok .tag{color:var(--a2)}
+ul.plain{margin:0;padding-left:1.15rem;display:flex;flex-direction:column;gap:.5rem;color:var(--ink-2)}
+ul.plain li::marker{color:var(--ink-3)}
+.note{border-left:2px solid var(--rule);padding-left:1rem;color:var(--ink-2);font-size:.96rem}
+pre{margin:0;background:var(--sunken);border:1px solid var(--rule-soft);border-radius:5px;
+  padding:.85rem .95rem;overflow-x:auto;font-family:"IBM Plex Mono",monospace;
+  font-size:.78rem;line-height:1.65}
+footer{margin-top:4rem;padding-top:1.1rem;border-top:1px solid var(--rule);
+  font-family:"IBM Plex Mono",monospace;font-size:.71rem;color:var(--ink-3);line-height:1.8}
+table{border-collapse:collapse;font-size:.83rem;width:100%}
+th,td{border:1px solid var(--rule);padding:.45rem .55rem;text-align:left}
+th{font-family:"IBM Plex Mono",monospace;font-size:.66rem;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--ink-3);font-weight:500}
+td.mono{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+.ok2{color:var(--a2);font-weight:600} .bad2{color:var(--bad);font-weight:600}
+.scroll{overflow-x:auto}
+</style>
+
+<div class="page">
+  <header>
+    <p class="eyebrow">2026-09-02 · LabVIEW 02:16 vs 端口 02:08 · 相隔八分钟</p>
+    <h1>参考本身在漂</h1>
+    <p class="standfirst">把端口和<strong>八分钟前</strong>的 LabVIEW 放在一起，峰值差 6%、衰减时间差 3%、电荷差 4%。之前那个 4 倍的差距不是程序错了——是器件在 23:16 到 02:16 这三小时里自己变了：<strong>LabVIEW 自己的 τ 从 190 ns 掉到 71 ns，自己的 Q 从 −9.2×10⁻¹⁰ 掉到 −3.3×10⁻¹⁰ C。</strong></p>
+    <dl class="facts">
+      <div class="fact"><dt>LabVIEW 02:16</dt><dd>−3.340e−10 C</dd></div>
+      <div class="fact"><dt>端口 02:08</dt><dd>+3.474e−10 C</dd></div>
+      <div class="fact"><dt>相差</dt><dd>4.0 %</dd></div>
+      <div class="fact"><dt>τ</dt><dd>71 / 73 ns</dd></div>
+      <div class="fact"><dt>还剩的差别</dt><dd>全局符号</dd></div>
+    </dl>
+  </header>
+
+  <section>
+    <p class="eyebrow">一 · 三条曲线</p>
+    <h2>不是程序差 4 倍，是器件三小时里掉了 3 倍</h2>
+    <p class="lede">同一个 v_pre 中间点。橙色是 23:16 的 LabVIEW——又高又慢；蓝色是 02:16 的 LabVIEW，红虚线是 02:08 的端口（已翻符号）。后两条基本压在一起。灰色那条是 02:20 那轮「完全沿用现场」，几乎是平的，原因在第三节。</p>
+    <figure class="wide">
+      <div class="frame">
+        <svg viewBox="0 0 700 200" role="img" aria-label="三条光电流曲线：23 点 16 分的 LabVIEW 明显更慢更大，2 点 16 分的 LabVIEW 与 2 点 08 分的端口几乎重合，沿用现场那一条几乎是平的。">
+          <g transform="translate(56,14)">
+            <line x1="-5" y1="14.3" x2="620" y2="14.3" stroke="currentColor" stroke-width="1.1" opacity="0.3"></line>
+            <text x="-9" y="17.8" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">0</text>
+            <line x1="-5" y1="50.0" x2="620" y2="50.0" stroke="currentColor" stroke-width="0.55" opacity="0.11"></line>
+            <text x="-9" y="53.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">−1</text>
+            <line x1="-5" y1="85.7" x2="620" y2="85.7" stroke="currentColor" stroke-width="0.55" opacity="0.11"></line>
+            <text x="-9" y="89.2" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">−2</text>
+            <line x1="-5" y1="121.4" x2="620" y2="121.4" stroke="currentColor" stroke-width="0.55" opacity="0.11"></line>
+            <text x="-9" y="124.9" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">−3</text>
+            <polyline fill="none" stroke="var(--a1)" stroke-width="1.7" points="0,18 6,20 12,19 19,12 25,1 31,-12 37,-35 43,-55 50,-72 56,-85 62,-97 68,-101 74,-107 81,-108 87,-108 93,-108 99,-106 105,-100 112,-99 118,-96 124,-91 130,-88 136,-86 143,-83 149,-77 155,-76 161,-73 167,-68 174,-68 180,-66 186,-63 192,-62 198,-60 205,-58 211,-55 217,-53 223,-49 229,-50 236,-48 242,-48 248,-43 254,-43 260,-45 267,-40 273,-41 279,-39 285,-39 291,-37 298,-36 304,-37 310,-35 316,-33 322,-30 329,-32 335,-31 341,-31 347,-29 353,-28 360,-27 366,-27 372,-26 378,-25 384,-24 391,-24 397,-23 403,-22 409,-23 415,-19 422,-20 428,-18 434,-20 440,-18 446,-17 453,-17 459,-17 465,-18 471,-15 477,-15 484,-14 490,-15 496,-16 502,-14 508,-15 515,-13 521,-11 527,-10 533,-12 539,-9 546,-11 552,-9 558,-9 564,-11 570,-7 577,-10 583,-8 589,-7 595,-7 601,-5 608,-6 614,-6 620,-5"></polyline>
+            <polyline fill="none" stroke="var(--a3)" stroke-width="1.7" points="0,14 6,16 12,13 19,8 25,-2 31,-18 37,-36 43,-53 50,-67 56,-75 62,-77 68,-78 74,-78 81,-74 87,-69 93,-64 99,-60 105,-56 112,-51 118,-49 124,-41 130,-39 136,-34 143,-32 149,-27 155,-23 161,-24 167,-20 174,-17 180,-16 186,-15 192,-11 198,-8 205,-6 211,-6 217,-5 223,-7 229,-2 236,-3 242,-3 248,-5 254,-4 260,-1 267,-1 273,-1 279,0 285,2 291,1 298,3 304,1 310,3 316,4 322,6 329,6 335,5 341,4 347,6 353,7 360,6 366,8 372,7 378,5 384,6 391,7 397,7 403,7 409,8 415,8 422,8 428,6 434,9 440,8 446,7 453,9 459,6 465,9 471,8 477,9 484,10 490,7 496,10 502,10 508,11 515,11 521,10 527,10 533,10 539,10 546,12 552,11 558,12 564,10 570,10 577,11 583,11 589,10 595,11 601,11 608,10 614,10 620,9"></polyline>
+            <polyline fill="none" stroke="var(--a4)" stroke-width="1.7" stroke-dasharray="5 2.5" points="0,16 6,16 12,14 19,8 25,-6 31,-25 37,-45 43,-61 50,-74 56,-82 62,-84 68,-86 74,-82 81,-77 87,-73 93,-68 99,-62 105,-56 112,-52 118,-46 124,-41 130,-37 136,-33 143,-29 149,-25 155,-24 161,-20 167,-18 174,-15 180,-14 186,-13 192,-12 198,-10 205,-9 211,-9 217,-6 223,-5 229,-3 236,-3 242,-4 248,-1 254,-1 260,-1 267,0 273,0 279,1 285,1 291,1 298,3 304,3 310,4 316,4 322,4 329,6 335,4 341,4 347,5 353,6 360,6 366,6 372,5 378,6 384,6 391,6 397,7 403,6 409,7 415,8 422,8 428,8 434,7 440,9 446,7 453,7 459,8 465,9 471,9 477,8 484,8 490,9 496,8 502,9 508,10 515,9 521,9 527,9 533,11 539,10 546,10 552,10 558,10 564,9 570,10 577,10 583,10 589,10 595,11 601,10 608,11 614,11 620,11"></polyline>
+            <polyline fill="none" stroke="var(--ink-3)" stroke-width="1.3" points="0,12 6,12 12,12 19,12 25,10 31,8 37,6 43,5 50,3 56,3 62,3 68,3 74,5 81,6 87,7 93,7 99,8 105,9 112,9 118,10 124,12 130,10 136,12 143,12 149,11 155,11 161,11 167,12 174,13 180,12 186,12 192,13 198,12 205,13 211,13 217,12 223,12 229,13 236,13 242,13 248,13 254,13 260,13 267,13 273,13 279,13 285,13 291,13 298,13 304,13 310,14 316,12 322,12 329,13 335,13 341,13 347,13 353,14 360,14 366,14 372,13 378,13 384,14 391,14 397,13 403,13 409,13 415,14 422,14 428,14 434,14 440,14 446,13 453,13 459,14 465,13 471,13 477,14 484,13 490,14 496,13 502,14 508,14 515,13 521,14 527,15 533,14 539,14 546,15 552,14 558,14 564,14 570,15 577,13 583,14 589,14 595,15 601,14 608,14 614,14 620,14"></polyline>
+            <text x="150" y="118" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--a1)">LabVIEW 23:16　−3.47 mA</text>
+            <text x="245" y="72" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--a3)">LabVIEW 02:16　−2.67 mA</text>
+            <text x="245" y="88" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--a4)">端口 02:08　−2.82 mA（已翻符号）</text>
+            <text x="360" y="30" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">沿用现场 02:20　−0.34 mA</text>
+            <text x="49.6" y="166" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">350</text>
+            <text x="173.6" y="166" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">450</text>
+            <text x="297.6" y="166" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">550</text>
+            <text x="421.6" y="166" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">650</text>
+            <text x="545.6" y="166" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">750</text>
+            <text x="310" y="184" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">记录时间 / ns　·　纵轴 光电流 / mA　·　v_pre 中间那一点</text>
+          </g>
+        </svg>
+      </div>
+      <div class="legend">
+        <span><i style="border-color:var(--a1)"></i>LabVIEW 23:16</span>
+        <span><i style="border-color:var(--a3)"></i>LabVIEW 02:16</span>
+        <span><i style="border-color:var(--a4);border-top-style:dashed"></i>端口 02:08（翻符号后）</span>
+        <span><i style="border-color:var(--ink-3)"></i>沿用现场 02:20</span>
+      </div>
+      <figcaption>橙线比蓝线高 30%、慢 2.7 倍。这两条都是 LabVIEW 自己跑的，中间只隔了三小时，参数一字未动。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <p class="eyebrow">二 · 归一化</p>
+    <h2>形状对上了</h2>
+    <p class="lede">各自除以自己的峰值。蓝线和红虚线几乎完全重叠，说明抽取过程的动力学是同一个；橙线明显在下面，那是三小时前的器件。</p>
+    <figure class="wide">
+      <div class="frame">
+        <svg viewBox="0 0 700 190" role="img" aria-label="各自按峰值归一后，2 点 16 分的 LabVIEW 与 2 点 08 分的端口几乎完全重叠，而 23 点 16 分那条衰减慢得多。">
+          <g transform="translate(56,14)">
+            <line x1="-5" y1="6.4" x2="620" y2="6.4" stroke="currentColor" stroke-width="0.55" opacity="0.11"></line>
+            <text x="-9" y="9.9" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">1.0</text>
+            <line x1="-5" y1="70.0" x2="620" y2="70.0" stroke="currentColor" stroke-width="0.55" opacity="0.11"></line>
+            <text x="-9" y="73.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">0.5</text>
+            <line x1="-5" y1="133.6" x2="620" y2="133.6" stroke="currentColor" stroke-width="1.1" opacity="0.3"></line>
+            <text x="-9" y="137.1" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">0</text>
+            <polyline fill="none" stroke="var(--a1)" stroke-width="1.7" points="0,6 6,7 12,10 19,12 25,17 31,20 37,23 43,26 50,32 56,32 62,37 68,41 74,43 81,47 87,49 93,52 99,52 105,57 112,58 118,59 124,62 130,65 136,66 143,68 149,67 155,68 161,76 167,74 174,74 180,77 186,77 192,79 198,78 205,78 211,80 217,79 223,83 229,85 236,87 242,86 248,86 254,86 260,89 267,90 273,92 279,91 285,93 291,95 298,95 304,96 310,94 316,96 322,97 329,99 335,99 341,99 347,101 353,99 360,100 366,101 372,102 378,101 384,104 391,104 397,104 403,104 409,103 415,104 422,104 428,106 434,108 440,109 446,106 453,110 459,111 465,109 471,109 477,111 484,110 490,109 496,112 502,111 508,112 515,111 521,113 527,115 533,113 539,111 546,115 552,113 558,114 564,112 570,116 577,115 583,116 589,116 595,116 601,116 608,116 614,117 620,115"></polyline>
+            <polyline fill="none" stroke="var(--a3)" stroke-width="2.0" points="0,6 6,13 12,15 19,24 25,29 31,36 37,44 43,46 50,53 56,63 62,64 68,70 74,73 81,80 87,84 93,87 99,90 105,96 112,96 118,97 124,100 130,102 136,103 143,105 149,104 155,107 161,110 167,112 174,111 180,111 186,113 192,114 198,115 205,116 211,116 217,118 223,117 229,119 236,118 242,121 248,119 254,123 260,120 267,123 273,121 279,124 285,121 291,123 298,123 304,125 310,124 316,122 322,121 329,123 335,125 341,124 347,125 353,125 360,126 366,126 372,126 378,124 384,123 391,125 397,125 403,126 409,127 415,128 422,127 428,127 434,127 440,129 446,126 453,132 459,129 465,128 471,127 477,131 484,129 490,132 496,129 502,128 508,130 515,127 521,128 527,131 533,128 539,130 546,128 552,129 558,130 564,130 570,132 577,131 583,130 589,131 595,132 601,131 608,129 614,130"></polyline>
+            <polyline fill="none" stroke="var(--a4)" stroke-width="1.7" stroke-dasharray="5 2.5" points="0,6 6,11 12,17 19,22 25,29 31,36 37,43 43,50 50,57 56,63 62,67 68,74 74,77 81,83 87,85 93,90 99,92 105,94 112,97 118,99 124,100 130,104 136,105 143,106 149,107 155,109 161,112 167,111 174,110 180,113 186,113 192,114 198,115 205,116 211,117 217,118 223,117 229,119 236,120 242,121 248,120 254,121 260,121 267,123 273,121 279,123 285,123 291,123 298,123 304,123 310,122 316,123 322,124 329,123 335,123 341,125 347,124 353,125 360,125 366,125 372,126 378,125 384,125 391,126 397,126 403,126 409,126 415,127 422,126 428,127 434,127 440,127 446,127 453,127 459,128 465,129 471,129 477,127 484,128 490,129 496,128 502,129 508,128 515,129 521,128 527,128 533,129 539,129 546,129 552,129 558,128 564,128 570,130 577,128 583,129 589,129 595,130 601,130 608,129 614,130"></polyline>
+            <text x="330" y="52" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--a1)">τ = 190 ns（23:16）</text>
+            <text x="180" y="128" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--a3)">τ = 71 / 73 ns</text>
+            <text x="0.0" y="156" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">0</text>
+            <text x="124.0" y="156" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">100</text>
+            <text x="248.0" y="156" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">200</text>
+            <text x="372.0" y="156" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">300</text>
+            <text x="496.0" y="156" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">400</text>
+            <text x="620.0" y="156" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">500</text>
+            <text x="310" y="174" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">从各自峰值起算 / ns　·　纵轴 归一化到各自峰值</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption>1/e 衰减：190.5 ns（23:16）对 71.0 ns（LabVIEW 02:16）对 73.0 ns（端口 02:08）。后两者差 2.8%。</figcaption>
+    </figure>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>运行</th><th>时刻</th><th>v_pre</th><th>峰值</th><th>τ (1/e)</th><th>Q（各自文件里的值）</th></tr></thead>
+        <tbody>
+          <tr><td>LabVIEW</td><td class="mono">23:16</td><td class="mono">1.01354</td><td class="mono">−3.474 mA</td><td class="mono">190.5 ns</td><td class="mono">−9.198e−10 C</td></tr>
+          <tr><td>LabVIEW</td><td class="mono">02:16</td><td class="mono">1.01174</td><td class="mono">−2.665 mA</td><td class="mono">71.0 ns</td><td class="mono">−3.340e−10 C</td></tr>
+          <tr><td>端口 <code>bare.py</code></td><td class="mono">02:08</td><td class="mono">1.01354</td><td class="mono">+2.824 mA</td><td class="mono">73.0 ns</td><td class="mono ok2">+3.474e−10 C</td></tr>
+          <tr><td>端口 <code>--as-found</code></td><td class="mono">02:20</td><td class="mono">0（继承来的）</td><td class="mono">+0.342 mA</td><td class="mono">38.5 ns</td><td class="mono bad2">+4.463e−11 C</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">三 · 那一轮为什么只剩 1/8</p>
+    <h2><code>--as-found</code> 继承到的是暗态电平</h2>
+    <p class="lede">02:20 那轮什么都没写，直接用 LabVIEW 留在发生器里的电平：<code>:VOLT1:HIGH 0.505434</code>、<code>:VOLT1:LOW 0</code>。这正是<strong>暗态</strong>那一对——摆幅 4 × 0.505434 = 2.0217 V 对得上，但基线是 0，也就是 v_pre = 0。器件在照光时被短路着，本来就存不下电荷，所以抽出来只有 4.5×10⁻¹¹ C。</p>
+    <figure class="wide">
+      <div class="frame">
+        <svg viewBox="0 0 700 210" role="img" aria-label="放大器把发生器的电平反相放大四倍；亮态那一行发生器基线为负四分之一伏，暗态那一行基线为零。LabVIEW 收工时停在暗态那一行。">
+          <defs>
+            <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 1 L 9 5 L 0 9 z" fill="currentColor"></path>
+            </marker>
+          </defs>
+          <text x="132" y="22" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">81150A 输出</text>
+          <text x="414" y="22" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">器件两端</text>
+
+          <text x="50" y="66" text-anchor="end" font-family="IBM Plex Sans SC, sans-serif" font-size="12" fill="var(--ink-2)">亮态</text>
+          <text x="50" y="156" text-anchor="end" font-family="IBM Plex Sans SC, sans-serif" font-size="12" fill="var(--bad)">暗态</text>
+
+          <line x1="56" y1="62" x2="209" y2="62" stroke="currentColor" stroke-width="0.6" stroke-dasharray="3 3" opacity="0.3"></line>
+          <line x1="338" y1="62" x2="491" y2="62" stroke="currentColor" stroke-width="0.6" stroke-dasharray="3 3" opacity="0.3"></line>
+          <line x1="56" y1="152" x2="209" y2="152" stroke="currentColor" stroke-width="0.6" stroke-dasharray="3 3" opacity="0.3"></line>
+          <line x1="338" y1="152" x2="491" y2="152" stroke="currentColor" stroke-width="0.6" stroke-dasharray="3 3" opacity="0.3"></line>
+
+          <polyline fill="none" stroke="var(--a3)" stroke-width="1.9" points="60,72.2 108,72.2 108,52 152,52 152,72.2 205,72.2"></polyline>
+          <polyline fill="none" stroke="var(--a3)" stroke-width="1.9" points="342,51.8 390,51.8 390,72 434,72 434,51.8 487,51.8"></polyline>
+          <polyline fill="none" stroke="var(--bad)" stroke-width="1.9" points="60,152 108,152 108,131.8 152,131.8 152,152 205,152"></polyline>
+          <polyline fill="none" stroke="var(--bad)" stroke-width="1.9" points="342,152 390,152 390,172.2 434,172.2 434,152 487,152"></polyline>
+
+          <text x="132" y="92" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">LOW −0.2559 → HIGH +0.2500</text>
+          <text x="414" y="92" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">v_pre +1.0235 → v_coll −1.000</text>
+          <text x="132" y="188" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--bad)">LOW 0 → HIGH +0.5054</text>
+          <text x="414" y="188" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--bad)">v_pre 0 → v_coll −2.0217</text>
+
+          <line x1="211" y1="62" x2="234" y2="62" stroke="currentColor" stroke-width="1.1" marker-end="url(#ar)" opacity="0.55"></line>
+          <line x1="211" y1="152" x2="234" y2="152" stroke="currentColor" stroke-width="1.1" marker-end="url(#ar)" opacity="0.55"></line>
+          <rect x="238" y="34" width="68" height="146" rx="4" fill="none" stroke="currentColor" stroke-width="1.1" opacity="0.45"></rect>
+          <text x="272" y="100" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" fill="currentColor">×(−4)</text>
+          <text x="272" y="118" text-anchor="middle" font-family="IBM Plex Sans SC, sans-serif" font-size="10" fill="var(--ink-3)">反相放大器</text>
+          <line x1="310" y1="62" x2="334" y2="62" stroke="currentColor" stroke-width="1.1" marker-end="url(#ar)" opacity="0.55"></line>
+          <line x1="310" y1="152" x2="334" y2="152" stroke="currentColor" stroke-width="1.1" marker-end="url(#ar)" opacity="0.55"></line>
+
+          <text x="497" y="149" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--bad)">← LabVIEW 收工时停在这一行</text>
+          <text x="497" y="163" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--bad)">　 as-found 继承到的就是它</text>
+        </svg>
+      </div>
+      <figcaption>放大器是<strong>反相、增益 4、零偏置</strong>：发生器的 LOW 决定 v_pre，HIGH 决定 v_coll。两行的摆幅一样（2.0217 V），差别只在基线。VI 每一点都是先亮后暗，所以收工时停在下面那一行。</figcaption>
+    </figure>
+    <div class="callout">
+      <span class="tag">这条路走不通</span>
+      <p><code>--as-found</code> 的本意是「一个电平都不写、完全沿用现场」，但 VI 收工时留下的是暗态电平，所以它继承到的偏压是错的。想沿用现场，只能用不带 <code>--as-found</code> 的 <code>bare.py --vpre …</code>：时基、触发、延迟、平均、LED、继电器全都照旧继承，只有那一对电平按 v_pre 重算——02:08 那轮就是这么跑的，结果对上了。</p>
+    </div>
+    <p class="note">附带确认了一件一直没证据的事：极性的映射。<code>pulse_levels(invert=True)</code> 给暗态的形状是 <code>(span/4, 0)</code>，和读回来的 <code>(0.505434, 0)</code> 逐位吻合；亮态应该是 <code>(+0.2500, −0.2559)</code>。这就把「LOW → v_pre、HIGH → v_coll」钉死了，不再是从手册上推的。</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">四 · 还剩什么</p>
+    <h2>只有一个全局符号</h2>
+    <p class="lede">端口全是正的，LabVIEW 全是负的，形状和大小都一样。这不是物理上的差别，是取号约定。</p>
+    <ul class="plain">
+      <li>在 <code>rig.toml</code> 里加 <code>current_sign = -1</code>，在驱动取数那一层乘一次，别再靠调发生器的极性开关去凑——极性开关改的是器件真实看到的电压，符号改的只是画出来的方向，两件事不能混。</li>
+      <li>器件在漂。以后拿 LabVIEW 当参照，必须是<strong>紧挨着</strong>的一轮；隔了几小时的旧数据不能当基准，这次就是被它带偏了两个晚上。</li>
+      <li>每轮记下 <code>0_instrument_state</code>（02:20 那轮已经在记了）。这次能一眼看出继承到的是暗态电平，全靠它。</li>
+    </ul>
+  </section>
+
+  <footer>
+    LabVIEW 23:16 = runs/20260901_231645　·　LabVIEW 02:16 = runs/20260902_021632　·　端口 02:08 = runs/bare_20260902_020827　·　沿用现场 02:20 = runs/bare_20260902_022050<br>
+    峰值与 τ 由本页重算（基线 = 末 200 点均值，1/e 判据）；Q 一栏直接取各自 <span class="mono">1_averagesQ</span> 文件里的值。
+  </footer>
+</div>

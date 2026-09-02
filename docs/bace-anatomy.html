@@ -1,0 +1,419 @@
+<title>Anatomy of a BACE Run</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+:root{
+  --paper:#f4f6f7; --surface:#ffffff; --surface-2:#eaeef0;
+  --ink:#141c23; --ink-2:#48585f; --ink-3:#74848d;
+  --rule:#d6dde1; --rule-strong:#b9c4ca;
+  --accent:#14586b; --accent-soft:#e0edf1;
+  --signal:#b8791f; --signal-soft:#f6ecdb;
+  --ok:#42663a; --ok-soft:#e5eddf;
+  --warn:#a2461e;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#0e141a; --surface:#151d24; --surface-2:#1c262e;
+    --ink:#e5ebef; --ink-2:#a5b3bd; --ink-3:#7a8a95;
+    --rule:#27333c; --rule-strong:#3a4952;
+    --accent:#68b3c8; --accent-soft:#142b34;
+    --signal:#e0aa5c; --signal-soft:#2a2015;
+    --ok:#9cc08b; --ok-soft:#1d2a1b;
+    --warn:#e2946d;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0e141a; --surface:#151d24; --surface-2:#1c262e;
+  --ink:#e5ebef; --ink-2:#a5b3bd; --ink-3:#7a8a95;
+  --rule:#27333c; --rule-strong:#3a4952;
+  --accent:#68b3c8; --accent-soft:#142b34;
+  --signal:#e0aa5c; --signal-soft:#2a2015;
+  --ok:#9cc08b; --ok-soft:#1d2a1b;
+  --warn:#e2946d;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:"Source Serif 4",Georgia,serif;font-size:17px;line-height:1.62;
+  -webkit-font-smoothing:antialiased}
+h1,h2,h3,figcaption,.ui{font-family:Archivo,"Helvetica Neue",Arial,sans-serif}
+code{font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+  background:var(--surface-2);padding:1.5px 5px;border-radius:2px;font-size:.85em;color:var(--ink)}
+.wrap{max-width:940px;margin:0 auto;padding:0 28px 96px}
+header.top{border-bottom:1px solid var(--rule);margin-bottom:40px;padding:52px 0 28px}
+.eyebrow{font-family:Archivo,sans-serif;font-size:11.5px;font-weight:600;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--accent);margin:0 0 14px}
+h1{font-size:clamp(30px,4.4vw,44px);font-weight:700;letter-spacing:-.02em;line-height:1.08;
+  margin:0 0 16px;text-wrap:balance}
+.standfirst{font-size:19px;color:var(--ink-2);max-width:64ch;margin:0}
+h2{font-size:22px;font-weight:600;letter-spacing:-.01em;margin:0 0 8px;padding-bottom:10px;
+  border-bottom:1px solid var(--rule)}
+h3{font-size:16px;font-weight:600;margin:28px 0 8px}
+section{margin:0 0 58px}
+p{margin:0 0 16px;max-width:68ch}
+ul{max-width:68ch;padding-left:20px}li{margin:0 0 8px}
+strong{font-weight:600}
+figure{margin:26px 0 8px}
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+  padding:22px 20px 14px;overflow-x:auto}
+.frame svg{display:block;width:100%;height:auto}
+figcaption{font-size:12.5px;color:var(--ink-3);margin-top:12px;max-width:70ch;line-height:1.55}
+
+/* diagram semantics */
+svg text{font-family:Archivo,sans-serif;fill:var(--ink-2)}
+.t-key{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;fill:var(--ink-3);font-weight:600}
+.t-lab{font-size:12px;fill:var(--ink-2)}
+.t-mono{font-family:"IBM Plex Mono",monospace;font-size:11.5px;fill:var(--ink-2)}
+.t-hd{font-size:13px;font-weight:600;fill:var(--ink)}
+.t-sm{font-size:11px;fill:var(--ink-3)}
+.ax{stroke:var(--rule-strong);stroke-width:1;fill:none}
+.grid{stroke:var(--rule);stroke-width:1;stroke-dasharray:2 4;fill:none}
+.mark{stroke:var(--ink-3);stroke-width:1;stroke-dasharray:3 3}
+.bias{stroke:var(--accent);stroke-width:2.2;fill:none;stroke-linejoin:round}
+.bias-d{stroke:var(--accent);stroke-width:1.8;fill:none;stroke-dasharray:5 4;stroke-linejoin:round;opacity:.75}
+.cur{stroke:var(--signal);stroke-width:2.2;fill:none}
+.cur-d{stroke:var(--signal);stroke-width:1.8;fill:none;stroke-dasharray:5 4;opacity:.75}
+.fill{fill:var(--signal);opacity:.16}
+.lit{fill:var(--signal);opacity:.28}
+.unlit{fill:none;stroke:var(--rule-strong);stroke-width:1}
+.box{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
+.box-2{fill:var(--surface-2);stroke:var(--rule-strong);stroke-width:1}
+.box-a{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.4}
+.box-s{fill:var(--signal-soft);stroke:var(--signal);stroke-width:1.4}
+.box-o{fill:var(--ok-soft);stroke:var(--ok);stroke-width:1.2}
+.nest{fill:none;stroke:var(--rule-strong);stroke-width:1;stroke-dasharray:4 3}
+.flow{stroke:var(--ink-3);stroke-width:1.4;fill:none}
+.flow-a{stroke:var(--accent);stroke-width:1.8;fill:none}
+.note-t{font-size:11px;fill:var(--warn);font-style:italic}
+
+.callout{border-left:3px solid var(--signal);background:var(--surface);border-radius:2px;
+  padding:14px 18px;margin:22px 0;font-size:15.5px;color:var(--ink-2)}
+.callout b{display:block;font-family:Archivo,sans-serif;font-size:11.5px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--signal);margin-bottom:5px}
+.callout p:last-child{margin-bottom:0}
+.scroll{overflow-x:auto;margin:20px 0;border:1px solid var(--rule);border-radius:3px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14px;font-family:Archivo,sans-serif}
+th{text-align:left;font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);
+  font-weight:600;padding:11px 14px;background:var(--surface-2);
+  border-bottom:1px solid var(--rule-strong);white-space:nowrap}
+td{padding:11px 14px;border-bottom:1px solid var(--rule);vertical-align:top;color:var(--ink-2)}
+tr:last-child td{border-bottom:none}
+td code{white-space:nowrap}
+footer{border-top:1px solid var(--rule);padding-top:22px;font-family:Archivo,sans-serif;
+  font-size:13px;color:var(--ink-3)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+
+<div class="wrap">
+<header class="top">
+  <p class="eyebrow">Measurement structure</p>
+  <h1>Anatomy of a BACE Run</h1>
+  <p class="standfirst">What the experiment is, before any question of how to code it — the atomic shot, the axes that can be swept over it, and where the numbers turn into physics.</p>
+</header>
+
+<section>
+<h2>1 · The shot</h2>
+<p>The illumination is not continuous. A <strong>33220A</strong> switches the LED between a drive level that lights it and one below its turn-on threshold — a 1 kHz square, 50 % duty. The LED is fully on or fully off; there is no dimming, so the on-phase intensity is exactly the intensity used for the DC measurement.</p>
+<p>An <strong>81150A</strong> holds the device at <code>V<sub>pre</sub> ≈ V<sub>oc</sub></code> through the 500 µs on-phase. Near V<sub>oc</sub> almost no current flows, so carriers accumulate and the device settles at its light open-circuit condition. A fixed delay after the LED goes off, the 81150A steps to a reverse collection field <code>V<sub>coll</sub></code> and sweeps them out into the sense resistor.</p>
+<p>The reference run repeats the identical experiment in the dark, over the <strong>same bias swing</strong>: the whole window is translated down by V<sub>oc</sub>, from <code>0 → V<sub>coll</sub> − V<sub>oc</sub></code> instead of <code>V<sub>oc</sub> → V<sub>coll</sub></code>. Same ΔV, so it measures the charge that is <em>not</em> photogenerated — the capacitive charge displaced by that swing, plus whatever dark current flows. Translating rather than repeating the absolute range is what keeps the diode out of forward bias, where in the dark it would inject heavily at 0.8 V.</p>
+
+<figure>
+<div class="frame">
+<svg viewBox="0 0 800 540" role="img" aria-label="Two-panel timing diagram. Panel a shows the 1 kHz LED square wave from the 33220A over two periods, with the device bias held at Vpre and a narrow collection pulse marked for zoom. Panel b zooms the LED falling edge: after a fixed delay the 81150A steps the bias from Vpre to Vcoll, and the resulting current transient is integrated after t0.">
+  <defs>
+    <marker id="arA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+    <marker id="arAs" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M10,0 L0,5 L10,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+
+  <!-- ================= PANEL A ================= -->
+  <text class="t-hd" x="0" y="16">a · one 1 kHz cycle</text>
+  <text class="t-sm" x="126" y="16">33220A drives the LED; 81150A holds the bias</text>
+
+  <text class="t-key" x="0" y="50">LED drive</text>
+  <line class="grid" x1="100" y1="44" x2="774" y2="44"/>
+  <line class="grid" x1="100" y1="84" x2="774" y2="84"/>
+  <text class="t-mono" x="10" y="70">on  1.0 V</text>
+  <text class="t-mono" x="6" y="98">off  0.4 V</text>
+  <path class="cur" d="M100,44 L268,44 L268,84 L436,84 L436,44 L604,44 L604,84 L774,84"/>
+  <g color="var(--ink-3)">
+    <line class="flow" x1="270" y1="106" x2="434" y2="106" marker-end="url(#arA)" marker-start="url(#arAs)"/>
+  </g>
+  <text class="t-sm" x="310" y="120">500 µs off</text>
+  <text class="t-sm" x="470" y="38">500 µs on</text>
+
+  <text class="t-key" x="0" y="146">Device bias</text>
+  <line class="grid" x1="100" y1="150" x2="774" y2="150"/>
+  <text class="t-mono" x="14" y="154">V pre</text>
+  <path class="bias" d="M100,150 L286,150 L286,172 L292,172 L292,150 L622,150 L622,172 L628,172 L628,150 L774,150"/>
+  <text class="t-sm" x="300" y="180">collection pulse — 5 µs, invisible at this scale</text>
+
+  <!-- zoom window + guides -->
+  <rect x="596" y="34" width="46" height="150" rx="2" fill="none" stroke="var(--signal)" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <path d="M596,184 L100,232 M642,184 L774,232" fill="none" stroke="var(--signal)" stroke-width="1" stroke-dasharray="3 4" opacity=".8"/>
+
+  <!-- ================= PANEL B ================= -->
+  <text class="t-hd" x="0" y="252">b · zoom on the falling edge</text>
+  <text class="t-sm" x="212" y="252">schematic — the delay and the collection window are ~50× apart</text>
+
+  <text class="t-key" x="0" y="286">LED</text>
+  <path class="cur" d="M100,278 L262,278 L262,306 L774,306"/>
+  <text class="t-sm" x="140" y="272">on — device equilibrates at light V oc</text>
+  <text class="t-sm" x="640" y="300">off — 0.4 V, below the ~1 V LED threshold</text>
+
+  <text class="t-key" x="0" y="342">Bias</text>
+  <line class="grid" x1="100" y1="376" x2="774" y2="376"/>
+  <text class="t-mono" x="76" y="380">0 V</text>
+  <line class="grid" x1="100" y1="350" x2="332" y2="350"/>
+  <text class="t-mono" x="52" y="354">V pre</text>
+  <line class="grid" x1="332" y1="410" x2="700" y2="410"/>
+  <text class="t-mono" x="46" y="414">V coll</text>
+  <path class="bias" d="M100,350 L332,350 L332,410 L700,410 L700,350 L774,350"/>
+  <path class="bias-d" d="M100,376 L332,376 L332,436 L700,436 L700,376 L774,376"/>
+  <text class="t-sm" x="614" y="452">dark run — same ΔV, translated by −V oc</text>
+  <text class="t-sm" x="614" y="466">capacitive charge + dark current</text>
+
+  <line class="mark" x1="262" y1="266" x2="262" y2="500"/>
+  <line class="mark" x1="332" y1="266" x2="332" y2="500"/>
+  <g color="var(--ink-3)">
+    <line class="flow" x1="264" y1="332" x2="330" y2="332" marker-end="url(#arA)" marker-start="url(#arAs)"/>
+    <line class="flow" x1="334" y1="396" x2="698" y2="396" marker-end="url(#arA)" marker-start="url(#arAs)"/>
+  </g>
+  <text class="t-sm" x="200" y="326">t delay  (no offset)</text>
+  <text class="t-sm" x="470" y="390">collection window</text>
+
+  <text class="t-key" x="0" y="452">Current</text>
+  <line class="ax" x1="100" y1="500" x2="774" y2="500"/>
+  <path class="fill" d="M366,500 L366,436 C398,450 436,474 486,488 C536,497 588,500 700,500 L366,500 Z"/>
+  <path class="cur" d="M100,500 L332,500 L340,500 L352,430 C388,446 430,472 486,486 C540,496 600,500 700,500 L774,500"/>
+  <path class="cur-d" d="M100,500 L332,500 L340,500 L352,470 C378,482 412,492 452,497 C500,500 560,500 700,500 L774,500"/>
+  <line class="mark" x1="366" y1="424" x2="366" y2="514"/>
+  <text class="t-sm" x="372" y="528">t0 integration</text>
+  <text class="t-lab" x="500" y="456">Q = ∫ ( j light − j dark ) dt</text>
+</svg>
+</div>
+<figcaption><strong>Figure 1 — one shot.</strong> Panel (a) is the repetition the LED runs at; panel (b) is the ~microsecond window the experiment measures. The delay is referenced to the <em>LED falling edge</em>, so extraction acts on carriers already generated and left to sit — which is what makes the delay a kinetics axis. The dark run is a full repeat of the same measurement with the same step amplitude, shifted so it runs between 0 V and V<sub>coll</sub> − V<sub>oc</sub>; its charge is the capacitive and dark-current background that the light run also carries.</figcaption>
+</figure>
+
+<div class="callout">
+<b>The invariant that makes V<sub>oc</sub> the right axis centre</b>
+<p>One number is used twice within an intensity point, and everything downstream assumes they match:</p>
+<pre style="background:var(--surface-2);border:none;border-radius:2px;padding:12px 14px;margin:12px 0;font-family:'IBM Plex Mono',monospace;font-size:12.5px;line-height:1.7;color:var(--ink);overflow-x:auto">V oc measurement   FUNC:SHAP DC;    :VOLT:OFFS  <b style="color:var(--signal)">1.0</b>          →  V oc = 0.8 V
+transient          FUNC:SHAP PULSE; :VOLT:HIGH  <b style="color:var(--signal)">1.0</b>
+                                    :VOLT:LOW   0.4   (dark)
+                                    :FREQ 1000;  FUNC:PULS:DCYC 50</pre>
+<p>Because the LED is fully off below ~1 V rather than dimmed, there is no duty-cycle averaging: the on-phase intensity <em>is</em> the DC intensity, and the V<sub>oc</sub> measured under DC is the condition the prebias sits at. If the pulse high level ever drifts from the DC level the axis is centred on the wrong V<sub>oc</sub>, every charge is biased, and nothing in the data shows it. That is worth an assertion rather than a convention — <code>core/illumination.py</code> refuses a low level above threshold, and <code>assert_axis_centre</code> refuses a V<sub>oc</sub> measured at a different drive.</p>
+</div>
+
+<div class="callout">
+<b>How the two generators are told apart in the recovered code</b>
+<p>The SCPI written inline by <code>BACE_Mehrdad.vi</code> carries <strong>no channel index</strong> — <code>FUNC:SHAP PULSE;</code>, <code>:FREQ %g;:VOLT:HIGH %g;:VOLT:LOW %g;</code>, <code>FUNC:PULS:DCYC %g;</code> — while every 81150A command in its driver library is indexed: <code>:FUNC%d</code>, <code>:VOLT%d:HIGH</code>, <code>:PULS:DEL%d</code>, <code>:ARM:SOUR%d</code>. So the inline block is the 33220A, set up as a <em>pulse</em>. The 81150A is armed from it and carries the delay.</p>
+<p>The per-step acquisition in the engine confirms the light/dark pair: two <code>Agilent 81150StandardWaveform</code> calls and two <code>shutter_lv2012</code> calls per point, waveform and shutter changed together between them.</p>
+</div>
+
+</section>
+
+<section>
+<h2>2 · The structure</h2>
+<p>A run is that shot, repeated along an axis. Which axis you sweep <em>is</em> the choice of experiment — the hardware, the waveform and the arithmetic are identical across all of them.</p>
+<p>The one thing that stops it being a plain nested loop over a fixed grid: the prebias axis is <strong>centred on a quantity the rig has to measure first</strong>. V<sub>oc</sub> moves with illumination, so the axis has to be built after the SourceMeter has spoken, once per intensity.</p>
+
+<figure>
+<div class="frame">
+<svg viewBox="0 0 880 620" role="img" aria-label="Nested structure of a run: sample context contains an illumination loop; inside it DC characterisation yields Voc which defines the swept axis; then repeat loops over axis points, each running one shot; every shot emits an event consumed by storage and live display.">
+  <defs>
+    <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+
+  <!-- sample context -->
+  <rect class="nest" x="14" y="14" width="700" height="516" rx="4"/>
+  <text class="t-key" x="28" y="36">Sample context</text>
+  <text class="t-mono" x="150" y="36">pixel area · polarity · sense resistor · amplifier gain</text>
+
+  <!-- illumination loop -->
+  <rect class="nest" x="34" y="52" width="662" height="462" rx="4"/>
+  <text class="t-key" x="48" y="74">for each illumination level</text>
+  <text class="t-mono" x="240" y="74">33220A high drive level — pulsed 1 kHz</text>
+
+  <!-- settle + DC -->
+  <rect class="box-2" x="56" y="90" width="118" height="42" rx="3"/>
+  <text class="t-hd" x="115" y="110" text-anchor="middle">settle</text>
+  <text class="t-sm" x="115" y="124" text-anchor="middle">LED stab. time</text>
+
+  <g color="var(--ink-3)"><line class="flow" x1="176" y1="111" x2="212" y2="111" marker-end="url(#ar2)"/></g>
+
+  <rect class="box-a" x="214" y="90" width="196" height="42" rx="3"/>
+  <text class="t-hd" x="312" y="110" text-anchor="middle">DC characterisation</text>
+  <text class="t-sm" x="312" y="124" text-anchor="middle">SourceMeter — V oc, J sc, J sat</text>
+
+  <g color="var(--ink-3)"><line class="flow" x1="412" y1="111" x2="448" y2="111" marker-end="url(#ar2)"/></g>
+  <rect class="box-2" x="450" y="90" width="140" height="42" rx="3"/>
+  <text class="t-hd" x="520" y="110" text-anchor="middle">pulse energy</text>
+  <text class="t-sm" x="520" y="124" text-anchor="middle">optional — power meter</text>
+
+  <!-- derived-axis arrow -->
+  <g color="var(--accent)">
+    <path class="flow-a" d="M312,134 L312,164" marker-end="url(#ar2)"/>
+  </g>
+  <text class="t-lab" x="322" y="154" style="fill:var(--accent)">V oc centres the axis</text>
+
+  <!-- axis definition -->
+  <rect class="box-a" x="56" y="168" width="534" height="76" rx="3"/>
+  <text class="t-hd" x="70" y="188">Axis — sweep one, pin the rest</text>
+  <line class="grid" x1="70" y1="196" x2="576" y2="196"/>
+  <text class="t-mono" x="70" y="214">V pre  ∈ V oc ± dV</text>
+  <text class="t-sm" x="70" y="230">carrier density at V oc  ·  BACE</text>
+  <text class="t-mono" x="248" y="214">t delay  ∈ [t1, t2]</text>
+  <text class="t-sm" x="248" y="230">recombination kinetics  ·  TDCF</text>
+  <text class="t-mono" x="430" y="214">V coll ∈ [V1, V2]</text>
+  <text class="t-sm" x="430" y="230">field dependence of extraction</text>
+
+  <!-- repeat loop -->
+  <rect class="nest" x="56" y="262" width="534" height="180" rx="4"/>
+  <text class="t-key" x="70" y="284">for each repeat loop</text>
+  <text class="t-mono" x="222" y="284">L = 1 … N loops</text>
+
+  <rect class="nest" x="76" y="298" width="494" height="124" rx="4"/>
+  <text class="t-key" x="90" y="320">for each axis point</text>
+  <text class="t-mono" x="212" y="320">k = 1 … N steps</text>
+
+  <rect class="box-s" x="98" y="334" width="450" height="72" rx="3"/>
+  <text class="t-hd" x="323" y="356" text-anchor="middle">SHOT  →  trace, Q</text>
+  <text class="t-mono" x="323" y="374" text-anchor="middle">set levels · arm scope · light run · dark run</text>
+  <text class="t-sm" x="323" y="392" text-anchor="middle">figure 1</text>
+
+  <!-- aggregation -->
+  <g color="var(--ink-3)"><line class="flow" x1="323" y1="444" x2="323" y2="466" marker-end="url(#ar2)"/></g>
+  <rect class="box-o" x="140" y="468" width="366" height="34" rx="3"/>
+  <text class="t-hd" x="323" y="490" text-anchor="middle">running mean and σ over loops  →  Q(axis) ± σ</text>
+
+  <!-- event stream out -->
+  <g color="var(--accent)">
+    <path class="flow-a" d="M714,368 L764,368" marker-end="url(#ar2)"/>
+  </g>
+  <text class="t-lab" x="726" y="360" style="fill:var(--accent)">event</text>
+  <text class="t-lab" x="726" y="386" style="fill:var(--accent)">per shot</text>
+
+  <rect class="box" x="768" y="300" width="100" height="46" rx="3"/>
+  <text class="t-lab" x="818" y="322" text-anchor="middle">raw traces</text>
+  <text class="t-sm" x="818" y="336" text-anchor="middle">HDF5</text>
+  <rect class="box" x="768" y="354" width="100" height="46" rx="3"/>
+  <text class="t-lab" x="818" y="376" text-anchor="middle">live plots</text>
+  <text class="t-sm" x="818" y="390" text-anchor="middle">browser</text>
+  <rect class="box" x="768" y="408" width="100" height="46" rx="3"/>
+  <text class="t-lab" x="818" y="430" text-anchor="middle">parameters</text>
+  <text class="t-sm" x="818" y="444" text-anchor="middle">.dat</text>
+
+  <!-- abort -->
+  <rect class="box" x="14" y="552" width="700" height="46" rx="3"/>
+  <text class="t-hd" x="30" y="574">Unwind — on finish, on abort, on failure</text>
+  <text class="t-mono" x="30" y="590">output off · shutter closed · device back to 0 V · files flushed</text>
+  <g color="var(--ink-3)"><line class="flow" x1="364" y1="532" x2="364" y2="550" marker-end="url(#ar2)"/></g>
+</svg>
+</div>
+<figcaption><strong>Figure 2 — the structure of a run.</strong> Dashed frames are iteration; solid boxes are work. The blue arrow is the dependency that matters: the prebias axis cannot be built until the SourceMeter has returned V<sub>oc</sub> at that illumination level, so axis construction sits <em>inside</em> the illumination loop, not before it. Every shot emits one event; storage, live display and the parameter file are three subscribers to the same stream rather than three places that reach into shared state.</figcaption>
+</figure>
+
+<div class="callout">
+<b>This generalisation is already latent in your LabVIEW</b>
+<p>The engine computes <code>Vcoll1Loop</code> and <code>Delay1Loop</code> as <em>per-step arrays</em>, one entry for every point on the sweep — and then fills both with a constant (<code>Vpre1Loop*0 + Vcoll</code>). The machinery for a delay or collection-field axis is there and has never been given a value. Making the axis a parameter rather than a hard-coded choice is not a new feature; it is finishing one.</p>
+</div>
+</section>
+
+<section>
+<h2>3 · What the charge becomes</h2>
+<div class="callout">
+<b>One systematic the subtraction cannot remove</b>
+<p>The two runs share a step <em>amplitude</em>, not a step <em>range</em>: the light run traverses <code>+0.8 → −2.5 V</code>, the dark run <code>0 → −3.3 V</code>. The displaced charge is <code>∫C(V) dV</code> over each range, so the two cancel exactly only where C is flat across the swing. Junction capacitance is not flat near forward bias, so a residual survives — small when V<sub>coll</sub> is deep and most of the swing is in reverse, larger for shallow V<sub>coll</sub> or thin devices. It is not a reason to change the method; it is a reason to keep both raw traces, so the assumption stays checkable after the sample is gone.</p>
+</div>
+<p>Q on its own is not the answer. Two corrections and one derivative stand between the raw integral and a carrier density, and both corrections are the reason the sweep exists in the first place.</p>
+
+<figure>
+<div class="frame">
+<svg viewBox="0 0 860 268" role="img" aria-label="From extracted charge to physics: Q versus prebias gives a differential capacitance, which after subtracting the geometric capacitance gives carrier density; carrier density against open-circuit voltage gives the recombination order. A parallel branch takes Q versus delay to the recombination rate.">
+  <defs>
+    <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+
+  <rect class="box-s" x="8" y="98" width="130" height="56" rx="3"/>
+  <text class="t-hd" x="73" y="122" text-anchor="middle">Q (axis) ± σ</text>
+  <text class="t-sm" x="73" y="138" text-anchor="middle">the measured quantity</text>
+
+  <!-- BACE branch -->
+  <g color="var(--ink-3)"><path class="flow" d="M140,116 L184,116 L184,60 L214,60" marker-end="url(#ar3)"/></g>
+  <text class="t-sm" x="150" y="76">V pre axis</text>
+
+  <rect class="box" x="216" y="36" width="132" height="48" rx="3"/>
+  <text class="t-lab" x="282" y="58" text-anchor="middle">dQ / dV pre  ?</text>
+  <text class="t-sm" x="282" y="72" text-anchor="middle">purpose to confirm</text>
+
+  <g color="var(--ink-3)"><line class="flow" x1="350" y1="60" x2="386" y2="60" marker-end="url(#ar3)"/></g>
+  <rect class="box" x="388" y="36" width="132" height="48" rx="3"/>
+  <text class="t-lab" x="454" y="58" text-anchor="middle">already subtracted</text>
+  <text class="t-sm" x="454" y="72" text-anchor="middle">by the dark run</text>
+
+  <g color="var(--ink-3)"><line class="flow" x1="522" y1="60" x2="558" y2="60" marker-end="url(#ar3)"/></g>
+  <rect class="box-o" x="560" y="36" width="126" height="48" rx="3"/>
+  <text class="t-lab" x="623" y="58" text-anchor="middle">n = Q / (q · A · d)</text>
+  <text class="t-sm" x="623" y="72" text-anchor="middle">carrier density</text>
+
+  <g color="var(--ink-3)"><path class="flow" d="M688,60 L724,60 L724,116 L756,116" marker-end="url(#ar3)"/></g>
+  <rect class="box-o" x="758" y="92" width="96" height="48" rx="3"/>
+  <text class="t-lab" x="806" y="114" text-anchor="middle">δ</text>
+  <text class="t-sm" x="806" y="130" text-anchor="middle">recomb. order</text>
+  <text class="t-sm" x="700" y="150">across the</text>
+  <text class="t-sm" x="700" y="164">intensity series:</text>
+  <text class="t-mono" x="700" y="180">d ln n / d V oc</text>
+
+  <!-- TDCF branch -->
+  <g color="var(--ink-3)"><path class="flow" d="M140,136 L184,136 L184,214 L214,214" marker-end="url(#ar3)"/></g>
+  <text class="t-sm" x="150" y="230">t delay axis</text>
+
+  <rect class="box" x="216" y="190" width="132" height="48" rx="3"/>
+  <text class="t-lab" x="282" y="212" text-anchor="middle">n (t delay)</text>
+  <text class="t-sm" x="282" y="226" text-anchor="middle">carriers left to extract</text>
+
+  <g color="var(--ink-3)"><line class="flow" x1="350" y1="214" x2="386" y2="214" marker-end="url(#ar3)"/></g>
+  <rect class="box-o" x="388" y="190" width="180" height="48" rx="3"/>
+  <text class="t-lab" x="478" y="212" text-anchor="middle">R(n) = − dn / dt</text>
+  <text class="t-sm" x="478" y="226" text-anchor="middle">recombination rate vs density</text>
+</svg>
+</div>
+<figcaption><strong>Figure 3 — from charge to physics.</strong> Revised: the capacitive background is removed by the dark run itself, not by the prebias slope. That leaves the three <code>Q1/Q2/Q3</code> columns needing a different explanation — marked with a question until confirmed. Whatever they are for, computing it at the source beats three adjacent columns and a convention held in someone's head.</figcaption>
+</figure>
+</section>
+
+<section>
+<h2>4 · Where the code boundaries fall</h2>
+<p>Read down figure 2 and the module boundaries pick themselves. Each layer owns one timescale and one kind of decision.</p>
+<div class="scroll">
+<table>
+<thead><tr><th>Layer</th><th>Timescale</th><th>Owns</th><th>Module</th></tr></thead>
+<tbody>
+<tr><td><strong>Shot</strong></td><td>~ms – s</td><td>One (V<sub>pre</sub>, V<sub>coll</sub>, t<sub>d</sub>, illumination) → trace and Q. Knows instruments, knows nothing about sweeps.</td><td><code>core/pulses</code><br><code>core/process</code><br><code>drivers/*</code></td></tr>
+<tr><td><strong>Scan</strong></td><td>seconds – minutes</td><td>An axis, its repeats, and the running statistics. Knows nothing about instruments.</td><td><code>core/sequence</code><br><code>core/scan</code></td></tr>
+<tr><td><strong>Session</strong></td><td>minutes – hours</td><td>The illumination series, DC characterisation, and building each axis from the measured V<sub>oc</sub>.</td><td><code>core/experiment</code></td></tr>
+<tr><td><strong>Service</strong></td><td>the run</td><td>Start, pause, abort; five session states; fan-out of the event stream.</td><td><code>service/app</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>Three things this structure fixes</h3>
+<ul>
+<li><strong>The axis becomes data.</strong> BACE and TDCF stop being two programs sharing an engine by copy-paste and become two axis definitions. A V<sub>coll</sub> series — field dependence of extraction — comes free, having never been available before.</li>
+<li><strong>The V<sub>oc</sub> dependency becomes visible.</strong> Right now it is implicit in which frame of the case structure runs first. Drawn as an arrow, it is obvious that a stale or failed V<sub>oc</sub> reading silently poisons the whole axis beneath it — worth an explicit check rather than a wrong sweep centre.</li>
+<li><strong>One place where traces are kept, not two.</strong> The engine already saves them — per-loop and averaged light, dark and photocurrent, eight files zipped per measurement. The wrapper does not: its summary file holds only Q. So the traces exist for a standalone run and vanish for an automated series. One storage layer subscribing to one event stream fixes that, and makes every processing decision — baseline window, integration start, offset correction — revisitable after the sample is gone.</li>
+</ul>
+</section>
+
+<footer>
+Drawn from the measurement, then checked against <code>BACE_Mehrdad.vi</code>, <code>TDCF-BACE.vi</code> and <code>TDCF-BACE_20160223.vi</code>, decompiled from their binaries.
+</footer>
+</div>

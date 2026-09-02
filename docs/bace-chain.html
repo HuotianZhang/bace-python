@@ -1,0 +1,445 @@
+<title>BACE Instrument Chain</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+:root{
+  --paper:#f4f6f7; --surface:#ffffff; --surface-2:#eaeef0;
+  --ink:#141c23; --ink-2:#48585f; --ink-3:#74848d;
+  --rule:#d6dde1; --rule-strong:#b9c4ca;
+  --accent:#14586b; --accent-soft:#e0edf1;
+  --signal:#b8791f; --signal-soft:#f6ecdb;
+  --ok:#42663a; --ok-soft:#e5eddf;
+  --warn:#a2461e; --warn-soft:#f6e6dd;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#0e141a; --surface:#151d24; --surface-2:#1c262e;
+    --ink:#e5ebef; --ink-2:#a5b3bd; --ink-3:#7a8a95;
+    --rule:#27333c; --rule-strong:#3a4952;
+    --accent:#68b3c8; --accent-soft:#142b34;
+    --signal:#e0aa5c; --signal-soft:#2a2015;
+    --ok:#9cc08b; --ok-soft:#1d2a1b;
+    --warn:#e2946d; --warn-soft:#33221a;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0e141a; --surface:#151d24; --surface-2:#1c262e;
+  --ink:#e5ebef; --ink-2:#a5b3bd; --ink-3:#7a8a95;
+  --rule:#27333c; --rule-strong:#3a4952;
+  --accent:#68b3c8; --accent-soft:#142b34;
+  --signal:#e0aa5c; --signal-soft:#2a2015;
+  --ok:#9cc08b; --ok-soft:#1d2a1b;
+  --warn:#e2946d; --warn-soft:#33221a;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:"Source Serif 4",Georgia,serif;font-size:17px;line-height:1.62;
+  -webkit-font-smoothing:antialiased}
+h1,h2,h3,figcaption,.ui{font-family:Archivo,"Helvetica Neue",Arial,sans-serif}
+code{font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace;background:var(--surface-2);
+  padding:1.5px 5px;border-radius:2px;font-size:.85em;color:var(--ink)}
+.wrap{max-width:960px;margin:0 auto;padding:0 28px 96px}
+header.top{border-bottom:1px solid var(--rule);margin-bottom:40px;padding:52px 0 28px}
+.eyebrow{font-family:Archivo,sans-serif;font-size:11.5px;font-weight:600;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--accent);margin:0 0 14px}
+h1{font-size:clamp(30px,4.4vw,44px);font-weight:700;letter-spacing:-.02em;line-height:1.08;
+  margin:0 0 16px;text-wrap:balance}
+.standfirst{font-size:19px;color:var(--ink-2);max-width:64ch;margin:0}
+h2{font-size:22px;font-weight:600;letter-spacing:-.01em;margin:0 0 8px;padding-bottom:10px;
+  border-bottom:1px solid var(--rule)}
+h3{font-size:16px;font-weight:600;margin:28px 0 8px}
+section{margin:0 0 58px}
+p{margin:0 0 16px;max-width:68ch}
+ul{max-width:68ch;padding-left:20px}li{margin:0 0 8px}
+figure{margin:26px 0 8px}
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+  padding:22px 20px 14px;overflow-x:auto}
+.frame svg{display:block;width:100%;min-width:640px;height:auto}
+figcaption{font-size:12.5px;color:var(--ink-3);margin-top:12px;max-width:70ch;line-height:1.55}
+
+svg text{font-family:Archivo,sans-serif;fill:var(--ink-2)}
+.t-key{font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;fill:var(--ink-3);font-weight:600}
+.t-hd{font-size:12.5px;font-weight:600;fill:var(--ink)}
+.t-lab{font-size:11.5px;fill:var(--ink-2)}
+.t-mono{font-family:"IBM Plex Mono",monospace;font-size:10.5px;fill:var(--ink-2)}
+.t-sm{font-size:10.5px;fill:var(--ink-3)}
+.box{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1.2}
+.box-a{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.4}
+.box-s{fill:var(--signal-soft);stroke:var(--signal);stroke-width:1.4}
+.box-o{fill:var(--ok-soft);stroke:var(--ok);stroke-width:1.2}
+.box-d{fill:var(--surface-2);stroke:var(--rule-strong);stroke-width:1}
+.zone{fill:none;stroke:var(--rule-strong);stroke-width:1;stroke-dasharray:4 3}
+.w-ctrl{stroke:var(--ink-3);stroke-width:1.3;fill:none}
+.w-bias{stroke:var(--accent);stroke-width:2;fill:none}
+.w-sig{stroke:var(--signal);stroke-width:2;fill:none}
+.w-opt{stroke:var(--signal);stroke-width:2;fill:none;stroke-dasharray:1 4;stroke-linecap:round}
+.w-trig{stroke:var(--ok);stroke-width:1.8;fill:none;stroke-dasharray:7 4}
+.w-q{stroke:var(--warn);stroke-width:1.4;fill:none;stroke-dasharray:2 3}
+.life{stroke:var(--rule-strong);stroke-width:1;stroke-dasharray:3 4}
+.hwband{fill:var(--ok);opacity:.10}
+.hwedge{stroke:var(--ok);stroke-width:1;stroke-dasharray:4 3;fill:none}
+
+.callout{border-left:3px solid var(--signal);background:var(--surface);border-radius:2px;
+  padding:14px 18px;margin:22px 0;font-size:15.5px;color:var(--ink-2)}
+.callout b{display:block;font-family:Archivo,sans-serif;font-size:11.5px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--signal);margin-bottom:5px}
+.callout.q{border-left-color:var(--warn)} .callout.q b{color:var(--warn)}
+.callout p:last-child{margin-bottom:0}
+.scroll{overflow-x:auto;margin:20px 0;border:1px solid var(--rule);border-radius:3px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;font-family:Archivo,sans-serif}
+th{text-align:left;font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);
+  font-weight:600;padding:11px 14px;background:var(--surface-2);
+  border-bottom:1px solid var(--rule-strong);white-space:nowrap}
+td{padding:11px 14px;border-bottom:1px solid var(--rule);vertical-align:top;color:var(--ink-2)}
+tr:last-child td{border-bottom:none}
+td.lvl{font-weight:600;color:var(--ink);white-space:nowrap}
+td code{font-size:12px;background:none;padding:0;color:var(--ink-2);display:block;white-space:nowrap}
+.legend{display:flex;flex-wrap:wrap;gap:10px 22px;margin:14px 0 0;font-family:Archivo,sans-serif;
+  font-size:12px;color:var(--ink-3)}
+.legend span{display:flex;align-items:center;gap:7px}
+.sw{width:22px;height:0;border-top-width:2.5px;border-top-style:solid;display:inline-block}
+footer{border-top:1px solid var(--rule);padding-top:22px;font-family:Archivo,sans-serif;
+  font-size:13px;color:var(--ink-3)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+
+<div class="wrap">
+<header class="top">
+  <p class="eyebrow">Control and data flow</p>
+  <h1>BACE Instrument Chain</h1>
+  <p class="standfirst">What is wired to what, which commands belong at which level of the run, and the one place where the software is deliberately not in the loop.</p>
+</header>
+
+<section>
+<h2>1 · The chain</h2>
+<p>Five instruments, two of them behind vendor DLLs rather than VISA. The thing to read off this picture is the <strong>trigger chain</strong>: the LED generator is the master clock, the bias generator is armed from it, and the whole fast loop closes in hardware without the host.</p>
+
+<figure>
+<div class="frame">
+<svg viewBox="0 0 900 520" role="img" aria-label="Topology of the BACE rig: the measurement service commands five instruments over VISA and a 32-bit helper over USB. The 33220A drives the LED and its sync arms the 81150A, whose output passes through a times-four amplifier to the device. Current flows through a sense resistor to the oscilloscope. The SourceMeter shares the device node for DC measurements, and a shutter and power meter sit in the optical path.">
+  <defs>
+    <marker id="cA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+  </defs>
+
+  <!-- zones -->
+  <rect class="zone" x="10" y="34" width="176" height="332" rx="4"/>
+  <text class="t-key" x="20" y="28">Host</text>
+  <rect class="zone" x="214" y="34" width="212" height="452" rx="4"/>
+  <text class="t-key" x="224" y="28">Instruments</text>
+  <rect class="zone" x="470" y="34" width="420" height="452" rx="4"/>
+  <text class="t-key" x="480" y="28">Optical bench &amp; sample</text>
+
+  <!-- host -->
+  <rect class="box-a" x="26" y="52" width="144" height="60" rx="3"/>
+  <text class="t-hd" x="98" y="76" text-anchor="middle">service</text>
+  <text class="t-sm" x="98" y="92" text-anchor="middle">64-bit · numpy · scipy</text>
+  <text class="t-sm" x="98" y="106" text-anchor="middle">owns all VISA sessions</text>
+
+  <rect class="box-d" x="26" y="286" width="144" height="60" rx="3"/>
+  <text class="t-hd" x="98" y="310" text-anchor="middle">32-bit helper</text>
+  <text class="t-sm" x="98" y="326" text-anchor="middle">delib.dll · usbdll.dll</text>
+  <text class="t-sm" x="98" y="340" text-anchor="middle">loopback JSON</text>
+  <g color="var(--ink-3)"><line class="w-ctrl" x1="98" y1="114" x2="98" y2="284" marker-end="url(#cA)"/></g>
+  <text class="t-sm" x="104" y="200">127.0.0.1</text>
+
+  <!-- instruments -->
+  <rect class="box" x="228" y="52" width="184" height="52" rx="3"/>
+  <text class="t-hd" x="320" y="74" text-anchor="middle">33220A</text>
+  <text class="t-sm" x="320" y="90" text-anchor="middle">LED driver — master clock</text>
+
+  <rect class="box" x="228" y="128" width="184" height="52" rx="3"/>
+  <text class="t-hd" x="320" y="150" text-anchor="middle">81150A</text>
+  <text class="t-sm" x="320" y="166" text-anchor="middle">bias pulser — carries the delay</text>
+
+  <rect class="box" x="228" y="204" width="184" height="52" rx="3"/>
+  <text class="t-hd" x="320" y="226" text-anchor="middle">Keithley 24xx</text>
+  <text class="t-sm" x="320" y="242" text-anchor="middle">DC — V oc, J sc, J sat</text>
+
+  <rect class="box" x="228" y="280" width="184" height="52" rx="3"/>
+  <text class="t-hd" x="320" y="302" text-anchor="middle">Infiniium</text>
+  <text class="t-sm" x="320" y="318" text-anchor="middle">hardware-averaged transient</text>
+
+  <rect class="box-d" x="228" y="358" width="184" height="46" rx="3"/>
+  <text class="t-hd" x="320" y="378" text-anchor="middle">Deditec DIO</text>
+  <text class="t-sm" x="320" y="394" text-anchor="middle">ID 9 · shutter nr 0 · relay nr 1</text>
+
+  <rect class="box-d" x="228" y="424" width="184" height="46" rx="3"/>
+  <text class="t-hd" x="320" y="444" text-anchor="middle">Newport 1918-C</text>
+  <text class="t-sm" x="320" y="460" text-anchor="middle">pulse energy</text>
+
+  <!-- host -> instruments (VISA) -->
+  <g color="var(--ink-3)">
+    <line class="w-ctrl" x1="172" y1="78" x2="226" y2="78" marker-end="url(#cA)"/>
+    <line class="w-ctrl" x1="172" y1="90" x2="200" y2="90"/><line class="w-ctrl" x1="200" y1="90" x2="200" y2="154"/>
+    <line class="w-ctrl" x1="200" y1="154" x2="226" y2="154" marker-end="url(#cA)"/>
+    <line class="w-ctrl" x1="200" y1="154" x2="200" y2="230"/>
+    <line class="w-ctrl" x1="200" y1="230" x2="226" y2="230" marker-end="url(#cA)"/>
+    <line class="w-ctrl" x1="200" y1="230" x2="200" y2="306"/>
+    <line class="w-ctrl" x1="200" y1="306" x2="226" y2="306" marker-end="url(#cA)"/>
+    <line class="w-ctrl" x1="172" y1="316" x2="190" y2="316"/><line class="w-ctrl" x1="190" y1="316" x2="190" y2="381"/>
+    <line class="w-ctrl" x1="190" y1="381" x2="226" y2="381" marker-end="url(#cA)"/>
+    <line class="w-ctrl" x1="190" y1="381" x2="190" y2="447"/>
+    <line class="w-ctrl" x1="190" y1="447" x2="226" y2="447" marker-end="url(#cA)"/>
+  </g>
+  <text class="t-sm" x="176" y="66">VISA</text>
+  <text class="t-sm" x="150" y="368">USB</text>
+
+  <!-- trigger chain: 33220 sync -> 81150 arm, and -> scope -->
+  <g color="var(--ok)">
+    <path class="w-trig" d="M414,92 L440,92 L440,142 L414,142" marker-end="url(#cA)"/>
+    <path class="w-trig" d="M414,172 L452,172 L452,300 L414,300" marker-end="url(#cA)"/>
+  </g>
+  <text class="t-sm" x="444" y="112" style="fill:var(--ok)">SYNC</text>
+  <text class="t-sm" x="444" y="126" style="fill:var(--ok)">arms</text>
+  <text class="t-sm" x="456" y="238" style="fill:var(--ok)">81150A SYNC</text>
+  <text class="t-sm" x="456" y="252" style="fill:var(--ok)">→ CHAN3</text>
+
+  <!-- optical bench -->
+  <rect class="box-s" x="492" y="52" width="92" height="46" rx="3"/>
+  <text class="t-hd" x="538" y="74" text-anchor="middle">LED</text>
+  <text class="t-sm" x="538" y="89" text-anchor="middle">1 kHz — on / fully off</text>
+
+  <rect class="box-d" x="612" y="52" width="86" height="46" rx="3"/>
+  <text class="t-hd" x="655" y="74" text-anchor="middle">shutter</text>
+  <text class="t-sm" x="655" y="89" text-anchor="middle">dark run</text>
+
+  <rect class="box-s" x="726" y="52" width="150" height="46" rx="3"/>
+  <text class="t-hd" x="801" y="74" text-anchor="middle">beam split ?</text>
+  <text class="t-sm" x="801" y="89" text-anchor="middle">to meter and sample</text>
+
+  <rect class="box-a" x="492" y="152" width="92" height="42" rx="3"/>
+  <text class="t-hd" x="538" y="178" text-anchor="middle">× 4 amp</text>
+
+  <rect class="box-o" x="612" y="222" width="70" height="58" rx="3"/>
+  <text class="t-hd" x="647" y="246" text-anchor="middle">RELAY</text>
+  <text class="t-sm" x="647" y="262" text-anchor="middle">amp  /</text>
+  <text class="t-sm" x="647" y="274" text-anchor="middle">2400</text>
+
+  <rect class="box-a" x="716" y="222" width="160" height="58" rx="3"/>
+  <text class="t-hd" x="796" y="248" text-anchor="middle">DEVICE</text>
+  <text class="t-sm" x="796" y="266" text-anchor="middle">pixel area · polarity</text>
+
+  <rect class="box" x="716" y="330" width="160" height="46" rx="3"/>
+  <text class="t-hd" x="796" y="350" text-anchor="middle">R sense  5.192 Ω</text>
+  <text class="t-sm" x="796" y="366" text-anchor="middle">then BNC to CHAN2</text>
+
+  <!-- optical path -->
+  <g color="var(--signal)">
+    <line class="w-opt" x1="586" y1="75" x2="608" y2="75" marker-end="url(#cA)"/>
+    <line class="w-opt" x1="700" y1="75" x2="722" y2="75" marker-end="url(#cA)"/>
+    <path class="w-opt" d="M801,100 L801,214" marker-end="url(#cA)"/>
+    <path class="w-opt" d="M760,100 L760,120 L420,120 L420,447 L414,447" marker-end="url(#cA)"/>
+  </g>
+  <text class="t-sm" x="430" y="116" style="fill:var(--signal)">split fraction to the meter</text>
+
+  <!-- electrical: 33220 -> LED ; 81150 -> amp -> device -->
+  <g color="var(--signal)"><line class="w-sig" x1="414" y1="66" x2="488" y2="66" marker-end="url(#cA)"/></g>
+  <g color="var(--accent)">
+    <line class="w-bias" x1="414" y1="168" x2="488" y2="168" marker-end="url(#cA)"/>
+    <path class="w-bias" d="M586,173 L600,173 L600,238 L610,238" marker-end="url(#cA)"/>
+    <path class="w-bias" d="M414,236 L470,236 L470,266 L610,266" marker-end="url(#cA)"/>
+    <line class="w-bias" x1="684" y1="251" x2="712" y2="251" marker-end="url(#cA)"/>
+  </g>
+  <text class="t-sm" x="476" y="258" style="fill:var(--accent)">DC path</text>
+
+  <!-- signal back to scope -->
+  <g color="var(--signal)">
+    <path class="w-sig" d="M796,282 L796,328"/>
+    <path class="w-sig" d="M716,353 L500,353 L500,312 L414,312" marker-end="url(#cA)"/>
+  </g>
+  <text class="t-sm" x="524" y="348" style="fill:var(--signal)">j(t) → CHAN2</text>
+
+  <!-- shutter control -->
+  <g color="var(--ink-3)">
+    <path class="w-ctrl" d="M414,381 L560,381 L560,110 L655,110 L655,100" marker-end="url(#cA)"/>
+  </g>
+
+  <!-- relay control -->
+  <g color="var(--ok)"><path class="w-trig" d="M414,392 L580,392 L580,290 L647,290 L647,282" marker-end="url(#cA)"/></g>
+  <text class="t-sm" x="470" y="406" style="fill:var(--ok)">module 1 · 1 = Keithley, 0 = amplifier</text>
+</svg>
+</div>
+<div class="legend">
+  <span><i class="sw" style="border-color:var(--ink-3)"></i> command / digital</span>
+  <span><i class="sw" style="border-color:var(--ok);border-top-style:dashed"></i> trigger</span>
+  <span><i class="sw" style="border-color:var(--accent)"></i> applied bias</span>
+  <span><i class="sw" style="border-color:var(--signal)"></i> drive &amp; measured signal</span>
+  <span><i class="sw" style="border-color:var(--signal);border-top-style:dotted"></i> light</span>
+  <span><i class="sw" style="border-color:var(--ok);border-top-style:dashed"></i> trigger &amp; relay control</span>
+</div>
+<figcaption><strong>Figure 1 — the chain.</strong> The 33220A is the master clock: its SYNC arms the 81150A and gives the scope its trigger, so once configured the fast loop runs entirely in hardware. Everything on the host side is setup and readback, never per-cycle timing.</figcaption>
+</figure>
+
+<div class="callout">
+<b>The two DIO lines — resolved</b>
+<p>Both boxes are Deditec modules on ID 9, channel 0. Which is which follows from two independent places in the code.</p>
+<p><strong>Module 0 is the shutter.</strong> <code>shutter_lv2012.vi</code> hard-codes its own target — module nr 0, ID 9, channel 0, with a 0.1 s settling wait — and its only input is a boolean. <code>TDCF-BACE.vi</code>, the standalone measurement that has a shutter and no relay, calls that VI and touches nothing else on the DIO.</p>
+<p><strong>Module 1 is the relay, and 1 means Keithley.</strong> Tracing every <code>Dapi DO Set1</code> by event frame: both frames set module 1 high on entry and then use the SourceMeter. The J-V frame never lowers it — the Keithley stays connected for the whole sweep. The BACE frame lowers it exactly once, immediately after <code>measJsc,Voc</code> and before the engine runs the transients. That is the only moment in the program where the bias path changes.</p>
+<pre style="background:var(--surface-2);border:none;border-left:2px solid var(--ok);margin:12px 0;padding:12px 14px;font-size:12px;line-height:1.7;overflow-x:auto">BACE frame
+   module 0 ← 1      shutter open
+   module 1 ← 1      relay → Keithley
+   Enable Output → measJsc,Voc → Enable Output off
+   module 1 ← 0      relay → amplifier
+   engine runs, toggling module 0 for each light/dark pair</pre>
+<p>Worth knowing: the un-driven state leaves the device on the <em>amplifier</em>, so the rig powers up on the transient path — safe while the 81150A output is off, but not the fail-safe direction you might assume.</p>
+<p>Still open: the <strong>power meter's optical position</strong> — a split fraction of the beam, or swapped into the sample position for calibration? It decides whether intensity can be logged during a run or only before one.</p>
+</div>
+</section>
+
+<section>
+<h2>2 · One shot, in time</h2>
+<p>The chain above says what is connected. This says who speaks when — and where the host deliberately stops speaking.</p>
+
+<figure>
+<div class="frame">
+<svg viewBox="0 0 900 640" role="img" aria-label="Sequence diagram for one axis point. The service configures the 81150A, opens the shutter and starts the scope, then waits while the hardware loop runs 200 averages autonomously; it reads the light trace, closes the shutter, shifts the bias levels, repeats for the dark trace, and finally computes the photocurrent and charge.">
+  <defs>
+    <marker id="sA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+  </defs>
+
+  <!-- lane heads -->
+  <rect class="box-a" x="14" y="14" width="118" height="34" rx="3"/>
+  <text class="t-hd" x="73" y="36" text-anchor="middle">service</text>
+  <rect class="box" x="176" y="14" width="104" height="34" rx="3"/>
+  <text class="t-hd" x="228" y="36" text-anchor="middle">33220A</text>
+  <rect class="box" x="324" y="14" width="104" height="34" rx="3"/>
+  <text class="t-hd" x="376" y="36" text-anchor="middle">81150A</text>
+  <rect class="box" x="472" y="14" width="104" height="34" rx="3"/>
+  <text class="t-hd" x="524" y="36" text-anchor="middle">shutter</text>
+  <rect class="box" x="620" y="14" width="104" height="34" rx="3"/>
+  <text class="t-hd" x="672" y="36" text-anchor="middle">scope</text>
+  <rect class="box-s" x="768" y="14" width="118" height="34" rx="3"/>
+  <text class="t-hd" x="827" y="36" text-anchor="middle">device</text>
+
+  <!-- lifelines -->
+  <line class="life" x1="73"  y1="48" x2="73"  y2="612"/>
+  <line class="life" x1="228" y1="48" x2="228" y2="612"/>
+  <line class="life" x1="376" y1="48" x2="376" y2="612"/>
+  <line class="life" x1="524" y1="48" x2="524" y2="612"/>
+  <line class="life" x1="672" y1="48" x2="672" y2="612"/>
+  <line class="life" x1="827" y1="48" x2="827" y2="612"/>
+
+  <!-- 1 compute -->
+  <rect class="box-a" x="16" y="66" width="114" height="26" rx="3"/>
+  <text class="t-lab" x="73" y="83" text-anchor="middle">pulse levels</text>
+
+  <!-- 2 -> 81150 -->
+  <g color="var(--ink-3)"><line class="w-ctrl" x1="132" y1="106" x2="372" y2="106" marker-end="url(#sA)"/></g>
+  <text class="t-mono" x="140" y="101">:VOLT1:HIGH  :VOLT1:LOW  :PULS:DEL1  :FUNC1:PULS:WIDT</text>
+
+  <!-- 3 shutter open -->
+  <g color="var(--ink-3)"><line class="w-ctrl" x1="132" y1="136" x2="520" y2="136" marker-end="url(#sA)"/></g>
+  <text class="t-mono" x="140" y="131">DapiDOSet1( ch 0, 1 )   — open</text>
+
+  <!-- 4 scope arm -->
+  <g color="var(--ink-3)"><line class="w-ctrl" x1="132" y1="166" x2="668" y2="166" marker-end="url(#sA)"/></g>
+  <text class="t-mono" x="140" y="161">:ACQ:AVER ON  :ACQ:AVER:COUN 200   :RUN</text>
+
+  <!-- hardware band 1 -->
+  <rect class="hwband" x="150" y="184" width="736" height="86" rx="3"/>
+  <rect class="hwedge" x="150" y="184" width="736" height="86" rx="3"/>
+  <text class="t-key" x="164" y="202" style="fill:var(--ok)">hardware-timed — the host is not in this loop</text>
+  <text class="t-lab" x="164" y="222">33220A free-runs at 1 kHz  →  SYNC arms the 81150A  →  bias steps  →  scope accumulates</text>
+  <text class="t-mono" x="164" y="242">200 averages × 1 ms  =  200 ms</text>
+  <text class="t-sm" x="164" y="260">the service polls *OPC / *STB? and otherwise waits</text>
+
+  <!-- 5 read light -->
+  <g color="var(--signal)"><line class="w-sig" x1="668" y1="292" x2="136" y2="292" marker-end="url(#sA)"/></g>
+  <text class="t-mono" x="180" y="287" style="fill:var(--signal)">:WAV:DATA?  →  light trace, 1000 pts + scaling</text>
+
+  <!-- 6 shutter close -->
+  <g color="var(--ink-3)"><line class="w-ctrl" x1="132" y1="330" x2="520" y2="330" marker-end="url(#sA)"/></g>
+  <text class="t-mono" x="140" y="325">DapiDOSet1( ch 0, 0 )   — close</text>
+
+  <!-- 7 shift bias -->
+  <g color="var(--ink-3)"><line class="w-ctrl" x1="132" y1="360" x2="372" y2="360" marker-end="url(#sA)"/></g>
+  <text class="t-mono" x="140" y="355">:VOLT1:HIGH 0  :VOLT1:LOW −|V pre − V coll|   — no dark injection</text>
+
+  <!-- 8 scope arm -->
+  <g color="var(--ink-3)"><line class="w-ctrl" x1="132" y1="390" x2="668" y2="390" marker-end="url(#sA)"/></g>
+  <text class="t-mono" x="140" y="385">:RUN</text>
+
+  <!-- hardware band 2 -->
+  <rect class="hwband" x="150" y="408" width="736" height="62" rx="3"/>
+  <rect class="hwedge" x="150" y="408" width="736" height="62" rx="3"/>
+  <text class="t-key" x="164" y="426" style="fill:var(--ok)">hardware-timed — dark</text>
+  <text class="t-lab" x="164" y="446">same waveform, same 200 averages, LED blocked</text>
+  <text class="t-mono" x="164" y="464">200 ms</text>
+
+  <!-- 9 read dark -->
+  <g color="var(--signal)"><line class="w-sig" x1="668" y1="492" x2="136" y2="492" marker-end="url(#sA)"/></g>
+  <text class="t-mono" x="180" y="487" style="fill:var(--signal)">:WAV:DATA?  →  dark trace</text>
+
+  <!-- 10 process -->
+  <rect class="box-o" x="16" y="514" width="230" height="72" rx="3"/>
+  <text class="t-lab" x="30" y="534">photo = light − dark</text>
+  <text class="t-lab" x="30" y="551">baseline · running average · Q</text>
+  <text class="t-sm" x="30" y="568">emit StepDone event</text>
+
+  <!-- budget -->
+  <text class="t-key" x="470" y="534">per axis point</text>
+  <text class="t-lab" x="470" y="554">≈ 0.5 s  —  two 200 ms acquisitions</text>
+  <text class="t-lab" x="470" y="571">plus shutter settling and VISA round trips</text>
+  <text class="t-sm" x="470" y="588">3 points × 5 loops × 20 intensities ≈ 5 min of acquisition</text>
+</svg>
+</div>
+<figcaption><strong>Figure 2 — one axis point.</strong> Two shaded bands are the whole argument. Inside them the experiment runs at 1 kHz with no host involvement; the service issues <code>:RUN</code>, polls status, and waits. Any design that tries to see individual cycles from Python is solving a problem the instruments already solved — and would miss deadlines by three orders of magnitude.</figcaption>
+</figure>
+</section>
+
+<section>
+<h2>3 · What is set where</h2>
+<p>Map the commands onto the nesting from the run structure and the performance question answers itself. Anything sent once per session must not be re-sent per shot; at roughly 500 shots a run, a stray reconfiguration in the inner loop is minutes of wasted bench time and a fresh chance to disturb a working setup.</p>
+
+<div class="scroll">
+<table>
+<thead><tr><th>Level</th><th>Repeats</th><th>Instrument</th><th>Sent</th></tr></thead>
+<tbody>
+<tr>
+  <td class="lvl">Session</td><td>once</td><td>scope</td>
+  <td><code>:SYST:HEAD OFF; *CLS; *ESE 1; *SRE 32;</code><code>:WAV:BYT MSBF; :WAV:FORM WORD; :WAV:VIEW MAIN;</code><code>:CHAN%d:OFFS; RANG; :PROB:EXT:GAIN</code><code>:TIM:RANG; :TIM:POS; :ACQ:POIN</code><code>:TRIG:MODE EDGE; :TRIG:EDGE:SOUR; :SLOP; :TRIG:LEV</code></td>
+</tr>
+<tr>
+  <td class="lvl"></td><td></td><td>81150A</td>
+  <td><code>:OUTP1:ROUT HIV; :OUTP1:IMP</code><code>:ARM:SOUR1 EXT; :ARM:SENS1 EDGE; :ARM:SLOP POS</code><code>:FUNC1 PULS; :OUTP1 ON</code></td>
+</tr>
+<tr>
+  <td class="lvl"></td><td></td><td>33220A</td>
+  <td><code>FUNC:SHAP PULSE; :FREQ 1000; FUNC:PULS:DCYC 50</code></td>
+</tr>
+<tr>
+  <td class="lvl"></td><td></td><td>Keithley</td>
+  <td><code>*RST; :FUNC:CONC ON; :FORM:BORD NORM; :RES:MODE MAN</code></td>
+</tr>
+<tr>
+  <td class="lvl">Intensity</td><td>per LED level<br>~20 per run</td><td>33220A<br>Keithley<br>meter</td>
+  <td><code>FUNC:SHAP DC; :VOLT:OFFS &lt;level&gt;   → measure V oc</code><code>FUNC:SHAP PULSE; :VOLT:HIGH &lt;same level&gt;</code><code>:VOLT:LOW 0.4  (below LED threshold — dark)</code><code>wait — LED stab. time</code><code>V oc, J sc, J sat  (source-0 / measure pairs)</code><code>PM:DS:Clear … PM:STAT:MEAN?</code></td>
+</tr>
+<tr>
+  <td class="lvl">Axis point</td><td>per sweep point<br>× repeat loops</td><td>81150A</td>
+  <td><code>:VOLT1:HIGH &lt;V pre / gain&gt;; :VOLT1:LOW &lt;V coll / gain&gt;</code><code>:PULS:DEL1 &lt;t delay&gt;; :FUNC1:PULS:WIDT &lt;width&gt;</code></td>
+</tr>
+<tr>
+  <td class="lvl">Shot</td><td>twice per point<br>light and dark</td><td>shutter<br>81150A<br>scope</td>
+  <td><code>DapiDOSet1( module 0, ch 0, 1 | 0 )</code><code>dark: :VOLT1:HIGH 0; :VOLT1:LOW −|ΔV| / gain</code><code>:RUN  →  poll *STB?  →  :WAV:DATA?</code></td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<h3>Two consequences for the code</h3>
+<ul>
+<li><strong>The driver objects are stateful on purpose.</strong> Each holds what it has already been told, so a session-level command issued in the inner loop is a no-op rather than a VISA round trip. That is the difference between a five-minute run and a fifteen-minute one.</li>
+<li><strong>The relay belongs to a router, not to the experiment code.</strong> It moves only when both sources report their outputs disabled, and it is not thrown back after every block — a mechanical relay has a finite operation count, and safety comes from the outputs being off rather than from the position. That turns 600 needless throws per run into three.</li>
+<li><strong>One number is used twice and must not drift.</strong> The DC level for the V<sub>oc</sub> measurement and the pulse high level for the transient are the same drive; the prebias axis is only centred correctly while they agree. <code>core/illumination.py</code> asserts it rather than trusting the call order.</li>
+<li><strong>The unwind path is not the reverse of setup.</strong> On abort the only things that matter are: 81150A output off, shutter closed, Keithley output off, device at 0 V. Everything else can be left as it is. Writing that as one <code>finally</code> rather than an unwound stack keeps it correct when the failure happens halfway through configuration.</li>
+</ul>
+</section>
+
+<footer>
+Commands are the literal format strings recovered from the LabVIEW drivers; wiring is inferred from those commands, the front-panel controls, and the physics. Three connections are marked unresolved above.
+</footer>
+</div>

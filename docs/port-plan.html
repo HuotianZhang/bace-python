@@ -1,0 +1,587 @@
+<title>TDCF-BACE Port Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+:root{
+  --paper:#f4f6f7; --surface:#ffffff; --surface-2:#eaeef0;
+  --ink:#141c23; --ink-2:#48585f; --ink-3:#74848d;
+  --rule:#d6dde1; --rule-strong:#b9c4ca;
+  --accent:#14586b; --accent-soft:#e0edf1;
+  --warn:#a2461e; --warn-soft:#f6e6dd;
+  --ok:#42663a; --ok-soft:#e5eddf;
+  --signal:#b8791f;
+  --shadow:0 1px 2px rgba(20,28,35,.06), 0 6px 18px rgba(20,28,35,.05);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#0e141a; --surface:#151d24; --surface-2:#1c262e;
+    --ink:#e5ebef; --ink-2:#a5b3bd; --ink-3:#7a8a95;
+    --rule:#27333c; --rule-strong:#3a4952;
+    --accent:#68b3c8; --accent-soft:#142b34;
+    --warn:#e2946d; --warn-soft:#33221a;
+    --ok:#9cc08b; --ok-soft:#1d2a1b;
+    --signal:#e0aa5c;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 6px 20px rgba(0,0,0,.28);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0e141a; --surface:#151d24; --surface-2:#1c262e;
+  --ink:#e5ebef; --ink-2:#a5b3bd; --ink-3:#7a8a95;
+  --rule:#27333c; --rule-strong:#3a4952;
+  --accent:#68b3c8; --accent-soft:#142b34;
+  --warn:#e2946d; --warn-soft:#33221a;
+  --ok:#9cc08b; --ok-soft:#1d2a1b;
+  --signal:#e0aa5c;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 6px 20px rgba(0,0,0,.28);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:"Source Serif 4",Georgia,"Times New Roman",serif;
+  font-size:17px; line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4,.ui{font-family:Archivo,"Helvetica Neue",Arial,sans-serif}
+code,pre,.mono,td.num{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace}
+
+.wrap{max-width:1180px;margin:0 auto;padding:0 28px 96px}
+.layout{display:block}
+@media (min-width:1080px){
+  .layout{display:grid;grid-template-columns:186px minmax(0,1fr);gap:56px;align-items:start}
+}
+
+/* ---- masthead ---- */
+header.top{border-bottom:1px solid var(--rule);margin-bottom:44px;padding:52px 0 30px}
+.eyebrow{
+  font-family:Archivo,sans-serif;font-size:11.5px;font-weight:600;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--accent);margin:0 0 14px
+}
+h1{
+  font-size:clamp(30px,4.6vw,46px);font-weight:700;letter-spacing:-.02em;line-height:1.08;
+  margin:0 0 16px;text-wrap:balance
+}
+.standfirst{font-size:19px;color:var(--ink-2);max-width:62ch;margin:0}
+.meta{
+  display:flex;flex-wrap:wrap;gap:8px 22px;margin-top:26px;
+  font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--ink-3)
+}
+.meta b{color:var(--ink-2);font-weight:500}
+
+/* ---- toc rail ---- */
+nav.toc{display:none}
+@media (min-width:1080px){
+  nav.toc{display:block;position:sticky;top:24px;font-family:Archivo,sans-serif;font-size:13px}
+  nav.toc ol{list-style:none;margin:0;padding:0;border-left:1px solid var(--rule)}
+  nav.toc li{margin:0}
+  nav.toc a{
+    display:block;padding:6px 0 6px 14px;margin-left:-1px;
+    border-left:2px solid transparent;color:var(--ink-3);text-decoration:none;line-height:1.35
+  }
+  nav.toc a:hover{color:var(--accent);border-left-color:var(--accent)}
+}
+
+/* ---- sections ---- */
+section{margin:0 0 60px;scroll-margin-top:24px}
+h2{
+  font-size:24px;font-weight:600;letter-spacing:-.012em;margin:0 0 8px;
+  padding-bottom:10px;border-bottom:1px solid var(--rule);text-wrap:balance
+}
+h3{font-size:16.5px;font-weight:600;letter-spacing:.005em;margin:32px 0 8px;color:var(--ink)}
+p{margin:0 0 16px;max-width:68ch}
+ul,ol{max-width:68ch;padding-left:20px}
+li{margin:0 0 7px}
+a{color:var(--accent)}
+strong{font-weight:600}
+.lead{font-size:18.5px;color:var(--ink-2)}
+
+/* ---- verdict panel ---- */
+.verdict{
+  background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+  padding:26px 28px;box-shadow:var(--shadow);margin-bottom:40px
+}
+.verdict p:last-child{margin-bottom:0}
+
+/* ---- stat strip ---- */
+.stats{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:1px;
+  background:var(--rule);border:1px solid var(--rule);border-radius:3px;overflow:hidden;margin:24px 0 8px
+}
+.stat{background:var(--surface);padding:16px 18px}
+.stat .n{
+  font-family:Archivo,sans-serif;font-size:26px;font-weight:700;letter-spacing:-.02em;
+  color:var(--ink);font-variant-numeric:tabular-nums;line-height:1.1
+}
+.stat .k{
+  font-family:Archivo,sans-serif;font-size:11px;font-weight:500;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3);margin-top:6px
+}
+
+/* ---- tables ---- */
+.scroll{overflow-x:auto;margin:20px 0;border:1px solid var(--rule);border-radius:3px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14px;font-family:Archivo,sans-serif}
+th{
+  text-align:left;font-weight:600;font-size:11px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--ink-3);padding:11px 14px;border-bottom:1px solid var(--rule-strong);white-space:nowrap;
+  background:var(--surface-2)
+}
+td{padding:11px 14px;border-bottom:1px solid var(--rule);vertical-align:top;color:var(--ink-2)}
+tr:last-child td{border-bottom:none}
+td.path{font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--ink);white-space:nowrap}
+td strong{color:var(--ink)}
+
+/* ---- chips ---- */
+.chip{
+  display:inline-block;font-family:Archivo,sans-serif;font-size:10.5px;font-weight:600;
+  letter-spacing:.07em;text-transform:uppercase;padding:3px 8px;border-radius:2px;white-space:nowrap
+}
+.chip.must{background:var(--warn-soft);color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 32%,transparent)}
+.chip.good{background:var(--ok-soft);color:var(--ok);border:1px solid color-mix(in srgb,var(--ok) 32%,transparent)}
+.chip.info{background:var(--accent-soft);color:var(--accent);border:1px solid color-mix(in srgb,var(--accent) 30%,transparent)}
+.chip.skip{background:var(--surface-2);color:var(--ink-3);border:1px solid var(--rule-strong)}
+
+/* ---- code ---- */
+pre{
+  background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--accent);
+  border-radius:2px;padding:16px 18px;overflow-x:auto;font-size:13px;line-height:1.6;
+  color:var(--ink);margin:16px 0
+}
+pre .c{color:var(--ink-3)}
+code:not(pre code){
+  background:var(--surface-2);padding:1.5px 5px;border-radius:2px;font-size:.86em;color:var(--ink)
+}
+figcaption{
+  font-family:Archivo,sans-serif;font-size:12.5px;color:var(--ink-3);
+  margin-top:10px;max-width:68ch
+}
+
+/* ---- callout ---- */
+.note{
+  border-left:3px solid var(--signal);background:var(--surface);border-radius:2px;
+  padding:14px 18px;margin:20px 0;font-size:15.5px;color:var(--ink-2)
+}
+.note b{color:var(--ink);font-family:Archivo,sans-serif;font-size:12px;letter-spacing:.08em;
+  text-transform:uppercase;display:block;margin-bottom:5px;color:var(--signal)}
+.note p:last-child{margin-bottom:0}
+
+/* ---- phases ---- */
+.phases{list-style:none;padding:0;margin:24px 0;counter-reset:ph}
+.phases li{
+  counter-increment:ph;position:relative;padding:0 0 22px 52px;margin:0;
+  border-left:1px solid var(--rule);margin-left:15px
+}
+.phases li:last-child{border-left-color:transparent;padding-bottom:0}
+.phases li::before{
+  content:counter(ph);position:absolute;left:-15px;top:-2px;width:30px;height:30px;
+  display:grid;place-items:center;border-radius:50%;background:var(--surface);
+  border:1px solid var(--rule-strong);color:var(--accent);
+  font-family:Archivo,sans-serif;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums
+}
+.phases h3{margin:2px 0 4px}
+.phases p{margin:0;font-size:16px}
+
+/* ---- diagram ---- */
+figure{margin:26px 0}
+.diagram{
+  background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:20px 18px 12px;
+  overflow-x:auto
+}
+.diagram svg{display:block;width:100%;min-width:560px;height:auto}
+.d-axis{stroke:var(--rule-strong);stroke-width:1}
+.d-grid{stroke:var(--rule);stroke-width:1;stroke-dasharray:2 4}
+.d-bias{fill:none;stroke:var(--accent);stroke-width:2.2;stroke-linejoin:round}
+.d-cur{fill:none;stroke:var(--signal);stroke-width:2.2}
+.d-fill{fill:var(--signal);opacity:.17}
+.d-lab{fill:var(--ink-2);font-family:"IBM Plex Mono",monospace;font-size:11px}
+.d-key{fill:var(--ink-3);font-family:Archivo,sans-serif;font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+.d-tick{stroke:var(--ink-3);stroke-width:1;stroke-dasharray:3 3}
+
+footer{border-top:1px solid var(--rule);padding-top:22px;margin-top:20px;
+  font-family:Archivo,sans-serif;font-size:13px;color:var(--ink-3)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="wrap">
+<header class="top">
+  <p class="eyebrow">Feasibility &amp; conversion plan</p>
+  <h1>TDCF-BACE Port Plan</h1>
+  <p class="standfirst">Decompiling <code>BACE_Mehrdad.vi</code> and its measurement engine out of LabVIEW, and rebuilding them as a Python service with a browser UI.</p>
+  <div class="meta">
+    <span><b>Source</b> D:\BACE\TDCF-BACE\TDCF-BACE</span>
+    <span><b>Rig</b> sternwarte</span>
+    <span><b>Target</b> Python + PyVISA, service + browser UI</span>
+    <span><b>Approach</b> clean redesign from the physics spec</span>
+    <span><b>Status</b> driver layer recovered — core built</span>
+  </div>
+</header>
+
+<div class="note">
+<b>Read this first &mdash; written 2026-09-02</b>
+<p>This is the <strong>original plan</strong>, written before any of it was built. Kept for the reasoning, not as a description of the code. One call made here turned out to be wrong and cost two evenings: the trigger offset was resolved as 47&nbsp;ns when the correct value on the scan path is <strong>0</strong>. That paragraph is corrected in place below.</p>
+<p>For the current state see <code>HANDOVER-2026-09-02.md</code> in the repository root; for what the engine comparison actually showed, <code>bace-wrapup.html</code> and <code>bace-drift.html</code> in this folder.</p>
+</div>
+
+<div class="layout">
+<nav class="toc" aria-label="Contents">
+  <ol>
+    <li><a href="#verdict">Verdict</a></li>
+    <li><a href="#recovered">What came out</a></li>
+    <li><a href="#experiment">The experiment</a></li>
+    <li><a href="#maths">Recovered maths</a></li>
+    <li><a href="#drivers">The driver layer</a></li>
+    <li><a href="#runtime">The 32-bit problem</a></li>
+    <li><a href="#built">What's built</a></li>
+    <li><a href="#architecture">Architecture</a></li>
+    <li><a href="#phases">Build order</a></li>
+    <li><a href="#questions">Open questions</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<section id="verdict">
+<div class="verdict">
+<p class="lead"><strong>Every blocker is cleared and the first increment runs.</strong> The two programs were parsed straight out of their binary <code>.vi</code> containers without LabVIEW; the duplicated hierarchy then gave up the complete command set of all four instruments.</p>
+<p>The decisive find: the measurement physics never lived in G wires. It lives in eight <strong>MathScript nodes</strong>, which are MATLAB-dialect text. Loop generation, pulse-level mapping, dark subtraction, baseline correction, running averaging and the charge integral are all already source code, and they are now ported and running against synthetic data.</p>
+<p>What the G diagram contributes is the <em>plumbing</em> — instrument sequencing, timing, file writing — and that is exactly the part being redesigned rather than transliterated.</p>
+</div>
+</section>
+
+<section id="recovered">
+<h2>What came out of the binaries</h2>
+<p>Both top-level VIs were last saved by <strong>LabVIEW 2020</strong> (20.0.1); the shared utilities <code>QMGR.vi</code> and <code>STOPALL.vi</code> date from LabVIEW 2012. The rig is live — <code>expConfig.xml</code> records a session ending 31.08.2026 12:59.</p>
+
+<div class="stats">
+  <div class="stat"><div class="n">2</div><div class="k">core programs</div></div>
+  <div class="stat"><div class="n">147</div><div class="k">panel objects</div></div>
+  <div class="stat"><div class="n">8</div><div class="k">MathScript nodes</div></div>
+  <div class="stat"><div class="n">907</div><div class="k">VIs read</div></div>
+  <div class="stat"><div class="n">1011</div><div class="k">archived .dat</div></div>
+</div>
+
+<div class="scroll">
+<table>
+<thead><tr><th>Artefact</th><th>Recovered</th><th>Use in the port</th></tr></thead>
+<tbody>
+<tr><td><strong>Block-diagram structure</strong></td><td><span class="chip good">complete</span></td><td>Every loop, case, sequence and subVI call, ordered left-to-right. Gives the control flow of both experiments.</td></tr>
+<tr><td><strong>Front-panel parameters</strong></td><td><span class="chip good">complete</span></td><td>82 objects on <code>BACE_Mehrdad</code>, 65 on the engine, with labels and numeric formats — the settings model, ready-made.</td></tr>
+<tr><td><strong>MathScript source</strong></td><td><span class="chip good">verbatim</span></td><td>The physics. Ports directly to NumPy.</td></tr>
+<tr><td><strong>SCPI templates</strong></td><td><span class="chip good">verbatim</span></td><td>Function-generator command strings, exactly as sent.</td></tr>
+<tr><td><strong>File format</strong></td><td><span class="chip good">verbatim</span></td><td>Column headers, units, filename prefixes and date formats — confirmed against the archived <code>.dat</code> files.</td></tr>
+<tr><td><strong>Wire-level dataflow</strong></td><td><span class="chip info">partial</span></td><td>Node order is inferred from diagram geometry, not traced wire by wire. Fine for a redesign; would matter for a literal transliteration.</td></tr>
+<tr><td><strong>Driver internals</strong></td><td><span class="chip good">complete</span></td><td>Every SCPI string the scope, pulse generator and SourceMeter receive, plus the shutter's module and channel numbers. See <a href="#drivers">the driver layer</a>.</td></tr>
+<tr><td><strong>Raw transients</strong></td><td><span class="chip must">never saved</span></td><td>The archived <code>.dat</code> files hold only aggregated parameters — no light, dark or photocurrent traces anywhere. This changes how the port can be validated.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>The instrument stack</h3>
+<div class="scroll">
+<table>
+<thead><tr><th>Role</th><th>Instrument</th><th>Driven by</th></tr></thead>
+<tbody>
+<tr><td>Collection-field pulse</td><td><strong>Agilent 81150A</strong> pulse function generator</td><td>VISA / SCPI — <code>SHAP PULSE</code>, <code>VOLT:HIGH</code>, <code>VOLT:LOW</code>, <code>FUNC:PULS:DCYC</code>, <code>FREQ</code></td></tr>
+<tr><td>LED bias</td><td><strong>Agilent 33220A</strong> function generator</td><td>VISA / SCPI — <code>SHAP DC</code>, <code>VOLT:OFFS</code>, <code>OUTP</code></td></tr>
+<tr><td>Transient acquisition</td><td><strong>Agilent 90000-series Infiniium</strong> DSO</td><td><code>agilentDSO.lvclass</code> + <code>Read unblocked TDCF.vi</code></td></tr>
+<tr><td>J–V, V<sub>oc</sub>, J<sub>sc</sub>, J<sub>sat</sub></td><td><strong>Keithley 24xx</strong> SourceMeter</td><td><code>Keithley 24XX.lvlib</code>, <code>measJsc,Voc.vi</code></td></tr>
+<tr><td>Pulse energy</td><td><strong>Ophir</strong> meter <span class="chip skip">being replaced</span></td><td><code>OphInstr.llb</code>. The new program uses a <strong>Newport 1918-C</strong> instead — not a VISA instrument, see below.</td></tr>
+<tr><td>Optical shutter</td><td><strong>Deditec</strong> USB digital I/O</td><td><code>delib.dll</code> — <code>Dapi Open Module</code> / <code>DO Set1</code> / <code>Close Module</code></td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<section id="experiment">
+<h2>The experiment, as the code defines it</h2>
+<p>The front panel has two buttons, <code>JV</code> and <code>BACE</code>, wired to the two frames of an event structure. They are two separate experiments sharing one panel.</p>
+
+<h3>JV — intensity-dependent current–voltage sweep</h3>
+<p>For each LED drive voltage from <em>Start Voltage LED</em> to <em>End Voltage LED</em> in steps of <em>dV LED</em>: set the 33220A DC offset, wait <em>LED stab. time</em>, then sweep the Keithley from <em>Start Voltage</em> to <em>End Voltage</em>, averaging <em>Averaging</em> readings per point with <em>Stab. time</em> between them. Current is divided by <em>Pixel Area</em>. V<sub>oc</sub> comes from <code>Threshold 1D Array</code> → <code>Interpolate 1D Array</code> on the current column — a linear interpolation of the zero crossing. Results go to <code>BACE_JV_Data_*.dat</code> and <code>BACE_JV_Parameters_*.dat</code>.</p>
+
+<h3>BACE — bias-assisted charge extraction</h3>
+<p>For each LED drive voltage: measure V<sub>oc</sub>, J<sub>sc</sub> and J<sub>sat</sub> on the Keithley, optionally read the Ophir meter, then hand three prebias points to the transient engine and record the extracted charge at each.</p>
+
+<figure>
+<div class="diagram">
+<svg viewBox="0 0 700 300" role="img" aria-label="Bias waveform stepping from Vpre down to Vcoll after a delay, and the resulting photocurrent transient with the integration window shaded">
+  <!-- bias panel -->
+  <text class="d-key" x="0" y="12">Applied bias</text>
+  <line class="d-axis" x1="46" y1="106" x2="672" y2="106"/>
+  <line class="d-axis" x1="46" y1="24" x2="46" y2="106"/>
+  <line class="d-grid" x1="46" y1="46" x2="672" y2="46"/>
+  <path class="d-bias" d="M46 46 L300 46 L300 96 L560 96 L560 46 L672 46"/>
+  <line class="d-tick" x1="300" y1="24" x2="300" y2="290"/>
+  <text class="d-lab" x="8" y="50">V pre</text>
+  <text class="d-lab" x="6" y="100">V coll</text>
+  <text class="d-lab" x="150" y="38">held at V oc ± dV, LED on</text>
+  <text class="d-lab" x="310" y="112">t = delay</text>
+
+  <!-- current panel -->
+  <text class="d-key" x="0" y="150">Photocurrent  =  light trace − dark trace</text>
+  <line class="d-axis" x1="46" y1="256" x2="672" y2="256"/>
+  <line class="d-axis" x1="46" y1="166" x2="46" y2="256"/>
+  <path class="d-fill" d="M330 256 L330 186 C360 196 400 224 450 240 C500 252 540 255 590 256 Z"/>
+  <path class="d-cur" d="M46 256 L300 256 L316 256 L330 186 C360 196 400 224 450 240 C500 252 540 255 590 256 L672 256"/>
+  <line class="d-tick" x1="330" y1="166" x2="330" y2="286"/>
+  <text class="d-lab" x="336" y="286">t0 Integration</text>
+  <text class="d-lab" x="404" y="212">Q = Σ j Δt</text>
+  <text class="d-lab" x="600" y="248">baseline from</text>
+  <text class="d-lab" x="600" y="262">last 10 % of record</text>
+</svg>
+</div>
+<figcaption>One BACE step. The device is held at a prebias near V<sub>oc</sub> under illumination, then switched to a strong reverse collection bias; the extracted charge is the integral of the dark-subtracted current after <code>t0 Integration</code>.</figcaption>
+</figure>
+
+<div class="note">
+<b>A detail worth confirming</b>
+<p>The parent VI passes <code>Vpre1 = Voc − dV</code> and <code>Vpre2 = Voc + dV</code>, and the engine expands that to <code>linspace(Vpre1, Vpre2, N)</code> with <code>N = |Vpre1 − Vpre2|/dV + 1</code> — three points. That is where the <code>Vpre1/2/3</code> and <code>Q1/2/3</code> columns in your <code>.dat</code> files come from, and the archived data confirms it: dV = 10 mV, V<sub>pre2</sub> exactly equal to the measured V<sub>oc</sub>. The evident purpose is dQ/dV around V<sub>oc</sub> — the differential capacitance needed to strip the geometric-capacitance charge out of Q. Worth confirming that is what you intend it for, because the redesign should make that correction explicit rather than leaving it implied by three adjacent columns.</p>
+</div>
+</section>
+
+<section id="maths">
+<h2>The recovered maths</h2>
+<p>These are extracts from the MathScript nodes, unedited. The full set is in <code>D:\BACE\_decompiled\mathscript_algorithms.txt</code>.</p>
+
+<h3>Sweep generation</h3>
+<pre><span class="c">%calc loop parameters</span>
+N = abs(Vpre1-Vpre2)/dV + 1;
+Vpre1Loop = linspace(Vpre1,Vpre2,N);
+Vcoll1Loop = Vpre1Loop*0+Vcoll;
+Delay1Loop = Vpre1Loop*0 + Delay;
+
+VpreAllLoops = repmat(Vpre1Loop,1,NLoops);          <span class="c">% all Loops</span>
+VpreAllLoops = reshape(VpreAllLoops,1,numel(VpreAllLoops));</pre>
+
+<h3>Pulse levels — polarity, amplifier, trigger offset</h3>
+<pre>Vpre = VpreAllLoops(i);
+if NewSample == 0
+  LoLvlL = Vcoll;   HiLvlL = Vpre;                  <span class="c">% light</span>
+  LoLvlD = -abs(Vpre - Vcoll);  HiLvlD = 0;         <span class="c">% dark</span>
+else                                                <span class="c">% invert &amp; switch</span>
+  LoLvlL = -Vpre;   HiLvlL = -Vcoll;
+  LoLvlD = 0;       HiLvlD = abs(Vpre - Vcoll);
+end
+HiLvlL = HiLvlL/PulseAmp;   LoLvlL = LoLvlL/PulseAmp;
+HiLvlD = HiLvlD/PulseAmp;   LoLvlD = LoLvlD/PulseAmp;
+
+T = 0e-9;                                           <span class="c">% 47e-9 in the single-step node</span>
+Delay = Delay*1e-9 + T;
+Width = Width*1e-9;</pre>
+<p>Two nodes disagreed on <code>T</code>: the single-shot path added a 47 ns offset, the looping path added zero. <strong>Corrected 2026-09-02 — zero is the right one.</strong> The call made here picked 47 ns, and that was wrong: a scan takes the <em>looping</em> path, and measurement confirms it. At the same <code>Delay(ns) = 90</code>, LabVIEW and the port both put the displacement spike at 328&nbsp;ns of record time, so <code>:PULS:DEL1</code> receives <code>delay_ns</code> unchanged. <code>pulses.TRIGGER_OFFSET_S</code> is still the one place it lives; its value is now <code>0.0</code>.</p>
+
+<h3>Charge extraction</h3>
+<pre>PhotoC = LightC - DarkC;
+T = dt*(NP-1);  time = 0:dt:T;
+if OffCorr == 1
+  PhotoC = PhotoC - mean(PhotoC(time &gt; T/10*9));    <span class="c">% baseline: last 10 %</span>
+end
+
+<span class="c">% running average across loops</span>
+if Loop == 1
+  avPhotoC(Step,:) = PhotoC;
+else
+  avPhotoC(Step,:) = (PhotoC + (Loop-1)*avPhotoC(Step,:))/Loop;
+end
+
+<span class="c">% charge integral</span>
+allQ(Loop,Step) = sum(PhotoC(time &gt; t0Int))*dt;
+for j = 1:NumStepsPerLoop
+  QStep   = allQ(~isnan(allQ(:,j)), j);
+  meanQ(j)= mean(QStep);   stdQ(j) = std(QStep);
+end</pre>
+
+<div class="note">
+<b>Free gift</b>
+<p>One MathScript node is a <strong>synthetic-data generator</strong> — an error-function rise into an exponential decay, plus noise, standing in for a real transient. Porting it gives a hardware-free simulator on day one, so the whole pipeline can be built and tested away from the rig.</p>
+</div>
+</section>
+
+<section id="drivers">
+<h2>The driver layer, recovered</h2>
+<p>The duplicated hierarchy — 907 VIs — was decompiled the same way as the main programs. Every command string below is the literal format string LabVIEW sent, not a reconstruction from a manual. The full reference is in <code>D:\BACE\_decompiled\instrument_commands.md</code>.</p>
+
+<h3>Agilent 81150A</h3>
+<p>Shape, levels, timing and trigger are all straightforward SCPI on an indexed channel:</p>
+<pre>:FUNC1 PULS;                      <span class="c"># shape</span>
+:VOLT1:HIGH %g;  :VOLT1:LOW %g;   <span class="c"># the mapped prebias / collection levels</span>
+:FREQ1 %g;                        <span class="c"># repetition rate</span>
+:FUNC1:PULS:WIDT %g;              <span class="c"># width</span>
+:PULS:DEL1 %e;                    <span class="c"># delay — where the trigger offset lands</span>
+:ARM:SOUR1 EXT;  :ARM:SLOP POS;   <span class="c"># external trigger</span>
+:OUTP1 ON;</pre>
+
+<h3>Infiniium — the acquisition core</h3>
+<pre><span class="c"># session</span>
+:SYST:HEAD OFF; *CLS; *ESE 1; *SRE 32; :WAV:BYT MSBF; :WAV:VIEW MAIN;
+<span class="c"># vertical / horizontal</span>
+:CHAN%d:OFFS %g;RANG %g;   :CHAN%d:PROB:EXT:GAIN %g;
+:TIM:RANG %g;  :TIM:POS %g;  :ACQ:POIN %d;
+<span class="c"># averaging — the panel's "# Averages (200)"</span>
+:ACQ:AVER ON;  :ACQ:AVER:COUN %d;
+<span class="c"># trigger: edge normally, runt for the window mode</span>
+:TRIG:MODE EDGE;  :TRIG:EDGE:SOUR %s;  :TRIG:EDGE:SLOP NEG;
+:TRIG:MODE RUNT;  :TRIG:RUNT:POL %s;  :TRIG:RUNT:TIME %g;
+<span class="c"># readback</span>
+:WAV:SOUR %s; :WAV:FORM WORD;
+:WAV:POIN?;:WAV:XOR?;:WAV:XINC?;:WAV:YOR?;:WAV:YINC?;:WAV:YREF?;
+:WAV:DATA?                        <span class="c"># IEEE block</span></pre>
+<p>Scaling comes from the driver's own annotation: <code>volts = (raw − YREF)·YINC + YOR</code>, <code>time = XOR + k·XINC</code>. The BACE path additionally clears waveform memory and hides the function traces before each run: <code>:RUN;:WMEM1:CLE;:FUNC1:DISPLAY OFF;:FUNC2:DISPLAY OFF;</code>. Completion is polled with <code>*OPC</code> then <code>*STB?</code>, not a blocking <code>*OPC?</code>.</p>
+
+<h3>Keithley — the V<sub>oc</sub>/J<sub>sc</sub> routine, verbatim</h3>
+<pre><span class="c"># Jsc: source 0 V, measure current</span>
+*RST
+:SOUR:FUNC:MODE VOLT; :SOUR:VOLT:LEV 0; :FORM:ELEM CURR; :ROUT:TERM FRON; :OUTP ON
+:SENS:FUNC 'CURR:DC'; :SENS:CURR:PROT:LEV &lt;compliance&gt;
+:READ?
+
+<span class="c"># Voc: source 0 A, measure voltage</span>
+*RST
+:SOUR:FUNC:MODE CURR; :SOUR:CURR:LEV 0; :FORM:ELEM VOLT; :ROUT:TERM FRON; :OUTP ON
+:SENS:FUNC 'VOLT:DC'; :SENS:CURR:PROT:LEV &lt;compliance&gt;
+:READ?</pre>
+<p>J<sub>sat</sub> uses the current-measuring form held at the panel's <em>Vcoll corresponding to Jsat</em>. Sweeps use <code>:SOUR:VOLT:STAR/:STOP</code> with <code>:SOUR:SWE:POIN</code>, and <code>:CURR:NPLC</code> plus <code>:AVER:COUN</code> set the integration and averaging.</p>
+
+<h3>Shutter</h3>
+<p>Deditec USB digital I/O through <code>delib.dll</code>. The LabVIEW <code>Dapi&nbsp;*.vi</code> wrappers are nothing but Call Library Nodes, so <code>ctypes</code> reaches the same entry points:</p>
+<pre>ULONG DapiOpenModule(ULONG moduleID, ULONG nr);   <span class="c">// -&gt; handle, 0 on failure</span>
+void  DapiDOSet1(ULONG handle, ULONG ch, ULONG data);
+ULONG DapiCloseModule(ULONG handle);</pre>
+<p><strong>One shutter</strong>, on module ID 9, module number 0, channel 0; 1 opens, 0 closes. <code>BACE_Mehrdad.vi</code> also carries constants for module number 1 — historical, unused. The copy on the rig, <code>D:\BACE\shutter\builds\data\delib.dll</code>, is <strong>32-bit</strong> — PE32, machine <code>0x014C</code>, exporting all four <code>Dapi</code> entry points.</p>
+
+<h3>Newport 1918-C — the one genuinely new driver</h3>
+<p>It is not a VISA instrument. It speaks a proprietary USB protocol through Newport's own <code>usbdll.dll</code> (product ID <code>0xCEC7</code>, typically a 32-bit build), with entry points <code>newp_usb_open_devices</code>, <code>newp_usb_send_ascii</code>, <code>newp_usb_get_ascii</code>. On top of that sits an ASCII command set:</p>
+<pre>PM:Lambda &lt;nm&gt;      <span class="c"># set detector wavelength</span>
+PM:Power?           <span class="c"># instantaneous power</span>
+PM:DS:Clear         <span class="c"># data store: clear, size, interval, enable</span>
+PM:DS:SIZE &lt;n&gt;
+PM:DS:ENable 1
+PM:DS:COUNT?        <span class="c"># poll until full</span>
+PM:STAT:MEAN?  PM:STAT:SDEV?</pre>
+<p>The data-store path is the right one for BACE: it replaces the mean and standard-deviation intensity columns the Ophir fed, in one buffered read rather than a poll loop. Its DLL is almost certainly 32-bit like the shutter's — see below.</p>
+</section>
+
+<section id="runtime">
+<h2>The 32-bit problem</h2>
+<p>Two instruments are reached through vendor DLLs rather than VISA. <code>delib.dll</code> is <strong>32-bit only</strong> — verified in both the build output and the installed runtime — and Newport's <code>usbdll.dll</code> ships from a <code>Program Files (x86)</code> install, so almost certainly the same. That looks at first like it forces a 32-bit service.</p>
+<p>It does the opposite. <strong>SciPy stopped publishing win32 wheels at Python 3.10</strong>, so a modern 32-bit Python on Windows cannot install the measurement core at all. A 32-bit service is not on the table.</p>
+<p>So the DLLs move into their own process:</p>
+<pre>64-bit service  --(JSON lines over 127.0.0.1)-->  32-bit helper  --> vendor DLLs
+   numpy, scipy                                     delib.dll
+   experiment, storage, UI                          usbdll.dll</pre>
+<p>Both devices are low-rate — a shutter toggle and a buffered power read — so the round trip costs nothing measurable next to instrument settling times. The helper dispatches to an explicit method table (no pickling, no dynamic import) and binds to loopback only. It is built and its transport is tested; <code>BridgedShutter</code> presents exactly the same interface as the direct backend, so the experiment code never learns which one it has.</p>
+<div class="note">
+<b>Settled — there is no 64-bit DELIB</b>
+<p>The installed runtime is <code>C:\Windows\SysWOW64\delib.dll</code>, machine <code>0x014C</code>, with <code>delibJNI.dll</code> beside it; <code>C:\Windows\System32</code> holds no <code>delib</code> at all. The SDK in <code>D:\BACE\DELIB</code> agrees — its <code>lib\delib.lib</code> is a 32-bit import library and all 73 <code>DllImport</code> attributes in <code>include\delib.cs</code> name <code>"delib.dll"</code>, with no <code>delib64</code> anywhere. Deditec does ship 64-bit builds and marks them with a <code>64</code> suffix (the bundled FTDI driver has <code>ftd2xx64.dll</code>), so the absence is real rather than a naming accident. The helper process is permanent.</p>
+</div>
+</section>
+
+<section id="built">
+<h2>What's built</h2>
+<p>In <code>D:\BACE\bace-python\</code>. Runs on <code>numpy</code> and <code>scipy</code> alone — no hardware, no VISA.</p>
+<div class="scroll">
+<table>
+<thead><tr><th>Module</th><th>Ported from</th><th>Does</th></tr></thead>
+<tbody>
+<tr><td class="path">core/sequence.py</td><td><code>calcLoopParameters</code></td><td>Prebias grid and its loop repetition; flattened loop/step indices.</td></tr>
+<tr><td class="path">core/pulses.py</td><td>pulse-level node</td><td>Physical bias → 81150A high/low levels for the light and dark traces, amplifier division, delay and width scaling, the 47 ns offset.</td></tr>
+<tr><td class="path">core/process.py</td><td>main processing node</td><td>Dark subtraction, last-10 % baseline, running loop average, charge integral, mean and sample std.</td></tr>
+<tr><td class="path">core/simulate.py</td><td>simulation node</td><td>Synthetic light/dark transients — the hardware-free stand-in.</td></tr>
+<tr><td class="path">drivers/shutter.py</td><td><code>Dapi *.vi</code> CLNs</td><td>Deditec shutter over <code>ctypes</code>, with a <code>dark()</code> context manager for the per-step light/dark pair. Three backends — direct, bridged, simulated — behind one interface.</td></tr>
+<tr><td class="path">drivers/win32bridge/</td><td>—</td><td>32-bit helper process and its client, so the 64-bit service can reach the vendor DLLs.</td></tr>
+<tr><td class="path">demo_pipeline.py</td><td>—</td><td>End-to-end dry run using settings from a real archived measurement.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>Three deliberate deviations</h3>
+<ul>
+<li><strong>A latent bug in the point count, fixed.</strong> LabVIEW computed <code>N = abs(Vpre1−Vpre2)/dV + 1</code> and truncated. With V<sub>pre1</sub> = V<sub>oc</sub> − dV and V<sub>pre2</sub> = V<sub>oc</sub> + dV, floating-point V<sub>oc</sub> values push that ratio just under the integer — V<sub>oc</sub> = 0.720555, dV = 0.01 gives 1.9999999999999, truncating to N = 2 and silently dropping the middle prebias point. Rounding to nearest fixes it. Worth checking whether any archived run lost a column this way.</li>
+<li><strong>Sample standard deviation.</strong> MathScript's <code>std</code> is <code>ddof=1</code>; NumPy defaults to <code>ddof=0</code>. Using the default would have shrunk every error bar.</li>
+<li><strong>The trigger offset, in one place.</strong> As above — and measured to be 0 on 2026-09-02.</li>
+</ul>
+<p>The charge integral stays a rectangular <code>sum(...)·dt</code> rather than a trapezoid, so numbers remain comparable with the LabVIEW output. Changing it should be a decision, not a side effect.</p>
+</section>
+
+<section id="architecture">
+<h2>Target architecture</h2>
+<p>Same shape as the JV console and the Lake Shore 331 controller: a Python measurement service holding all instrument state, a browser front end talking to it over WebSocket. One stack across all three programs, one place to fix a driver bug.</p>
+
+<pre>bace/
+  drivers/          <span class="c"># thin PyVISA wrappers, one class per instrument</span>
+    agilent81150.py     <span class="c"># shape, freq, high/low, width, duty, delay, trigger</span>
+    agilent33220a.py    <span class="c"># LED bias DC offset</span>
+    infiniium.py        <span class="c"># timebase, record length, averaging, trigger, :WAV: readback</span>
+    keithley24xx.py     <span class="c"># source V / measure I; Voc, Jsc, Jsat</span>
+    newport1918c.py     <span class="c"># usbdll.dll via ctypes — not VISA</span>
+    shutter.py          <span class="c"># delib.dll via ctypes</span>
+    simulated.py        <span class="c"># the ported MathScript generator — no hardware needed</span>
+  core/
+    sequence.py       <span class="c"># Vpre / Vcoll / delay grids  (from calcLoopParameters)</span>
+    pulses.py         <span class="c"># polarity + PulseAmp mapping, delay and width scaling</span>
+    process.py        <span class="c"># dark subtraction, baseline, running average, Q integral</span>
+    experiments.py    <span class="c"># the JV sweep and the BACE run</span>
+    storage.py        <span class="c"># HDF5 primary + legacy .dat writer</span>
+  service/
+    app.py            <span class="c"># FastAPI: run control, live traces, progress, abort</span>
+  ui/                 <span class="c"># browser front end</span></pre>
+
+<h3>Three things the redesign should fix</h3>
+<ul>
+<li><strong>Make the capacitance correction explicit.</strong> Three adjacent Q columns that only mean something if you know the convention is a trap. Store V<sub>pre</sub>, Q and the derived dQ/dV as named quantities.</li>
+<li><strong>One canonical output.</strong> HDF5 with the full traces, parameters and instrument state per run; the flat <code>.dat</code> files written alongside for continuity with your existing analysis. Right now the raw transients are averaged away before they hit disk.</li>
+<li><strong>Resolve the 47 ns.</strong> One trigger-offset constant, in the config, applied in one place. <em>Done — and the measured value is 0.</em></li>
+</ul>
+</section>
+
+<section id="phases">
+<h2>Build order</h2>
+<div class="note">
+<b>A correction to the earlier plan</b>
+<p>Validating the charge integral against the archived data is not possible: the raw transients were <strong>never written to disk</strong>. Every one of the 1011 <code>.dat</code> files holds aggregated parameters only — LED voltage, V<sub>oc</sub>, J<sub>sc</sub>, J<sub>sat</sub>, V<sub>pre</sub>, Q and its standard deviation. The light, dark and photocurrent traces were averaged away in memory and discarded. So the archives can confirm the sweep planning and the file format, but the acceptance test for the processing chain has to be a side-by-side run on the rig. It is also the strongest argument for making HDF5 trace storage part of the redesign rather than a later addition.</p>
+</div>
+<ol class="phases">
+<li>
+  <h3>Maths core <span class="chip good">done</span></h3>
+  <p>Sequence, pulse mapping and processing ported from the MathScript source and running end to end against synthetic transients. Three deviations from the original, each deliberate and documented.</p>
+</li>
+<li>
+  <h3>Run loop against the simulator</h3>
+  <p>Wrap the core in the actual experiment: state machine, per-step light/dark acquisition, live aggregation, storage, and an abort that unwinds the instruments safely. Still no hardware — the simulator stands in for the scope.</p>
+</li>
+<li>
+  <h3>Drivers <span class="chip info">shutter done</span></h3>
+  <p>Four PyVISA wrappers from the recovered command set, plus the Newport <code>ctypes</code> wrapper. Each gets a standalone smoke test against its instrument before it goes near an experiment. Settle the 32-bit <code>usbdll.dll</code> question first.</p>
+</li>
+<li>
+  <h3>Service and browser UI</h3>
+  <p>FastAPI plus WebSocket, and the front end: live light/dark/photocurrent traces, Q versus V<sub>pre</sub>, progress, and a stop that actually stops. Reuses the patterns from the JV console.</p>
+</li>
+<li>
+  <h3>Side-by-side on the rig</h3>
+  <p>Same sample, same settings, LabVIEW and Python back to back. Agreement on Q(V<sub>pre</sub>) within noise is the acceptance test.</p>
+</li>
+</ol>
+</section>
+
+<section id="questions">
+<h2>Open questions</h2>
+<p>These are what the driver layer still can't infer for itself.</p>
+<ul>
+<li><strong>Exact models.</strong> Which Infiniium (DSO90xxx? DSOS/MSOS?) and which Keithley (2400 / 2401 / 2440?). The drivers cover the families; a few commands differ between members.</li>
+<li><strong>Addresses.</strong> An NI-MAX configuration export, or just the VISA resource strings. The only one recovered from the diagram is the Ophir's — <code>USB0::0x0BD3::0x0334</code> — and that instrument is being replaced.</li>
+<li><strong>The signal path.</strong> The panel shows <em>Resistor</em> = 5.192 Ω and <em>Pulse Amp</em> = 4. I read those as the current-sensing resistor and a ×4 voltage amplifier between the 81150 and the device — confirm, and tell me where the probe attenuation of 1.0 sits. Absolute charges depend on this and nothing else in the recovered material pins it down.</li>
+<li><strong>Two shutter modules.</strong> The diagram addresses Deditec module numbers 0 <em>and</em> 1, both on module ID 9, channel 0. Two shutters, or one shutter and something else?</li>
+<li><strong>Runt-window trigger.</strong> There is a panel switch and a dedicated VI. In routine use, or a leftover from the TDCF configuration?</li>
+<li><strong>Retirement scope.</strong> BACE only, or does the TDCF mode come across too? They share almost the whole engine, so doing both is far cheaper than doing them separately later.</li>
+</ul>
+</section>
+
+<footer>
+Source material decompiled with <a href="https://github.com/mefistotelis/pylabview">pylabview</a> from 907 VIs, written to <code>D:\BACE\_decompiled\</code>. Ported code in <code>D:\BACE\bace-python\</code>. No LabVIEW installation was used or required.
+</footer>
+
+</main>
+</div>
+</div>

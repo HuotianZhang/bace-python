@@ -1,0 +1,11 @@
+# The legacy .dat writer is byte-exact against bench-archive/, and those files
+# are ASCII with CRLF. Any line-ending normalisation silently breaks
+# tests/test_regression_20260807.py, so git must never touch them.
+*.dat  -text
+
+# cmd.exe wants CRLF in batch files.
+*.bat  text eol=crlf
+
+*.h5   binary
+*.png  binary
+*.zip  binary
