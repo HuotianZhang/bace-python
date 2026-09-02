@@ -28,6 +28,7 @@ from bace.service.session import Session, tree_for_module
 from bace.storage.naming import RunMetadata
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
+RECIPE = REPO / "tests" / "run-quickcheck.toml"   # the frozen quick-check recipe these tests pin
 TIMEOUT = 20.0
 FAST = {"n_averages": 8, "settle_s": 0.0, "dark_settle_s": 0.0, "record_length": 400,
         "t0_int_s": 2.71e-7, "t0_int_reference": "record", "calibrate_trigger": False,
@@ -35,7 +36,7 @@ FAST = {"n_averages": 8, "settle_s": 0.0, "dark_settle_s": 0.0, "record_length":
 
 
 def _catalogue() -> Catalogue:
-    return Catalogue(rig_config=RigConfig(), run_toml=run_toml_layer(REPO / "run.toml"),
+    return Catalogue(rig_config=RigConfig(), run_toml=run_toml_layer(RECIPE),
                      history=None, sample={"sample": "s4", "material": "SIM", "pixel": "a"})
 
 
@@ -120,7 +121,7 @@ def test_the_session_snapshot_says_live_while_a_scan_is_inside_its_acquisition(t
     shutter open -- every one `inferred` -- with `state: running`, while
     `read_at` is still the Start read-back's. `StepPhase` frames reach the
     subscriber with `seq` null and are in neither the ring nor the journal."""
-    s = Session(RigConfig(), run_toml_layer(REPO / "run.toml"), out=str(tmp_path / "runs"),
+    s = Session(RigConfig(), run_toml_layer(RECIPE), out=str(tmp_path / "runs"),
                 mode="sim", fast=True, seed=5, session_id="20260902_230000",
                 sample={"sample": "s4", "material": "SIM", "pixel": "a"})
     with s:

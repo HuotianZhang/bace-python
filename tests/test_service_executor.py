@@ -31,6 +31,10 @@ from bace.service.worker import Job, RunWorker, StopMode
 from bace.storage.naming import RunMetadata
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
+RECIPE = REPO / "tests" / "run-quickcheck.toml"
+# The frozen quick-check recipe, not the lab's run.toml: these tests pin the
+# numbers the run.toml layer delivers, and the lab's recipe changes with the
+# measurement (it was brought in line with the validated 2026-09-02 settings).
 TIMEOUT = 20.0
 NO_SLEEP = lambda s: None                                      # noqa: E731
 RUN_ID = "20260902_210000-001"
@@ -43,7 +47,7 @@ FAST = {"n_averages": 8, "settle_s": 0.0, "dark_settle_s": 0.0, "record_length":
 
 
 def catalogue() -> Catalogue:
-    return Catalogue(rig_config=RigConfig(), run_toml=run_toml_layer(REPO / "run.toml"),
+    return Catalogue(rig_config=RigConfig(), run_toml=run_toml_layer(RECIPE),
                      history=None, sample={"sample": "s4", "material": "SIM", "pixel": "a"})
 
 

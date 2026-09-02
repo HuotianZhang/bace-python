@@ -26,6 +26,10 @@ from bace.service.rigs import Bench
 from bace.storage.naming import RunMetadata
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
+RECIPE = REPO / "tests" / "run-quickcheck.toml"
+# The frozen quick-check recipe, not the lab's run.toml: these tests pin the
+# numbers the run.toml layer delivers, and the lab's recipe changes with the
+# measurement (it was brought in line with the validated 2026-09-02 settings).
 NO_SLEEP = lambda s: None                                      # noqa: E731
 
 FAST = {"n_averages": 8, "settle_s": 0.0, "dark_settle_s": 0.0, "record_length": 400,
@@ -54,7 +58,7 @@ class FakeHistory:
 
 
 def catalogue(history=None, run_toml=None, sample=None) -> Catalogue:
-    raw = run_toml_layer(REPO / "run.toml") if run_toml is None else run_toml
+    raw = run_toml_layer(RECIPE) if run_toml is None else run_toml
     return Catalogue(rig_config=RigConfig(), run_toml=raw, history=history, sample=sample)
 
 
@@ -162,7 +166,7 @@ def test_the_recipes_illumination_level_reaches_jv_bace_and_an_optional_jv_table
     assert ps.get("smu_nplc") == ParamValue(1.0, Source.RUN_TOML, "run.toml [sourcemeter]")
     assert cat.param_set("jv_dark").get("step_v").source is Source.DEFAULT
 
-    raw = dict(run_toml_layer(REPO / "run.toml"))
+    raw = dict(run_toml_layer(RECIPE))
     raw["jv"] = {"step_v": 0.01, "both_directions": True}
     ps = catalogue(run_toml=raw).param_set("jv_dark")
     assert ps.get("step_v") == ParamValue(0.01, Source.RUN_TOML, "run.toml [jv]")

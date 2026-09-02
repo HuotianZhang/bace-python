@@ -681,8 +681,8 @@ def test_run_toml_layer_reads_the_repo_recipe_raw():
     """The raw tables, because provenance names the table: by the time a value
     is a `RunConfig` field it no longer knows it came from `[acquisition]`."""
     raw = run_toml_layer(REPO / "run.toml")
-    assert raw["acquisition"]["n_averages"] == 20
-    assert raw["illumination"]["level_v"] == 1.020
+    assert raw["acquisition"]["n_averages"] == 200        # the validated recipe (2026-09-02)
+    assert raw["illumination"]["level_v"] == 1.000
 
     ps = small_set()
     ps.set_layer(Source.RUN_TOML,
@@ -693,8 +693,8 @@ def test_run_toml_layer_reads_the_repo_recipe_raw():
     ps.update_layer(Source.RUN_TOML,
                     toml_layer(raw, {"illumination.level_v": "led_v"}),
                     detail="run.toml [illumination]")
-    assert ps.get("n_averages") == ParamValue(20, Source.RUN_TOML, "run.toml [acquisition]")
-    assert ps.get("led_v") == ParamValue(1.02, Source.RUN_TOML, "run.toml [illumination]")
+    assert ps.get("n_averages") == ParamValue(200, Source.RUN_TOML, "run.toml [acquisition]")
+    assert ps.get("led_v") == ParamValue(1.0, Source.RUN_TOML, "run.toml [illumination]")
     assert ps.get("t0_int_reference").value == "trigger"
     assert ps.get("offset_correct").value is True
 

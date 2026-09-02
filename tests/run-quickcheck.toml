@@ -1,12 +1,8 @@
+# The port's quick-check recipe of 2026-09-01, frozen for the service tests: they exercise
+# the run.toml provenance layer and pin these numbers (LED 1.020 V, 20 averages, delay 88).
+# The lab's recipe is ../run.toml and changes with the measurement; this file must not.
 # One measurement. Copied verbatim into the output, so a result carries its own
 # recipe. Change freely; nothing here describes the hardware.
-#
-# 2026-09-02: brought in line with what matched the LabVIEW engine that night
-# (tools/bare.py --invert --settle 5 at 02:08 against LabVIEW at 02:16, and
-# recipes/run-labview.toml): combination-4 polarity, 200 averages, 5 s after
-# every shutter move, LED 1.000 V, delay 90 ns, t0 = 320 ns of record. The
-# earlier values here were the port's quick-check defaults, not a validated
-# recipe, and the service's first runs on the rig inherited them.
 
 [axis]
 name = "vpre"                   # vpre | delay_ns | vcoll
@@ -21,11 +17,11 @@ centre_on_voc = true
 
 [pinned]
 vcoll = -1.0                    # V at the device
-delay_ns = 90.0   # what the LabVIEW panel held on 2026-09-02 (Delay(ns) = 90); 88 was the archive's
+delay_ns = 88.0                 # after the LED falling edge
 
 [acquisition]
 n_loops = 100
-n_averages = 200   # hardware averages per trace. 200 is the panel's and the 02:16 LabVIEW run's; 20 was a quick-check value
+n_averages = 20                 # hardware averages per trace
 timebase_ns_per_div = 200.0     # ten divisions -> 2 us screen, which is what a
                                 # screenshot of the LabVIEW panel (2026-09-01)
                                 # actually shows: Timebase (200 ns) = 200E+0
@@ -40,8 +36,8 @@ record_length = 5000            # a request, not a promise: the instrument gives
                                 # 4000; 5 us may give 10000, or the scope may
                                 # drop to 1 GSa/s and give 5000 at dt = 1 ns.
                                 # Nothing downstream assumes either.
-t0_int_reference = "trigger"   # "trigger" or "record"
-t0_int_s = 1.205e-7   # 120.5 ns after the trigger = 320 ns of record time at 200 ns/div, the panel's t0 Integration; see the note below
+t0_int_reference = "trigger"    # "trigger" or "record".
+t0_int_s = 1.185e-7             # ns after the trigger, NOT into the record.
                                 # :TIM:POS is timebase*4 and is the screen
                                 # centre, so the trigger sits range/2 - TIM:POS
                                 # into the record: 200 ns at 200 ns/div, 500 ns
@@ -59,7 +55,7 @@ pulse_frequency_hz = 500.0        # read off the rig 2026-08-31: both
                                 # 1 kHz assumed from the old code
 duty_percent = 50.0
 offset_correct = true           # subtract the mean of the last 10 %
-inverted_output = false   # unused while output_polarity is set explicitly below
+inverted_output = false         # `:OUTP1:POL INV`. The 81150A's LOW level is
                                 # what the device sits at between pulses, so with
                                 # NORM and LoLvl = Vcoll it is held in extraction
                                 # and pulsed to Vpre; with INV it is held at Vpre
@@ -67,15 +63,11 @@ inverted_output = false   # unused while output_polarity is set explicitly below
                                 # First light on 2026-09-01 gave Q = -2.07e-10 C
                                 # where the archive at the same Vcoll and delay
                                 # gives +3.65e-10 C -- see BENCH.md.
-invert_polarity = true   # combination 4 with output_polarity INV: the only one of the four whose light-minus-dark returns to zero (docs/bace-polarity.html, bare.py --invert 02:08)
+invert_polarity = false         # the original's "New Sample?": swaps and negates
                                 # both levels for an inverted device. A sign
                                 # convention — wrong here flips every charge.
-output_polarity = "INV"        # :OUTP1:POL, written by the run. With invert_polarity above this is combination 4 (pure negation); read back into the file either way
-settle_s = 0.3   # after the levels are written (bare.py --level-settle 0.3)
-dark_settle_s = 0.3   # after the dark levels, before the shutter shuts
-shutter_settle_s = 5.0          # after the shutter has moved, BOTH traces, before acquiring. bare.py --settle 5
-                                # is what matched LabVIEW at 02:08 (peak 6 %, tau 2.8 %, Q 4 %); run.toml carried 0.2 s of
-                                # settle and no shutter settle, and the port's first service runs were made with that.
+settle_s = 0.2
+dark_settle_s = 0.2
 read_intensity = true
 trigger_sweep = "AUTO"          # AUTO or TRIG. AUTO is what the LabVIEW driver
                                 # used, and it sweeps even when no trigger
@@ -102,16 +94,16 @@ store_shots = false             # per-shot traces: 163 MB for a 51-point,
 # rig.toml carries the ceiling these may not exceed.
 current_compliance_a = 0.01     # while sourcing voltage (J_sc, J_sat, J-V)
 voltage_compliance_v = 2.0      # while sourcing current (V_oc, at 0 A)
-settle_jsc_ms = 1000
-settle_voc_ms = 1000   # a slow cell settles far more slowly here
-settle_jsat_ms = 1000
+settle_jsc_ms = 500
+settle_voc_ms = 500             # a slow cell settles far more slowly here
+settle_jsat_ms = 500
 nplc = 1.0                      # integration time in power-line cycles
-averaging = 10
+averaging = 1
 terminals = "FRON"
 four_wire = false
 
 [illumination]
-level_v = 1.000   # 33220A output; the SAME number is used for the DC V_oc measurement and the pulse high level. 1.000 is what LabVIEW ran at on 2026-09-02
+level_v = 1.020                 # 33220A output; the SAME number is used for the
                                 # DC V_oc measurement and the pulse high level
 low_level_v = 0.4               # below the LED threshold, so fully dark
 v_sat = -1.0                    # bias at which J_sat is measured

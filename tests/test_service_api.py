@@ -34,6 +34,10 @@ from bace.service.app import create_app  # noqa: E402
 from bace.service.session import Session  # noqa: E402
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
+RECIPE = REPO / "tests" / "run-quickcheck.toml"
+# The frozen quick-check recipe, not the lab's run.toml: these tests pin the
+# numbers the run.toml layer delivers, and the lab's recipe changes with the
+# measurement (it was brought in line with the validated 2026-09-02 settings).
 TIMEOUT = 20.0
 SID = "20260902_220000"
 
@@ -53,7 +57,7 @@ FRAME_KEYS = {"seq", "ts", "run_id", "node_path", "type", "data", "decimated"}
 
 # -- helpers ------------------------------------------------------------------------
 def make_session(tmp_path, sid: str = SID, **kw) -> Session:
-    return Session(RigConfig(), run_toml_layer(REPO / "run.toml"), out=str(tmp_path / "runs"),
+    return Session(RigConfig(), run_toml_layer(RECIPE), out=str(tmp_path / "runs"),
                    mode="sim", fast=True, seed=5, session_id=sid,
                    sample={"sample": "s4", "material": "SIM", "pixel": "a",
                            "temperature_k": 290.0}, **kw)
@@ -578,7 +582,7 @@ def test_with_the_331_named_a_temperature_pipeline_settles_over_the_api(tmp_path
     the settled verdict are on the stream and in the record, `/bench` follows
     the reading, the temperature card has no `needs`, and the journal taught
     the cost model the settle."""
-    session = Session(RigConfig(temperature_console="sim"), run_toml_layer(REPO / "run.toml"),
+    session = Session(RigConfig(temperature_console="sim"), run_toml_layer(RECIPE),
                       out=str(tmp_path / "runs"), mode="sim", fast=True, seed=5,
                       session_id=SID, sample={"sample": "s4", "material": "SIM", "pixel": "a"})
     with TestClient(create_app(session)) as client:

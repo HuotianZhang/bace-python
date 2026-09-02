@@ -593,8 +593,11 @@ def test_run_toml_builds_a_usable_plan():
     plan = spec.plan(0.906)
     assert plan.n_steps == 1 and plan.n_loops == 100      # repeats via loops
     assert plan.setpoints[0].vpre == pytest.approx(0.906)
-    assert run.n_averages == 20
-    assert drive.level == pytest.approx(1.020)
+    # the validated 2026-09-02 recipe: 200 averages, LED 1.000 V (run.toml header)
+    assert run.n_averages == 200
+    assert drive.level == pytest.approx(1.000)
+    assert run.invert_polarity and run.output_polarity == "INV"
+    assert run.shutter_settle_s == pytest.approx(5.0)
     assert meta.temperature_k == pytest.approx(290.0)
 
 
