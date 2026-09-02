@@ -67,6 +67,7 @@ list is here too, so nobody has to discover it twice:
 | light and dark sharing an extreme means clipping | `bace-delay-scan-1.html`, `bace-polarity.html` | They should share it. Clipping shows as 7–8 consecutive samples at one float inside a single averaged trace. |
 | the port is 3× low against LabVIEW | working notes, 2026-09-01 | The reference moved. LabVIEW's own τ fell from 190 ns to 71 ns over three hours; against a run eight minutes away the port agrees to 4 % on charge. |
 | `Q:` and `D:` are one store over the network | `bace-status.html` (already withdrawn there) | Two separate trees. Mirror with `D:\BACE\sync-bace.sh` and verify by fingerprint. |
+| combination ④ means `invert_polarity` + `:OUTP1:POL INV` | `recipes/run-labview.toml`, `recipes/run-bace.toml` (the "④" comments), `bace-polarity.html`'s labels as read into the recipes | The validated pair is `invert_polarity = true` with **NORM**: `bare.py --invert` matched LabVIEW to 4 % at 02:08 with the generator read back at NORM, and the 02:20 bit-exact read-back shows LabVIEW itself finishes at NORM. Through the inverting ×4 amplifier, INV rests the device at v_coll so extraction never stops: every INV run (the four replicas of 23:41–01:22 and the service run of 2026-09-02 14:52) shows the photo peak collapsed from ~3 mA to ~0.5 mA and the displacement spike with the opposite sign. |
 
 ## The criterion, since it was got wrong repeatedly
 
