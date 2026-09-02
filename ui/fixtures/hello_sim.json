@@ -1,0 +1,201 @@
+{
+ "seq": null,
+ "ts": 1788381998.1916282,
+ "run_id": null,
+ "node_path": "",
+ "type": "Hello",
+ "data": {
+  "session": {
+   "id": "20260902_204357",
+   "mode": "sim",
+   "fast": true,
+   "started": "2026-09-02T20:43:57",
+   "started_at": 1788381837.0452287,
+   "sample": {
+    "sample": "",
+    "material": "",
+    "pixel": "",
+    "temperature_k": 290.0,
+    "operator": "",
+    "comment": ""
+   },
+   "out": "/tmp/claude-0/-home-user-bace-python/d0a5436a-8df7-52ce-8423-72d22311f52f/scratchpad/runs",
+   "rig_toml": "/home/user/bace-python/rig.toml",
+   "run_toml": "/home/user/bace-python/run.toml",
+   "fingerprint": "9ab7e55b8144",
+   "journal": "/tmp/claude-0/-home-user-bace-python/d0a5436a-8df7-52ce-8423-72d22311f52f/scratchpad/runs/journal/20260902_204357.jsonl",
+   "errors": 0,
+   "last_error": null
+  },
+  "seq": 151,
+  "bench": {
+   "session": {
+    "id": "20260902_204357",
+    "mode": "sim",
+    "fast": true,
+    "started": "2026-09-02T20:43:57",
+    "started_at": 1788381837.0452287,
+    "sample": {
+     "sample": "",
+     "material": "",
+     "pixel": "",
+     "temperature_k": 290.0,
+     "operator": "",
+     "comment": ""
+    },
+    "out": "/tmp/claude-0/-home-user-bace-python/d0a5436a-8df7-52ce-8423-72d22311f52f/scratchpad/runs",
+    "rig_toml": "/home/user/bace-python/rig.toml",
+    "run_toml": "/home/user/bace-python/run.toml",
+    "fingerprint": "9ab7e55b8144",
+    "journal": "/tmp/claude-0/-home-user-bace-python/d0a5436a-8df7-52ce-8423-72d22311f52f/scratchpad/runs/journal/20260902_204357.jsonl",
+    "errors": 0,
+    "last_error": null
+   },
+   "state": "idle",
+   "run": null,
+   "queue": [],
+   "read_at": 1788381998.1866412,
+   "instruments": {
+    "relay": {
+     "position": "amplifier",
+     "how": "readback"
+    },
+    "bias": {
+     "output": false,
+     "polarity": "NORM",
+     "arm_source": "EXT",
+     "arm_slope": "POS",
+     "high_v": 0.75,
+     "low_v": 0.0,
+     "frequency_hz": 500.0,
+     "polarity_read": false
+    },
+    "smu": {
+     "output": false,
+     "compliance": {
+      "current_a": 0.05,
+      "voltage_v": null
+     },
+     "ceiling": {
+      "current_a": 0.05,
+      "voltage_v": 5.0
+     }
+    },
+    "shutter": {
+     "open": false,
+     "how": "readback"
+    },
+    "led": {
+     "output": true,
+     "polarity": "NORM",
+     "mode": "PULSE",
+     "high_v": 1.0,
+     "low_v": 0.4,
+     "frequency_hz": 500.0
+    },
+    "voc": {
+     "value": 0.9040736711190411,
+     "led_v": 1.02,
+     "from": {
+      "run_id": "20260902_204357-003",
+      "node_path": "jv_bace",
+      "ts": 1788381998.0032556,
+      "how": "jv_bace"
+     }
+    },
+    "power": {
+     "available": true,
+     "watts": 0.0,
+     "trustworthy": true,
+     "wavelength_nm": 530.0,
+     "monitor": false
+    },
+    "temperature": {
+     "wired": false,
+     "kelvin": null,
+     "setpoint_k": null,
+     "in_band": null,
+     "source": null,
+     "monitor": false,
+     "reads": 0
+    }
+   },
+   "inferred": [],
+   "chain": {
+    "read_at": 1788381998.1866412,
+    "ok": 3,
+    "total": 4,
+    "items": [
+     {
+      "key": "led_polarity",
+      "label": "33220A POL",
+      "value": "NORM",
+      "expected": "INV",
+      "level": "warn",
+      "fix": "set-33220a-pol-inv",
+      "text": "NORM makes the Sync's rising edge mean light ON, so extraction would happen during illumination"
+     },
+     {
+      "key": "bias_arm",
+      "label": "81150A ARM",
+      "value": "EXT",
+      "expected": "EXT",
+      "level": "ok",
+      "fix": "arm-81150a-ext",
+      "text": "armed from the 33220A Sync"
+     },
+     {
+      "key": "bias_arm_slope",
+      "label": "SLOP",
+      "value": "POS",
+      "expected": "POS",
+      "level": "ok",
+      "fix": "arm-81150a-ext",
+      "text": "arms on the rising Sync edge, which with the 33220A at INV is light off"
+     },
+     {
+      "key": "bias_polarity",
+      "label": "81150A POL",
+      "value": "NORM",
+      "expected": "NORM",
+      "level": "ok",
+      "fix": null,
+      "text": "what the recipe's output_polarity asks for"
+     }
+    ]
+   },
+   "rig": {
+    "path": "/home/user/bace-python/rig.toml",
+    "loaded_at": 1788381837.0455956,
+    "fingerprint": "9ab7e55b8144",
+    "values": {
+     "sense_resistor_ohm": 5.192,
+     "pulse_amp": 4.0,
+     "current_sign": -1.0,
+     "trigger_offset_s": 0.0,
+     "light_path_delay_ns": 502.0,
+     "probe_attenuation": 1.0,
+     "led_threshold_v": 1.0,
+     "max_current_compliance_a": 0.05,
+     "max_voltage_compliance_v": 5.0
+    }
+   },
+   "verdicts": [
+    {
+     "level": "warn",
+     "code": "chain.led-polarity",
+     "text": "33220A POL reads NORM: NORM makes the Sync's rising edge mean light ON, so extraction would happen during illumination",
+     "node_path": "",
+     "data": {
+      "value": "NORM",
+      "expected": "INV",
+      "fix": "set-33220a-pol-inv"
+     }
+    }
+   ],
+   "unavailable": {},
+   "monitors": []
+  }
+ },
+ "decimated": {}
+}

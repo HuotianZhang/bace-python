@@ -15,6 +15,7 @@ extended, and focused on **measurement** — analysis stays downstream.
 | `rig.toml` / `run.toml` | the bench and the recipe, kept separate |
 | `scripts/` | the double-click `.bat` entry points, one per bench stage; `setup.sh` for a Linux checkout |
 | `docs/ui-kickoff.md` | where the console work starts, with `docs/ui-rules.md` and `docs/design/` |
+| `ui/README.md` | the console itself — how to run it, the fixtures it develops against, and what each milestone owes. `docs/ui-plan.md` is the plan it follows |
 
 ## Developing away from the bench (Linux, a container, a cloud session)
 
@@ -62,7 +63,10 @@ bace/           the package
   bench/        the staged hardware harness
   service/      FastAPI + WebSocket around the engine — the bench, the modules,
                 the runs, the pipeline tree. bace/service/README.md
-tools/          standalone rig scripts — scan, bare, lightpower, relay, identify_dio
+ui/             the console — plain ES modules, no build step, served by the
+                service at /ui. ui/README.md; docs/ui-plan.md is the plan
+tools/          standalone rig scripts — scan, bare, lightpower, relay, identify_dio;
+                and the console's fixture recorders
 scripts/        the double-click .bat entry points; each cd's to the repo root first
 recipes/        the named recipe variants, passed with --run
 tests/          the suite
