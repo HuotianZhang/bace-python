@@ -195,8 +195,8 @@ a{color:#ae1800}a:hover{color:#ec3013}
           <div class="pf"><span class="l">n_loops</span><span class="v">20</span></div>
           <div class="pf"><span class="l">n_averages</span><span class="v">100</span></div>
           <span class="sep"></span>
-          <div class="pf"><span class="l" style="color:#ae1800">invert_polarity</span><span class="bool acc"><span>true</span><span class="on">false</span></span></div>
-          <div class="pf"><span class="l" style="color:#ae1800">inverted_output</span><span class="bool acc"><span>NORM</span><span class="on">INV</span></span></div>
+          <div class="pf"><span class="l" style="color:#ae1800">invert_polarity</span><span class="bool acc"><span class="on">true</span><span>false</span></span></div>
+          <div class="pf"><span class="l" style="color:#ae1800">output_polarity</span><span class="bool acc"><span class="on">NORM</span><span>INV</span></span></div>
           <span style="flex:1"></span>
           <button class="btng">17 more · run.toml <lu-i name="down" style="width:10px"></lu-i></button>
         </div>
@@ -244,7 +244,7 @@ a{color:#ae1800}a:hover{color:#ec3013}
         <span class="st bad">33220A POL NORM <lu-i name="warn" style="width:12px"></lu-i></span><button class="btns" style="padding:5px 9px">set INV</button>
         <span class="st">81150A ARM EXT <lu-i name="ok" style="width:12px"></lu-i></span>
         <span class="st">SLOP POS <lu-i name="ok" style="width:12px"></lu-i></span>
-        <span class="st">POL INV <lu-i name="ok" style="width:12px"></lu-i></span>
+        <span class="st">POL NORM <lu-i name="ok" style="width:12px"></lu-i></span>
       </sc-if>
       <span style="flex:1"></span>
       <span class="st" style="color:#7d7979">rig.toml · R_sense 5.192 Ω · gain ×4</span>
@@ -333,8 +333,8 @@ a{color:#ae1800}a:hover{color:#ec3013}
           <div class="pf"><span class="l">n_loops</span><span class="v">20</span></div>
           <div class="pf"><span class="l">n_averages</span><span class="v">100</span></div>
           <span class="sep"></span>
-          <div class="pf"><span class="l" style="color:#ae1800">invert_polarity</span><span class="bool acc"><span>true</span><span class="on">false</span></span></div>
-          <div class="pf"><span class="l" style="color:#ae1800">inverted_output</span><span class="bool acc"><span>NORM</span><span class="on">INV</span></span></div>
+          <div class="pf"><span class="l" style="color:#ae1800">invert_polarity</span><span class="bool acc"><span class="on">true</span><span>false</span></span></div>
+          <div class="pf"><span class="l" style="color:#ae1800">output_polarity</span><span class="bool acc"><span class="on">NORM</span><span>INV</span></span></div>
           <span style="flex:1"></span>
           <button class="btng">17 more · run.toml <lu-i name="down" style="width:10px"></lu-i></button>
         </div>
@@ -396,7 +396,7 @@ a{color:#ae1800}a:hover{color:#ec3013}
         <span class="st">33220A POL INV <lu-i name="ok" style="width:12px"></lu-i></span>
         <span class="st">81150A ARM EXT <lu-i name="ok" style="width:12px"></lu-i></span>
         <span class="st">SLOP POS <lu-i name="ok" style="width:12px"></lu-i></span>
-        <span class="st">POL INV <lu-i name="ok" style="width:12px"></lu-i></span>
+        <span class="st">POL NORM <lu-i name="ok" style="width:12px"></lu-i></span>
         <span class="cs">read back 21:03</span>
       </sc-if>
       <span style="flex:1"></span>
@@ -482,7 +482,7 @@ a{color:#ae1800}a:hover{color:#ec3013}
         <span class="st">33220A POL INV <lu-i name="ok" style="width:12px"></lu-i></span>
         <span class="st">81150A ARM EXT <lu-i name="ok" style="width:12px"></lu-i></span>
         <span class="st">SLOP POS <lu-i name="ok" style="width:12px"></lu-i></span>
-        <span class="st">POL INV <lu-i name="ok" style="width:12px"></lu-i></span>
+        <span class="st">POL NORM <lu-i name="ok" style="width:12px"></lu-i></span>
         <span class="cs">read back 21:10 · re-read at Start</span>
       </sc-if>
       <span style="flex:1"></span>
@@ -534,10 +534,10 @@ a{color:#ae1800}a:hover{color:#ec3013}
       <span class="st bad">33220A :OUTP:POL NORM <lu-i name="warn" style="width:12px"></lu-i></span><button class="btns" style="padding:5px 9px">set INV</button>
       <span class="st">81150A :ARM:SOUR1 EXT <lu-i name="ok" style="width:12px"></lu-i></span>
       <span class="st">:ARM:SLOP POS <lu-i name="ok" style="width:12px"></lu-i></span>
-      <span class="st">:OUTP1:POL INV <lu-i name="ok" style="width:12px"></lu-i></span>
+      <span class="st">:OUTP1:POL NORM <lu-i name="ok" style="width:12px"></lu-i></span>
       <button class="btng"><lu-i name="reset" style="width:11px"></lu-i>re-read</button>
       <span style="flex:1"></span>
-      <span class="st" style="color:#7d7979">rig.toml · R_sense 5.192 Ω · gain ×4 · + 47 ns</span>
+      <span class="st" style="color:#7d7979">rig.toml · R_sense 5.192 Ω · gain ×4 · light path 502 ns · delay zero 0</span>
       <button class="btng">back to bench</button>
     </div>
   </div>
