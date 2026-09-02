@@ -6,6 +6,9 @@
 # cmd.exe wants CRLF in batch files.
 *.bat  text eol=crlf
 
+# And a shell script with CRLF is a broken shebang on the machine it is for.
+*.sh   text eol=lf
+
 *.h5   binary
 *.png  binary
 *.zip  binary

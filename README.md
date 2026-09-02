@@ -13,7 +13,39 @@ extended, and focused on **measurement** — analysis stays downstream.
 | `bace/service/README.md` | how to run the service and drive it by hand; `docs/service-contract.md` has every shape |
 | `docs/bace-status.html` | the full narrative with evidence and figures |
 | `rig.toml` / `run.toml` | the bench and the recipe, kept separate |
-| `scripts/` | the double-click `.bat` entry points, one per bench stage |
+| `scripts/` | the double-click `.bat` entry points, one per bench stage; `setup.sh` for a Linux checkout |
+| `docs/ui-kickoff.md` | where the console work starts, with `docs/ui-rules.md` and `docs/design/` |
+
+## Developing away from the bench (Linux, a container, a cloud session)
+
+The console can be built with no hardware at all: `--sim` assembles the rig from
+`bace.drivers.simulated` and never imports pyvisa, so a Linux checkout needs
+only the `service` extra.
+
+```bash
+bash scripts/setup.sh          # installs .[service,dev], then runs the suite
+python -m bace.service --sim --fast --port 8900 --ui ui/
+```
+
+`--fast` makes every settle a no-op, so a 20-loop scan takes a second; it is
+refused on a real rig, where it would measure before the device had settled with
+no symptom in the data. `--seed` varies the simulated device.
+
+Two things that catch people out on a sandbox:
+
+- **`--host` is refused unless it is a loopback address** (`127.0.0.0/8`, `::1`,
+  `localhost`). The service has no auth and owns every instrument, so this is not
+  a configuration choice. Where a sandbox exposes ports by proxying localhost
+  there is nothing to do; where it wants the process on `0.0.0.0`, put the proxy
+  in front rather than editing the check.
+- **Run from the repo root.** `rig.toml` and `run.toml` are found by name in the
+  working directory; from anywhere else the service falls back to the built-in
+  defaults, which is a recipe nobody chose. `scripts/setup.sh` and the `.bat`
+  files both `cd` there first.
+
+One test fails on the machine this port was written on — a stray 64-bit
+`delib64.dll` in System32 makes the DIO backend findable where the test needs it
+absent. There is no DELIB on Linux, so expect a clean run there.
 
 ## Layout
 
