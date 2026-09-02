@@ -57,7 +57,19 @@ The whole reconnect discipline lives in one module and no view knows about it:
 `since=` replay, `seq` dedupe, `StepPhase` arriving with `seq: null` and never
 entering the ring, the 1008 drop that `--sim --fast` *will* cause on a long
 scan — and `decimated[name].replay === true`, which means *redraw the loop
-curve, the trace is gone*. That last one is the subtle branch: a replayed
+curve, the trace is gone*.
+
+**The dedupe cursor belongs to a service session, not to the socket.** `seq` is
+per-session and a new process starts it at zero, so a service restarted under
+an open browser breaks a naive cursor twice over: `?since=<the old high seq>`
+replays nothing, and then `seq > last seen` discards every numbered frame the
+new process sends — a bench that goes quietly stale until someone reloads the
+page. `Hello` carries what settles it (`data.session.id`, beside `data.seq` and
+`data.bench`), and its envelope `seq` is `null`, so it is exempt from the
+dedupe it configures. Handle `Hello` first: when `data.session.id` differs from
+the one in hand, drop the cursor and the session state and rebuild from
+`data.bench` rather than filtering the new session's frames against the old
+session's numbers. That last one is the subtle branch: a replayed
 `StepDone` carries every scalar and its `verdict` with the four traces `null`,
 and a client that blanks the chart instead of redrawing from scalars has a bug
 that only shows up after a reconnect.

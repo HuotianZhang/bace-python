@@ -211,18 +211,45 @@ gives `na_290K_…` and `sample = ""` gives `290K_…`, two different names. So 
 literal `na` in `sample`, `material` or `pixel` is escaped on the way into the
 name (`na-`), and `as_dict()` keeps what was typed.
 
-That is worth doing, but it is not the whole hazard, and the difference should
-be said plainly: **two runs whose metadata matches to the second already
-overwrite each other today.** `RunRecorder._start()` is
-`os.makedirs(self.folder, exist_ok=True)`, and every file inside is named from
-`metadata.stamp` — `<stem><stamp>.dat`, `run<stamp>.h5` — so identical
-metadata in the same second means the same folder and the same file names, and
-the second run lands on the first. Under `--sim --fast` a run takes
-milliseconds and same-second pairs are ordinary; on the rig they are not. The
-grid widens the surface slightly by mapping "unset" and a literal `na` together;
-reserving the sentinel closes that much. Making colliding folders unique at all
-is a separate change, out of this proposal's scope, and is named here so it is
-not mistaken for something the grid already handles.
+### Colliding folders are made unique, and that is part of this proposal
+
+Reserving the sentinel is not enough, because **`slug()` is many-to-one** and
+the grid is what makes every identity pass through it. Measured, at the
+24-character limit:
+
+| two identities | both become |
+|---|---|
+| `a_b` and `a b` | `a-b` |
+| `s4 pixel` and `s4_pixel` | `s4-pixel` |
+| `PTQ10IT4F-batch-2026-08-A` and `…-B` | `PTQ10IT4F-batch-2026-08` |
+
+The first two are contrived; the third is not — two batches of one material,
+differing after character 24, is an ordinary thing for a lab to have. Today
+those pairs produce different folder names. Both of those names are broken (one
+forges a field boundary, one puts a space in a directory), which is why they
+are being slugged — but "different and broken" becoming "identical" is a
+regression, and it is this proposal's to own.
+
+Underneath it is a hazard that predates the grid: **two runs whose metadata
+matches to the second already overwrite each other.** `RunRecorder._start()` is
+`os.makedirs(self.folder, exist_ok=True)` and every file inside is named from
+`metadata.stamp` — `<stem><stamp>.dat`, `run<stamp>.h5` — so the same folder
+means the same file names and the second run lands on the first. Under
+`--sim --fast` a run takes milliseconds and same-second pairs are ordinary; on
+the rig they are not.
+
+So `_start()` stops reusing a folder that already holds a run: it takes the
+next free `-2`, `-3` suffix instead. That is one small change and it closes the
+whole class — the sentinel, the three slug cases above, and the same-second
+case that was there all along. The suffix rides on the last part
+(`…_20260902_183355-2`), so the count stays nine and the stamp stays readable
+at parts 8–9; the files inside keep the plain LabVIEW stamp, because they are
+in a different directory and never clash.
+
+An injective encoding was the alternative and is the wrong trade: it buys
+uniqueness by making every name unreadable, when the name exists to be read.
+Uniqueness belongs at the directory, and the record — which is now per-run and
+carries all three identity fields verbatim — is what says which run is which.
 
 `sample`, `material` and `pixel` are reduced with `slug()` on the way in, for
 the reason above: whitespace and `_` become `-`, the characters a Windows path
