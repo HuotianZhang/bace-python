@@ -114,6 +114,12 @@ test('a client dropped at 1008 comes back without missing a numbered frame',
       assert.ok(shot.verdict, 'and its verdict — the loop curve is redrawable without the trace');
     }
     assert.ok(run.shots.some((shot) => shot.traces), 'and the newest shots still have their traces');
+    // This is also what a page opened mid-run does, which is why the console
+    // boots with `since=0`: the run comes back whole — its axis, its counts
+    // and its outcome — none of which `/bench` carries.
+    assert.ok(run.axis && run.values.length, 'the axis is rebuilt from the replay');
+    assert.equal(run.kept, run.requested);
+    assert.equal(run.state, 'done', 'including the terminal frames');
     // The stream counts frames over the whole session, this run's and every
     // earlier one's; the store counts the shots of this run.
     assert.ok(replayed.stream.state.stats.tracesGone >= gone.length);

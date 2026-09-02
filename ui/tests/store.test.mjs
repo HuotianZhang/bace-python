@@ -218,6 +218,23 @@ test('a queued run is in the queue, and leaves it when the worker takes it', () 
   assert.equal(s.getState().benchState, 'preflight');
 });
 
+test('a J-V counts its curves as they complete, not at the end', () => {
+  // On the rig a sweep takes minutes. `JVStarted` says how many curves are
+  // coming and every `JVCurveDone` is one of them, so the rail can say
+  // "1/2" while it happens instead of nothing at all until `NodeDone`.
+  const s = store();
+  const counts = [];
+  for (const frame of parseJsonl(fixture('stream_jv_sim.jsonl'))) {
+    s.applyFrame(frame);
+    const run = currentRun(s.getState());
+    const now = `${run.kept}/${run.requested}`;
+    if (counts[counts.length - 1] !== now) counts.push(now);
+    if (frame.type === 'JVFinished') break;          // before NodeDone lands
+  }
+  assert.deepEqual(counts, ['null/null', 'null/2', '1/2', '2/2'],
+                   'requested at JVStarted, kept as each curve arrives');
+});
+
 test('the Hello frame carries the whole bench', () => {
   const s = store();
   const hello = JSON.parse(fixture('hello_sim.json'));
