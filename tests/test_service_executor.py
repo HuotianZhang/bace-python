@@ -289,8 +289,10 @@ def test_a_manual_run_takes_the_sessions_voc_as_the_source_it_is(tmp_path):
     evs = list(run_pipeline(b.rig, schedule, catalogue=catalogue(),
                             ctx_factory=factory(None, str(tmp_path), store),
                             on_voc=vocs.append, session_voc=session_voc))
-    assert [type(e).__name__ for e in evs[:3]] == ["NodeStarted", "RunStarted", "AxisResolved"]
-    assert evs[2].voc == 0.9
+    kinds = [type(e).__name__ for e in evs]
+    # the LED read-back (InstrumentState) sits between NodeStarted and RunStarted
+    assert kinds[:4] == ["NodeStarted", "InstrumentState", "RunStarted", "AxisResolved"]
+    assert evs[3].voc == 0.9
     done = evs[-1]
     assert isinstance(done, E.NodeDone) and done.node_path == "bace" and done.outcome == "ok"
     assert done.detail["voc"] == {**session_voc.as_dict()}

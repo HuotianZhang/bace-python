@@ -358,6 +358,11 @@ def test_bace_refuses_centre_on_voc_without_a_source(tmp_path):
     # an absolute axis needs no source at all
     gen = cat.build("bace", {**FAST, "centre_on_voc": False, "axis_start": 0.9,
                              "axis_stop": 0.9, "n_loops": 1}, ctx, b.rig)
+    # The LED read-back comes first (what the 33220A answered after being
+    # set to pulse), then the engine starts.
+    first = next(gen)
+    assert isinstance(first, E.InstrumentState) and first.values["led_output"] == "ON"
+    assert first.values["led_mode"] == "PULSE"
     assert isinstance(next(gen), E.RunStarted)
     gen.close()
     assert not b.sim.led.output_enabled
@@ -716,3 +721,59 @@ def test_the_temperature_module_polls_live_while_it_waits_and_an_abort_unwinds(t
                    stop_mode=lambda: StopMode.AFTER_SHOT, wait_for_operator=wait)
     evs = list(cat.build("temperature", params, ctx, b.rig))
     assert [type(e).__name__ for e in evs] == ["RunAborted"] and evs[0].reason == "requested"
+
+
+def test_bace_refuses_a_33220a_that_did_not_take_pulse_mode_or_its_output(tmp_path):
+    """The 33220A is the master clock: in DC, or with the output off, nothing
+    arms the 81150A and the scope has no sync. The first real service run
+    (session 115857) had no read-back of either generator in its file; now the
+    33220A is read back after being set, written into the file, and a
+    generator that answers OFF or DC stops the module before the scan."""
+    from bace.service.modules import ModuleError, _led_problems, _read_led_state
+
+    class Led:
+        """A 33220A that took nothing: reads back OFF and DC."""
+        output_enabled = True
+        mode = "PULSE"
+        def __init__(self): self.log = []
+        def set_pulse(self, *a, **k): self.log.append("set_pulse")
+        def set_dc(self, *a, **k): self.log.append("set_dc")
+        def enable_output(self, on=True): self.log.append(f"enable({on})")
+        def disable_output(self): self.log.append("enable(False)")
+        def off(self): self.log.append("off")
+        def set_polarity(self, inverted): pass
+        def polarity(self): return "INV"
+        def read_state(self):
+            return {"output": False, "polarity": "INV", "mode": "DC", "shape": "DC",
+                    "high_v": 1.02, "low_v": 0.4, "frequency_hz": 500.0}
+        def errors(self): return ['-221,"Settings conflict"']
+
+    state = _read_led_state(Led())
+    assert state["output"] == "OFF" and state["mode"] == "DC" and "Settings conflict" in state["errors"]
+    problems = _led_problems(state, {"frequency": 500.0})
+    assert any("OFF" in p for p in problems)
+    assert any("DC" in p for p in problems)
+    assert any("Settings conflict" in p for p in problems)
+    # NORM polarity is the chain card's warn, never a refusal here
+    assert not any("POL" in p for p in problems)
+
+    b = bench()
+    b.rig.led = Led()
+    cat = catalogue()
+    ctx = make_ctx(tmp_path)
+    gen = cat.build("bace", {**FAST, "centre_on_voc": False, "axis_start": 0.9,
+                             "axis_stop": 0.9, "n_loops": 1}, ctx, b.rig)
+    first = next(gen)
+    assert first.values["led_output"] == "OFF" and first.values["led_mode"] == "DC"
+    with pytest.raises(ModuleError, match="33220A is not driving the LED"):
+        next(gen)
+    assert b.sim.bench.shots == 0, "nothing was acquired"
+    assert "off" in b.rig.led.log, "the module still switches the LED off on its way out"
+
+
+def test_a_simulated_33220a_that_answers_nothing_definite_is_not_refused(tmp_path):
+    """`?` is not a problem: the simulator has no `read_state`, and a driver
+    that cannot answer is not a generator that said no."""
+    from bace.service.modules import _led_problems
+    assert _led_problems({"output": "?", "mode": "?", "frequency_hz": "?", "polarity": "?"},
+                         {"frequency": 500.0}) == []

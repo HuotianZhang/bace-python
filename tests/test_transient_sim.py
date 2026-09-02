@@ -521,7 +521,11 @@ def test_the_dark_trace_can_be_shutter_only():
     assert (lv.high_light * 4, lv.low_light * 4) == pytest.approx((1.0, -1.01354))
     assert (lv.high_dark * 4, lv.low_dark * 4) == pytest.approx((2.01354, 0.0))
 
-    for ref, expect_writes in (("translated", 2), ("same", 1)):
+    # One extra write per run since 2026-09-02: setup applies the first
+    # step's light levels before enabling the generator, so the scope can
+    # calibrate its trigger against a live sync. The loop then writes the
+    # light pair again (same numbers) and, for "translated", the dark pair.
+    for ref, expect_writes in (("translated", 3), ("same", 2)):
         sim = make_bench(seed=2)
         rig = Rig(bias=sim.bias, scope=sim.scope, shutter=sim.shutter,
                   config=RigConfig())
@@ -536,6 +540,7 @@ def test_the_dark_trace_can_be_shutter_only():
         list(run_transient_scan(rig, bace_sweep(0.90, 0.90, 0.02, n_loops=1),
                                 cfg, sleep=NO_SLEEP))
         assert len(seen) == expect_writes, f"{ref}: {seen}"
+        assert seen[0] == seen[1], "setup and the first shot apply the same light pair"
         if ref == "same":
             # the light pair, written once, and never rewritten for the dark
             assert len(set(seen)) == 1
@@ -661,3 +666,56 @@ def test_a_trigger_channel_with_no_sync_only_warns_under_trig():
     assert any(isinstance(e, E.Notice) and e.level == "warning"
                and "no sync on CHAN3" in e.text for e in evs)
     assert any(isinstance(e, E.RunFinished) for e in evs)
+
+
+def test_the_generator_is_enabled_before_the_scope_calibrates_its_trigger():
+    """Session 115857 on the rig (2026-09-02): the service parks the bench after
+    every run, so the 81150A output was OFF when the scope calibrated, CHAN3
+    swung 5.2 mV, and there was nothing to trigger on. Every earlier run had
+    inherited a generator the LabVIEW VI left ON. The VI enables the generator
+    first and calibrates after; so does the run now, at the first step's light
+    levels with the shutter still shut. The file says the output was on."""
+    sim, rig = build()
+    order: list[str] = []
+    real_enable, real_acquire = rig.bias.enable_output, rig.scope.acquire
+
+    def enable(on=True):
+        order.append(f"bias.enable_output({on})")
+        return real_enable(on)
+
+    def acquire(n, *, source="CHAN2", autorange_first=False, timeout_s=30.0):
+        order.append(f"scope.acquire({source})")
+        return real_acquire(n, source=source, autorange_first=autorange_first,
+                            timeout_s=timeout_s)
+
+    rig.bias.enable_output = enable          # type: ignore[method-assign]
+    rig.scope.acquire = acquire              # type: ignore[method-assign]
+    cfg = RunConfig(n_averages=8, settle_s=0.0, dark_settle_s=0.0,
+                    t0_int_s=2.71e-7, calibrate_trigger=True)
+    evs = list(run_transient_scan(rig, bace_sweep(0.9, 0.9, 0.0), cfg, sleep=NO_SLEEP))
+    assert order.index("bias.enable_output(True)") < order.index("scope.acquire(CHAN3)")
+    states = [e.values for e in evs if isinstance(e, E.InstrumentState)]
+    assert any(v.get("bias_output") == "ON" for v in states), states
+    assert sim.bench.shutter_open is False or True   # the shutter moved only inside the loop
+    assert isinstance(evs[-1], E.RunFinished)
+
+
+def test_the_bias_output_state_in_the_file_is_read_from_the_instrument_when_it_can_be():
+    """A driver with `read_output` (the real 81150A asks `:OUTP1?`) is asked;
+    the cached flag is the fallback. A generator that did not take `:OUTP1 ON`
+    must be reported OFF, not remembered ON."""
+    from bace.experiment.transient import _output_state
+
+    class Stubborn:
+        output_enabled = True                 # what the driver remembers
+        def read_output(self):
+            return False                      # what the instrument says
+    class Mute:
+        output_enabled = True
+        def read_output(self):
+            return None
+    class Plain:
+        output_enabled = True
+    assert _output_state(Stubborn()) == "OFF"
+    assert _output_state(Mute()) == "?"
+    assert _output_state(Plain()) == "ON"

@@ -83,6 +83,67 @@ SAMPLE_KEYS: frozenset[str] = frozenset(
 reads from it. Not module parameters: they describe the session."""
 
 
+def _read_led_state(led) -> dict[str, str]:
+    """The LED generator as it answers: `output`, `mode`, `frequency_hz`,
+    `high_v`, `low_v`, `polarity` -- strings, `?` for what it will not say.
+    `read_state` is the real driver's (not a protocol member); a driver
+    without it reports its cached flags, which is what the simulator has."""
+    read = getattr(led, "read_state", None)
+    state: dict = {}
+    if callable(read):
+        try:
+            state = dict(read())
+        except Exception:                               # noqa: BLE001
+            state = {}
+    out = {}
+    on = state.get("output", None) if state else bool(getattr(led, "output_enabled", False))
+    out["output"] = "?" if on is None else ("ON" if on else "OFF")
+    out["mode"] = str(state.get("mode", getattr(led, "mode", "?")) or "?")
+    for key in ("frequency_hz", "high_v", "low_v"):
+        v = state.get(key)
+        out[key] = "?" if v is None else f"{float(v):g}"
+    pol = state.get("polarity")
+    if pol is None:
+        try:
+            pol = led.polarity()
+        except Exception:                               # noqa: BLE001
+            pol = "?"
+    out["polarity"] = str(pol or "?").upper()
+    # The error queue, drained: `:VOLT:HIGH` below the LOW in force, or a
+    # width that no longer fits the period, is refused by the 33220A with
+    # `-221 Settings conflict` and no other symptom, and the run path
+    # never reads the queue itself.
+    errors = getattr(led, "errors", None)
+    if callable(errors):
+        try:
+            out["errors"] = "; ".join(str(e) for e in errors()) or ""
+        except Exception:                               # noqa: BLE001
+            out["errors"] = "?"
+    return out
+
+
+def _led_problems(state: dict[str, str], wanted: dict) -> list[str]:
+    """What the read-back contradicts in the recipe. `?` is not a problem:
+    a driver that cannot answer (the simulator) is not a generator that
+    said no."""
+    problems = []
+    if state.get("output") == "OFF":
+        problems.append("output is OFF (:OUTP? = 0)")
+    mode = state.get("mode", "?").upper()
+    if mode not in ("PULSE", "?", "PULS"):
+        problems.append(f"shape is {mode}, not PULSE: a DC output has no Sync edge to arm the 81150A")
+    freq = state.get("frequency_hz", "?")
+    if freq != "?" and abs(float(freq) - float(wanted["frequency"])) > 1.0:
+        problems.append(f"frequency reads {freq} Hz against {wanted['frequency']:g} Hz asked")
+    # Polarity is deliberately NOT refused here: NORM is the chain card's
+    # warn with a one-click fix, and a warn never blocks (the three-tier
+    # rule). It is in the read-back so the file says which edge armed.
+    errors = state.get("errors", "")
+    if errors and errors != "?":
+        problems.append(f"the generator rejected a command: {errors}")
+    return problems
+
+
 class ModuleError(ValueError):
     """A module or parameter the catalogue refuses. The message starts with
     the module's name and, where one parameter is at fault, that parameter's
@@ -992,6 +1053,20 @@ class Catalogue:
                                   duty_percent=s["duty"])
                 rig.led.enable_output(True)
                 ctx.sleep(led_settle_s)
+                # The 33220A is the master clock: its Sync arms the 81150A,
+                # whose Sync triggers the scope. Read it back (the real
+                # driver asks :OUTP? / FUNC:SHAP? / :FREQ?) and refuse a
+                # generator that is off, in DC, or at another frequency
+                # before the scan calibrates against a silent CHAN3. The
+                # first real service run (2026-09-02, session 115857) had
+                # nothing in its file saying whether either generator was
+                # on; the reading goes into the file either way.
+                led_state = _read_led_state(rig.led)
+                yield E.InstrumentState({f"led_{k}": v for k, v in led_state.items()})
+                problems = _led_problems(led_state, s)
+                if problems:
+                    raise ModuleError(f"{name}: the 33220A is not driving the LED as "
+                                      f"the recipe asks: {'; '.join(problems)}")
 
                 if voc_src is not None:
                     ctx.voc = voc_src

@@ -316,6 +316,17 @@ AbortCheck = Callable[[], bool]
 Sleep = Callable[[float], None]
 
 
+def _output_state(device) -> str:
+    """`ON` / `OFF` / `?` -- from the instrument when the driver has a
+    `read_output`, else from its cached flag."""
+    read = getattr(device, "read_output", None)
+    try:
+        on = read() if callable(read) else bool(device.output_enabled)
+    except Exception:                                   # noqa: BLE001
+        return "?"
+    return "?" if on is None else ("ON" if on else "OFF")
+
+
 def _resolve_plan(spec: ScanSpec, voc: float | None) -> ScanPlan:
     return spec.plan(voc)
 
@@ -352,6 +363,60 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
     try:
         # -- setup ---------------------------------------------------------
         rig.scope.configure_timebase(config.timebase_ns_per_div, config.record_length)
+        # Arming before the shape, as `Agilent 81150StandardWaveformTDCF` does
+        # (Configure Trigger, then Configure Standard Waveform). Written on
+        # every run: a generator left free-running by the front panel still
+        # triggers the scope and still yields a plausible charge, at a random
+        # phase of the LED cycle -- see `RunConfig.external_trigger`.
+        rig.bias.configure_trigger(external=config.external_trigger,
+                                   positive_slope=config.trigger_slope_positive)
+        rig.bias.configure_shape(config.pulse_frequency_hz,
+                                 duty_percent=config.duty_percent,
+                                 inverted_output=config.polarity_instruction())
+        pol = rig.bias.output_polarity
+        arm = rig.bias.trigger_state()
+        left_alone = config.polarity_instruction() is None
+        # The readback, not the request, is what a later reader needs: with
+        # `output_polarity = "leave"` the recipe says nothing about which
+        # convention ran, so only this reaches the file. A Notice goes to the
+        # terminal and is gone; InstrumentState is written beside the config.
+        # The arming is read back for the same reason: what was *sent* is in
+        # the run config, what the instrument *holds* is here.
+        yield InstrumentState({
+            "bias_output_polarity": pol,
+            "bias_polarity_source": "left as found" if left_alone else "set by this run",
+            "bias_arm_source": arm.get("arm_source", "?"),
+            "bias_arm_slope": arm.get("arm_slope", "?"),
+            "dark_reference": config.dark_reference,
+        })
+        yield Notice(
+            "info",
+            f":OUTP:POL in force = {pol}" + (
+                " — left as found, not set by this run. Which level the device "
+                "rests at between pulses depends on how the sample is wired, so "
+                "this run does not assume it"
+                if left_alone else ""))
+        # The generator is enabled BEFORE the scope calibrates its trigger, at
+        # the first step's light levels with the shutter still shut -- the
+        # order `Agilent 81150StandardWaveformTDCF` and then the scope VIs
+        # take. Until 2026-09-02 the calibration came first, and it worked only
+        # because every earlier run inherited an 81150A the LabVIEW VI had left
+        # ON. The service parks the bench after every run, so the first run
+        # from a parked bench (session 115857) calibrated against a silent
+        # CHAN3: 5.2 mV peak to peak, no sync, no measurement.
+        first = pulse_levels(plan.setpoints[0].vpre, plan.setpoints[0].vcoll,
+                             cfg.pulse_amp, plan.setpoints[0].delay_ns,
+                             config.pulse_width_ns, invert=config.invert_polarity,
+                             trigger_offset_s=cfg.trigger_offset_s)
+        rig.bias.set_levels(first.high_light, first.low_light,
+                            delay_s=first.delay_s, width_s=first.width_s)
+        rig.bias.enable_output(True)
+        # Read back where the driver can (`read_output` is not a protocol
+        # member; the real driver asks `:OUTP1?`), else the cached flag: a
+        # generator that did not take `:OUTP1 ON` gives no sync and no
+        # pulse, and the file should say which it was.
+        yield InstrumentState({"bias_output": _output_state(rig.bias)})
+
         threshold = None
         if config.calibrate_trigger:
             probe = rig.scope.acquire(16, source=cfg.trigger_source,
@@ -393,40 +458,6 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                                          positive=cfg.trigger_positive,
                                          high_threshold=threshold,
                                          sweep=config.trigger_sweep)
-        # Arming before the shape, as `Agilent 81150StandardWaveformTDCF` does
-        # (Configure Trigger, then Configure Standard Waveform). Written on
-        # every run: a generator left free-running by the front panel still
-        # triggers the scope and still yields a plausible charge, at a random
-        # phase of the LED cycle -- see `RunConfig.external_trigger`.
-        rig.bias.configure_trigger(external=config.external_trigger,
-                                   positive_slope=config.trigger_slope_positive)
-        rig.bias.configure_shape(config.pulse_frequency_hz,
-                                 duty_percent=config.duty_percent,
-                                 inverted_output=config.polarity_instruction())
-        pol = rig.bias.output_polarity
-        arm = rig.bias.trigger_state()
-        left_alone = config.polarity_instruction() is None
-        # The readback, not the request, is what a later reader needs: with
-        # `output_polarity = "leave"` the recipe says nothing about which
-        # convention ran, so only this reaches the file. A Notice goes to the
-        # terminal and is gone; InstrumentState is written beside the config.
-        # The arming is read back for the same reason: what was *sent* is in
-        # the run config, what the instrument *holds* is here.
-        yield InstrumentState({
-            "bias_output_polarity": pol,
-            "bias_polarity_source": "left as found" if left_alone else "set by this run",
-            "bias_arm_source": arm.get("arm_source", "?"),
-            "bias_arm_slope": arm.get("arm_slope", "?"),
-            "dark_reference": config.dark_reference,
-        })
-        yield Notice(
-            "info",
-            f":OUTP:POL in force = {pol}" + (
-                " — left as found, not set by this run. Which level the device "
-                "rests at between pulses depends on how the sample is wired, so "
-                "this run does not assume it"
-                if left_alone else ""))
-        rig.bias.enable_output(True)
 
         # -- the loop ------------------------------------------------------
         for s in plan:
