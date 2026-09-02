@@ -96,7 +96,11 @@ function renderRail(state) {
  */
 function afterFrame(frame) {
   if (frame.type !== 'RunStateChanged' || !frame.data || frame.data.state !== 'parked') return;
-  api.bench().then(store.applyBench).catch(() => {});
+  // `readBack`: take the instruments, the chain and the verdicts, and leave
+  // the run, the queue and the bench state to the stream — this response and
+  // the next run's `preflight` frame race, and the loser must not be the one
+  // that cannot arrive out of order.
+  api.bench().then((bench) => store.applyBench(bench, { readBack: true })).catch(() => {});
   api.modules().then(store.applyModules).catch(() => {});
 }
 

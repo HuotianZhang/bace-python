@@ -33,10 +33,16 @@ export const FIXTURES = [
     url: 'fixtures/stream_bace_sim.jsonl' },
   { key: 'stream-jv', kind: 'stream', label: 'sim — a jv_bace off the wire',
     url: 'fixtures/stream_jv_sim.jsonl' },
+  { key: 'stream-pipeline', kind: 'stream',
+    label: 'sim — a two-node pipeline: node identity, and the loop\'s own progress',
+    url: 'fixtures/stream_pipeline_sim.jsonl' },
   { key: 'hello', kind: 'hello', label: 'sim — the Hello frame, and the bench in it',
     url: 'fixtures/hello_sim.json' },
   { key: 'jv-curves', kind: 'data', label: 'sim — GET /runs/{id}/data for the J-V',
     url: 'fixtures/jv_sim.json' },
+  { key: 'transient', kind: 'data',
+    label: 'rig 15:37:22 — the transient run at full precision, as the data endpoint answers',
+    url: 'fixtures/transient_20260902_153722.json' },
 ];
 
 /** Parse a JSONL body into frames, skipping blank lines. */

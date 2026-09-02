@@ -91,24 +91,46 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
       notify();
     },
 
-    /** `GET /bench`, and the `data.bench` every `Hello` carries. */
-    applyBench(bench) {
+    /**
+     * `GET /bench`, and the `data.bench` every `Hello` carries.
+     *
+     * `readBack` is for a snapshot fetched *because* something changed the
+     * bench — the refetch after a run parks. An HTTP response and the socket
+     * race, so by the time that snapshot arrives the next queued run may
+     * already have reported `preflight` on the stream; applying its `run`,
+     * `queue` and `state` would put the console back where the bench was a
+     * moment ago, or resurrect a run that has finished. Those three come from
+     * the stream, which cannot arrive out of order. What the refetch is
+     * actually for — the read-back: the instruments, the chain, the V_oc a
+     * J-V just measured — is applied either way.
+     */
+    applyBench(bench, { readBack = false } = {}) {
       if (!bench) return;
       state.bench = bench;
       state.session = bench.session || state.session;
-      state.queue = bench.queue || [];
-      state.benchState = bench.state || 'idle';
       state.readAt = bench.read_at || null;
-      if (bench.run && bench.run.run_id) {
-        state.activeRunId = bench.run.run_id;
-        const record = run(bench.run.run_id);
-        record.state = bench.run.state || record.state;
-        record.node_path = bench.run.node_path || record.node_path;
-        record.module = bench.run.module || record.module;
-        record.progress = bench.run.progress || record.progress;
-        record.eta = bench.run.eta || record.eta;
-      } else {
-        state.activeRunId = null;
+      // The startup read-back's verdicts are on the snapshot and nowhere else:
+      // a socket opened after them replays nothing, so a console that only
+      // folded `Verdict` frames would show a clean bench with a warning on it.
+      // Keyed per (code, node_path), so a frame for the same check replaces
+      // this copy rather than doubling it.
+      for (const verdict of bench.verdicts || []) {
+        replaceVerdict(state.verdicts, { ...verdict, node_path: verdict.node_path || '' });
+      }
+      if (!readBack) {
+        state.queue = bench.queue || [];
+        state.benchState = bench.state || 'idle';
+        if (bench.run && bench.run.run_id) {
+          state.activeRunId = bench.run.run_id;
+          const record = run(bench.run.run_id);
+          record.state = bench.run.state || record.state;
+          record.node_path = bench.run.node_path || record.node_path;
+          record.module = bench.run.module || record.module;
+          record.progress = bench.run.progress || record.progress;
+          record.eta = bench.run.eta || record.eta;
+        } else {
+          state.activeRunId = null;
+        }
       }
       notify();
     },

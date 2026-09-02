@@ -240,6 +240,45 @@ test('a current density is A/cm² on the wire, and mA/cm² only after converting
   assert.equal(density(null), '—', 'pixel_area_cm2 = 0 has no density at all');
 });
 
+test('the read-back\'s own verdicts are visible without a Verdict frame', () => {
+  // The startup read-back's verdicts live on the snapshot and nowhere else: a
+  // socket opened after them replays nothing, so a console that folded only
+  // `Verdict` frames would show a clean bench that is not clean.
+  const s = store();
+  const bench = JSON.parse(fixture('hello_sim.json')).data.bench;
+  assert.ok(bench.verdicts.length, 'the recording caught the chain warning');
+  s.applyBench(bench);
+  assert.deepEqual(s.getState().verdicts.map((v) => v.code), bench.verdicts.map((v) => v.code));
+
+  // And the frame for the same check replaces that copy rather than doubling it.
+  const one = bench.verdicts[0];
+  s.applyFrame({ seq: 9, ts: 1, run_id: null, node_path: '', type: 'Verdict',
+                 data: { ...one, level: 'ok', text: 're-read at Start' } });
+  const verdicts = s.getState().verdicts;
+  assert.equal(verdicts.filter((v) => v.code === one.code).length, 1);
+  assert.equal(verdicts.find((v) => v.code === one.code).level, 'ok');
+});
+
+test('a snapshot fetched after a park does not undo what the stream has said', () => {
+  // The HTTP response and the socket race: by the time the post-park `/bench`
+  // arrives, the next queued run may already have reported `preflight`.
+  const s = store();
+  const change = (runId, state) => ({ seq: 1, ts: 1, run_id: runId, node_path: '',
+                                      type: 'RunStateChanged', data: { state }, decimated: {} });
+  s.applyFrame(change('run-1', 'running'));
+  s.applyFrame(change('run-1', 'done'));
+  s.applyFrame(change('run-1', 'parked'));
+  s.applyFrame(change('run-2', 'preflight'));          // the worker moved on
+
+  const stale = { session: { id: 'S1' }, state: 'idle', queue: [], run: null,
+                  instruments: {}, verdicts: [{ level: 'warn', code: 'chain.led-polarity',
+                                                text: 'NORM', node_path: '' }] };
+  s.applyBench(stale, { readBack: true });
+  assert.equal(s.getState().activeRunId, 'run-2', 'the older snapshot does not idle the bench');
+  assert.equal(s.getState().benchState, 'preflight');
+  assert.equal(s.getState().verdicts.length, 1, 'but its read-back still lands');
+});
+
 test('sigma_Q of zero is an absence, not a value', () => {
   // Most of the 9 x 5 archive carries 0.000000 because the loops were never
   // recorded; a zero-length error bar drawn as a bare dot is a lie.
