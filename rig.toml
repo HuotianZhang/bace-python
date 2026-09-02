@@ -23,6 +23,26 @@ trigger_offset_s = 0.0          # added to delay_ns before :PULS:DEL1.
                                 # is exactly the 47 ns this used to add. The
                                 # original's looping path — the one a scan
                                 # takes — has no offset. See core/pulses.py.
+current_sign = -1               # multiplied once, in Infiniium._fetch, beside
+                                # the division by sense_resistor_ohm. Measured
+                                # 2026-09-02 against the LabVIEW engine, same
+                                # device, eight minutes apart: the port read
+                                # every current positive, LabVIEW every one
+                                # negative, same shape and size (dark trace
+                                # corr(-bare, lv) = 0.9988; peak 6 %, tau 3 %,
+                                # Q 4 % apart). A convention of the digitiser
+                                # chain, not physics. Do NOT fix a sign with
+                                # the generator's polarity switch: :OUTP1:POL
+                                # changes the voltage the device really sees
+                                # (which pulse edge extracts); this changes
+                                # only the sign of the number written down.
+
+[timing]
+light_path_delay_ns = 502.0      # from the 33220A's drive edge to the light going
+                                # off at the sample: 502 ns measured 2026-09-01
+                                # (419 ns of it the 85 m fibre), see
+                                # docs/bace-timing.html. Informational: the delay
+                                # axis is zeroed by trigger_offset_s, not by this.
 
 [scope]
 address = "TCPIP0::PwM-DSO9054H.local::inst0::INSTR"
@@ -82,8 +102,16 @@ dll_path = ""                   # empty = pick the DELIB build matching this
                                 # the matching one. Set a path to override.
 
 # Lake Shore 331 at GPIB0::7::INSTR, with its own console on 127.0.0.1:8331.
-# Integration is the step after this one — leave `console` empty and temperature
-# stays metadata that someone types.
+# Naming the console here makes every temperature loop settle through it: the
+# service writes the setpoint, polls the console until the reading has held
+# inside the loop's tolerance for hold_s, marks each node in the console's audit
+# log, and pauses for the operator only on a timeout or a refusal. The console
+# keeps its own rules -- the 350 K setpoint ceiling (refused, never clamped) and
+# the heater range, ramp and PID it holds -- and the service asks it for nothing
+# else. Leave `console` empty and temperature stays a number someone types at
+# the pause; a named console that is not running behaves the same way, with the
+# reason on the bench card.
 [temperature]
-console = ""                    # "http://127.0.0.1:8331" when integrated
-address = "GPIB0::7::INSTR"     # for reference; this program does not open it
+console = ""                    # "http://127.0.0.1:8331" to settle through the console
+address = "GPIB0::7::INSTR"     # for reference; this program never opens it -- the
+                                # console owns the GPIB session (one owner rule)

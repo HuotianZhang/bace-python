@@ -273,6 +273,7 @@ def main(argv=None) -> int:
     rig = Rig(bias=bias,
               scope=Infiniium(scope_res,
                               sense_resistor_ohm=rig_cfg.sense_resistor_ohm,
+                              current_sign=rig_cfg.current_sign,
                               probe_attenuation=rig_cfg.probe_attenuation),
               shutter=shutter, config=rig_cfg, led=led, power=power)
     rig.scope.default_setup()

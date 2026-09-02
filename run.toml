@@ -74,6 +74,15 @@ trigger_sweep = "AUTO"          # AUTO or TRIG. AUTO is what the LabVIEW driver
                                 # instead and times out. Switch once the trigger
                                 # path is known good.
 calibrate_trigger = true        # threshold = max(CHAN3) * 0.5 * attenuation
+external_trigger = true         # arm the 81150A from its EXT input (the 33220A
+                                # Sync) -- the panel's "ext. trig?". Default
+                                # true. Written by every run since 2026-09-02;
+                                # before that only tools/scan.py set it and a
+                                # run started any other way inherited the front
+                                # panel, and a free-running pulse still gives a
+                                # plausible charge at a random LED phase.
+trigger_slope_positive = true   # arm on the rising Sync edge, which with the
+                                # 33220A at INV is light-off. Default true.
 store_shots = false             # per-shot traces: 163 MB for a 51-point,
                                 # 100-loop run. The honest version of "Big File?"
 

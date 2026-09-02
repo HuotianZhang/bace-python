@@ -101,30 +101,44 @@ class JVWriter:
 
 
 def write_hdf5(path: str, curves, *, metadata: dict, config: dict,
-               rig_config: dict) -> str:
+               rig_config: dict, resolved: dict | None = None,
+               curve_states: list[dict] | None = None) -> str:
     """One file per J–V run, with every curve as its own group.
 
     Dark and light live together because a dark curve is only interpretable
     beside the light curve it belongs to, and hysteresis is only visible when
     both directions are in the same place.
+
+    Schema `bace-jv/2` adds `/config/resolved` -- what the instruments
+    reported during the run, folded from `InstrumentState` events the same
+    way `bace-run/2` does it -- and a `shutter` attribute on every curve
+    group. A light J-V taken with the shutter shut is a dark J-V wearing a
+    light label, and until 2026-09-02 nothing in the file could say which it
+    was. Readers of `bace-jv/1` are unaffected: nothing moved.
     """
     import h5py
 
     from .hdf5 import COMPRESSION, _set_attrs
 
     with h5py.File(path, "w") as f:
-        f.attrs["schema"] = "bace-jv/1"
+        f.attrs["schema"] = "bace-jv/2"
         f.attrs["n_curves"] = len(curves)
         _set_attrs(f.create_group("metadata"), metadata)
         cfg = f.create_group("config")
         _set_attrs(cfg.create_group("jv"), config)
         _set_attrs(cfg.create_group("rig"), rig_config)
+        _set_attrs(cfg.create_group("resolved"), resolved or {})
 
+        states = list(curve_states or [])
         g = f.create_group("curves")
-        for c in curves:
+        for i, c in enumerate(curves):
             sub = g.create_group(f"{c.index:02d}_{_label(c).replace(' ', '_')}")
+            state = states[i] if i < len(states) else {}
             _set_attrs(sub, {
                 "label": c.label, "dark": bool(c.dark), "direction": c.direction,
+                # "?" is honest: a rig without a shutter, or a run recorded
+                # before the shutter state was on the stream, cannot say.
+                "shutter": state.get("shutter", "?"),
                 "led_level_v": "" if c.led_level_v is None else c.led_level_v,
                 "intensity_w": "" if c.intensity_w is None else c.intensity_w,
                 **{k: ("" if v is None else v) for k, v in c.metrics.as_dict().items()},
@@ -157,8 +171,17 @@ class JVRecorder:
     metadata: dict
     rig_config: dict
     write_hdf5: bool = True
+    resolved: dict = field(default_factory=dict)
+    """Instrument readbacks, folded from `InstrumentState` events -- the
+    shutter position before each curve, and anything a caller seeds here
+    (the 33220A polarity it verified before the run). Same idea as
+    `RunRecorder.resolved`: a *reading*, kept apart from the *settings*."""
 
     curves: list = field(default_factory=list)
+    curve_states: list = field(default_factory=list)
+    """The `resolved` snapshot in force when each curve was taken, so a
+    file with a dark and a light curve says "shut" for one and "open" for
+    the other rather than only the last value."""
     written: list[str] = field(default_factory=list)
     _config: dict = field(default_factory=dict)
     _finished: bool = False
@@ -170,11 +193,15 @@ class JVRecorder:
         self.finish()
 
     def handle(self, ev) -> None:
+        from ..experiment.events import InstrumentState
         from ..experiment.jv import JVCurveDone, JVStarted
         if isinstance(ev, JVStarted):
             self._config = ev.config.get("jv", {})
+        elif isinstance(ev, InstrumentState):
+            self.resolved.update(ev.values)
         elif isinstance(ev, JVCurveDone):
             self.curves.append(ev)
+            self.curve_states.append(dict(self.resolved))
 
     def finish(self) -> list[str]:
         if self._finished or not self.curves:
@@ -187,7 +214,8 @@ class JVRecorder:
             self.written.append(write_hdf5(
                 os.path.join(self.folder, f"jv{self.stamp}.h5"), self.curves,
                 metadata=self.metadata, config=self._config,
-                rig_config=self.rig_config))
+                rig_config=self.rig_config, resolved=self.resolved,
+                curve_states=self.curve_states))
         return self.written
 
 

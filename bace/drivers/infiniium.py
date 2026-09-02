@@ -40,7 +40,8 @@ not obvious and are reproduced deliberately:
 
 The fetch divides the scaled voltage by the sense resistor, so the arrays this
 returns are **currents in amps**, matching `Fetch (Waveform).vi` with
-`50 Ohm? = TRUE`.
+`50 Ohm? = TRUE` -- and multiplies by `current_sign`, the one place the rig's
+sign convention is applied (see `RigConfig.current_sign`).
 """
 from __future__ import annotations
 
@@ -64,10 +65,16 @@ class Infiniium:
     """One scope session. Not thread-safe -- VISA sessions never are."""
 
     def __init__(self, resource, *, sense_resistor_ohm: float = 5.192,
+                 current_sign: float = -1.0,
                  probe_attenuation: float = 1.0, timeout_ms: int = 20000):
         self._io = resource                       # a pyvisa resource
         self._io.timeout = timeout_ms
         self.sense_resistor_ohm = sense_resistor_ohm
+        self.current_sign = float(current_sign)
+        """`RigConfig.current_sign`. Applied in `_fetch` only. Every
+        construction site passes it from the rig config explicitly; the
+        default here matches the bench so a bare `Infiniium(res)` in a test
+        still reports in the rig's convention."""
         self.probe_attenuation = probe_attenuation
         self._ranged = False
         self.last_fetch_method = ""
@@ -478,9 +485,17 @@ class Infiniium:
         That VI passes `50 Ohm? = TRUE` and `Resistor = 5.192` into the fetch,
         so the engine's arrays are currents. Both `Read blocked.vi` and
         `Read unblocked TDCF.vi` wire the constant TRUE explicitly.
+
+        `current_sign` is applied here and nowhere else. It is the digitiser
+        chain's convention (this port read every current positive, the LabVIEW
+        engine every one negative, 2026-09-02), so it belongs beside the
+        resistor division that is the rest of that chain -- not in
+        `_fetch_volts`, which the auto-range uses to compute a window in volts,
+        and not in `core.process`, which is validated numerics.
         """
         tr = self._fetch_volts(source)
-        return Trace(y=tr.y / self.sense_resistor_ohm, dt=tr.dt, t0=tr.t0)
+        return Trace(y=self.current_sign * tr.y / self.sense_resistor_ohm,
+                     dt=tr.dt, t0=tr.t0)
 
     @property
     def clipped(self) -> bool:

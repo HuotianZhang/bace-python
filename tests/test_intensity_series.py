@@ -167,7 +167,9 @@ def test_more_light_extracts_more_charge():
     _, rig, _ = build()
     pts = [e for e in run(rig, TWO_LEVELS, bace_at_voc(2))
            if isinstance(e, S.SeriesPointDone)]
-    assert pts[1].q_mean[0] > pts[0].q_mean[0]
+    # abs(): Q carries the rig's sign convention (negative), so "more charge"
+    # is larger in magnitude, not larger on the number line.
+    assert abs(pts[1].q_mean[0]) > abs(pts[0].q_mean[0])
 
 
 # -- illumination sequencing ---------------------------------------------

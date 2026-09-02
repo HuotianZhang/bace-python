@@ -50,12 +50,45 @@ def finished(evs):
 # -- physics recovered through the whole chain ---------------------------
 def test_recovers_the_injected_photocharge():
     """Dark subtraction has to remove a capacitive charge ~13x larger than the
-    signal. Getting within a few percent means the whole chain is wired up."""
+    signal. Getting within a few percent means the whole chain is wired up.
+
+    The device model returns the *physical* photocharge. The digitizer applies
+    `current_sign` (-1 on this bench, `RigConfig.current_sign`) on the way out,
+    exactly where the real one does, so what the run recovers is
+    `current_sign * photocharge` -- what a reader of a real file sees. The
+    comparison carries the sign rather than the simulator dropping it."""
     sim, rig = build()
     evs = run(rig, bace_sweep(0.80, 1.00, 0.02, n_loops=2))
     f = finished(evs)
-    expected = np.array([sim.bench.device.photocharge(v, 1.020) for v in f.values])
-    np.testing.assert_allclose(f.q_mean, expected, rtol=0.05)
+    physical = np.array([sim.bench.device.photocharge(v, 1.020) for v in f.values])
+    assert sim.scope.current_sign == -1.0, "the simulator must match the rig"
+    np.testing.assert_allclose(f.q_mean, sim.scope.current_sign * physical,
+                               rtol=0.05)
+
+
+def test_the_simulator_reports_in_the_rigs_sign_convention():
+    """`current_sign` is a bench constant, so the simulated bench defaults to
+    the one `RigConfig` carries -- otherwise a simulated file and a real one
+    would disagree in sign for the same physics. It is applied once, in the
+    fetch: flipping it flips every number and changes nothing else, which the
+    same seed on both benches shows to the last bit."""
+    assert make_bench().scope.current_sign == RigConfig().current_sign == -1.0
+
+    def q_and_peak(sign):
+        sim = make_bench(seed=3, current_sign=sign)
+        sim.led.set_pulse(1.020, 0.4)
+        rig = Rig(bias=sim.bias, scope=sim.scope, shutter=sim.shutter,
+                  config=RigConfig(current_sign=sign))
+        evs = run(rig, bace_at_voc(1), voc=0.906)
+        step = next(e for e in evs if isinstance(e, E.StepDone))
+        return (finished(evs).q_mean[0],
+                step.light.y[np.argmax(np.abs(step.light.y))])
+
+    q_minus, peak_minus = q_and_peak(-1.0)
+    q_plus, peak_plus = q_and_peak(+1.0)
+    assert q_minus < 0 < q_plus, "extraction reads negative on this bench"
+    assert q_minus == pytest.approx(-q_plus, rel=1e-12)
+    assert peak_minus == pytest.approx(-peak_plus, rel=1e-12)
 
 
 def test_charge_is_insensitive_to_the_collection_field():
@@ -64,7 +97,9 @@ def test_charge_is_insensitive_to_the_collection_field():
     dark-run design exists to buy."""
     sim, rig = build()
     f = finished(run(rig, field_dependence(-0.5, -3.5, 0.5, vpre=0.906)))
-    spread = (f.q_mean.max() - f.q_mean.min()) / f.q_mean.mean()
+    # abs(): every Q is negative in the rig's sign convention, and a negative
+    # denominator would make this pass for any spread at all.
+    spread = np.ptp(f.q_mean) / abs(f.q_mean.mean())
     assert spread < 0.10, f"Q varied by {spread:.1%} across V_coll; the dark " \
                           "subtraction is not cancelling the capacitive charge"
 
@@ -188,6 +223,9 @@ def test_a_shutter_left_open_for_the_dark_trace_biases_the_charge():
     sim2.shutter.shut = lambda: None                 # sabotage: never closes
     bad = finished(run(rig2, bace_at_voc(3), voc=0.906)).q_mean[0]
 
+    # Magnitudes. In the rig's sign convention both charges are negative, and
+    # "comes out low" means smaller in size, not further down the number line.
+    good, bad = abs(good), abs(bad)
     assert bad < good
     assert 0.05 < (good - bad) / good < 0.30, (
         "the simulator should show a clear but non-obvious bias here; if this "
@@ -319,6 +357,29 @@ def test_leave_means_the_run_does_not_write_the_output_polarity():
     assert sim.bias.inverted is True, "the run must not have written it"
     notes = [e.text for e in evs if isinstance(e, E.Notice)]
     assert any("left as found" in t and "INV" in t for t in notes), notes
+
+
+def test_the_run_arms_the_generator_and_records_what_it_holds():
+    """The simulated 81150A starts free-running (`IMM`, what `*RST` leaves),
+    which is exactly the state a run that forgot to arm would inherit. The
+    run has to write the arming and then read it back into the
+    `InstrumentState` that reaches the file, beside the polarity."""
+    sim, rig = build()
+    assert sim.bias.trigger_state()["arm_source"] == "IMM"
+
+    evs = run(rig, bace_at_voc(1), voc=0.906,
+              cfg=RunConfig(n_averages=16, settle_s=0.0, dark_settle_s=0.0))
+    state = next(e for e in evs if isinstance(e, E.InstrumentState)).values
+    assert state["bias_arm_source"] == "EXT"
+    assert state["bias_arm_slope"] == "POS"
+    assert sim.bias.trigger_state() == {"arm_source": "EXT", "arm_slope": "POS"}
+
+    sim2, rig2 = build()
+    evs = run(rig2, bace_at_voc(1), voc=0.906,
+              cfg=RunConfig(n_averages=16, settle_s=0.0, dark_settle_s=0.0,
+                            external_trigger=False))
+    state = next(e for e in evs if isinstance(e, E.InstrumentState)).values
+    assert state["bias_arm_source"] == "IMM"
 
 
 def test_auto_still_writes_what_inverted_output_says():
@@ -483,3 +544,36 @@ def test_the_dark_trace_can_be_shutter_only():
 def test_a_misspelt_dark_reference_is_refused():
     with pytest.raises(ValueError, match="dark_reference must be"):
         RunConfig(dark_reference="shutter-only")
+
+
+def test_every_shot_announces_its_phases_in_order():
+    """`StepPhase` says where inside a shot the run is, between the same
+    instrument calls in the same order; filtering it out leaves the stream
+    exactly as it was. With `dark_reference = "same"` nothing is rewritten
+    for the dark trace, so that segment is absent and `of` says so."""
+    sim, rig = build()
+    evs = run(rig, bace_sweep(0.88, 0.92, 0.02, n_loops=1))
+    phases = [e for e in evs if isinstance(e, E.StepPhase)]
+    names = ["levels", "light settle", "acquire light", "dark levels", "dark settle",
+             "acquire dark", "process"]
+    assert [(p.phase, p.k, p.of) for p in phases] == \
+        [(n, k, 7) for _ in range(3) for k, n in enumerate(names, 1)]
+    assert [p.index for p in phases] == [i for i in range(3) for _ in names]
+    kinds = [type(e).__name__ for e in evs if not isinstance(e, E.StepPhase)]
+    seq = [k for k in kinds if k in ("StepStarted", "StepDone")]
+    assert seq == ["StepStarted", "StepDone"] * 3
+    # between StepStarted and StepDone, and nowhere else
+    order = [type(e).__name__ for e in evs]
+    for i, e in enumerate(evs):
+        if isinstance(e, E.StepPhase):
+            before = [k for k in order[:i] if k in ("StepStarted", "StepDone")]
+            assert before and before[-1] == "StepStarted"
+
+    sim, rig = build()
+    evs = run(rig, bace_sweep(0.88, 0.92, 0.02, n_loops=1),
+              cfg=RunConfig(n_averages=8, settle_s=0.0, dark_settle_s=0.0,
+                            dark_reference="same"))
+    phases = [e for e in evs if isinstance(e, E.StepPhase)]
+    assert [(p.phase, p.of) for p in phases][:6] == [
+        ("levels", 6), ("light settle", 6), ("acquire light", 6), ("dark settle", 6),
+        ("acquire dark", 6), ("process", 6)]

@@ -26,12 +26,14 @@ Deliberate infidelities that catch real bugs:
 from __future__ import annotations
 
 import math
+import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 import numpy as np
 
-from .protocols import DCPoint, Trace
+from .lakeshore331 import TemperatureError
+from .protocols import DCPoint, TemperatureReading, Trace
 
 KT_Q_290K = 8.617333e-5 * 290.0     # V
 
@@ -131,6 +133,7 @@ class Bench:
     shutter_open: bool = False
     led_drive_v: float = 0.0
     led_mode: str = "OFF"              # OFF | DC | PULSE
+    led_duty: float = 1.0              # on-fraction of the cycle; 1 under DC
     bias_high_v: float = 0.0           # at the generator output
     bias_low_v: float = 0.0
     bias_delay_s: float = 0.0
@@ -138,6 +141,7 @@ class Bench:
     bias_output: bool = False
     smu_output: bool = False
     relay: str = "amplifier"
+    temperature_k: float = 294.8       # the cryostat, as the 331 stand-in moves it
 
     # bookkeeping, handy in tests
     shots: int = 0
@@ -180,6 +184,20 @@ class SimulatedBiasSource:
         self.edge_time_s = 2.5e-9
         self.inverted = False
         self.output_polarity = "?"
+        # What `*RST` leaves on the real instrument: free-running. It is also
+        # exactly the state a run that forgot to arm would inherit, so a test
+        # can tell "armed by this run" from "inherited" by looking here.
+        self.arm_source = "IMM"
+        self.arm_slope = "POS"
+
+    def configure_trigger(self, *, external: bool = True,
+                          positive_slope: bool = True) -> None:
+        self.arm_source = "EXT" if external else "IMM"
+        if external:
+            self.arm_slope = "POS" if positive_slope else "NEG"
+
+    def trigger_state(self) -> dict[str, str]:
+        return {"arm_source": self.arm_source, "arm_slope": self.arm_slope}
 
     def configure_shape(self, frequency_hz: float, *, duty_percent: float = 50.0,
                         edge_time_s: float = 2.5e-9,
@@ -209,6 +227,13 @@ class SimulatedBiasSource:
     def output_enabled(self) -> bool:
         return self.bench.bias_output
 
+    @property
+    def last_levels(self) -> tuple[float, float]:
+        """`(high, low)` as last written by `set_levels`, for the service's
+        bench read-back. Read-only: the bench holds the levels, this only
+        reports them, so a read-back can never move an output."""
+        return (self.bench.bias_high_v, self.bench.bias_low_v)
+
 
 # -- digitizer ------------------------------------------------------------
 class SimulatedDigitizerError(RuntimeError):
@@ -218,8 +243,16 @@ class SimulatedDigitizerError(RuntimeError):
 class SimulatedDigitizer:
     """Stand-in for the Infiniium DSO9054H."""
 
-    def __init__(self, bench: Bench, *, trigger_position_divisions: float = 4.0):
+    def __init__(self, bench: Bench, *, current_sign: float = -1.0,
+                 trigger_position_divisions: float = 4.0):
         self.bench = bench
+        self.current_sign = float(current_sign)
+        """`RigConfig.current_sign`, applied in `acquire` at the same place
+        `Infiniium._fetch` applies it -- beside the sense-resistor division --
+        so the simulator reports in the rig's convention. The device model
+        underneath keeps returning the physical photocharge: a test that
+        compares a recovered Q against `SimulatedDevice.photocharge` has to
+        multiply by this, exactly as a reader of a real file has to."""
         self.trigger_position_divisions = trigger_position_divisions
         """Where `:TIM:POS` puts the screen centre, in divisions. The trigger
         then lands at `range/2 - TIM:POS` into the record, which for the rig's
@@ -330,8 +363,11 @@ class SimulatedDigitizer:
         self._clipped = bool((v > top).any() or (v < bottom).any())
         v = np.clip(v, bottom, top)
         self.bench.shots += 1
-        return Trace(y=v / self.bench.sense_resistor_ohm, dt=self.dt,
-                     t0=-self.trigger_position_s)
+        # volts -> amps, with the sign convention, in one place. Clipping was
+        # done in volts above, as the real window is, so the sign cannot move
+        # the rail.
+        return Trace(y=self.current_sign * v / self.bench.sense_resistor_ohm,
+                     dt=self.dt, t0=-self.trigger_position_s)
 
     @property
     def clipped(self) -> bool:
@@ -382,16 +418,38 @@ class SimulatedLedSource:
     def __init__(self, bench: Bench):
         self.bench = bench
         self._output = False
+        # NORM, because that is what a cold instrument was found at (bench
+        # session 2026-08-31) -- and the wrong setting for BACE, so a run that
+        # never sets it inherits the wrong one here too, as on the rig.
+        self._polarity = "NORM"
+        # What the service's read-back reports beside the mode. Kept here
+        # rather than on the bench because the bench only needs the on-level;
+        # the low level and the frequency are what the *generator* holds.
+        self.frequency_hz = 1000.0
+        self.duty_percent = 50.0
+        self._levels: tuple[float | None, float | None] = (None, None)
 
     def set_dc(self, level_v: float) -> None:
         self.bench.led_drive_v = float(level_v)
         self.bench.led_mode = "DC"
+        self.bench.led_duty = 1.0
+        self._levels = (float(level_v), None)
 
     def set_pulse(self, high_v: float, low_v: float, *, frequency_hz: float = 1000.0,
                   duty_percent: float = 50.0) -> None:
         # The device is measured during the on-phase, so the bench sees the high level.
         self.bench.led_drive_v = float(high_v)
         self.bench.led_mode = "PULSE"
+        self.bench.led_duty = float(duty_percent) / 100.0
+        self._levels = (float(high_v), float(low_v))
+        self.frequency_hz = float(frequency_hz)
+        self.duty_percent = float(duty_percent)
+
+    @property
+    def last_levels(self) -> tuple[float | None, float | None]:
+        """`(high, low)` as last set; `low` is None in DC mode. Read-only, for
+        the service's bench read-back."""
+        return self._levels
 
     def off(self) -> None:
         self.bench.led_drive_v = 0.0
@@ -411,6 +469,16 @@ class SimulatedLedSource:
     def output_enabled(self) -> bool:
         return self._output
 
+    @property
+    def mode(self) -> str:
+        return self.bench.led_mode
+
+    def set_polarity(self, inverted: bool) -> None:
+        self._polarity = "INV" if inverted else "NORM"
+
+    def polarity(self) -> str:
+        return self._polarity
+
 
 # -- source meter ---------------------------------------------------------
 class SimulatedSourceMeter:
@@ -426,12 +494,28 @@ class SimulatedSourceMeter:
 
     def measure_dc(self, *, v_sat: float = -1.0,
                    settle_s: float | None = None) -> DCPoint:
+        """V_oc, J_sc, J_sat under the light that actually reaches the sample.
+
+        Light only reaches it with the shutter open; the meter is on the
+        bench like everything else, so a DC characterisation taken with the
+        shutter shut is the dark point, not a number that happens to look
+        right. Under PULSE a slow meter (NPLC 1 is ten LED cycles) averages
+        the on and off phases, modelled here as the duty-weighted mean of
+        the two open-circuit voltages -- visibly not the DC V_oc, which is
+        the point: a sequence that reads V_oc before switching the 33220A to
+        DC would otherwise pass every test and centre a real axis on the
+        wrong number.
+        """
         d, b = self.bench.device, self.bench
-        i = d.led_current(b.led_drive_v)
+        lit = b.shutter_open and b.led_mode in ("DC", "PULSE")
+        i = d.led_current(b.led_drive_v) if lit else 0.0
+        if i <= 0.0:
+            return DCPoint(voc=0.0, jsc=0.0, jsat=0.0, v_sat=v_sat)
+        on = b.led_duty if b.led_mode == "PULSE" else 1.0
         noise = b.rng.normal(0.0, 2e-4)
-        return DCPoint(voc=d.voc(b.led_drive_v) + noise if i > 0 else 0.0,
-                       jsc=-d.jsc_ref * i,
-                       jsat=-d.jsat_ref * i,
+        return DCPoint(voc=on * d.voc(b.led_drive_v) + noise,
+                       jsc=-d.jsc_ref * i * on,
+                       jsat=-d.jsat_ref * i * on,
                        v_sat=v_sat)
 
     def sweep(self, start_v: float, stop_v: float, points: int, *,
@@ -485,6 +569,95 @@ class SimulatedPowerMeter:
     def read_statistics(self, n: int) -> tuple[float, float]:
         vals = np.array([self.read_power() for _ in range(max(2, n))])
         return float(vals.mean()), float(vals.std(ddof=1))
+
+
+# -- temperature ----------------------------------------------------------
+class SimulatedTemperatureController:
+    """Stand-in for the 331 console: a first-order approach to the setpoint
+    that advances one step per `read()`, not per wall-clock second.
+
+    Per read rather than per second because the settle that polls it sleeps
+    through `RunContext.sleep`, which `--fast` makes a no-op: a model on the
+    wall clock would be polled a thousand times in one millisecond and never
+    move, and a test could not count polls. Each read closes `1/tau` of the
+    remaining gap (`tau = time_constant_reads`), so from 294.8 K a 250 K
+    setpoint is inside a 0.2 K band after about thirty reads at the default
+    six -- a handful of polls under `--fast`, a couple of minutes at the
+    executor's five-second poll if someone ran it slow.
+
+    Because the model steps per read, *every* reader steps it: the bench
+    read-back at Start and the temperature monitor, when one runs beside a
+    settle under `--sim`, each move the stand-in one step, so a settle then
+    converges in fewer of its own polls than the same tree alone. That is
+    an artefact of the stand-in, not of the service -- the real console
+    answers `/api/state` from a cached poll and a reader moves nothing --
+    and it is accepted rather than hidden behind a second read path the
+    protocol does not have. The lock keeps a step whole when two threads
+    read at once.
+
+    The ceiling is the console's rule (`ls331/config.py`, 350 K), reproduced
+    with the console's own wording so a refusal in a test reads as it would
+    on the rig: refused, never clamped. `notes` keeps what the service wrote
+    to the audit log, `setpoints` every setpoint it wrote; `connected` may be
+    set False by a test to play the console-up, instrument-silent case, in
+    which the console keeps reporting its last values with the flag down;
+    `ramping` plays RAMPST? (True while the console's ramp still walks the
+    setpoint), which the model itself never raises and a test sets to check
+    that a reading inside the band does not count while it is up;
+    `heater_range` is what the console holds and may be set to 0 to play the
+    heater off.
+    """
+
+    def __init__(self, bench: Bench, *, start_k: float = 294.8, ceiling_k: float = 350.0,
+                 time_constant_reads: int = 6):
+        self.bench = bench
+        self.kelvin = float(start_k)
+        self.setpoint_k = float(start_k)
+        self.ceiling_k = float(ceiling_k)
+        self.time_constant_reads = max(1, int(time_constant_reads))
+        self.heater_range = 3
+        self.connected = True
+        self.ramping = False
+        self.reads = 0
+        self.notes: list[str] = []
+        self.setpoints: list[float] = []
+        self.last: TemperatureReading | None = None
+        self._lock = threading.Lock()
+        bench.temperature_k = self.kelvin
+
+    def read(self) -> TemperatureReading:
+        with self._lock:
+            self.reads += 1
+            if self.heater_range or self.setpoint_k < self.kelvin:
+                # The heater only heats: with the range off the model still
+                # cools toward a lower setpoint (the cryogen does that) and
+                # sits where it is for a higher one.
+                self.kelvin += (self.setpoint_k - self.kelvin) / self.time_constant_reads
+            self.bench.temperature_k = self.kelvin
+            r = TemperatureReading(
+                kelvin=self.kelvin, setpoint_k=self.setpoint_k, ramping=bool(self.ramping),
+                heater_range=self.heater_range, connected=self.connected,
+                status_text="ok" if self.connected else "the instrument is not answering",
+                elapsed_s=float(self.reads), max_setpoint_k=self.ceiling_k)
+            self.last = r
+            return r
+
+    def set_setpoint(self, kelvin: float) -> float:
+        kelvin = float(kelvin)
+        if kelvin > self.ceiling_k:
+            raise TemperatureError(
+                "setpoint %.3f K exceeds the %.1f K limit for this cryostat"
+                % (kelvin, self.ceiling_k), refused=True, status=403)
+        if kelvin < 0.0:
+            raise TemperatureError("setpoint %.3f K is below the 0.0 K limit" % kelvin,
+                                   refused=True, status=403)
+        self.setpoint_k = kelvin
+        self.setpoints.append(kelvin)
+        return kelvin
+
+    def note(self, text: str) -> bool:
+        self.notes.append(str(text))
+        return True
 
 
 # -- router ---------------------------------------------------------------
@@ -547,7 +720,10 @@ class SimulatedRouter:
 # -- convenience ----------------------------------------------------------
 @dataclass
 class SimulatedRig:
-    """All six instruments on one bench, ready to hand to an experiment."""
+    """All eight instruments on one bench, ready to hand to an experiment.
+    `temperature` is built but only attached to a `Rig` when the bench names
+    a console (`service.rigs.Bench.build_simulated`), so `--sim` with the
+    default `rig.toml` still pauses for the operator as the real bench does."""
 
     bench: Bench
     bias: SimulatedBiasSource
@@ -557,9 +733,14 @@ class SimulatedRig:
     smu: SimulatedSourceMeter
     power: SimulatedPowerMeter
     router: SimulatedRouter
+    temperature: SimulatedTemperatureController
 
 
-def make_bench(seed: int | None = 0, **device_kw) -> SimulatedRig:
+def make_bench(seed: int | None = 0, current_sign: float = -1.0,
+               **device_kw) -> SimulatedRig:
+    """`current_sign` defaults to the bench's own (`RigConfig.current_sign`),
+    so a simulated run and a real one write the same sign for the same
+    physics. Pass +1 only to test that the sign is applied once."""
     bench = Bench(device=SimulatedDevice(**device_kw),
                   rng=np.random.default_rng(seed))
     bias = SimulatedBiasSource(bench)
@@ -567,10 +748,11 @@ def make_bench(seed: int | None = 0, **device_kw) -> SimulatedRig:
     return SimulatedRig(
         bench=bench,
         bias=bias,
-        scope=SimulatedDigitizer(bench),
+        scope=SimulatedDigitizer(bench, current_sign=current_sign),
         shutter=SimulatedShutter(bench),
         led=SimulatedLedSource(bench),
         smu=smu,
         power=SimulatedPowerMeter(bench),
         router=SimulatedRouter(bench, sourcemeter=smu, pulse_path=bias),
+        temperature=SimulatedTemperatureController(bench),
     )

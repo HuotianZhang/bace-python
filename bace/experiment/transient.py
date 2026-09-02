@@ -38,7 +38,7 @@ from ..core.process import (ChargeAccumulator, RunningAverage, baseline_is_flat,
 from ..core.pulses import pulse_levels
 from .events import (AxisResolved, Event, InstrumentState, LoopDone, Notice,
                      Progress, RunAborted, RunFinished, RunStarted, StepDone,
-                     StepStarted)
+                     StepPhase, StepStarted)
 from .rig import Rig
 
 
@@ -203,6 +203,30 @@ class RunConfig:
     read_intensity: bool = True
     acquisition_timeout_s: float = 30.0
 
+    external_trigger: bool = True
+    """Arm the 81150A from its external trigger input -- the 33220A Sync --
+    rather than free-running. The panel's "ext. trig?" toggle. True is BACE:
+    the collection pulse has to be phased to the LED cycle, and only the Sync
+    carries that phase.
+
+    Written by the run, not inherited. Until 2026-09-02 only `tools/scan.py`
+    armed the generator, in its pre-flight; `run_transient_scan` itself sent
+    nothing, so a run started any other way -- the bench harness, the
+    service, a front panel left in IMM -- pulsed at whatever the instrument
+    held. That is dangerous precisely because it is silent: the scope
+    triggers on the 81150A's *own* Sync, so a free-running generator still
+    triggers every acquisition and still produces a transient of plausible
+    size, at a random phase of the LED cycle. So the arming is written on
+    every run and read back into `InstrumentState` as `bias_arm_source` and
+    `bias_arm_slope`, beside the polarity.
+    """
+
+    trigger_slope_positive: bool = True
+    """Arm on the rising edge of the external trigger. With the 33220A at
+    `:OUTP:POL INV` the rising Sync edge is light-off, the edge extraction
+    has to follow; arming on the falling edge would extract in the middle of
+    generation. Moot when `external_trigger` is False."""
+
     trigger_sweep: str = "AUTO"
     """`AUTO` or `TRIG`. The recovered driver used AUTO, so that is the default.
     AUTO sweeps anyway when no trigger arrives, so a loose sync cable produces
@@ -327,18 +351,30 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                                          positive=cfg.trigger_positive,
                                          high_threshold=threshold,
                                          sweep=config.trigger_sweep)
+        # Arming before the shape, as `Agilent 81150StandardWaveformTDCF` does
+        # (Configure Trigger, then Configure Standard Waveform). Written on
+        # every run: a generator left free-running by the front panel still
+        # triggers the scope and still yields a plausible charge, at a random
+        # phase of the LED cycle -- see `RunConfig.external_trigger`.
+        rig.bias.configure_trigger(external=config.external_trigger,
+                                   positive_slope=config.trigger_slope_positive)
         rig.bias.configure_shape(config.pulse_frequency_hz,
                                  duty_percent=config.duty_percent,
                                  inverted_output=config.polarity_instruction())
         pol = rig.bias.output_polarity
+        arm = rig.bias.trigger_state()
         left_alone = config.polarity_instruction() is None
         # The readback, not the request, is what a later reader needs: with
         # `output_polarity = "leave"` the recipe says nothing about which
         # convention ran, so only this reaches the file. A Notice goes to the
         # terminal and is gone; InstrumentState is written beside the config.
+        # The arming is read back for the same reason: what was *sent* is in
+        # the run config, what the instrument *holds* is here.
         yield InstrumentState({
             "bias_output_polarity": pol,
             "bias_polarity_source": "left as found" if left_alone else "set by this run",
+            "bias_arm_source": arm.get("arm_source", "?"),
+            "bias_arm_slope": arm.get("arm_slope", "?"),
             "dark_reference": config.dark_reference,
         })
         yield Notice(
@@ -367,16 +403,33 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                                   invert=config.invert_polarity,
                                   trigger_offset_s=cfg.trigger_offset_s)
 
+            # The shot's segments, announced as each starts (`StepPhase`),
+            # so a live view can tell a settle from a hung acquisition.
+            # Nothing about the measurement changes: these are yields
+            # between the same instrument calls in the same order.
+            same_dark = config.dark_reference == "same"
+            phases = ["levels", "light settle", "acquire light"]
+            phases += [] if same_dark else ["dark levels"]
+            phases += ["dark settle", "acquire dark", "process"]
+            of = len(phases)
+
+            def phase(name: str) -> StepPhase:
+                return StepPhase(index=s.index, phase=name,
+                                 k=phases.index(name) + 1, of=of)
+
             # light: levels first, then shutter, then acquire with autorange
+            yield phase("levels")
             rig.bias.set_levels(levels.high_light, levels.low_light,
                                 delay_s=levels.delay_s, width_s=levels.width_s)
             rig.shutter.unblock()
+            yield phase("light settle")
             sleep(config.settle_s + config.shutter_settle_s)
 
             intensity = None
             if config.read_intensity and rig.power is not None:
                 intensity = rig.power.read_power()
 
+            yield phase("acquire light")
             light = rig.scope.acquire(config.n_averages, source=cfg.current_source,
                                       autorange_first=True,
                                       timeout_s=config.acquisition_timeout_s)
@@ -385,18 +438,22 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
             # "same"` nothing but the shutter moves, so the levels are not
             # rewritten at all -- and the settle before the shutter has nothing
             # to settle.
-            if config.dark_reference == "same":
+            if same_dark:
                 dark_levels = (levels.high_light, levels.low_light)
             else:
+                yield phase("dark levels")
                 dark_levels = (levels.high_dark, levels.low_dark)
                 rig.bias.set_levels(*dark_levels, delay_s=levels.delay_s,
                                     width_s=levels.width_s)
                 sleep(config.dark_settle_s)
+            yield phase("dark settle")
             rig.shutter.shut()
             sleep(config.shutter_settle_s)
+            yield phase("acquire dark")
             dark = rig.scope.acquire(config.n_averages, source=cfg.current_source,
                                      autorange_first=False,
                                      timeout_s=config.acquisition_timeout_s)
+            yield phase("process")
 
             # -- process ---------------------------------------------------
             dt = light.dt

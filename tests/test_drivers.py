@@ -11,6 +11,8 @@ whether the instrument agrees.
 """
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytest
 
@@ -169,6 +171,91 @@ def test_the_illumination_object_drives_the_generator():
     assert ":VOLT:HIGH 1.02;" in io.log
 
 
+# -- Agilent 81150A -------------------------------------------------------
+def _run_on_a_real_driver(io, **cfg_kw):
+    """`run_transient_scan` with the real 81150A driver on a fake resource and
+    the simulated scope and shutter. The driver is not mocked: HANDOFF §9 is
+    about a test that mocked the driver and hid a real crash."""
+    from bace.core.axis import bace_sweep
+    from bace.drivers.agilent81150 import Agilent81150
+    from bace.drivers.simulated import make_bench
+    from bace.experiment.rig import Rig, RigConfig
+    from bace.experiment.transient import RunConfig, run_transient_scan
+
+    sim = make_bench(seed=1)
+    rig = Rig(bias=Agilent81150(io), scope=sim.scope, shutter=sim.shutter,
+              config=RigConfig())
+    cfg = RunConfig(n_averages=4, settle_s=0.0, dark_settle_s=0.0,
+                    record_length=400, **cfg_kw)
+    return list(run_transient_scan(rig, bace_sweep(0.90, 0.90, 0.02, n_loops=1),
+                                   cfg, sleep=lambda s: None))
+
+
+def test_the_run_path_arms_the_generator_before_shaping_the_pulse():
+    """Until 2026-09-02 only `tools/scan.py` sent `:ARM:SOUR1 EXT`, as a
+    pre-flight side effect. `run_transient_scan` sent nothing, so a run
+    started from the bench harness or the service pulsed at whatever arming
+    the front panel held -- and a free-running 81150A still triggers the
+    scope (which watches the 81150A's own Sync) and still integrates to a
+    plausible charge, at a random phase of the LED cycle. The transcript has
+    to show the arming, and show it in the recovered VI's order: trigger
+    first, then the standard waveform."""
+    io = FakeIO(idn="Agilent Technologies,81150A,MY5,1.0")
+    _run_on_a_real_driver(io)
+    assert io.index(":ARM:SOUR1 EXT") < io.index(":ARM:SLOP POS") < io.index(":FUNC1 PULS")
+    # the recovered constants travel with it, and never through the protocol
+    assert ":ARM:LEV 1;" in io.log and ":ARM:IMP 10000;" in io.log
+    # and the run reads the arming back rather than trusting what it sent
+    assert io.index(":ARM:SOUR1?") > io.index(":ARM:SOUR1 EXT")
+
+
+def test_the_run_can_ask_for_internal_arming_and_says_so():
+    io = FakeIO(idn="Agilent Technologies,81150A,MY5,1.0")
+    _run_on_a_real_driver(io, external_trigger=False)
+    assert ":ARM:SOUR1 IMM;" in io.log
+    assert not any(c.startswith(":ARM:SOUR1 EXT") for c in io.log)
+    # no slope *set* (a readback query is fine, and expected)
+    assert not any(c.startswith(":ARM:SLOP ") for c in io.log)
+
+
+def test_trigger_state_is_a_readback_not_an_echo():
+    """`?` when the instrument will not answer, the token when it does, and a
+    source that is neither EXT nor IMM passed through as spelt: MAN is
+    information, and `?` would hide it."""
+    from bace.drivers.agilent81150 import Agilent81150, TriggerConfig
+
+    class Answers(FakeIO):
+        def __init__(self, source, slope):
+            super().__init__(idn="Agilent Technologies,81150A")
+            self.source, self.slope = source, slope
+
+        def query(self, cmd):
+            self.log.append(cmd)
+            if ":ARM:SOUR1?" in cmd:
+                if isinstance(self.source, Exception):
+                    raise self.source
+                return self.source
+            if ":ARM:SLOP?" in cmd:
+                return self.slope
+            return super().query(cmd)
+
+    assert Agilent81150(Answers("EXT\n", "POS")).trigger_state() == \
+        {"arm_source": "EXT", "arm_slope": "POS"}
+    assert Agilent81150(Answers("imm", "neg")).trigger_state() == \
+        {"arm_source": "IMM", "arm_slope": "NEG"}
+    assert Agilent81150(Answers("MAN", "")).trigger_state() == \
+        {"arm_source": "MAN", "arm_slope": "?"}
+    assert Agilent81150(Answers(OSError("timeout"), "POS")).trigger_state() == \
+        {"arm_source": "?", "arm_slope": "POS"}
+
+    # the older spelling still works, for the bench harness and tools/scan.py
+    io = FakeIO(idn="Agilent Technologies,81150A")
+    Agilent81150(io).configure_trigger(TriggerConfig(external=True, positive_slope=False))
+    assert ":ARM:SLOP NEG;" in io.log
+    Agilent81150(io).configure_trigger()
+    assert io.log.count(":ARM:SOUR1 EXT;") == 2
+
+
 # -- Newport 1918-C -------------------------------------------------------
 class FakeConsole:
     """Stands in for the 1918-C console's HTTP API."""
@@ -243,6 +330,224 @@ def test_an_unreachable_console_says_what_to_do():
         m.read_power()
 
 
+# -- Lake Shore 331 -------------------------------------------------------
+STATE_331 = {"connected": True, "control_temperature": 249.93, "temperature_a": 249.93,
+             "temperature_b": 251.1, "setpoint": 250.0, "heater_percent": 31.5,
+             "heater_range": 3, "ramping": False, "ramp_on": False, "ramp_rate": 1.0,
+             "heater_fault": 0, "status_text": "ok", "elapsed_s": 812.4,
+             "max_setpoint_k": 350.0, "last_error": None, "history": [],
+             "idn": "LSCI,MODEL331S,331000,1.1", "control_loop": 1, "control_input": "A"}
+"""`/api/state` as `ls331/service.py` publishes it, keys the service reads
+and keys it does not."""
+
+
+class Fake331Console:
+    """Stands in for the 331 console's HTTP API at the request level, with
+    the console's own rules: the ceiling refused in its words, never
+    clamped; a setpoint read back after the write."""
+
+    def __init__(self, state=None, *, ceiling=350.0, note_ok=True):
+        self.log = []
+        self.timeouts = []
+        self.state = dict(STATE_331 if state is None else state)
+        self.ceiling = ceiling
+        self.note_ok = note_ok
+
+    def install(self, controller):
+        from bace.drivers.lakeshore331 import TemperatureError
+
+        def request(method, path, body, *, timeout_s=None):
+            self.log.append((method, path, body))
+            self.timeouts.append((path, timeout_s))
+            if path == "/api/state":
+                return dict(self.state)
+            if path == "/api/setpoint":
+                kelvin = float(body["kelvin"])
+                if kelvin > self.ceiling:
+                    message = ("setpoint %.3f K exceeds the %.1f K limit for this cryostat"
+                               % (kelvin, self.ceiling))
+                    raise TemperatureError(
+                        message + " (the 331 console refused POST /api/setpoint with HTTP 403)",
+                        refused=True, status=403, console_message=message)
+                self.state["setpoint"] = kelvin
+                return {"ok": True, "setpoint": kelvin}
+            if path == "/api/note":
+                if not self.note_ok:
+                    raise TemperatureError("empty note (HTTP 400)", refused=True, status=400)
+                return {"ok": True}
+            return {}
+        controller._request = request
+        return controller
+
+
+class _HTTPReply:
+    def __init__(self, payload):
+        self._body = json.dumps(payload).encode()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self):
+        return self._body
+
+
+def test_the_331_is_a_client_of_the_console_that_owns_it():
+    """One process holds the 331's GPIB session -- its console -- so this is
+    an HTTP client and satisfies the protocol without a VISA resource."""
+    from bace.drivers.lakeshore331 import ConsoleTemperatureController, TemperatureReading
+    from bace.drivers.protocols import TemperatureController
+
+    c = Fake331Console()
+    t = c.install(ConsoleTemperatureController())
+    assert isinstance(t, TemperatureController) and t.base_url == "http://127.0.0.1:8331"
+    r = t.read()
+    assert isinstance(r, TemperatureReading) and t.last is r
+    assert (r.kelvin, r.setpoint_k, r.ramping, r.heater_range) == (249.93, 250.0, False, 3)
+    assert (r.connected, r.status_text, r.elapsed_s, r.max_setpoint_k) == (True, "ok", 812.4, 350.0)
+    assert t.set_setpoint(240.0) == 240.0
+    assert t.read().setpoint_k == 240.0
+    assert t.note("bace 20260902_120000-001 T=240K: setpoint 240 K") is True
+    assert [(m, p) for m, p, _ in c.log] == [("GET", "/api/state"), ("POST", "/api/setpoint"),
+                                             ("GET", "/api/state"), ("POST", "/api/note")]
+    bodies = {p: b for _, p, b in c.log if b is not None}
+    assert bodies["/api/setpoint"] == {"kelvin": 240.0}
+    assert bodies["/api/note"] == {"text": "bace 20260902_120000-001 T=240K: setpoint 240 K"}
+
+
+def test_a_state_with_the_instrument_silent_is_still_a_reading():
+    """`connected` False is the console's word that the 331 is not answering
+    on the bus: the reading comes back with the flag down, the control
+    temperature falls back to sensor A, and the console's error is the
+    status -- so a caller can say "console up, instrument silent"."""
+    from bace.drivers.lakeshore331 import ConsoleTemperatureController
+
+    state = {**STATE_331, "connected": False, "last_error": "VI_ERROR_TMO on KRDG? A",
+             "status_text": ""}
+    del state["control_temperature"]
+    t = Fake331Console(state).install(ConsoleTemperatureController())
+    r = t.read()
+    assert r.connected is False and r.kelvin == 249.93
+    assert r.status_text == "VI_ERROR_TMO on KRDG? A"
+    bare = Fake331Console({"connected": False, "max_setpoint_k": 350.0}).install(
+        ConsoleTemperatureController())
+    r = bare.read()
+    assert r.connected is False and r.kelvin != r.kelvin, "no temperature yet: NaN, not a number"
+    assert r.setpoint_k is None and r.max_setpoint_k == 350.0
+
+
+def test_a_setpoint_above_the_ceiling_is_refused_in_the_consoles_words_and_never_clamped(
+        monkeypatch):
+    """The real `_request` against the console's own 403 body. The ceiling
+    is enforced in the console process; here nothing is clamped, nothing
+    retried, and the message is the console's."""
+    import io as _io
+    import urllib.error
+    import urllib.request
+
+    from bace.drivers.lakeshore331 import ConsoleTemperatureController, TemperatureError
+
+    posted = []
+
+    def refuse(req, timeout=None):
+        posted.append((req.full_url, json.loads(req.data.decode())))
+        raise urllib.error.HTTPError(
+            req.full_url, 403, "Forbidden", {},
+            _io.BytesIO(b'{"ok": false, "error": "setpoint 400.000 K exceeds the 350.0 K '
+                        b'limit for this cryostat"}'))
+
+    monkeypatch.setattr(urllib.request, "urlopen", refuse)
+    t = ConsoleTemperatureController("http://127.0.0.1:8331")
+    with pytest.raises(TemperatureError) as e:
+        t.set_setpoint(400.0)
+    msg = str(e.value)
+    assert msg.startswith("setpoint 400.000 K exceeds the 350.0 K limit for this cryostat")
+    assert "HTTP 403" in msg and "cannot reach" not in msg
+    assert e.value.refused is True and e.value.status == 403
+    assert posted == [("http://127.0.0.1:8331/api/setpoint", {"kelvin": 400.0})], (
+        "one request, the refused one; no second write at 350 K")
+
+    def bad_body(req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, 400, "Bad Request", {},
+                                     _io.BytesIO(b'{"ok": false, "error": "bad request: '
+                                                 b'float() argument must be a string"}'))
+
+    monkeypatch.setattr(urllib.request, "urlopen", bad_body)
+    with pytest.raises(TemperatureError, match="^bad request: float") as e:
+        t.set_setpoint(250.0)
+    assert e.value.refused and e.value.status == 400
+
+    def dead(req, timeout=None):
+        raise urllib.error.URLError("refused")
+
+    monkeypatch.setattr(urllib.request, "urlopen", dead)
+    with pytest.raises(TemperatureError, match="cannot reach the 331 console") as e:
+        t.read()
+    assert e.value.refused is False and e.value.status is None
+
+
+def test_a_note_that_fails_is_swallowed_because_a_log_mark_must_not_stop_a_run():
+    from bace.drivers.lakeshore331 import ConsoleTemperatureController
+
+    assert Fake331Console(note_ok=False).install(ConsoleTemperatureController()).note("x") is False
+    assert Fake331Console().install(ConsoleTemperatureController()).note("x") is True
+    dead = ConsoleTemperatureController("http://127.0.0.1:9", timeout_s=0.2)
+    assert dead.note("bace: setpoint 250 K") is False
+
+
+def test_available_keys_on_the_consoles_own_liveness_key(monkeypatch):
+    """`max_setpoint_k` is what `console_server._already_running` looks for
+    to recognise itself; something else answering on the port is not the
+    console."""
+    import urllib.error
+    import urllib.request
+
+    from bace.drivers.lakeshore331 import ConsoleTemperatureController
+
+    t = ConsoleTemperatureController("http://127.0.0.1:8331")
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda req, timeout=None: _HTTPReply({"hello": "world"}))
+    assert t.available() is False
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda req, timeout=None: _HTTPReply(STATE_331))
+    assert t.available() is True
+
+    def dead(req, timeout=None):
+        raise urllib.error.URLError("refused")
+
+    monkeypatch.setattr(urllib.request, "urlopen", dead)
+    assert t.available() is False
+
+
+def test_the_simulated_331_converges_per_read_and_refuses_above_the_ceiling():
+    """One step per `read()`, not per second, so `--fast` converges in a
+    handful of polls and a test can count them; the ceiling refused in the
+    console's words and nothing clamped."""
+    from bace.drivers.lakeshore331 import TemperatureError
+    from bace.drivers.protocols import TemperatureController
+    from bace.drivers.simulated import make_bench
+
+    t = make_bench().temperature
+    assert isinstance(t, TemperatureController)
+    assert t.read().kelvin == 294.8, "at rest it stays where it is"
+    assert t.set_setpoint(250.0) == 250.0
+    reads = 0
+    while abs(t.read().kelvin - 250.0) > 0.2:
+        reads += 1
+        assert reads < 200
+    assert reads + 1 <= t.time_constant_reads * 5
+    assert t.last.setpoint_k == 250.0 and t.last.connected and not t.last.ramping
+    assert t.last.heater_range == 3 and t.last.max_setpoint_k == 350.0
+    with pytest.raises(TemperatureError, match="exceeds the 350.0 K limit for this cryostat") as e:
+        t.set_setpoint(400.0)
+    assert e.value.refused and t.setpoint_k == 250.0 and t.setpoints == [250.0]
+    assert t.note("mark") is True and t.notes == ["mark"]
+    t.connected = False
+    assert t.read().connected is False
+
+
 # -- config ---------------------------------------------------------------
 def test_rig_toml_carries_the_confirmed_addresses():
     r = load_rig("rig.toml")
@@ -251,7 +556,23 @@ def test_rig_toml_carries_the_confirmed_addresses():
     assert r.bias_address == "GPIB0::12::INSTR"
     assert r.scope_address.startswith("TCPIP0::")
     assert r.sense_resistor_ohm == pytest.approx(5.192)
+    assert r.current_sign == -1.0
     assert (r.shutter_module_nr, r.relay_module_nr) == (0, 1)
+
+
+def test_the_current_sign_is_a_sign_not_a_gain(tmp_path):
+    """`current_sign = -1` is an integer to TOML and must come out a float,
+    because it multiplies an array. And it must be exactly +1 or -1: anything
+    else is a gain under the wrong name, rescaling every charge as silently as
+    a wrong sense resistor would."""
+    p = tmp_path / "rig.toml"
+    p.write_text('[electrical]\ncurrent_sign = -1\n')
+    r = load_rig(p)
+    assert r.current_sign == -1.0 and isinstance(r.current_sign, float)
+
+    p.write_text('[electrical]\ncurrent_sign = 2\n')
+    with pytest.raises(ConfigError, match=r"\+1 or -1"):
+        load_rig(p)
 
 
 def test_run_toml_builds_a_usable_plan():
@@ -318,6 +639,33 @@ def test_the_led_polarity_can_be_set_not_only_read():
     assert g.polarity() == "INV"
 
 
+def test_the_led_polarity_readback_says_unknown_rather_than_raising():
+    """`LedSource.polarity` promises `NORM`, `INV` or `?`. The `?` branch is
+    what lets a run read the polarity into its file without a dead GPIB link
+    masking an exception already propagating, and what makes `tools/scan.py`'s
+    pre-flight refuse (`?` is not `INV`) instead of crash. Same shape as the
+    81150A `trigger_state` readback."""
+    from bace.drivers.agilent33220a import Agilent33220A
+
+    class Silent(FakeIO):
+        def __init__(self, reply):
+            super().__init__(idn="Agilent Technologies,33220A,MY4,2.0")
+            self.reply = reply
+
+        def query(self, cmd):
+            self.log.append(cmd)
+            if ":OUTP:POL?" in cmd:
+                if isinstance(self.reply, Exception):
+                    raise self.reply
+                return self.reply
+            return super().query(cmd)
+
+    assert Agilent33220A(Silent(OSError("VI_ERROR_TMO"))).polarity() == "?"
+    assert Agilent33220A(Silent("")).polarity() == "?"
+    assert Agilent33220A(Silent("\n")).polarity() == "?"
+    assert Agilent33220A(Silent("norm\n")).polarity() == "NORM"
+
+
 def test_the_console_post_bodies_use_the_keys_the_console_actually_reads():
     """The console does `int(body.get("code"))` for units, `float(body.get("nm"))`
     for the wavelength and `body.get("size")/("intervalMs")` for a capture. This
@@ -364,3 +712,194 @@ def test_a_console_that_answers_with_an_error_is_not_reported_as_unreachable():
     assert "HTTP 400" in msg
     assert "refused" in msg
     assert "cannot reach" not in msg
+
+
+# -- read-back: what the instrument holds, not what the driver remembers ----
+class ScriptedIO(FakeIO):
+    """Answers each query from a table keyed on the command; a query not in
+    the table raises, as a dead GPIB link would."""
+
+    def __init__(self, replies: dict[str, str], idn: str = "x"):
+        super().__init__(idn=idn)
+        self.replies = replies
+
+    def query(self, cmd):
+        self.log.append(cmd)
+        key = cmd.strip().upper().rstrip(";")
+        if key in self.replies:
+            return self.replies[key]
+        raise OSError(f"VI_ERROR_TMO on {cmd!r}")
+
+
+def test_the_81150a_read_back_asks_the_instrument_and_refreshes_the_interlock_flag():
+    """A generator left ON by the LabVIEW VI: a driver constructed a minute
+    ago says `output_enabled` is False, and the relay would be thrown under
+    a live source. `read_output` asks, and the flag the router reads follows
+    the answer. The spellings are the ones tools/scan.py sent by hand."""
+    from bace.drivers.agilent81150 import Agilent81150
+
+    io = ScriptedIO({":OUTP1?": "1\n", ":OUTP1:POL?": "INV\n", ":VOLT1:HIGH?": "+2.50000E-01",
+                     ":VOLT1:LOW?": "-2.50000E-01", ":FREQ1?": "+5.00000E+02",
+                     ":PULS:DEL1?": "+9.00000E-08", ":FUNC1:PULS:WIDT?": "+5.00000E-06"})
+    g = Agilent81150(io)
+    assert g.output_enabled is False and g.output_polarity == "?"
+    state = g.read_state()
+    assert state == {"output": True, "polarity": "INV", "high_v": 0.25, "low_v": -0.25,
+                     "frequency_hz": 500.0, "delay_s": 9e-8, "width_s": 5e-6}
+    assert g.output_enabled is True, "the interlock now sees the front panel"
+    assert g.output_polarity == "INV", "the chain can be judged before any run"
+    assert [c for c in io.log if c.endswith("?")] == [
+        ":OUTP1?", ":OUTP1:POL?", ":VOLT1:HIGH?", ":VOLT1:LOW?", ":FREQ1?",
+        ":PULS:DEL1?", ":FUNC1:PULS:WIDT?"]
+    assert not any(c for c in io.log if not c.endswith("?")), "a read-back writes nothing"
+
+
+def test_the_81150a_read_back_says_unknown_when_the_instrument_will_not_answer():
+    from bace.drivers.agilent81150 import Agilent81150
+
+    g = Agilent81150(ScriptedIO({":OUTP1?": "0"}))
+    g.enable_output(True)                      # what the driver remembers
+    state = g.read_state()
+    assert state["output"] is False and g.output_enabled is False, "the answer wins"
+    assert state["polarity"] == "?" and state["high_v"] is None and state["delay_s"] is None
+
+    dead = Agilent81150(ScriptedIO({}))
+    dead.enable_output(True)
+    assert dead.read_output() is None
+    assert dead.output_enabled is True, "no answer changes nothing"
+    assert dead.read_polarity() == "?" and dead.output_polarity == "?"
+
+
+def test_the_33220a_read_back_reports_mode_levels_and_polarity_from_the_instrument():
+    """The levels were checked by nobody until 2026-09-01: a recipe that
+    changes the LED level and a generator that keeps the old one is a
+    charge scaled by the wrong intensity with no symptom in the data."""
+    from bace.drivers.agilent33220a import Agilent33220A
+
+    io = ScriptedIO({":OUTP?": "1", ":OUTP:POL?": "NORM", "FUNC:SHAP?": "PULS",
+                     ":VOLT:HIGH?": "+1.02000E+00", ":VOLT:LOW?": "+4.00000E-01",
+                     ":VOLT:OFFS?": "+7.10000E-01", ":FREQ?": "+5.00000E+02"})
+    g = Agilent33220A(io)
+    assert g.output_enabled is False and g.mode == "OFF"
+    state = g.read_state()
+    assert state == {"output": True, "polarity": "NORM", "mode": "PULSE", "shape": "PULS",
+                     "high_v": 1.02, "low_v": 0.4, "offset_v": 0.71, "frequency_hz": 500.0}
+    assert g.output_enabled is True and g.mode == "PULSE"
+
+    off = Agilent33220A(ScriptedIO({":OUTP?": "0", "FUNC:SHAP?": "DC", ":OUTP:POL?": "INV"}))
+    state = off.read_state()
+    assert state["mode"] == "OFF" and state["shape"] == "DC", "an output that is off is dark"
+    assert state["high_v"] is None and state["polarity"] == "INV"
+
+    odd = Agilent33220A(ScriptedIO({":OUTP?": "1", "FUNC:SHAP?": "SIN"}))
+    assert odd.read_state()["mode"] == "SIN", "a shape this driver never sets is reported as spelt"
+    assert odd.mode == "OFF", "and the cached mode is not overwritten with one it cannot mean"
+
+    dead = Agilent33220A(ScriptedIO({}))
+    assert dead.read_state() == {"output": None, "polarity": "?", "mode": "?", "shape": "?",
+                                 "high_v": None, "low_v": None, "offset_v": None,
+                                 "frequency_hz": None}
+
+
+def test_the_keithley_read_back_refreshes_the_interlock_flag():
+    io = ScriptedIO({":OUTP?": "1"}, idn="KEITHLEY INSTRUMENTS INC.,MODEL 2400,4473504,C34")
+    k = Keithley2400(io)
+    assert k.output_enabled is False
+    assert k.read_output() is True and k.output_enabled is True
+    assert io.log[-1] == ":OUTP?"
+    assert Keithley2400(ScriptedIO({})).read_output() is None
+
+
+def test_the_setpoint_write_waits_longer_than_the_consoles_bus_job_and_reads_do_not():
+    """`POST /api/setpoint` is served on the console's bus thread and waits
+    up to 8 s for the job; a client that gives up sooner reports a setpoint
+    the console then applies as a failure. Reads answer from the cache and
+    keep the short timeout."""
+    from bace.drivers.lakeshore331 import (READ_TIMEOUT_S, WRITE_TIMEOUT_S,
+                                           ConsoleTemperatureController)
+
+    c = Fake331Console()
+    t = c.install(ConsoleTemperatureController())
+    t.read()
+    t.set_setpoint(240.0)
+    t.note("x")
+    assert c.timeouts == [("/api/state", None), ("/api/setpoint", WRITE_TIMEOUT_S),
+                          ("/api/note", None)]
+    assert (t.timeout_s, t.write_timeout_s) == (READ_TIMEOUT_S, WRITE_TIMEOUT_S) == (3.0, 10.0)
+    assert WRITE_TIMEOUT_S > 8.0, "the console's submit() waits 8 s for the bus job"
+
+
+def test_the_consoles_own_sentence_is_kept_apart_from_the_transport_text(monkeypatch):
+    import io as _io
+    import urllib.error
+    import urllib.request
+
+    from bace.drivers.lakeshore331 import ConsoleTemperatureController, TemperatureError
+
+    def refuse(req, timeout=None):
+        raise urllib.error.HTTPError(
+            req.full_url, 403, "Forbidden", {},
+            _io.BytesIO(b'{"ok": false, "error": "setpoint 400.000 K exceeds the 350.0 K '
+                        b'limit for this cryostat"}'))
+
+    monkeypatch.setattr(urllib.request, "urlopen", refuse)
+    t = ConsoleTemperatureController("http://127.0.0.1:8331")
+    with pytest.raises(TemperatureError) as e:
+        t.set_setpoint(400.0)
+    assert e.value.console_message == "setpoint 400.000 K exceeds the 350.0 K limit for this cryostat"
+    assert str(e.value).startswith(e.value.console_message) and "HTTP 403" in str(e.value)
+    assert "HTTP 403" not in e.value.console_message
+
+    def bare(req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, 500, "Internal Server Error", {},
+                                     _io.BytesIO(b""))
+
+    monkeypatch.setattr(urllib.request, "urlopen", bare)
+    with pytest.raises(TemperatureError) as e:
+        t.set_setpoint(250.0)
+    assert e.value.console_message == "HTTP 500" and e.value.refused and e.value.status == 500
+
+
+def test_a_socket_that_dies_while_the_reply_is_read_is_an_unreachable_console(monkeypatch):
+    """`r.read()` is outside urlopen's own wrapping: a timeout or a closed
+    socket there must still be the driver's error, so `available()` keeps
+    its bool and `read()` its contract."""
+    import socket
+    import urllib.request
+
+    from bace.drivers.lakeshore331 import ConsoleTemperatureController, TemperatureError
+
+    class Dying:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            raise socket.timeout("timed out")
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=None: Dying())
+    t = ConsoleTemperatureController("http://127.0.0.1:8331")
+    assert t.available() is False and t.probe() is None
+    with pytest.raises(TemperatureError, match="cannot reach the 331 console") as e:
+        t.read()
+    assert e.value.refused is False and "timed out" in str(e.value)
+    assert t.note("x") is False
+
+
+def test_probe_tells_a_console_before_its_first_poll_from_no_console(monkeypatch):
+    """The console's state before one successful poll is `{"connected":
+    false}` with no ceiling: not `available`, but answered by something --
+    the bench words its reason from that."""
+    import urllib.request
+
+    from bace.drivers.lakeshore331 import ConsoleTemperatureController
+
+    t = ConsoleTemperatureController("http://127.0.0.1:8331")
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda req, timeout=None: _HTTPReply({"connected": False}))
+    assert t.probe() == {"connected": False} and t.available() is False
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda req, timeout=None: _HTTPReply([1, 2]))
+    assert t.probe() is None and t.available() is False

@@ -57,10 +57,104 @@ def test_drivers_do_not_depend_on_experiment() -> None:
     assert not offenders, f"drivers/ reached outward: {offenders}"
 
 
+def test_experiment_and_storage_do_not_depend_on_service() -> None:
+    """Dependencies point inward: the engine and the file formats must never
+    know the service exists, or a route change could reach into a
+    measurement. The service wraps them; they do not call back."""
+    offenders = {}
+    for sub in ("experiment", "storage"):
+        for f in sorted((PKG / sub).rglob("*.py")):
+            bad = _imported_subpackages(f) & {"service", "ui"}
+            if bad:
+                offenders[f"{sub}/{f.name}"] = sorted(bad)
+    assert not offenders, f"experiment/ or storage/ reached out to the service: {offenders}"
+
+
+def _all_import_heads(path: pathlib.Path, *, module_level_only: bool) -> set[str]:
+    """Top-level names imported by a file: every import statement anywhere
+    (functions included), or only the ones at module level."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    nodes = ast.walk(tree) if not module_level_only else _module_level(tree)
+    out: set[str] = set()
+    for node in nodes:
+        if isinstance(node, ast.Import):
+            out.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            out.add(node.module.split(".")[0])
+    return out
+
+
+def _module_level(tree: ast.Module):
+    """Statements that run at import time: the module body and the bodies
+    of `if`/`try` blocks in it, but nothing inside a def or class."""
+    stack = list(tree.body)
+    while stack:
+        node = stack.pop()
+        yield node
+        if isinstance(node, (ast.If, ast.Try)):
+            for attr in ("body", "orelse", "finalbody"):
+                stack.extend(getattr(node, attr, []) or [])
+            for h in getattr(node, "handlers", []) or []:
+                stack.extend(h.body)
+
+
+WEB = {"fastapi", "uvicorn", "starlette", "pydantic"}
+
+
+def test_only_the_app_and_the_cli_import_fastapi() -> None:
+    """FastAPI and uvicorn are an optional extra. `pipeline`, `modules`,
+    `journal`, `worker`, `executor` and the rest are the service's logic and
+    must import on a machine that has only numpy -- the tests run them
+    without a web stack, and so does anyone scripting a session."""
+    offenders = {}
+    for f in sorted((PKG / "service").glob("*.py")):
+        if f.name in ("app.py", "__main__.py"):
+            continue
+        bad = _all_import_heads(f, module_level_only=False) & WEB
+        if bad:
+            offenders[f.name] = sorted(bad)
+    assert not offenders, f"the service core imports the web stack: {offenders}"
+
+
+def test_pyvisa_is_imported_lazily_by_the_service() -> None:
+    """`--sim` must work with no VISA backend, so no module in the service
+    imports pyvisa at import time; `rigs.build_real` does it inside the
+    function, on the lab PC only."""
+    offenders = [f.name for f in sorted((PKG / "service").glob("*.py"))
+                 if "pyvisa" in _all_import_heads(f, module_level_only=True)]
+    assert not offenders, f"pyvisa imported at module level in the service: {offenders}"
+
+
+def test_the_service_core_imports_without_fastapi_or_pyvisa() -> None:
+    """The same rule, proven by running it: a fresh interpreter with
+    `fastapi`, `uvicorn`, `starlette` and `pyvisa` made unimportable must
+    still import every service module but `app` and `__main__`."""
+    import subprocess
+    import sys
+
+    code = (
+        "import sys\n"
+        "for name in ('fastapi', 'uvicorn', 'starlette', 'pyvisa'):\n"
+        "    sys.modules[name] = None\n"
+        "import bace.service.pipeline, bace.service.modules, bace.service.journal\n"
+        "import bace.service.worker, bace.service.executor, bace.service.session\n"
+        "import bace.service.rigs, bace.service.monitors, bace.service.wire\n"
+        "loaded = sorted(m for m in sys.modules if m.split('.')[0] in "
+        "('fastapi', 'uvicorn', 'starlette', 'pyvisa') and sys.modules[m] is not None)\n"
+        "print('loaded', loaded)\n"
+    )
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                          cwd=str(PKG.parent), timeout=120)
+    assert proc.returncode == 0, proc.stderr
+    assert "loaded []" in proc.stdout, proc.stdout
+
+
 def test_every_real_driver_satisfies_its_protocol() -> None:
     from bace.drivers import protocols as P
+    from bace.drivers.agilent33220a import Agilent33220A
     from bace.drivers.agilent81150 import Agilent81150
     from bace.drivers.infiniium import Infiniium
+    from bace.drivers.lakeshore331 import ConsoleTemperatureController
     from bace.drivers.routing import BiasRouter
     from bace.drivers.shutter import SimulatedShutter
 
@@ -76,6 +170,9 @@ def test_every_real_driver_satisfies_its_protocol() -> None:
     assert isinstance(Infiniium(_IO()), P.Digitizer)
     assert isinstance(SimulatedShutter(), P.Shutter)
     assert isinstance(BiasRouter(dio=_DIO()), P.Router)
+    assert isinstance(Agilent33220A(_IO()), P.LedSource)
+    # the 331 is a client of its console, not a VISA driver: no resource
+    assert isinstance(ConsoleTemperatureController(), P.TemperatureController)
 
 
 def test_every_simulated_instrument_satisfies_its_protocol() -> None:
@@ -89,6 +186,8 @@ def test_every_simulated_instrument_satisfies_its_protocol() -> None:
     assert isinstance(r.smu, P.SourceMeter)
     assert isinstance(r.power, P.PowerMeter)
     assert isinstance(r.router, P.Router)
+    assert isinstance(r.led, P.LedSource)
+    assert isinstance(r.temperature, P.TemperatureController)
 
 
 def test_a_digitizer_that_cannot_report_clipping_is_not_a_digitizer() -> None:

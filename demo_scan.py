@@ -58,7 +58,12 @@ def main(which: str = "sweep") -> int:
                 unit = ev.axis.unit
                 print(f"\n  {ev.axis.name:>9} [{unit}]   {'Q [C]':>13}   {'sd':>9}")
                 for v, m, s in zip(ev.values, ev.q_mean, ev.q_std):
-                    bar = "#" * int(60 * m / ev.q_mean.max())
+                    # Magnitudes: every Q carries the rig's sign convention
+                    # (`current_sign = -1` since 2026-09-02), so a ratio of
+                    # signed values would divide by the least-negative Q
+                    # and print hundreds of characters per row.
+                    top = float(abs(ev.q_mean).max()) or 1.0
+                    bar = "#" * int(60 * abs(m) / top)
                     print(f"  {v:12.4g}   {m:13.4e}   {s:9.2e}  {bar}")
                 print(f"\n  {ev.q_all.size} shots, {ev.photo_averaged.shape[1]} "
                       f"samples each, dt = {ev.dt*1e9:g} ns, "

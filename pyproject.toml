@@ -11,6 +11,9 @@ dependencies = ["numpy>=1.24", "scipy>=1.10", "h5py>=3.8"]
 
 [project.optional-dependencies]
 rig = ["pyvisa>=1.13", "pyvisa-py>=0.7"]
+service = ["fastapi>=0.110", "uvicorn>=0.29", "websockets>=12"]
+# The lab PC runs the service on the real rig, so it needs both: `pip install -e .[lab]`.
+lab = ["bace[rig,service]"]
 dev = ["pytest>=7"]
 
 [tool.setuptools.packages.find]

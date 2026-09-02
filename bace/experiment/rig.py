@@ -18,8 +18,8 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
-from ..drivers.protocols import (BiasSource, Digitizer, PowerMeter, Router,
-                                 Shutter, SourceMeter)
+from ..drivers.protocols import (BiasSource, Digitizer, LedSource, PowerMeter,
+                                 Router, Shutter, SourceMeter, TemperatureController)
 
 
 @dataclass(frozen=True)
@@ -30,6 +30,28 @@ class RigConfig:
     """The resistor between the device and the scope input. Absolute charge is
     proportional to 1/R, so this is the single most consequential number here.
     The panel note reads '(50 old big Amp) (5.192 new Amp)'."""
+
+    current_sign: float = -1.0
+    """Sign convention of the digitiser chain. Multiplied ONCE, in the
+    digitizer fetch, beside the division by `sense_resistor_ohm`.
+
+    Measured 2026-09-02 against the LabVIEW engine on the same device, eight
+    minutes apart: this port reported every current positive, LabVIEW every
+    one negative, and the two agree in shape and size (dark-trace
+    corr(-bare, lv) = 0.9988; peak 6.0 %, tau 2.8 %, Q 4.0 % apart). That is a
+    convention about which way round the sense resistor is read, not physics,
+    so it is a bench constant and is applied in exactly one place --
+    `Infiniium._fetch`, and `SimulatedDigitizer.acquire` so the simulator
+    reports in the rig's convention too. `_fetch_volts` stays sign-free: the
+    auto-range works in volts at the scope input, and a sign there would
+    move the window instead of the number.
+
+    It is NOT the generator's polarity switch and must not be fixed with one.
+    `:OUTP1:POL` changes the voltage the device really sees -- which edge of
+    the pulse the extraction happens on -- while this changes only the sign
+    of the number written down. The value reaches every file through
+    `as_dict()` (HDF5 `/config/rig`), so a reader can undo it.
+    """
 
     pulse_amp: float = 4.0
     """Voltage gain of the amplifier between the 81150A and the device. Bias
@@ -44,6 +66,14 @@ class RigConfig:
     trigger_positive: bool = True
     trigger_offset_s: float = 0.0
     """Latency between the sync edge and the field reaching the device."""
+
+    light_path_delay_ns: float = 0.0
+    """From the 33220A's drive edge to the light actually going off at the
+    sample: measured 502 ns on this bench (2026-09-01, `docs/bace-timing.html`),
+    419 ns of it the 85 m fibre. Informational -- the delay axis is zeroed by
+    `trigger_offset_s`, not by this -- and shown on the rig tab beside it so
+    the two constants of the chain's timing are on record together. 0 means
+    it has not been measured on this bench."""
 
     led_threshold_v: float = 1.0
     dio_module_id: int = 9
@@ -82,8 +112,11 @@ class RigConfig:
 
     temperature_console: str = ""
     """Lake Shore 331 at GPIB0::7::INSTR, owned by its own console on
-    127.0.0.1:8331. Empty until temperature is integrated, which is the step
-    after this one; the field exists so nothing has to move when it is."""
+    127.0.0.1:8331. Naming the console here attaches it as `Rig.temperature`
+    (`service.rigs.Bench.build_real`), and a temperature loop then settles
+    through it -- setpoint written, the band waited for, the console's own
+    350 K ceiling and heater range left to the console. Empty keeps
+    temperature a number an operator types at each pause."""
 
     # -- bench ceilings ---------------------------------------------------
     max_current_compliance_a: float = 0.05
@@ -93,6 +126,16 @@ class RigConfig:
     measurement recipe should be able to authorise that."""
 
     max_voltage_compliance_v: float = 5.0
+
+    def __post_init__(self) -> None:
+        # A sign is +1 or -1 and nothing else. Any other magnitude would be a
+        # gain hiding under the wrong name, and it would rescale every charge
+        # with the same silence a wrong sense resistor does.
+        if self.current_sign not in (1.0, -1.0):
+            raise ValueError(
+                f"current_sign must be +1 or -1, not {self.current_sign!r}. A "
+                "gain belongs in sense_resistor_ohm, where it can be read as one."
+            )
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -115,7 +158,13 @@ class Rig:
     router: Router | None = None
     smu: SourceMeter | None = None
     power: PowerMeter | None = None
-    led: object | None = None
+    led: LedSource | None = None
+    temperature: TemperatureController | None = None
+    """The 331, through its console (`RigConfig.temperature_console`). None
+    when no console is named or the named one does not answer: a temperature
+    node then pauses for the operator instead of settling on its own. Not
+    parked -- the cryostat keeps its setpoint when a run ends, because
+    walking it back to room temperature is a decision, not a safe state."""
 
     def park(self) -> None:
         """Leave the bench safe: outputs off, shutter closed."""

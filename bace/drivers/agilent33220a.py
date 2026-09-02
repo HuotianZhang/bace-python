@@ -23,6 +23,15 @@ diode is fully off rather than dim. Both are physics, and both live in
 """
 from __future__ import annotations
 
+from typing import Any
+
+from .readback import ask, number, on_off, word
+
+SHAPES: dict[str, str] = {"PULS": "PULSE", "DC": "DC"}
+"""`FUNC:SHAP?` replies that map onto this driver's two modes. Any other
+shape (SIN, SQU, RAMP, ...) is reported as the instrument spelt it: it is not
+a mode this driver would have set, which is exactly what a read-back is for."""
+
 
 class LedSourceError(RuntimeError):
     pass
@@ -120,8 +129,17 @@ class Agilent33220A:
         self._polarity = "INV" if inverted else "NORM"
 
     def polarity(self) -> str:
-        """`INV` or `NORM`, from the instrument."""
-        return str(self._io.query(":OUTP:POL?")).strip().upper()
+        """`INV`, `NORM` or `?`, from the instrument.
+
+        `?` for a query that fails, on the `LedSource` contract: a readback
+        that raises inside a run's unwind would mask the exception already
+        propagating, and a plausible default would be a lie in the file.
+        """
+        try:
+            reply = str(self._io.query(":OUTP:POL?")).strip().upper()
+        except Exception:
+            return "?"
+        return reply or "?"
 
     def off(self) -> None:
         """Dark: output disabled, not merely a low level."""
@@ -145,6 +163,44 @@ class Agilent33220A:
         """OFF, DC or PULSE — read by the illumination guard when it checks that
         V_oc was measured under the same drive the transient will use."""
         return self._mode
+
+    # -- read-back, for the service's bench card --------------------------
+    # Not protocol members; the service reaches for them with `getattr`. The
+    # levels were checked by nobody until 2026-09-01 (tools/scan.py), and a
+    # generator keeps whatever the previous session left: these are how the
+    # bench card compares what the LED is driven at with what the recipe asks.
+    def read_output(self) -> bool | None:
+        """`:OUTP?`, and the cached flag `output_enabled` follows it."""
+        on = on_off(ask(self._io, ":OUTP?"))
+        if on is not None:
+            self._output = on
+            if not on:
+                self._mode = "OFF"
+        return on
+
+    def read_state(self) -> dict[str, Any]:
+        """`output`, `polarity`, `mode` (OFF / DC / PULSE, or the shape as the
+        instrument spelt it), `shape`, `high_v`, `low_v`, `offset_v`,
+        `frequency_hz` -- from the instrument, None/`?` where it would not
+        answer. `mode` is OFF whenever the output reads off, whatever shape
+        the generator holds: a waveform nobody can see is dark."""
+        on = self.read_output()
+        shape = word(ask(self._io, "FUNC:SHAP?"), tuple(SHAPES))
+        mode = "?" if shape == "?" else SHAPES.get(shape, shape)
+        if on is False:
+            mode = "OFF"
+        if mode in ("OFF", "DC", "PULSE"):
+            self._mode = mode
+        return {
+            "output": on,
+            "polarity": self.polarity(),
+            "mode": mode,
+            "shape": shape,
+            "high_v": number(ask(self._io, ":VOLT:HIGH?")),
+            "low_v": number(ask(self._io, ":VOLT:LOW?")),
+            "offset_v": number(ask(self._io, ":VOLT:OFFS?")),
+            "frequency_hz": number(ask(self._io, ":FREQ?")),
+        }
 
     def errors(self) -> list[str]:
         out: list[str] = []

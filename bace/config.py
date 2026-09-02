@@ -54,9 +54,11 @@ def load_rig(path: str | Path = "rig.toml") -> RigConfig:
     e, sc = d.get("electrical", {}), d.get("scope", {})
     smu, led = d.get("sourcemeter", {}), d.get("led", {})
     pm, dio, bias = d.get("power_meter", {}), d.get("dio", {}), d.get("bias", {})
+    timing = d.get("timing", {})
 
     _check(e, {"sense_resistor_ohm", "pulse_amp", "probe_attenuation",
-               "trigger_offset_s"}, "electrical")
+               "trigger_offset_s", "current_sign"}, "electrical")
+    _check(timing, {"light_path_delay_ns"}, "timing")
     _check(sc, {"address", "current_source", "channel", "trigger_source",
                 "trigger_positive"}, "scope")
     _check(dio, {"module_id", "shutter_module_nr", "relay_module_nr", "channel",
@@ -65,35 +67,50 @@ def load_rig(path: str | Path = "rig.toml") -> RigConfig:
     _check(smu, {"address", "max_current_compliance_a",
                  "max_voltage_compliance_v"}, "sourcemeter")
 
-    cfg = RigConfig(
-        sense_resistor_ohm=e.get("sense_resistor_ohm", 5.192),
-        pulse_amp=e.get("pulse_amp", 4.0),
-        probe_attenuation=e.get("probe_attenuation", 1.0),
-        trigger_offset_s=e.get("trigger_offset_s", 0.0),
-        current_source=sc.get("current_source", "CHAN2"),
-        scope_channel=sc.get("channel", 2),
-        trigger_source=sc.get("trigger_source", "CHAN3"),
-        trigger_positive=sc.get("trigger_positive", True),
-        led_threshold_v=led.get("threshold_v", 1.0),
-        dio_module_id=dio.get("module_id", 9),
-        shutter_module_nr=dio.get("shutter_module_nr", 0),
-        relay_module_nr=dio.get("relay_module_nr", 1),
-        dio_dll_path=dio.get("dll_path", ""),
-        scope_address=sc.get("address", RigConfig.scope_address),
-        bias_address=bias.get("address", RigConfig.bias_address),
-        sourcemeter_address=smu.get("address", RigConfig.sourcemeter_address),
-        led_address=led.get("address", RigConfig.led_address),
-        power_meter_wavelength_nm=pm.get("wavelength_nm", 530.0),
-        power_meter_console=pm.get("console", RigConfig.power_meter_console),
-        temperature_console=d.get("temperature", {}).get("console", ""),
-        max_current_compliance_a=smu.get("max_current_compliance_a", 0.05),
-        max_voltage_compliance_v=smu.get("max_voltage_compliance_v", 5.0),
-    )
+    try:
+        cfg = RigConfig(
+            sense_resistor_ohm=e.get("sense_resistor_ohm", 5.192),
+            # float(): TOML reads `-1` as an integer, and the sign is a multiplier
+            # on a float array, not a count.
+            current_sign=float(e.get("current_sign", -1.0)),
+            pulse_amp=e.get("pulse_amp", 4.0),
+            probe_attenuation=e.get("probe_attenuation", 1.0),
+            trigger_offset_s=e.get("trigger_offset_s", 0.0),
+            light_path_delay_ns=float(timing.get("light_path_delay_ns", 0.0)),
+            current_source=sc.get("current_source", "CHAN2"),
+            scope_channel=sc.get("channel", 2),
+            trigger_source=sc.get("trigger_source", "CHAN3"),
+            trigger_positive=sc.get("trigger_positive", True),
+            led_threshold_v=led.get("threshold_v", 1.0),
+            dio_module_id=dio.get("module_id", 9),
+            shutter_module_nr=dio.get("shutter_module_nr", 0),
+            relay_module_nr=dio.get("relay_module_nr", 1),
+            dio_dll_path=dio.get("dll_path", ""),
+            scope_address=sc.get("address", RigConfig.scope_address),
+            bias_address=bias.get("address", RigConfig.bias_address),
+            sourcemeter_address=smu.get("address", RigConfig.sourcemeter_address),
+            led_address=led.get("address", RigConfig.led_address),
+            power_meter_wavelength_nm=pm.get("wavelength_nm", 530.0),
+            power_meter_console=pm.get("console", RigConfig.power_meter_console),
+            temperature_console=d.get("temperature", {}).get("console", ""),
+            max_current_compliance_a=smu.get("max_current_compliance_a", 0.05),
+            max_voltage_compliance_v=smu.get("max_voltage_compliance_v", 5.0),
+        )
+    except ValueError as exc:                 # RigConfig's own validation
+        raise ConfigError(str(exc)) from exc
     if cfg.shutter_module_nr == cfg.relay_module_nr:
         raise ConfigError(
             f"shutter and relay are both on DIO module {cfg.shutter_module_nr}. "
             "Driving the shutter line as the relay would leave the device "
             "connected to whichever source the relay happens to be set to."
+        )
+    if cfg.relay_module_nr == 0:
+        # `drivers.routing.BiasRouter` refuses module 0 as well; refused here
+        # it is a config error with the file named, not a traceback from the
+        # service's assembly.
+        raise ConfigError(
+            "[dio] relay_module_nr = 0: module 0 is the shutter (measured on the "
+            "rig 2026-09-01), not the relay. The relay is module 1."
         )
     return cfg
 

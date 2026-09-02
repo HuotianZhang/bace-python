@@ -251,6 +251,7 @@ def main(argv=None) -> int:
     print(f"\n  wrote the instrument state into {folder}")
 
     scope = Infiniium(scope_res, sense_resistor_ohm=cfg.sense_resistor_ohm,
+                      current_sign=cfg.current_sign,
                       probe_attenuation=cfg.probe_attenuation)
     shutter = Shutter(cfg.dio_dll_path or None, module_id=cfg.dio_module_id,
                       module_nr=cfg.shutter_module_nr).open()
@@ -267,7 +268,12 @@ def main(argv=None) -> int:
             time.sleep(a.settle)
             _acquire(scope_res, scope, a)
             tr = scope.fetch_volts(cfg.current_source)
-            L = tr.y / cfg.sense_resistor_ohm
+            # This program does the digitiser chain by hand (volts / R), so
+            # it applies the rig's sign here, where `Infiniium._fetch` would.
+            # Without it the Q printed below has the opposite sign from every
+            # other run on this bench and from the LabVIEW reference it is
+            # printed next to -- which is how the sign question stayed open.
+            L = cfg.current_sign * tr.y / cfg.sense_resistor_ohm
             print(f"    light  {L.min()*1e3:+8.3f} .. {L.max()*1e3:+8.3f} mA"
                   f"   {L.size} samples, dt {tr.dt*1e9:.3f} ns")
 
@@ -278,7 +284,8 @@ def main(argv=None) -> int:
             shutter.shut()
             time.sleep(a.settle)
             _acquire(scope_res, scope, a)
-            D = scope.fetch_volts(cfg.current_source).y / cfg.sense_resistor_ohm
+            D = (cfg.current_sign * scope.fetch_volts(cfg.current_source).y
+                 / cfg.sense_resistor_ohm)
             print(f"    dark   {D.min()*1e3:+8.3f} .. {D.max()*1e3:+8.3f} mA")
             if D.size != L.size:
                 print("    the two traces are different lengths — stopping.")

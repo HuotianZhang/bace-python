@@ -10,6 +10,7 @@ extended, and focused on **measurement** — analysis stays downstream.
 |---|---|
 | **`HANDOFF.md`** | the current state, what is built, what is not, and every trap. **Read this first.** |
 | `BENCH.md` | how to exercise it against the real rig, stage by stage |
+| `bace/service/README.md` | how to run the service and drive it by hand; `docs/service-contract.md` has every shape |
 | `docs/bace-status.html` | the full narrative with evidence and figures |
 | `rig.toml` / `run.toml` | the bench and the recipe, kept separate |
 | `scripts/` | the double-click `.bat` entry points, one per bench stage |
@@ -18,11 +19,17 @@ extended, and focused on **measurement** — analysis stays downstream.
 
 ```
 bace/           the package
-  core/         the physics. Imports nothing outward
-  drivers/      six Protocol contracts; real and simulated instruments satisfy both
-  experiment/   the run itself — a synchronous generator of typed events
+  params.py     where each parameter value came from — default, run.toml,
+                last-used, edited, inherited, derived — so the console can say so
+  core/         the physics — axis, pulses, process, illumination, simulate.
+                Imports nothing outward
+  drivers/      seven Protocol contracts; real and simulated instruments satisfy both
+  experiment/   the run itself — a synchronous generator of typed events;
+                wire.py puts them on the wire
   storage/      byte-exact legacy .dat, plus HDF5
   bench/        the staged hardware harness
+  service/      FastAPI + WebSocket around the engine — the bench, the modules,
+                the runs, the pipeline tree. bace/service/README.md
 tools/          standalone rig scripts — scan, bare, lightpower, relay, identify_dio
 scripts/        the double-click .bat entry points; each cd's to the repo root first
 recipes/        the named recipe variants, passed with --run
@@ -41,15 +48,29 @@ before doing anything, so every relative path below still resolves.
 Everything runs end to end on the simulated rig, with no instruments present:
 
 ```
-python -m pytest -q          # 168 tests
-python demo_scan.py          # a simulated transient scan
-python -m bace.bench         # the offline stages of the bench harness
+python -m pytest -q                    # 528 passed, 7 skipped
+python demo_scan.py                    # a simulated transient scan
+python -m bace.bench                   # the offline stages of the bench harness
+python -m bace.service --sim --fast    # the service on the simulated rig, http://127.0.0.1:8900/
 ```
 
 ## Status
 
 The measurement half is written, tested, and proven on the rig: scope
 acquisition, auto-range, DIO identity, shutter, and first light on a real device
-all confirmed. `service/` (FastAPI + WebSocket) and `ui/` are not started — see
-`HANDOFF.md` §3, which also carries the user's explicit instruction about the
-UI's shape.
+all confirmed; against a LabVIEW run eight minutes away the port agrees to 4 %
+on charge (`HANDOVER-2026-09-02.md`).
+
+`service/` is built (2026-09-02): one process owning the instruments, wrapping
+the engine's event generators in HTTP + WebSocket — the bench read-back and its
+explicit by-hand actions, the module catalogue with every parameter's
+provenance, manual runs and the pipeline tree (validate, dry run, execute), the
+two stop verbs, an append-only journal per session, and a temperature node
+that settles through the 331 console when `rig.toml` names it and pauses for
+the operator (`NeedsOperator`) when it does not. It runs end to end on the simulator with
+`--sim --fast` and has not yet been run against the real rig. `bace/service/README.md`
+says how to run and drive it; `docs/service-contract.md` is what it was built to.
+
+`ui/` is still to come — see `HANDOFF.md` §3, which carries the user's explicit
+instruction about the UI's shape, and `docs/bace-console-round3.html`, the
+design the service contract was derived from.

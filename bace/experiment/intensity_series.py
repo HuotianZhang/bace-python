@@ -27,7 +27,7 @@ sees the whole series as a single stream.
 from __future__ import annotations
 
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Callable, Iterator
 
 import numpy as np
@@ -201,8 +201,14 @@ def run_intensity_series(rig: Rig, series: SeriesConfig, spec: ScanSpec,
                              threshold_v=rig.config.led_threshold_v)
 
             # -- steady illumination, DC characterisation ------------------
+            # The shutter is opened for it: an LED that is on is not light
+            # at the sample, and a V_oc read with the shutter shut (as the
+            # transient's park leaves it) is the dark V_oc wearing the
+            # level's name. Shut again before the transient, which opens
+            # it per shot for the light trace only.
             rig.led.set_dc(drive.dc_settings()["offset"])
             rig.led.enable_output(True)
+            rig.shutter.unblock()
             yield IlluminationSet(index=i, level_v=level, mode="dc")
             sleep(series.led_settle_s)
 
@@ -211,10 +217,14 @@ def run_intensity_series(rig: Rig, series: SeriesConfig, spec: ScanSpec,
                 intensity = yield from _read_intensity(rig, series, level)
 
             dc: DCPoint | None = None
-            if series.measure_dc:
-                with rig.router.dc():
-                    dc = rig.smu.measure_dc(v_sat=series.v_sat,
-                                            settle_s=series.dc_settle_s)
+            try:
+                if series.measure_dc:
+                    with rig.router.dc():
+                        dc = rig.smu.measure_dc(v_sat=series.v_sat,
+                                                settle_s=series.dc_settle_s)
+            finally:
+                rig.shutter.shut()
+            if dc is not None:
                 yield DCMeasured(led_drive_v=level, dc=dc)
 
             voc = dc.voc if dc is not None else None
@@ -272,7 +282,7 @@ def run_intensity_series(rig: Rig, series: SeriesConfig, spec: ScanSpec,
             pass
         if rig.led is not None:
             try:
-                rig.led.off() if hasattr(rig.led, "off") else rig.led.disable_output()
+                rig.led.off()
             except Exception:
                 pass
         if rig.router is not None:

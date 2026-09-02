@@ -1,7 +1,8 @@
 # BACE port — hand-off
 
 Converting `BACE_Mehrdad.vi` (LabVIEW, 907 VIs) to Python. The measurement half
-is written, tested and proven on the rig. The service and UI are not started.
+is written, tested and proven on the rig; the service over it is built and
+proven on the simulator. The UI is not started.
 
 Read `docs/bace-status.html` first — it is the full narrative with the evidence.
 This file is the operational summary.
@@ -16,6 +17,16 @@ vs 端口 02:08）：峰值差 6.0%、τ 差 2.8%、Q 差 4.0%，尖峰都在记
 
 下一程第一件事：`rig.toml` 加 `current_sign = -1`，乘在 `Infiniium._fetch`，
 同时进协议和模拟器。端口全正、LabVIEW 全负，是取号约定，不是物理。
+
+**2026-09-02，稍后：** 上面这件事做了，`docs/service-plan.md` 里的 P0 清理
+全部完成——`current_sign = -1` 进了 `rig.toml`，只在 `Infiniium._fetch` 乘一次，
+协议和模拟器同步；事件信封（`Envelope`、`Progress.node_path`、服务层的事件词汇）
+定在 `experiment/events.py`；`configure_trigger` 进了 `BiasSource` 协议，
+`run_transient_scan` 自己设；`LedSource` 协议；`core/sequence.py` 删了；`run_jv`
+自己开关快门（亮曲线开、暗曲线关）。`bace/service/` 已建，在模拟器上跑通了
+整条路（bench 读回与动作、模块目录、单模块 run、pipeline 树的校验/试跑/执行、
+两个停法、journal），还没上过真台子：怎么跑见 `bace/service/README.md`，契约见
+`docs/service-contract.md`。测试 528 passed / 7 skipped。
 
 以下内容写于 2026-09-01 之前，其中 `timebase 500`、`trigger_offset 47 ns`、
 「光根本没关」三条已被数据推翻，以 `HANDOVER-2026-09-02.md` 为准。
@@ -66,19 +77,43 @@ user does not need to upload them.
 
 ## 2. What is built
 
-168 tests pass, including a numerical regression against a real 2026-08-07 run
-(worst relative difference 1.6e-06) and a byte-exact `.dat` round-trip. Both now
-run on the lab PC too, against the deployed copy.
+528 tests pass (7 skipped), including a numerical regression against a real
+2026-08-07 run (worst relative difference 1.6e-06) and a byte-exact `.dat`
+round-trip. Both now run on the lab PC too, against the deployed copy. On
+sternwarte one `test_bench` DIO test fails because that machine has
+`delib64.dll` installed; that is the environment, not the code.
 
 ```
-core/       sequence, pulses, process, illumination, axis, simulate
-drivers/    protocols (6 contracts), infiniium, agilent81150, agilent33220a,
+params.py   parameter provenance — default, run.toml, last-used, edited,
+            inherited, derived
+core/       axis, pulses, process, illumination, simulate
+drivers/    protocols (7 contracts), infiniium, agilent81150, agilent33220a,
             keithley2400, newport1918c, shutter, delib, routing, simulated,
             win32bridge
-experiment/ events, rig, transient, jv, intensity_series
+experiment/ events, wire, rig, transient, jv, intensity_series
 storage/    numbers, legacy_dat, naming, hdf5, recorder, jv, series
 bench/      report, session, checks, __main__
+service/    __main__, session, rigs, modules, journal, worker, wire, pipeline,
+            executor, monitors, app
 ```
+
+**`service/`** — FastAPI + WebSocket around the engine, built 2026-09-02 to
+`docs/service-contract.md`, itself derived from `docs/service-plan.md` and the
+Round 3 console design. One process owns every VISA instrument; one worker
+thread is the bench lock, and everything that touches the bus is a job on it.
+Every event a run yields is enveloped (`seq`, `ts`, `run_id`, `node_path`),
+fanned out over `WS /events` under a payload policy that decimates traces on
+the wire and keeps scalars in the journal, and appended to
+`<out>/journal/<session>.jsonl`. `/bench` is the cached read-back plus the
+explicit by-hand actions (the service never fixes anything on its own);
+`/modules` is the catalogue with each parameter's provenance; `/runs` is a
+manual run, which is a one-node pipeline on the same code path; `/pipelines`
+validates, dry-runs and executes the tree with the three bindings and a
+`NeedsOperator` pause at each temperature. Two stop verbs, `after_shot` and
+`abort`; every ending parks the bench. It rewrites no measurement logic and
+imports `pyvisa` only inside `rigs.py`, so `--sim --fast` runs on a machine
+with no VISA backend. `bace/service/README.md` is how to run and drive it. It
+has run on the simulator only.
 
 Design rules that are load-bearing:
 
@@ -95,10 +130,6 @@ Design rules that are load-bearing:
 
 ## 3. What is NOT built
 
-**`service/`** — FastAPI + WebSocket. Live light/dark/photocurrent, Q versus
-axis, progress, and a stop that unwinds to a parked bias and a closed shutter.
-Adapt the synchronous generator to `async` at the service edge, not deeper.
-
 **`ui/`** — browser front end. **Explicit instruction from the user, 2026-09-01:**
 
 > *"I do not want the same shape as JV console and the 331 controller. I want a
@@ -108,15 +139,21 @@ Adapt the synchronous generator to `async` at the service edge, not deeper.
 So: do not copy the existing consoles. Design for what a BACE run actually is —
 a scan over a bias axis, repeated in loops, each point producing a light trace, a
 dark trace, their difference and one charge. Draft it in **Claude Design** and
-iterate with the user there.
+iterate with the user there. The Round 3 canvas (`docs/bace-console-round3.html`,
+four tabs: bench, pipeline, results, rig) is where that stands, and the service
+was built to serve it; `python -m bace.service --ui DIR` serves what gets built.
+The results tab is not designed on either side.
 
-**Temperature** — deferred by the user's decision. The Lake Shore 331 is at
-`GPIB0::7::INSTR` with its own console on `127.0.0.1:8331`.
-`RigConfig.temperature_console` exists and is empty; filling it in is the whole
-integration on this side. `temperature_k` is already a metadata field.
-Temperature is **not** an `Axis` — it settles in minutes, the axis quantities are
-per-shot and set in nanoseconds. It belongs at the session layer as an outer loop
-beside the LED level.
+**Temperature** — wired since this handover was written (superseded here by
+`docs/service-contract.md` section 7). The Lake Shore 331 is at
+`GPIB0::7::INSTR` with its own console on `127.0.0.1:8331`, and
+`bace/drivers/lakeshore331.py` is an HTTP client to that console, never a
+second GPIB session. `RigConfig.temperature_console` names it (empty in the
+default `rig.toml`); named and answering at Start, a temperature node settles
+through it, otherwise the executor pauses with `NeedsOperator` as before. No
+endpoint changed. `temperature_k` is a metadata field. Temperature is **not** an `Axis` —
+it settles in minutes, the axis quantities are per-shot and set in nanoseconds.
+It is an outer loop of the pipeline tree beside the LED level.
 
 ---
 
@@ -128,7 +165,7 @@ beside the LED level.
 | Agilent 81150A | `GPIB0::12::INSTR` | collection field, through a ×4 amplifier |
 | Keithley 2400 | `GPIB0::24::INSTR` | DC side of the relay |
 | Agilent 33220A | `GPIB0::15::INSTR` | LED drive |
-| Lake Shore 331 | `GPIB0::7::INSTR` | not integrated yet |
+| Lake Shore 331 | `GPIB0::7::INSTR` | through its console on `127.0.0.1:8331` (contract section 7); never opened directly |
 | Deditec DIO | module ID 9, channel 0 | module 0 = shutter, module 1 = relay |
 
 **Record geometry**, stable across every session: 4000 points, dt 0.5 ns,
@@ -276,10 +313,17 @@ to reach for the same shortcuts.
 
 ## 10. Suggested order
 
-1. **`service/`** — FastAPI + WebSocket over `run_transient_scan`. The event
-   stream already exists; the service only has to adapt and fan out.
-2. **`ui/`** — in Claude Design, shaped for this measurement. See §3.
+1. **`service/`** — done, 2026-09-02, on the simulator. The first thing on the
+   lab PC is `scripts\Run Service.bat`, a `jv_dark` from `curl`, and a read of
+   `/bench` against what the instruments actually say
+   (`bace/service/README.md`, "Driving it by hand").
+2. **`ui/`** — in Claude Design, shaped for this measurement. See §3. The
+   contract it talks to is `docs/service-contract.md`; `--ui DIR` serves it.
 3. **Side-by-side** — same device, same settings, LabVIEW and Python back to
    back, against `Q:\Huotian\2026\BACE\20260831\220K`. Agreement on Q within
    noise is the acceptance test.
-4. **Temperature** — the 331 console, as an outer loop at the session layer.
+4. **Temperature** — done since (contract section 7): the 331 console is a
+   `TemperatureController` on the rig, a temperature node settles through it
+   when `RigConfig.temperature_console` names it and it answers, and pauses
+   for the operator otherwise. What is left is the first run against the real
+   console on the rig.

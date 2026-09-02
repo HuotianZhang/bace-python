@@ -181,6 +181,124 @@ def test_abort_stops_before_the_next_illumination():
     assert len([e for e in evs if isinstance(e, JVCurveDone)]) == 2
 
 
+# -- the shutter ----------------------------------------------------------
+def test_a_light_curve_opens_the_shutter_and_a_dark_curve_shuts_it():
+    """Recorded gap (ui-brief 01-modules section 4): `run_jv` never touched the
+    shutter, so a light J-V taken with it shut was a dark J-V wearing a light
+    label. The simulated SourceMeter does not see the shutter -- its current
+    follows the LED drive only -- so this pins the sequence, not the physics:
+    the shutter position at the moment each sweep is taken, the
+    `InstrumentState` the run yields for a console or recorder to pick up
+    (`JVRecorder` writes it, see the storage tests), and the shutter shut
+    afterwards."""
+    sim, rig = build()
+    seen, states = [], []
+    for ev in run_jv(rig, JVConfig(dark=True, led_levels_v=(1.020, 1.060)),
+                     sleep=NO_SLEEP):
+        if isinstance(ev, E.InstrumentState):
+            states.append(ev.values["shutter"])
+        elif isinstance(ev, JVCurveDone):
+            seen.append((ev.label, sim.bench.shutter_open))
+    assert seen == [("dark", False), ("1.02 V", True), ("1.06 V", True)]
+    assert states == ["shut", "open", "open"]
+    assert sim.bench.shutter_open is False, "shut on the way out"
+
+
+def test_the_shutter_moves_before_the_illumination_settles():
+    """The settle exists so the device reaches its steady state under the
+    light it is about to be measured in. A shutter that opens after it makes
+    the settle count for nothing."""
+    sim, rig = build()
+    log = []
+
+    class Watched:
+        def __init__(self, inner): self._i = inner
+        def unblock(self): log.append("open"); return self._i.unblock()
+        def shut(self): log.append("shut"); return self._i.shut()
+        def __getattr__(self, n): return getattr(self._i, n)
+
+    rig.shutter = Watched(sim.shutter)
+    list(run_jv(rig, JVConfig(dark=False, led_levels_v=(1.020,), led_settle_s=0.5),
+                sleep=lambda s: log.append(("sleep", s))))
+    assert log[:2] == ["open", ("sleep", 0.5)]
+    assert log[-1] == "shut"
+
+
+def test_walking_away_mid_light_curve_shuts_the_shutter():
+    sim, rig = build()
+    gen = run_jv(rig, JVConfig(dark=False, led_levels_v=(1.020, 1.060)),
+                 sleep=NO_SLEEP)
+    for ev in gen:
+        if isinstance(ev, JVCurveDone):
+            break
+    assert sim.bench.shutter_open is True            # mid-run, lit
+    gen.close()
+    assert sim.bench.shutter_open is False
+
+
+def test_a_bare_sourcemeter_rig_does_not_wait_for_an_led_it_has_not_got():
+    """`led_settle_s` is the time the device takes to reach steady state after
+    the illumination changed. With no LED and no shutter nothing changed, and
+    the run used to skip the wait (it lived inside `_set_illumination`, behind
+    the `rig.led is None` return). Moving the shutter into the run must not
+    turn that into a silent 2 s per curve."""
+    sim = make_bench(seed=4)
+    rig = Rig(bias=sim.bias, scope=sim.scope, shutter=None, config=RigConfig(),
+              smu=sim.smu, led=None)
+    slept = []
+    evs = list(run_jv(rig, JVConfig(dark=True, led_levels_v=(), led_settle_s=2.0),
+                      sleep=lambda s: slept.append(s)))
+    assert isinstance(evs[-1], JVFinished)
+    assert slept == []
+    assert not any(isinstance(e, E.InstrumentState) for e in evs)
+
+
+def test_a_shutter_alone_still_earns_the_settle():
+    """A rig with a shutter and no LED still changes the light on the device
+    when the shutter moves, so the settle is spent."""
+    sim = make_bench(seed=4)
+    rig = Rig(bias=sim.bias, scope=sim.scope, shutter=sim.shutter,
+              config=RigConfig(), smu=sim.smu, led=None)
+    slept = []
+    list(run_jv(rig, JVConfig(dark=True, led_levels_v=(), led_settle_s=0.5),
+                sleep=lambda s: slept.append(s)))
+    assert slept == [0.5]
+
+
+def test_an_led_that_will_not_switch_off_stops_a_dark_curve():
+    """Before 2026-09-02 a failing `off()` on the dark branch was swallowed
+    and the sweep went ahead under whatever the LED was doing -- a dark curve
+    taken lit, labelled dark. Now it stops the run before any curve is taken,
+    and the unwind still parks everything it can: the SourceMeter off, the
+    shutter shut, and the LED off on the retry."""
+    sim, rig = build()
+    sim.led.set_dc(1.020)
+    sim.led.enable_output(True)          # lit going in, as after a light run
+    sim.shutter.unblock()                # and open, so the unwind has work to do
+    calls = {"off": 0}
+
+    class Flaky:
+        def __init__(self, inner): self._i = inner
+        def off(self):
+            calls["off"] += 1
+            if calls["off"] == 1:
+                raise OSError("VISA timeout on :OUTP 0")
+            return self._i.off()
+        def __getattr__(self, n): return getattr(self._i, n)
+
+    rig.led = Flaky(sim.led)
+    seen = []
+    with pytest.raises(OSError, match="OUTP 0"):
+        for ev in run_jv(rig, JVConfig(dark=True, led_levels_v=(1.020,)),
+                         sleep=NO_SLEEP):
+            seen.append(ev)
+    assert not any(isinstance(e, JVCurveDone) for e in seen)
+    assert calls["off"] == 2             # the unwind tried again, and succeeded
+    assert sim.led.output_enabled is False
+    assert sim.smu.output_enabled is False
+    assert sim.bench.shutter_open is False
+
+
 # -- storage --------------------------------------------------------------
 def test_a_recorded_jv_run_writes_both_flat_files_and_an_hdf5(tmp_path):
     import os
@@ -213,6 +331,28 @@ def test_an_interrupted_jv_series_still_writes_what_completed(tmp_path):
             break
     assert rec.written
     assert len(rec.curves) == 2
+
+
+def test_the_file_says_which_curves_were_taken_with_the_shutter_open(tmp_path):
+    """A light J-V taken with the shutter shut is a dark J-V wearing a light
+    label, and until 2026-09-02 nothing in the file could tell the two
+    apart. Schema bace-jv/2 folds the shutter `InstrumentState` into
+    /config/resolved and onto every curve group -- per curve, because one
+    file holds a dark and a light curve and the last value alone would
+    mislabel one of them."""
+    import h5py
+    _, rig = build()
+    rec = JVRecorder(str(tmp_path), "20260902_150000", metadata={},
+                     rig_config=rig.config.as_dict(),
+                     resolved={"led_output_polarity": "INV"})
+    list(record(run_jv(rig, JVConfig(dark=True, led_levels_v=(1.020,)),
+                       sleep=NO_SLEEP), rec))
+    with h5py.File([p for p in rec.written if p.endswith(".h5")][0], "r") as f:
+        assert f.attrs["schema"] == "bace-jv/2"
+        assert f["config/resolved"].attrs["led_output_polarity"] == "INV"
+        assert f["config/resolved"].attrs["shutter"] == "open"   # the last one
+        by_name = {n: f["curves"][n].attrs["shutter"] for n in f["curves"]}
+        assert [by_name[n] for n in sorted(by_name)] == ["shut", "open"]
 
 
 def test_hdf5_keeps_dark_and_light_together(tmp_path):

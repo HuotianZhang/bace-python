@@ -187,6 +187,20 @@ def test_the_written_files_read_back_as_what_was_measured(tmp_path):
     assert h["metadata"]["temperature_k"] == pytest.approx(290.0)
 
 
+def test_the_file_carries_the_sign_convention_its_currents_were_written_in(tmp_path):
+    """`current_sign` is multiplied into every trace once, in the digitizer
+    fetch. A file that did not say which sign it used could not be compared
+    with the LabVIEW engine's: the port read every current positive and the
+    original every one negative for the same physics (2026-09-02). The value
+    rides into `/config/rig` with the rest of `RigConfig`, so the recorder did
+    not have to change -- this pins that it actually arrives, next to numbers
+    that carry it."""
+    rec, _ = _run(tmp_path, bace_sweep(0.88, 0.90, 0.02, n_loops=1))
+    h = _h5(rec)
+    assert h["rig_config"]["current_sign"] == -1.0
+    assert np.all(h["q_mean"] < 0), "extraction reads negative in this convention"
+
+
 def test_an_aborted_run_still_leaves_a_readable_folder(tmp_path):
     """The failure mode that matters: hours of loops, a fault at loop 7, and
     nothing on disk. Here loop 3 of 5 is interrupted and everything measured

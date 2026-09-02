@@ -650,6 +650,7 @@ def stage_configure(report: Report, rm, rig_config, run_config, *,
             return
         try:
             s = Infiniium(res, sense_resistor_ohm=rig_config.sense_resistor_ohm,
+                          current_sign=rig_config.current_sign,
                           probe_attenuation=rig_config.probe_attenuation)
             s.default_setup()
             s.configure_timebase(run_config.timebase_ns_per_div,
@@ -843,6 +844,7 @@ def stage_acquire(report: Report, rm, rig_config, run_config, averages: int) -> 
         from bace.drivers.infiniium import ScopeError
         try:
             s = Infiniium(res, sense_resistor_ohm=rig_config.sense_resistor_ohm,
+                          current_sign=rig_config.current_sign,
                           probe_attenuation=rig_config.probe_attenuation)
             s.default_setup()
             s.configure_timebase(run_config.timebase_ns_per_div,
@@ -1585,6 +1587,7 @@ def stage_measure(report: Report, rm, rig_config, run_config, *, averages: int,
         rig = Rig(bias=Agilent81150(bias_res),
                   scope=Infiniium(scope_res,
                                   sense_resistor_ohm=rig_config.sense_resistor_ohm,
+                                  current_sign=rig_config.current_sign,
                                   probe_attenuation=rig_config.probe_attenuation),
                   shutter=shutter, config=rig_config)
 
@@ -1600,15 +1603,22 @@ def stage_measure(report: Report, rm, rig_config, run_config, *, averages: int,
                                             "Vcoll — stepped to Vpre")
         c.data["averages / loops"] = f"{averages} / {loops}"
 
-        # -- the trigger chain, as the instruments actually hold it -----------
-        # Three states this run depends on and never sets: the 81150A's arming
-        # source and slope, and the 33220A's output polarity. All three are
-        # inherited from whatever the last session left behind, and none of them
-        # reached the output — which is how a run that extracts *during*
-        # illumination looks exactly like one that extracts after it. Reading
-        # them costs three queries. See claude/bace-trigger-chain.md.
-        for label, query in ((":ARM:SOUR1?", ":ARM:SOUR1?"),
-                             (":ARM:SLOP?", ":ARM:SLOP?"),
+        # -- the trigger chain, as found before the run ------------------------
+        # States this run depends on, read before it starts. Until 2026-09-02
+        # no run set any of them: the 81150A's arming source and slope and the
+        # 33220A's output polarity were inherited from whatever the last
+        # session left behind, and none reached the output -- which is how a
+        # run that extracts *during* illumination looks exactly like one that
+        # extracts after it. Since then `run_transient_scan` arms the 81150A
+        # itself (`configure_trigger`, before the pulse shape) and reads the
+        # arming back into `InstrumentState.bias_arm_source` / `bias_arm_slope`,
+        # which the recorder writes to /config/resolved. So the two :ARM lines
+        # below say what the front panel held *before* this run, not what the
+        # run ran under; for that, open the run folder this stage writes. The
+        # 33220A polarity is still only read, never written, by a run. See
+        # claude/bace-trigger-chain.md.
+        for label, query in ((":ARM:SOUR1? (as found, before the run)", ":ARM:SOUR1?"),
+                             (":ARM:SLOP? (as found, before the run)", ":ARM:SLOP?"),
                              (":OUTP1:POL? (read back)", ":OUTP1:POL?")):
             try:
                 c.data["81150A " + label] = str(bias_res.query(query)).strip()

@@ -1,4 +1,10 @@
-"""Axis geometry, and its agreement with the validated sweep planner."""
+"""Axis geometry, and its agreement with the sweep planner it replaced.
+
+`core.sequence.build_plan` was the first port of `calcLoopParameters` and the
+one validated against the 2026-08-07 archive. It is gone -- one planner, not
+two -- so the grid it produced is written out here and the general axis path
+has to reproduce it exactly.
+"""
 from __future__ import annotations
 
 import numpy as np
@@ -6,7 +12,6 @@ import pytest
 
 from bace.core.axis import (Axis, AxisError, ScanSpec, bace_at_voc,
                             bace_legacy_three_point, bace_sweep, tdcf_delay)
-from bace.core.sequence import build_plan
 
 
 def test_point_count_is_rounded_not_truncated():
@@ -102,21 +107,37 @@ def test_flattening_is_loop_major_like_the_original():
     assert order == [(1, 1), (1, 2), (1, 3), (2, 1), (2, 2), (2, 3)]
 
 
-def test_agrees_with_the_validated_sweep_planner():
-    """`core.sequence.build_plan` is the module validated against the archive.
-    The general axis path must reproduce it exactly for the V_pre case."""
+def test_reproduces_the_archive_validated_sweep_planner():
+    """The grid `core.sequence.build_plan` produced for the 2026-08-07
+    archive's parameters (V_oc 0.906, dV 1 mV, three loops), as that module
+    computed it from `calcLoopParameters`:
+
+        N          = round(|Vpre1 - Vpre2| / dV) + 1     (rounded, not truncated)
+        Vpre1Loop  = linspace(Vpre1, Vpre2, N)
+        VpreAll    = tile(Vpre1Loop, NLoops)
+        LoopIndex  = repeat(1..NLoops, N)                  loop-major
+        StepIndex  = tile(1..N, NLoops)
+
+    The general axis path has to reproduce every one of those arrays. The
+    rounding half of the guarantee is `test_point_count_is_rounded_not_truncated`
+    above; this is the flattening half."""
     voc, dv, n_loops = 0.906, 0.001, 3
-    legacy = build_plan(voc - dv, voc + dv, dv, vcoll=-1.0,
-                        delay_ns=88.0, n_loops=n_loops)
     plan = ScanSpec(axis=Axis("vpre", -dv, +dv, dv, centre_on_voc=True),
                     vcoll=-1.0, delay_ns=88.0, n_loops=n_loops).plan(voc)
 
-    assert plan.n_steps == legacy.n_steps
-    assert plan.n_shots == legacy.n_all_steps
-    np.testing.assert_allclose(plan.values, legacy.vpre_step)
-    np.testing.assert_allclose([s.setpoint.vpre for s in plan], legacy.vpre_all)
-    assert [s.loop for s in plan] == list(legacy.loop_index)
-    assert [s.step for s in plan] == list(legacy.step_index)
+    n = int(round(abs((voc - dv) - (voc + dv)) / dv)) + 1
+    vpre_step = np.linspace(voc - dv, voc + dv, n)
+    assert n == 3
+    assert plan.n_steps == n
+    assert plan.n_shots == n * n_loops
+    np.testing.assert_allclose(plan.values, vpre_step)
+    np.testing.assert_allclose(plan.values, [0.905, 0.906, 0.907], atol=1e-12)
+    np.testing.assert_allclose([s.setpoint.vpre for s in plan],
+                               np.tile(vpre_step, n_loops))
+    assert [s.loop for s in plan] == list(np.repeat(np.arange(1, n_loops + 1), n))
+    assert [s.step for s in plan] == list(np.tile(np.arange(1, n + 1), n_loops))
+    # the pinned conditions ride along unchanged, as Vcoll1Loop / Delay1Loop did
+    assert {(s.setpoint.vcoll, s.setpoint.delay_ns) for s in plan} == {(-1.0, 88.0)}
 
 
 def test_legacy_three_point_helper_matches_the_archive():

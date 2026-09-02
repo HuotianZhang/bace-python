@@ -111,6 +111,20 @@ class Shutter:
                 self._lib.DapiCloseModule(self._handle)
                 self._handle = None
 
+    def release(self) -> None:
+        """Close the module handle and leave the line where it is.
+
+        `close()` drives the line low first, which for the shutter is the
+        safe state. The relay is driven through this same class on another
+        module number, and low there is a relay throw to the amplifier --
+        the one move on this rig that must go through the router's
+        interlock, never through a shutdown path. Its owner releases the
+        handle with this instead.
+        """
+        if self._handle is not None:
+            self._lib.DapiCloseModule(self._handle)
+            self._handle = None
+
     def __enter__(self) -> "Shutter":
         return self.open()
 
@@ -216,6 +230,11 @@ class BridgedShutter(Shutter):
                 self._client.call("shutter", "close")
                 self._handle = None
 
+    def release(self) -> None:
+        if self._handle is not None:
+            self._client.call("shutter", "close")
+            self._handle = None
+
     def _set(self, value: int) -> None:
         if self._handle is None:
             raise ShutterError("shutter is not open")
@@ -246,6 +265,9 @@ class SimulatedShutter(Shutter):
         return self
 
     def close(self) -> None:
+        self._handle = None
+
+    def release(self) -> None:
         self._handle = None
 
     def _set(self, value: int) -> None:

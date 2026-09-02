@@ -26,6 +26,9 @@ sample architecture is inverted.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
+
+from .readback import ask, on_off, number
 
 TRIGGER_LEVEL_V = 1.0
 TRIGGER_INPUT_IMPEDANCE_OHM = 10_000.0
@@ -64,15 +67,49 @@ class Agilent81150:
         self._output = False
 
     # -- session-level setup, sent once ----------------------------------
-    def configure_trigger(self, cfg: TriggerConfig = TriggerConfig()) -> None:
-        if not cfg.external:
+    def configure_trigger(self, cfg: TriggerConfig | None = None, *,
+                          external: bool | None = None,
+                          positive_slope: bool | None = None) -> None:
+        """Arm the generator. Two spellings, one behaviour.
+
+        The bench harness and `tools/scan.py` pass a `TriggerConfig`, which
+        also carries the recovered threshold and impedance; the run path
+        speaks the `BiasSource` protocol and passes only the two booleans, so
+        the 1.0 V / 10 kohm constants never leave this file. Booleans given
+        beside a `TriggerConfig` override its fields.
+        """
+        base = cfg if cfg is not None else TriggerConfig()
+        ext = base.external if external is None else bool(external)
+        pos = base.positive_slope if positive_slope is None else bool(positive_slope)
+        if not ext:
             self._io.write(f":ARM:SOUR{self.ch} IMM;")
             return
         self._io.write(f":ARM:SOUR{self.ch} EXT;")
         self._io.write(f":ARM:SENS{self.ch} EDGE;")
-        self._io.write(f":ARM:SLOP {'POS' if cfg.positive_slope else 'NEG'};")
-        self._io.write(f":ARM:LEV {cfg.level_v:g};")
-        self._io.write(f":ARM:IMP {cfg.impedance_ohm:g};")
+        self._io.write(f":ARM:SLOP {'POS' if pos else 'NEG'};")
+        self._io.write(f":ARM:LEV {base.level_v:g};")
+        self._io.write(f":ARM:IMP {base.impedance_ohm:g};")
+
+    def trigger_state(self) -> dict[str, str]:
+        """`BiasSource.trigger_state`: `:ARM:SOUR1?` and `:ARM:SLOP?` read back.
+
+        A readback, not an echo of what `configure_trigger` sent -- the point
+        is to record what the instrument holds, which is also what
+        `tools/scan.py` checked by hand before this existed.
+        """
+        def ask(query: str, known: tuple[str, ...]) -> str:
+            try:
+                reply = str(self._io.query(query)).strip().upper()
+            except Exception:
+                return "?"
+            if not reply:
+                return "?"
+            for token in known:
+                if reply.startswith(token):
+                    return token
+            return reply                      # MAN, INT2, ...: say so
+        return {"arm_source": ask(f":ARM:SOUR{self.ch}?", ("EXT", "IMM")),
+                "arm_slope": ask(":ARM:SLOP?", ("POS", "NEG"))}
 
     def configure_shape(self, frequency_hz: float, *, duty_percent: float = 50.0,
                         edge_time_s: float = LEADING_EDGE_TIME_S,
@@ -129,8 +166,52 @@ class Agilent81150:
 
     @property
     def output_enabled(self) -> bool:
-        """Read by `drivers.routing.BiasRouter` before it moves the relay."""
+        """Read by `drivers.routing.BiasRouter` before it moves the relay.
+
+        The driver's memory of what it last sent -- or, after `read_output`,
+        of what the instrument last answered. The service refreshes it with
+        `read_output()` before every relay move and every read-back, because
+        a generator left ON by the LabVIEW VI is invisible to a flag that
+        starts False."""
         return self._output
+
+    # -- read-back, for the service's bench card --------------------------
+    # Not protocol members: the run path never asks these questions, the
+    # service does, through `getattr` with a cached fallback. Each one asks
+    # the instrument and answers None/"?" when it will not say. The spellings
+    # are the ones tools/scan.py checked by hand until 2026-09-02.
+    def read_output(self) -> bool | None:
+        """`:OUTP1?`, and the cached flag `output_enabled` follows it."""
+        on = on_off(ask(self._io, f":OUTP{self.ch}?"))
+        if on is not None:
+            self._output = on
+        return on
+
+    def read_polarity(self) -> str:
+        """`:OUTP1:POL?` -> `NORM`, `INV` or `?`; `output_polarity` follows it,
+        so the chain can be judged before any run has configured the shape."""
+        pol = ask(self._io, f":OUTP{self.ch}:POL?")
+        if pol is None:
+            return "?"
+        pol = pol.upper().rstrip(";")
+        self.output_polarity = pol
+        return pol
+
+    def read_state(self) -> dict[str, Any]:
+        """Everything the bench card shows for this generator, read from the
+        instrument: `output`, `polarity`, `high_v`, `low_v`, `frequency_hz`,
+        `delay_s`, `width_s`. A value the instrument would not give is None
+        (`?` for the polarity)."""
+        ch = self.ch
+        return {
+            "output": self.read_output(),
+            "polarity": self.read_polarity(),
+            "high_v": number(ask(self._io, f":VOLT{ch}:HIGH?")),
+            "low_v": number(ask(self._io, f":VOLT{ch}:LOW?")),
+            "frequency_hz": number(ask(self._io, f":FREQ{ch}?")),
+            "delay_s": number(ask(self._io, f":PULS:DEL{ch}?")),
+            "width_s": number(ask(self._io, f":FUNC{ch}:PULS:WIDT?")),
+        }
 
     def errors(self) -> list[str]:
         out = []

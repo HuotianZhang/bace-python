@@ -10,8 +10,9 @@ What it does that the original did not:
 * **Dark and light in one run.** The original swept the Keithley under whatever
   the 33220A happened to be doing. Here `dark` and the LED levels are explicit,
   the LED output is actually switched off for a dark scan rather than set low,
-  and both land in the same file set so the pair is kept together — a dark curve
-  is only useful next to the light curve it belongs to.
+  the shutter is opened for a light curve and shut for a dark one, and both
+  land in the same file set so the pair is kept together — a dark curve is
+  only useful next to the light curve it belongs to.
 * **Both sweep directions, optionally.** Forward and reverse curves that differ
   is hysteresis, which for many device chemistries is the most interesting thing
   in the measurement and is invisible if you only ever sweep one way. Off by
@@ -35,7 +36,7 @@ from typing import Callable, Iterator, Literal
 
 import numpy as np
 
-from .events import Event, Notice, Progress
+from .events import Event, InstrumentState, Notice, Progress
 from .rig import Rig
 
 Direction = Literal["forward", "reverse"]
@@ -191,10 +192,12 @@ def run_jv(rig: Rig, config: JVConfig = JVConfig(), *,
            sleep: Sleep = time.sleep) -> Iterator[Event]:
     """Sweep the SourceMeter, dark and/or at each LED level.
 
-    Yields `JVStarted`, then a `JVCurveDone` per sweep, then `JVFinished`.
+    Yields `JVStarted`, then per illumination an `InstrumentState` naming the
+    shutter position (when the rig has a shutter) and a `JVCurveDone` per
+    sweep, then `JVFinished`.
     Unwinds the same way the transient run does: the `finally` disables the
-    SourceMeter and the LED whether the run finished, was aborted, raised, or
-    the consumer simply stopped iterating.
+    SourceMeter, the LED and the shutter whether the run finished, was
+    aborted, raised, or the consumer simply stopped iterating.
     """
     if rig.smu is None:
         raise RuntimeError(
@@ -229,7 +232,23 @@ def run_jv(rig: Rig, config: JVConfig = JVConfig(), *,
                     yield Notice("warning", "J-V run aborted before "
                                             f"{'dark' if dark else f'{level} V'}")
                     return
-                _set_illumination(rig, dark, level, sleep, config.led_settle_s)
+                _set_illumination(rig, dark, level)
+                shutter = _set_shutter(rig, dark)
+                if shutter is not None:
+                    # On the event stream, for a console or recorder to pick
+                    # up: a light curve is only a light curve if light reached
+                    # the sample. `JVRecorder` folds it into /config/resolved
+                    # and onto each curve group (schema bace-jv/2), the way
+                    # the transient recorder does, so the *file* can say.
+                    yield InstrumentState({"shutter": shutter})
+                if rig.led is not None or shutter is not None:
+                    # Only when something moved. A bare SourceMeter rig has
+                    # nothing to settle after, and before 2026-09-02 the
+                    # settle lived inside `_set_illumination`, behind its
+                    # `rig.led is None` return, so such a rig never waited;
+                    # a silent 2 s per curve would be a regression nobody
+                    # reports.
+                    sleep(config.led_settle_s)
                 label = "dark" if dark else f"{level:g} V"
 
                 intensity = None
@@ -265,34 +284,61 @@ def run_jv(rig: Rig, config: JVConfig = JVConfig(), *,
         except Exception:
             pass
         _led_off(rig)
+        if rig.shutter is not None:
+            try:
+                rig.shutter.shut()
+            except Exception:
+                pass
 
 
-def _set_illumination(rig: Rig, dark: bool, level: float | None,
-                      sleep: Sleep, settle_s: float) -> None:
+def _set_illumination(rig: Rig, dark: bool, level: float | None) -> None:
     """Dark means the LED output *off*, not merely a low level.
 
     A sub-threshold level is right for the transient, where the generator has to
     keep producing a waveform. For a dark J-V there is nothing to keep, and an
     output that is off cannot leak.
+
+    Loud, not swallowed: an `off()` that fails mid-run leaves the LED on under
+    a curve labelled dark, which is worse than a stopped run.
     """
     if rig.led is None:
         return
     if dark:
-        _led_off(rig)
+        rig.led.off()
     else:
         rig.led.set_dc(float(level))
         rig.led.enable_output(True)
-    sleep(settle_s)
+
+
+def _set_shutter(rig: Rig, dark: bool) -> str | None:
+    """Open for a light curve, shut for a dark one. Returns the state for the
+    `InstrumentState` the run yields; None when the rig has no shutter.
+
+    Until 2026-09-02 `run_jv` never touched the shutter (recorded gap,
+    ui-brief 01-modules section 4). An LED that is on is not the same as light
+    reaching the sample, and only the shutter knows the difference: a light
+    J-V taken with the shutter shut is a dark J-V wearing a light label --
+    V_oc of nothing, J_sc of nothing, and a file that says "1.02 V". Moved
+    before the illumination settle, so the settle is spent under the light
+    the curve will be taken in.
+    """
+    if rig.shutter is None:
+        return None
+    if dark:
+        rig.shutter.shut()
+        return "shut"
+    rig.shutter.unblock()
+    return "open"
 
 
 def _led_off(rig: Rig) -> None:
+    """The unwind: never raises, so a dead LED cannot mask the exception that
+    is already propagating. `off()` is in the `LedSource` contract, so there
+    is no fallback spelling to try."""
     if rig.led is None:
         return
     try:
-        if hasattr(rig.led, "off"):
-            rig.led.off()
-        else:
-            rig.led.disable_output()
+        rig.led.off()
     except Exception:
         pass
 

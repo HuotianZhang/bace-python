@@ -437,8 +437,10 @@ def stage_sync(report, rm, rig_config, run_config, *,
                drive: bool = False, confirm=None,
                window_s: float = 2.5e-3, points: int = 500_000,
                timeout_s: float = 30.0) -> None:
-    """One wide single-shot record of the whole LED cycle, plus the three
-    instrument states the run depends on and never sets."""
+    """One wide single-shot record of the whole LED cycle, plus the
+    instrument states the run depends on. Since 2026-09-02 the run path arms
+    the 81150A itself (`RunConfig.external_trigger`); the 33220A polarity is
+    still never written by a run and is the state this stage exists for."""
     from bace.drivers.infiniium import Infiniium
 
     from .checks import Check, _wrap
@@ -511,6 +513,7 @@ def stage_sync(report, rm, rig_config, run_config, *,
 
         try:
             s = Infiniium(res, sense_resistor_ohm=rig_config.sense_resistor_ohm,
+                          current_sign=rig_config.current_sign,
                           probe_attenuation=rig_config.probe_attenuation)
             s.default_setup()
 

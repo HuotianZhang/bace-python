@@ -24,6 +24,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .protocols import DCPoint
+from .readback import ask, on_off
 
 
 class SourceMeterError(RuntimeError):
@@ -89,6 +90,18 @@ class Keithley2400:
     @property
     def output_enabled(self) -> bool:
         return self._output
+
+    def read_output(self) -> bool | None:
+        """`:OUTP?` from the instrument; the cached `output_enabled` follows it.
+
+        Not a protocol member. The router's interlock reads the cached flag,
+        and the service refreshes it here before a relay move and at every
+        read-back, so a SourceMeter left ON by hand is seen rather than
+        remembered as off."""
+        on = on_off(ask(self._io, ":OUTP?"))
+        if on is not None:
+            self._output = on
+        return on
 
     # -- the three DC quantities -----------------------------------------
     def _prepare(self) -> None:

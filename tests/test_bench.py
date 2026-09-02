@@ -649,6 +649,57 @@ def test_settled_prefers_the_instrument_when_it_really_disagrees():
     assert Infiniium._settled(0.0, 0.0) == 0.0
 
 
+# -- the sign convention, applied once ------------------------------------
+class _KnownVolts:
+    """A scope whose codes map to known volts: y = code * 1e-5 V, no offset."""
+
+    timeout = 0
+
+    def write(self, c):
+        pass
+
+    def query(self, c):
+        if "ADER" in c:
+            return "+1"
+        return "4000;-1.995E-7;5.0E-10;0;1.0E-5;0"
+
+    def query_binary_values(self, c, **kw):
+        return np.arange(-2000, 2000, dtype=np.int16)
+
+
+def test_the_fetch_applies_the_sign_once_beside_the_resistor_division():
+    """The transfer function, pinned. `current_sign` (rig.toml, -1) is the
+    digitiser chain's convention -- the port read every current positive and
+    the LabVIEW engine every one negative for the same physics, 2026-09-02 --
+    and it is applied exactly where the resistor division is, in `_fetch`.
+
+    `_fetch_volts` stays sign-free, and so does the auto-range built on it:
+    `scale to maximum.vi` works in volts at the input, and a sign there would
+    move the window rather than the number. That is why none of the autorange
+    tests above mention the sign, and why this one checks the window as well."""
+    from bace.drivers.infiniium import Infiniium
+
+    volts = np.arange(-2000, 2000, dtype=float) * 1e-5
+    neg = Infiniium(_KnownVolts(), sense_resistor_ohm=5.192, current_sign=-1.0)
+    pos = Infiniium(_KnownVolts(), sense_resistor_ohm=5.192, current_sign=+1.0)
+
+    np.testing.assert_allclose(neg._fetch_volts("CHAN2").y, volts)
+    np.testing.assert_allclose(pos._fetch_volts("CHAN2").y, volts)
+    np.testing.assert_allclose(neg._fetch("CHAN2").y, -volts / 5.192)
+    np.testing.assert_allclose(pos._fetch("CHAN2").y, +volts / 5.192)
+
+    # The default is the bench's own, so a bare `Infiniium(res)` in a test is
+    # not silently a +1 instrument.
+    assert Infiniium(_KnownVolts()).current_sign == -1.0
+
+    windows = set()
+    for sign in (-1.0, +1.0):
+        d = Infiniium(_ClippingScope(vertical_range=2.0), current_sign=sign)
+        vrange, voffset = d.autorange("CHAN2")
+        windows.add((round(vrange, 9), round(voffset, 9)))
+    assert len(windows) == 1, "the window is computed in volts; the sign must not move it"
+
+
 # -- the DIO backend probe --------------------------------------------------
 def _rig(dll_path=""):
     class _Rig:

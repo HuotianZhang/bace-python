@@ -42,6 +42,16 @@ beyond a web font, and they fall back cleanly without it.
 | `bace-console-round3.html` | 《BACE console — Round 3 · B》 — the console mockup: home is the five modules as cards, each card parameters + Run + result; the bench rail across the top; the pipeline composed from the cards as they stand; the rig diagram on its own tab. Three turns — cold bench, the same bench mid-check, and the rig tab. **Self-contained**: all 33 assets it needs (React, the stylesheet, the web font) are inlined, so it opens from disk with no network and no account. This is the current version — its chain-timing lane carries the corrected light path, 502 ns with delay zero at 0. |
 | `BACE Console - Round 3.dc.html` | The editable canvas source for the same design, and **neither current nor openable as it stands.** It still reads `+ 47 ns` — see the overturned table below — and it references `./support.js`, `_ds/modernist-…/styles.css` and `BACE Console - Round 1 / 2.dc.html`, none of which are in this folder, so a browser renders it unstyled and inert. Kept only as the source form; read `bace-console-round3.html` instead. |
 
+## The service layer
+
+Markdown, not figure pages. Read in this order.
+
+| file | what it is |
+|---|---|
+| `service-plan.md` | 《BACE 服务层规划》 — why the service is a thin shell around the engine: one process, one worker thread as the bench lock, the API by tab, the three pipeline bindings, `NeedsOperator` for a cryostat that is not wired, the verdict rule, and the P0 core cleanups to make first. Chinese. |
+| `service-contract.md` | The contract `bace/service/` was built to, derived from the plan and the Round 3 canvas: package layout, the concurrency and stop semantics, every endpoint's shape, the wire and journal payload policy, the tree schema, the check catalogue and the cost model. Where it and the plan disagree the plan wins; where it and the code disagree, fix one and say so there. |
+| `../bace/service/README.md` | How to run the service and drive it by hand with `curl`, `httpx` and a WebSocket client. |
+
 ## What has been overturned
 
 Every page below was written in good faith and then contradicted by

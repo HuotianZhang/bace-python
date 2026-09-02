@@ -19,8 +19,9 @@
 - **既有的独立 console 保持独立**：1918-C 在 :8918（单进程约束），331 在 :8331
   （未接线）。服务层像现在的代码一样走 HTTP 找它们。
 - **同一时刻至多一个 RunWorker**（bench 锁）。生成器在 worker 线程里跑（阻塞
-  VISA I/O），事件进 asyncio 队列 → 扇出给 WebSocket 订阅者 + RunRecorder +
-  journal。
+  VISA I/O）；RunRecorder / JVRecorder 套在生成器链里面，跟 tools/scan.py 一样
+  （`storage.recorder.record`）；事件进 asyncio 队列 → 扇出给 WebSocket 订阅者 +
+  journal。（2026-09-02 订正：recorder 不在 asyncio 扇出里，见 contract §2。）
 - **手动跑一张卡 = 单节点 pipeline**，同一条代码路径——这就是 flow-model 里
   "manual run 和 pipeline step 共享 monitor 和 history"的实现方式。
 - **并发只允许不碰 VISA 总线的观察者**：power monitor 走 :8918 的 HTTP，可以
@@ -90,6 +91,12 @@ Dry run = `validate` + 返回完整 schedule，不碰任何输出——UI 的 Dr
    inherited）——`/modules` 的 provenance 直接消费它。
 5. 第四批 15–17（`LedSource` 协议、删 `core/sequence.py`、拆 `checks.py`）
    顺路做，不挡路。
+6. （2026-09-02 补记，实际做了、计划里没列的）`run_jv` 光曲线开快门、暗曲线
+   关快门并 yield `InstrumentState({"shutter"})`；`run_intensity_series` 在
+   `measure_dc` 周围开快门；`storage/jv.py` 因此升到 `bace-jv/2`。都是
+   ui-brief 01-modules §4 记过的时序缺口，不是重写测量逻辑；`bace-run/2` 不变。
+   审阅轮又加了 `run_transient_scan` 每段 yield `StepPhase`（同样的仪器调用、
+   同样的顺序，只是多了 yield）。
 
 ## 分期
 
