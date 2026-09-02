@@ -25,6 +25,16 @@ Claude Design with the user before coding screens that differ from Round 3.
 | artifact `UI mockups: Pipeline bench timeline` (claude.ai/code/artifact/b51c4ebd-…) | the editable canvas of the same design |
 | `D:\BACE\ui-brief\` | the design pack: `02-orchestration.md` (the flow model), `03-states.md` (the rail, the chain, failures-that-look-like-results), `06-visual.md` (type, colour, density), `data/` (real numbers to develop against) |
 
+The bundle and the artifact are the same four artboards, and both were
+corrected on 2026-09-02: the 81150A `:OUTP1:POL` read `INV` in every chain
+strip, and the bace card's second polarity row was `inverted_output` → INV.
+It is now `output_polarity` → NORM — `inverted_output` is a *boolean* that an
+explicit `output_polarity` architects out, and NORM/INV is `output_polarity`'s
+pair. **Take no parameter name or value from the mockup**: the names come from
+`GET /modules` and the values from its `{value, source, …}`. The artboards'
+numbers are one operator's session — good examples, and a fair starting point
+for the cards' defaults, but not the recipe.
+
 ## Developing
 
 ```
@@ -56,6 +66,17 @@ The scripted walk-through of the whole operator flow is
   state (`how: "inferred"`, listed in `inferred`) — show the distinction.
 - Runs from earlier sessions answer from the journal (`GET /runs?session=all`,
   `GET /runs/{id}` with `from: "journal"`) — the grey V_oc grid reads this.
+- **Where a temperature came from travels with it** (contract §7, added
+  2026-09-02): every run and journalled node carries `temperature_how` ×
+  `temperature_source` — `typed`/`""` (nobody read an instrument),
+  `setpoint`/`""` (**requested, not reached**), `settled`/`console|simulated`,
+  `operator`/`operator` (typed at the pause), `operator`/`console|simulated`
+  (the pause ended without a number; this is the last polled reading). `how`
+  alone does not separate the last two, so render both — and never let a
+  `simulated` source read as a measured one. The folder name says `290K`
+  either way; it is not evidence.
+- `[sample] comment` is slugged into the folder name and kept verbatim in the
+  metadata. Show the sentence, not the slug.
 
 ## Known gaps the UI should not paper over
 
@@ -66,7 +87,12 @@ The scripted walk-through of the whole operator flow is
   watts, never mW/cm² (design pack, `04-data.md`).
 - Temperature settles automatically only when `[temperature] console` is set
   in rig.toml; otherwise every temperature node pauses (`NeedsOperator`) and
-  the UI must surface resume with a typed `temperature_k`.
+  the UI must surface resume with a typed `temperature_k` — and both ways of
+  ending that pause are recorded differently, see `temperature_how` above.
+- A `temperature` module binds the **rest of the run**, not the rest of one
+  loop iteration (the cryostat does not reset between iterations); a
+  temperature *loop* still wins for its own subtree. The pipeline tab's "what
+  it will do, in order" must show it that way.
 
 ## State of the bench code (so the UI session does not re-litigate it)
 
