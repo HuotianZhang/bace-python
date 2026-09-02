@@ -540,6 +540,19 @@ class Session:
             self.last_validated = {"tree": v.schedule.tree.as_wire(), "name": name,
                                    "validated_at": time.time(), "valid": v.valid}
         if not v.valid or v.schedule is None:
+            # Into the journal, not only the 422 body: session 143158 on
+            # the rig was refused and the reason lived nowhere once the
+            # HTTP response was gone.
+            try:
+                self.journal.append({
+                    "seq": None, "ts": time.time(), "run_id": None,
+                    "node_path": "", "type": "RunRefused",
+                    "data": {"name": name,
+                             "checks": [to_wire(c)[0] for c in v.checks
+                                        if c.level in ("invalid", "crit")]},
+                    "decimated": {}})
+            except Exception:                           # noqa: BLE001
+                pass
             raise SubmitRefused(v)
         tree = v.schedule.tree
         inferred = "manual" if isinstance(tree, Module) else "pipeline"

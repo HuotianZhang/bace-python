@@ -203,11 +203,27 @@ class Keithley2400:
         self._io.write(":FORM:ELEM VOLT,CURR;")
         self._io.write(f":SOUR:DEL {settle_s:g};")
         self._io.write(f":TRIG:COUN {int(points):d};")
+        # The whole sweep is ONE `:READ?`: the instrument steps, settles,
+        # integrates and averages every point before it answers. That is
+        # points x (source delay + averaging x NPLC / 50 Hz) plus stepping
+        # overhead -- with the validated recipe (71 points, 50 ms delay,
+        # averaging 10, NPLC 1) about 18 s, and the session's blanket
+        # 20 s VISA timeout cut it off on the rig (VI_ERROR_TMO, session
+        # 20260902_143927). So the timeout is sized from the sweep, with
+        # a factor two for auto-zero and stepping, and restored after.
+        per_point_s = (settle_s
+                       + max(1, int(self.config.averaging)) * self.config.nplc / 50.0)
+        budget_ms = int((10.0 + 2.0 * points * per_point_s) * 1000)
+        old_timeout = getattr(self._io, "timeout", None)
+        if old_timeout is not None and budget_ms > old_timeout:
+            self._io.timeout = budget_ms
         self.enable_output(True)
         try:
             raw = self._io.query(":READ?").strip()
         finally:
             self.disable_output()
+            if old_timeout is not None and budget_ms > old_timeout:
+                self._io.timeout = old_timeout
         flat = np.array([float(x) for x in raw.split(",")])
         return flat[0::2], flat[1::2]
 

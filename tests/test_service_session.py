@@ -235,7 +235,15 @@ def test_submit_refuses_crit_and_invalid_trees_with_the_checks_and_queues_nothin
             s.submit(temperature_pipeline(bace(1, voc=0.9)), kind="manual")
         assert s.last_validated["valid"] is True and s.last_validated["tree"]["loop"] == "temperature"
         assert s.records == [] and s.events_since(0) == [] and s.runs_index() == []
-        assert len(journal_lines(s)) == 1
+        # A refusal leaves no run, but it does leave a trace: session 143158
+        # on the rig was refused with 422 and the reason lived nowhere once
+        # the HTTP response was gone. One RunRefused line per refusal, with
+        # the blocking checks only.
+        refusals = [l for l in journal_lines(s) if l["type"] == "RunRefused"]
+        assert len(refusals) == 3 and len(journal_lines(s)) == 4
+        assert {c["code"] for c in refusals[0]["data"]["checks"]} == {"smu.ceiling"}
+        assert all(c["level"] in ("invalid", "crit")
+                   for r in refusals for c in r["data"]["checks"])
         with pytest.raises(UnknownRun):
             s.stop("nope")
         with pytest.raises(UnknownRun):

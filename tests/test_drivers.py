@@ -939,3 +939,38 @@ def test_probe_tells_a_console_before_its_first_poll_from_no_console(monkeypatch
     monkeypatch.setattr(urllib.request, "urlopen",
                         lambda req, timeout=None: _HTTPReply([1, 2]))
     assert t.probe() is None and t.available() is False
+
+
+def test_a_long_sweep_sizes_the_visa_timeout_from_its_own_arithmetic():
+    """The whole J-V sweep is one `:READ?`: the 2400 steps, settles, integrates
+    and averages every point before it answers. With the validated recipe
+    (71 points, 50 ms source delay, averaging 10, NPLC 1) that is ~18 s, and
+    the session's blanket 20 s VISA timeout cut it off on the rig
+    (VI_ERROR_TMO, session 20260902_143927). The driver now raises the
+    resource timeout for the read -- sized from the sweep, factor two -- and
+    puts it back afterwards."""
+
+    class Timed(FakeIO):
+        def __init__(self, **kw):
+            super().__init__(**kw)
+            self.timeout = 20000
+            self.timeout_at_read = None
+
+        def query(self, cmd):
+            if ":READ?" in cmd:
+                self.timeout_at_read = self.timeout
+            return super().query(cmd)
+
+    io_ = Timed(reads=["0.0,-2.0E-4,0.5,-1.5E-4"])
+    k = Keithley2400(io_, config=SourceMeterConfig(averaging=10, nplc=1.0))
+    k.sweep(0.0, 0.5, 71, settle_s=0.05)
+    # 71 x (0.05 + 10 x 0.02) = 17.75 s of instrument time; the budget is
+    # 10 + 2 x that, in ms
+    assert io_.timeout_at_read >= 45000
+    assert io_.timeout == 20000, "restored, so the next quick query fails fast"
+
+    # a quick sweep leaves the session's timeout alone
+    io_ = Timed(reads=["0.0,-2.0E-4,0.5,-1.5E-4"])
+    Keithley2400(io_, config=SourceMeterConfig(averaging=1, nplc=1.0)).sweep(
+        0.0, 0.5, 3, settle_s=0.0)
+    assert io_.timeout_at_read == 20000
