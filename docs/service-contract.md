@@ -285,7 +285,8 @@ to change.)
     `voc_min`, `voc_max`, `light_curves`.
   - `run_record(run_id) -> dict | None`: one run's `summary()` plus its `tree`
     and `nodes` — every module node's `NodeDone` reduced to `{module, outcome,
-    kept, requested, voc, voc_how, led_v, temperature_k, summary, folder,
+    kept, requested, voc, voc_how, led_v, temperature_k, temperature_how,
+    temperature_source, summary, folder,
     finished_at}` — from whichever session file holds it. What `GET /runs/{id}`
     answers for a run this process never held (§6): the pipeline tab's grey
     V_oc grid is the *previous* run's, and that record died with its process.
@@ -494,7 +495,8 @@ returns the generator (already wrapped in the recorder for that module and in
 the router context) — this is the single place a module's parameters become
 dataclasses. `RunContext` carries: `run_id`, `node_path`, `out_folder`,
 `metadata: RunMetadata` (sample/material/pixel/operator from `[sample]`,
-`temperature_k` from context or typed, `led_drive_v`, `voc_v`), `led_v`
+`temperature_k` from context or typed — with `temperature_how` and
+`temperature_source` saying which, see §7 — `led_drive_v`, `voc_v`), `led_v`
 (inherited or None), `voc: VocSource | None` (`value, led_v, run_id, node_path, how`),
 `sleep` (a no-op under `--fast`), `abort: Callable[[], bool]`, `resolved`
 (seed for `RunRecorder.resolved`: `led_output_polarity`, `bias_arm_source`,
@@ -662,9 +664,40 @@ entered. Then `Verdict(ok, "temperature.settled", "250 K reached in 27 min,
 held 60 s", node_path, data={setpoint_k, kelvin, settle_s, hold_s, held_s,
 polls, source})`, and the **last measured kelvin** (not the setpoint) becomes
 the subtree's `temperature_k` — folder names and metadata. A `temperature`
-*module* binds the same way for the nodes after it (the innermost open loop's
-iteration, or the rest of the tree at the top level), so a `bace` beside it
-is labelled with what the cryostat is at, not with the session's number.
+*module* binds the same way for the nodes after it, and for the **rest of the
+run**, not the rest of one loop iteration: the cryostat stays where it was put
+until another temperature node moves it, so a `bace` beside it — or at the
+next level of an enclosing illumination loop — is labelled with what the
+cryostat is at, not with the session's number. A temperature loop still wins
+for its own subtree; each iteration writes its setpoint again on the way in.
+
+**Where the number came from travels with it.** The folder name is the
+2026-08-07 archive convention and does not change: `290K` in a name is the
+same string however the 290 was arrived at. So every `RunMetadata`, every
+`/metadata` group in HDF5 and every journalled node carries two more fields —
+
+| `temperature_how` | `temperature_source` | means |
+|---|---|---|
+| `typed` | `""` | `[sample]` in the recipe, or the console's metadata field. Nobody read an instrument. |
+| `setpoint` | `""` | A temperature loop asked for it and the settle never got one reading. **What was requested, not what was reached.** |
+| `settled` | `console` \| `simulated` | The controller held it inside the band. `simulated` means the stand-in, so a `--sim` file cannot be mistaken for a measured one. |
+| `operator` | `operator` | A person typed the number at the pause. |
+| `operator` | `console` \| `simulated` | A person ended the pause without typing one; the number is the last reading polled while they decided. |
+
+`how` alone is not enough — the last two rows share it — so both are stored
+and both are rendered. A field absent altogether is a file written before
+these existed; the HDF5 schema stays `bace-run/2`, because two attributes on
+a group every reader already opens is an addition, not a change.
+
+The same split — the name is a convenience, the file is the record — applies
+to `[sample] comment`. The folder name carries a slug of it
+(`bace.storage.naming.slug`: whitespace and `_` become `-`, the characters a
+Windows path segment may not hold are dropped, 64 characters, anything merely
+non-ASCII is kept), while the metadata keeps the sentence verbatim. `runs/`
+holds a directory named `290K_1000mVLED_offsetcorr_LabVIEW panel replica -
+combination 4 - shutter only dark_20260902_012223` from 2026-09-01 to say
+why: spaces in a path, and a claim that was overturned the next day and can
+no longer be corrected without renaming the folder.
 Each node is marked in the console's audit log (`POST /api/note`) at the
 setpoint write and at the settle, best effort.
 

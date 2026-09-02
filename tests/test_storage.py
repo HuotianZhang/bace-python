@@ -12,6 +12,7 @@ import os
 
 import numpy as np
 import pytest
+from dataclasses import replace
 
 from bace.core.axis import bace_sweep
 from bace.drivers.simulated import make_bench
@@ -102,13 +103,14 @@ def test_the_archive_is_a_partial_run_and_the_mean_ignores_the_gap():
 
 
 # -- the recorder end to end ---------------------------------------------
-def _run(tmp_path, spec, cfg_kw=None, **rec_kw):
+def _run(tmp_path, spec, cfg_kw=None, meta_kw=None, **rec_kw):
     sim = make_bench(seed=3)
     sim.led.set_pulse(1.020, 0.4)
     rig = Rig(bias=sim.bias, scope=sim.scope, shutter=sim.shutter,
               config=RigConfig(), power=sim.power)
     meta = RunMetadata(sample="sim", material="TEST", pixel="pxa",
-                       temperature_k=290, led_drive_v=1.020, voc_v=0.906)
+                       temperature_k=290, led_drive_v=1.020, voc_v=0.906,
+                       **(meta_kw or {}))
     rec = RunRecorder(str(tmp_path), meta, **rec_kw)
     cfg = RunConfig(n_averages=64, settle_s=0.0, dark_settle_s=0.0, record_length=500,
                     **(cfg_kw or {}))
@@ -254,6 +256,85 @@ def test_folder_name_matches_the_archive_convention():
                     started=datetime.datetime(2026, 8, 7, 11, 15, 21))
     assert m.folder_name() == (
         "s4_PTQ10IT4F_pxa_290K_1020mVLED_906mVVOC_offsetcorr_20260807_111521")
+
+
+def test_temperature_provenance_stays_out_of_the_name():
+    """`290K` in a folder name says nothing about where 290 came from, and the
+    name cannot be made to: it is the 2026-08-07 convention, and every
+    reference to that archive -- HANDOVER, the journals, the regression test --
+    reads it. So the provenance is stored beside the number and the name does
+    not move by so much as a character."""
+    import datetime
+    plain = RunMetadata(sample="s4", material="PTQ10IT4F", pixel="pxa",
+                        temperature_k=290, led_drive_v=1.020, voc_v=0.906,
+                        started=datetime.datetime(2026, 8, 7, 11, 15, 21))
+    settled = replace(plain, temperature_how="settled", temperature_source="console")
+    typed = replace(plain, temperature_how="typed")
+    guessed = replace(plain, temperature_how="setpoint")
+    assert plain.folder_name() == settled.folder_name() == typed.folder_name() \
+        == guessed.folder_name()
+
+    d = settled.as_dict()
+    assert (d["temperature_k"], d["temperature_how"], d["temperature_source"]) == \
+        (290, "settled", "console")
+    # An unset pair is empty, not None: it goes into HDF5 attrs, which have no
+    # null, and `""` is how the rest of `as_dict` spells "nothing here".
+    assert plain.as_dict()["temperature_how"] == plain.as_dict()["temperature_source"] == ""
+
+
+@pytest.mark.parametrize("comment, expect", [
+    ("snake_case_note", "snake-case-note"),           # `_` separates fields: a comment may not forge one
+    ("a/b:c*d?e", "abcde"),                           # not allowed in a Windows path segment
+    ("up" + chr(92) + "down|<x>", "updownx"),         # the backslash above all: a path separator
+    ("tab\there", "tab-here"),                        # control codes go, they do not become dashes
+    ("  spaced  out  ", "spaced-out"),                # no spaces in a directory name
+    ("对照 LabVIEW 的那一轮", "对照-LabVIEW-的那一轮"),  # not-ASCII is not the same as not-safe
+    ("   ", ""),                                      # nothing to say
+    ("x" * 90, "x" * 64),                             # one long token: truncated as it stands
+    ("a-" * 60, "a-" * 31 + "a"),                     # many words: cut on a word boundary
+])
+def test_a_comment_is_reduced_to_one_path_segment(comment, expect):
+    from bace.storage.naming import slug
+    assert slug(comment) == expect
+
+
+def test_the_name_gets_the_slug_and_the_record_keeps_the_sentence():
+    """`290K_1000mVLED_offsetcorr_LabVIEW panel replica - combination 4 -
+    shutter only dark_20260902_012223` is a real directory in `runs/`: spaces
+    in a path, and a claim -- "combination 4" -- that was overturned the next
+    day and cannot be corrected now without renaming the folder. The name is
+    reduced from here on. The sentence is not: it stays in the metadata, in
+    full, where nothing depends on its shape."""
+    import datetime
+    said = "LabVIEW panel replica - combination 4 - shutter only dark"
+    m = RunMetadata(sample="s4", temperature_k=290, offset_corrected=False,
+                    comment=said, started=datetime.datetime(2026, 9, 2, 1, 22, 23))
+    assert m.folder_name() == (
+        "s4_290K_LabVIEW-panel-replica-combination-4-shutter-only-dark_20260902_012223")
+    assert " " not in m.folder_name()
+    assert m.as_dict()["comment"] == said, "the name is reduced; the record is not"
+
+    # A comment with nothing left after the reduction drops the field rather
+    # than leaving an empty one -- `s4_290K__20260902_012223` helps nobody.
+    blank = replace(m, comment=" :: ")
+    assert blank.folder_name() == "s4_290K_20260902_012223"
+    assert blank.as_dict()["comment"] == " :: "
+
+
+def test_the_file_says_whether_its_temperature_was_measured(tmp_path):
+    """The 2026-08-07 defect in miniature: `output_polarity = "leave"` wrote
+    nothing, so the file could not say which convention produced its numbers,
+    and `/config/resolved` was the answer. A temperature is the same shape of
+    problem -- 290 K typed into a recipe and 290 K settled by the 331 are the
+    same float -- so the pair travels into `/metadata` with it."""
+    from bace.storage.hdf5 import read_run
+    rec, _ = _run(tmp_path, bace_sweep(0.88, 0.92, 0.02, n_loops=2),
+                  meta_kw={"temperature_how": "settled",
+                           "temperature_source": "simulated"})
+    meta = read_run([p for p in rec.written if p.endswith(".h5")][0])["metadata"]
+    assert meta["temperature_k"] == pytest.approx(290.0)
+    assert (meta["temperature_how"], meta["temperature_source"]) == ("settled", "simulated"), (
+        "a file written against the stand-in must not read as a measured one")
 
 
 def test_a_run_survives_a_missing_h5py(tmp_path, monkeypatch):

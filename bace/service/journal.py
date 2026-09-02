@@ -562,6 +562,11 @@ class _Run:
                     "voc": voc.get("value") if isinstance(voc, dict) else voc,
                     "voc_how": voc.get("how") if isinstance(voc, dict) else None,
                     "led_v": detail.get("led_v"), "temperature_k": detail.get("temperature_k"),
+                    # Beside the number, as `voc_how` sits beside the V_oc:
+                    # a node recorded at 220 K is worth knowing whether the
+                    # console settled there or a loop only asked.
+                    "temperature_how": detail.get("temperature_how"),
+                    "temperature_source": detail.get("temperature_source"),
                     "summary": detail.get("summary"), "folder": folder,
                     "finished_at": ts}
 

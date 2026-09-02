@@ -148,7 +148,12 @@ class Settled:
     caller closes the tree). `temperature_k` is what the subtree is measured
     at: the last reading on the automatic path, the operator's typed number
     on the pause path, the last reading when they typed none, None when
-    nothing was read at all (the setpoint then stands). `settle_s` is what
+    nothing was read at all -- the setpoint then stands, and the executor
+    records it as `how = "setpoint"`, because nothing confirmed it). `how`
+    and `source` are not only for the card: they are copied onto the context
+    and from there into `RunMetadata.temperature_how`/`temperature_source`,
+    so a stored run says whether its temperature was measured, merely asked
+    for, or typed by a person. `settle_s` is what
     the ETA learns: polls times the poll interval, plus the wall time a
     person took.
     """
@@ -365,6 +370,9 @@ def settle(rig: Rig, ctx: "RunContext", detail: dict, *, node_path: str,
         # What was measured, not what was asked for: the folder names and
         # the metadata of everything below this node carry this number.
         ctx.temperature_k = kelvin
+        # `source` distinguishes the console from the stand-in, so a file
+        # written under `--sim` cannot be mistaken for a measured one.
+        ctx.temperature_how, ctx.temperature_source = "settled", source
         _note(controller, f"bace {ctx.run_id} {node_path}: settled at {kelvin:.3f} K")
         return Settled(how="settled", temperature_k=kelvin, settle_s=reached_s,
                        source=source, polls=p.polls)
@@ -445,6 +453,11 @@ def _pause(rig: Rig, ctx: "RunContext", detail: dict, *, node_path: str,
         polled_k if polled_k is not None else fallback_k)
     if temperature_k is not None:
         ctx.temperature_k = temperature_k
+        # `how` is `operator` either way -- a person decided this node was
+        # settled. `source` is what produced the number: their keyboard, or
+        # the console they were watching while they decided.
+        ctx.temperature_how = "operator"
+        ctx.temperature_source = "operator" if typed is not None else (source or "")
     ctx.sleep(hold_s)
     if controller is not None:
         _note(controller, f"bace {ctx.run_id} {node_path}: operator resumed"

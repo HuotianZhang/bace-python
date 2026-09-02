@@ -22,7 +22,7 @@ REM This does NOT touch the 81150A or the relay. It moves the shutter and the
 REM 33220A, and puts both back exactly as it found them - shape, polarity,
 REM frequency, both levels, and the output state.
 REM
-REM Writes runs\lightpower<stamp>.csv: one row per sample, with the phase, so
+REM Writes runs\lightpower_<stamp>.csv: one row per sample, with the phase, so
 REM the shutter transition itself is in the file too.
 
 setlocal

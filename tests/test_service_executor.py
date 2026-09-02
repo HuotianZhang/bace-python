@@ -579,6 +579,10 @@ def test_a_settle_that_times_out_pauses_and_the_operator_resumes_or_stops(tmp_pa
     done = {p: ev for p, ev, _ in h.of(E.NodeDone)}
     bace = done["T=250K/led=1.020V/bace"]
     assert bace.detail["temperature_k"] == last.kelvin and bace.outcome == "ok"
+    # `how` alone would lie here: a person ended this node, but the number is
+    # the console's last reading, not anything they typed. The pair says so.
+    assert (bace.detail["temperature_how"], bace.detail["temperature_source"]) == \
+        ("operator", "simulated")
     assert f"{last.kelvin:g}K" in os.path.basename(bace.detail["folder"])
     assert h.state_names() == ["preflight", "running", "paused", "running", "done", "parked"]
     assert any("operator resumed" in n for n in b.sim.temperature.notes)
@@ -849,3 +853,112 @@ def test_a_silent_instrument_pauses_at_the_node_before_the_setpoint_is_written(t
     folders = [ev.detail["folder"] for _, ev, _ in h.of(E.NodeDone) if "folder" in ev.detail]
     assert folders and all("250K" in os.path.basename(f) for f in folders), (
         "no usable reading: the setpoint names the folder")
+# -- where the temperature came from ---------------------------------------------------------
+def temperature_node(setpoint: float = 250.0, **kw) -> dict:
+    return {"kind": "module", "module": "temperature",
+            "params": {"setpoint_k": setpoint, "tolerance_k": 0.2, "hold_s": 0.0,
+                       "timeout_s": 600.0, **kw}}
+
+
+def test_a_settled_temperature_and_one_nothing_confirmed_are_told_apart(tmp_path):
+    """250 K the console settled at and 250 K a loop merely asked for are the
+    same float and the same folder name. `temperature_how` is the only thing
+    that separates them, so both paths are asserted here against the same
+    tree: one console answering, one console down."""
+    b = wired()
+    obj = tree(temperatures=(295,), levels=(1.02,), n_loops=1)
+    h, job = run_job(b, schedule_of(obj), str(tmp_path))
+    h.finish()
+    assert job.state == "done"
+
+    done = {p: ev for p, ev, _ in h.of(E.NodeDone)}
+    reached = [ev for _, ev, _ in h.of(E.TemperatureRead)][-1].kelvin
+    for path in ("T=295K", "T=295K/led=1.020V/jv_bace", "T=295K/led=1.020V/bace"):
+        d = done[path].detail
+        assert d["temperature_k"] == reached
+        assert (d["temperature_how"], d["temperature_source"]) == ("settled", "simulated"), path
+    assert f"{reached:g}K" in os.path.basename(done["T=295K/led=1.020V/bace"].detail["folder"])
+
+    # The console is not answering at all: nothing is ever read, the node
+    # pauses, and the operator resumes without a number. The setpoint stands
+    # in the folder name -- it has to stand for something -- and says so.
+    b2 = wired()
+    b2.sim.temperature.connected = False
+    obj2 = tree(temperatures=(250,), levels=(1.02,), n_loops=1)
+    h2, job2 = run_job(b2, schedule_of(obj2), str(tmp_path / "down"))
+    h2.wait_paused(250.0, what="temperature timeout")
+    assert job2.resume({"note": "console is down, front panel says about 250"})
+    h2.finish()
+    assert job2.state == "done"
+
+    assert not h2.of(E.TemperatureRead), "nothing was ever read"
+    done2 = {p: ev for p, ev, _ in h2.of(E.NodeDone)}
+    bace = done2["T=250K/led=1.020V/bace"]
+    assert bace.detail["temperature_k"] == 250.0, "the setpoint is all there is"
+    assert (bace.detail["temperature_how"], bace.detail["temperature_source"]) == \
+        ("setpoint", ""), "asked for, never confirmed -- and the file must not pretend"
+    assert "250K_" in os.path.basename(bace.detail["folder"]) + "_"
+
+
+def test_an_operator_who_types_the_temperature_is_recorded_as_its_source(tmp_path):
+    """The number the person typed, not the setpoint and not the last reading,
+    and `source = "operator"` so a later reader knows a keyboard produced it."""
+    b = wired()
+    b.sim.temperature.time_constant_reads = 1000
+    obj = tree(temperatures=(250,), levels=(1.02,), n_loops=1)
+    obj["tolerance_k"], obj["timeout_s"] = 0.001, 60.0
+    h, job = run_job(b, schedule_of(obj), str(tmp_path))
+    h.wait_paused(250.0, what="temperature timeout")
+    assert job.resume({"temperature_k": 249.6, "note": "read off the front panel"})
+    h.finish()
+    assert job.state == "done"
+
+    typed = [ev for _, ev, _ in h.of(E.TemperatureRead) if ev.source == "operator"]
+    assert [ev.kelvin for ev in typed] == [249.6]
+    done = {p: ev for p, ev, _ in h.of(E.NodeDone)}
+    bace = done["T=250K/led=1.020V/bace"]
+    assert bace.detail["temperature_k"] == 249.6
+    assert (bace.detail["temperature_how"], bace.detail["temperature_source"]) == \
+        ("operator", "operator")
+    assert "249.6K" in os.path.basename(bace.detail["folder"])
+
+
+def test_a_temperature_module_binds_the_rest_of_the_run_not_one_iteration(tmp_path):
+    """`illumination > [jv_bace, temperature, bace]`, two levels. The module
+    settles the cryostat in the first iteration; the second iteration's
+    jv_bace runs *before* the module comes round again, with the cryostat
+    still where the first one left it.
+
+    That jv_bace used to be labelled with the session's typed number, because
+    the module's reading was written onto the illumination node and a fresh
+    node is built per iteration from the outer scope. The cryostat does not
+    reset between iterations, so neither does the binding: it goes to the
+    root and to every node already open."""
+    b = wired()
+    obj = {"kind": "loop", "loop": "illumination", "levels_v": [1.02, 1.04],
+           "led_low_v": 0.4, "led_settle_s": 0.0,
+           "children": [jv_node(), temperature_node(250.0), bace_node(1)]}
+    h, job = run_job(b, schedule_of(obj), str(tmp_path))
+    h.finish()
+    assert job.state == "done" and not h.of(E.NeedsOperator)
+
+    done = {p: ev for p, ev, _ in h.of(E.NodeDone)}
+    # What the module settled at in the *first* iteration -- the second
+    # iteration's module runs again later and reads a slightly different
+    # number, which is the point: the jv_bace between them must carry the
+    # first one, not the session's.
+    settled_at = [ev for p, ev, _ in h.of(E.TemperatureRead)
+                  if p == "led=1.020V/temperature"][-1].kelvin
+    assert abs(settled_at - 250.0) <= 0.2 and settled_at != 250.0
+
+    first = done["led=1.020V/jv_bace"].detail
+    assert "temperature_k" not in first, (
+        "before the module ran, the cryostat was where the session says it was")
+
+    second = done["led=1.040V/jv_bace"].detail
+    assert second["temperature_k"] == settled_at, (
+        "the cryostat is still at 250 K: the second level must not be labelled 290")
+    assert (second["temperature_how"], second["temperature_source"]) == \
+        ("settled", "simulated")
+    assert "290K" not in os.path.basename(second["folder"])
+    assert f"{settled_at:g}K" in os.path.basename(second["folder"])

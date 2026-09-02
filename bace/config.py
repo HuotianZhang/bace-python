@@ -147,9 +147,14 @@ def load_run(path: str | Path = "run.toml"
                      duty_percent=run.duty_percent,
                      threshold_v=1.0)
 
+    # Typed, and nothing on this path can make it anything else: `tools/scan.py`
+    # opens no temperature controller. The service is where a number can be
+    # settled or read, and it says so there.
+    typed_k = sam.get("temperature_k")
     meta = RunMetadata(sample=sam.get("sample", ""), material=sam.get("material", ""),
                        pixel=sam.get("pixel", ""),
-                       temperature_k=sam.get("temperature_k"),
+                       temperature_k=typed_k,
+                       temperature_how="typed" if typed_k is not None else "",
                        led_drive_v=drive.level,
                        offset_corrected=run.offset_correct,
                        operator=sam.get("operator", ""),

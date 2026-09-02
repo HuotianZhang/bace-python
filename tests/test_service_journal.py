@@ -445,6 +445,8 @@ def test_run_record_finds_a_run_in_any_session_file_with_its_nodes(tmp_path):
     older = bace_run("20260901_100000-001", T0 - 86400, 1, {"n_loops": 7})
     older[-3]["data"]["detail"].update({"module": "bace", "voc": {"value": 0.906, "how": "jv_bace"},
                                         "led_v": 1.02, "temperature_k": 250.1,
+                                        "temperature_how": "settled",
+                                        "temperature_source": "console",
                                         "summary": "Q 1e-10 C · 4/20"})
     write_session(out, "20260901_100000", older)
     write_session(out, "20260902_120000", bace_run("20260902_120000-001", T0, 1, {"n_loops": 3}))
@@ -455,6 +457,9 @@ def test_run_record_finds_a_run_in_any_session_file_with_its_nodes(tmp_path):
         assert rec["nodes"] == {"bace": {
             "module": "bace", "outcome": "ok", "kept": 4, "requested": 20, "voc": 0.906,
             "voc_how": "jv_bace", "led_v": 1.02, "temperature_k": 250.1,
+            # Beside the number, as voc_how sits beside the V_oc: 250.1 K
+            # that the console settled at is not 250.1 K that a loop asked for.
+            "temperature_how": "settled", "temperature_source": "console",
             "summary": "Q 1e-10 C · 4/20", "folder": "runs/s4_290K_20260902_120000",
             "finished_at": rec["nodes"]["bace"]["finished_at"]}}
         assert rec["node_count_done"] == 1

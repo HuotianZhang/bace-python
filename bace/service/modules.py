@@ -236,8 +236,11 @@ class RunContext:
 
     `led_v`/`led_low_v` are the illumination loop's binding (None outside
     one); `voc` the V_oc source in scope, which `bace` replaces with the one
-    it actually centred on; `temperature_k` the context temperature after an
-    operator resumed a temperature node. `sleep` is a no-op under `--fast`;
+    it actually centred on; `temperature_k` the context temperature a
+    temperature node settled at or an operator typed, with `temperature_how`
+    and `temperature_source` saying which -- the `how` and `source` of the
+    `Settled` it came from, so the file can tell a reading from a wish.
+    `sleep` is a no-op under `--fast`;
     `abort` is the worker's flag. `resolved` seeds the recorder's readbacks
     (the chain from the last read-back). `on_data` receives the full-
     precision arrays at the end so the session can serve `/runs/{id}/data`;
@@ -261,6 +264,8 @@ class RunContext:
     led_low_v: float | None = None
     voc: VocSource | None = None
     temperature_k: float | None = None
+    temperature_how: str = ""
+    temperature_source: str = ""
     sleep: Callable[[float], None] = time.sleep
     abort: Callable[[], bool] = _never
     resolved: dict[str, str] = field(default_factory=dict)
@@ -269,6 +274,17 @@ class RunContext:
     folders: list[str] = field(default_factory=list)
     emit: Callable[[E.Event], None] | None = None
     stop_mode: Callable[[], str | None] | None = None
+
+    def temperature(self) -> tuple[float | None, str, str]:
+        """`(kelvin, how, source)` for a module's metadata: the tree's binding
+        when a temperature node made one, the session's typed number
+        otherwise. The three travel together on purpose -- a folder named
+        `220K` reads the same whether the console settled there or a loop
+        merely asked, and only `how` separates them."""
+        if self.temperature_k is not None:
+            return self.temperature_k, self.temperature_how, self.temperature_source
+        return (self.metadata.temperature_k, self.metadata.temperature_how,
+                self.metadata.temperature_source)
 
 
 # -- the specs --------------------------------------------------------------
@@ -649,9 +665,14 @@ class Catalogue:
         """The session's `RunMetadata` from `[sample]`; a module fills in the
         LED level, the V_oc and the temperature it ran at."""
         s = self.sample
+        # The session's own number is typed -- in `[sample]` or in the console's
+        # metadata field, which is the same slot. A temperature node replaces it
+        # for its subtree, and `how`/`source` with it.
+        typed_k = _float_or_none(s.get("temperature_k"))
         return RunMetadata(sample=str(s.get("sample", "")), material=str(s.get("material", "")),
                            pixel=str(s.get("pixel", "")),
-                           temperature_k=_float_or_none(s.get("temperature_k")),
+                           temperature_k=typed_k,
+                           temperature_how="typed" if typed_k is not None else "",
                            operator=str(s.get("operator", "")),
                            comment=str(s.get("comment", "")))
 
@@ -952,9 +973,9 @@ class Catalogue:
             cfg.points()
         except ValueError as exc:
             raise ModuleError(f"{name}: step_v: {exc}") from None
-        temperature = ctx.temperature_k if ctx.temperature_k is not None \
-            else ctx.metadata.temperature_k
+        temperature, temp_how, temp_source = ctx.temperature()
         meta = replace(ctx.metadata, temperature_k=temperature,
+                       temperature_how=temp_how, temperature_source=temp_source,
                        led_drive_v=levels[0] if len(levels) == 1 else None,
                        voc_v=None, offset_corrected=False, started=datetime.now())
         folder = os.path.join(ctx.out_folder, meta.folder_name())
@@ -1051,8 +1072,7 @@ class Catalogue:
             except IlluminationError as exc:
                 raise ModuleError(f"{name}: voc: {exc}") from None
 
-        temperature = ctx.temperature_k if ctx.temperature_k is not None \
-            else ctx.metadata.temperature_k
+        temperature, temp_how, temp_source = ctx.temperature()
         store_shots = bool(p["store_shots"])
         v_sat = float(p["v_sat"])
         led_settle_s = float(p["led_settle_s"])
@@ -1140,6 +1160,7 @@ class Catalogue:
 
                 meta = replace(ctx.metadata, led_drive_v=led_v, voc_v=voc,
                                temperature_k=temperature,
+                               temperature_how=temp_how, temperature_source=temp_source,
                                offset_corrected=run_cfg.offset_correct,
                                started=datetime.now())
                 rec = RunRecorder(ctx.out_folder, meta, store_shots=store_shots,

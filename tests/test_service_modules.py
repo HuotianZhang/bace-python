@@ -71,7 +71,8 @@ def make_ctx(tmp_path, node_path="bace", **kw) -> RunContext:
     return RunContext(run_id="20260902_210000-001", node_path=node_path,
                       out_folder=str(tmp_path),
                       metadata=RunMetadata(sample="s4", material="SIM", pixel="a",
-                                           temperature_k=290.0), **kw)
+                                           temperature_k=290.0,
+                                           temperature_how="typed"), **kw)
 
 
 def voc_at(level: float, value: float = 0.906) -> VocSource:
@@ -179,6 +180,24 @@ def test_the_recipes_illumination_level_reaches_jv_bace_and_an_optional_jv_table
     meta = catalogue(sample={"sample": "s4", "material": "PTQ10:IT-4F", "pixel": "a",
                              "temperature_k": 290, "operator": "hz"}).base_metadata()
     assert (meta.sample, meta.pixel, meta.temperature_k, meta.operator) == ("s4", "a", 290.0, "hz")
+    assert (meta.temperature_how, meta.temperature_source) == ("typed", ""), (
+        "nobody read an instrument for this number, and the file must say so")
+    bare = catalogue(sample={"sample": "s4"}).base_metadata()
+    assert (bare.temperature_k, bare.temperature_how) == (None, ""), "no number, no provenance"
+
+
+def test_the_context_temperature_prefers_the_tree_over_the_session(tmp_path):
+    """Two levels, and no competition between them: what a temperature node
+    bound wins for its subtree, the session's typed `[sample]` number is the
+    fallback when no node bound one, and `how`/`source` travel with whichever
+    won -- a run must never be filed with one level's kelvin and the other's
+    provenance."""
+    ctx = make_ctx(tmp_path)
+    assert ctx.temperature() == (290.0, "typed", ""), "no node bound one: the session's"
+
+    ctx.temperature_k, ctx.temperature_how = 250.1, "settled"
+    ctx.temperature_source = "console"
+    assert ctx.temperature() == (250.1, "settled", "console"), "the tree's, whole"
 
 
 def test_as_wire_reports_what_the_module_needs():
@@ -339,6 +358,14 @@ def test_bace_pulses_the_led_runs_on_the_amplifier_and_records_the_folder(tmp_pa
     files = os.listdir(ctx.folders[0])
     assert any(f.startswith("1_averagesQ") for f in files)
     assert any(f.startswith("run") and f.endswith(".h5") for f in files)
+
+    # No temperature node ran, so the 290 in that name is the session's typed
+    # number and nothing more. The name cannot say that; the file does.
+    from bace.storage.hdf5 import read_run
+    h5 = [f for f in files if f.startswith("run") and f.endswith(".h5")][0]
+    meta = read_run(os.path.join(ctx.folders[0], h5))["metadata"]
+    assert (meta["temperature_k"], meta["temperature_how"], meta["temperature_source"]) == \
+        (pytest.approx(290.0), "typed", "")
 
     data = got["bace"]
     assert set(data) >= {"axis", "values", "q_mean", "q_std", "q_all", "time_s", "light",

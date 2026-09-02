@@ -233,7 +233,11 @@ POST /runs/{id}/resume   {"temperature_k": 250.1, "note": "set by hand"}
 ```
 
 `temperature_k` becomes the subtree's temperature — folder names, metadata —
-and both fields are journaled as `OperatorResumed`. `hold_s` is honoured after
+and both fields are journaled as `OperatorResumed`. The metadata also records
+*how* that number was arrived at (`temperature_how`/`temperature_source`,
+contract §7): typed here, settled by the console, or a setpoint nothing ever
+confirmed. The folder name cannot say — `250K` is `250K` — so the file does.
+`hold_s` is honoured after
 the resume. The seconds between the pause and the resume go to the journal,
 keyed by setpoint, and become the settle time the Dry run quotes for that
 temperature next time; a temperature never settled before shows `—`, never an

@@ -54,13 +54,20 @@ settle, and a reading delivered after they have decided it settled is
 history), and the resume's `temperature_k` becomes the context temperature of
 the subtree. Either way the temperature the subtree is measured at -- the
 last reading, or the operator's number -- goes into the folder names and the
-metadata of everything measured below the node, and the settle it took feeds
-the ETA. Without an `emit` hook (a script, a test) the readings taken during
-a pause are yielded after the resume instead. A `temperature` *module* binds
-the same way for the nodes after it: what it settled at (or the operator
-typed) is written into the innermost open loop, or the tree's root when
-there is none, so a `bace` that follows it is labelled with the temperature
-the cryostat is at, not the session's.
+metadata of everything measured below the node -- with the `how` and `source`
+that say which it was (`RunMetadata.temperature_how`/`temperature_source`; a
+folder called `220K` reads the same whether the console settled there, a loop
+only asked and nothing answered, or a person typed it) -- and the settle it
+took feeds the ETA. Without an `emit` hook (a script, a test) the readings
+taken during a pause are yielded after the resume instead. A `temperature`
+*module* binds the same way for the nodes after it, and for the rest of the
+run rather than the rest of one iteration: the cryostat is where it settled
+and stays there until another temperature node moves it, so what it settled
+at (or the operator typed) is written into the root *and* into every loop
+node already open, and a `bace` that follows it -- in this iteration or the
+next -- is labelled with the temperature the cryostat is at, not the
+session's. A temperature loop still wins for its own subtree; each iteration
+writes its setpoint again on the way in.
 
 **Stopping.** `after_shot` is polled before every node and reported by the
 module in flight (`RunAborted(reason="requested")`); the open loop nodes are
@@ -139,6 +146,8 @@ class _Open:
     led_v: float | None = None
     led_low_v: float | None = None
     temperature_k: float | None = None
+    temperature_how: str = ""
+    temperature_source: str = ""
     detail: dict = field(default_factory=dict)
 
 
@@ -320,6 +329,8 @@ class _Executor:
         outer = self._context()
         node.led_v, node.led_low_v = outer.led_v, outer.led_low_v
         node.temperature_k = outer.temperature_k
+        node.temperature_how = outer.temperature_how
+        node.temperature_source = outer.temperature_source
         if step.loop == "illumination":
             node.led_v = _float_or_none(d.get("led_v", step.value))
             node.led_low_v = _float_or_none(d.get("led_low_v"))
@@ -334,7 +345,11 @@ class _Executor:
         detail = {"setpoint_k": setpoint,
                   **{k: float(d.get(k, v)) for k, v in TEMPERATURE_DEFAULTS.items()},
                   "index": index, "count": count}
+        # What was asked for, until the settle says what was reached. If it
+        # never does -- a timeout with not one reading -- this setpoint is what
+        # the folder names carry, and `how` says it was never confirmed.
         node.temperature_k = setpoint
+        node.temperature_how, node.temperature_source = "setpoint", ""
         ctx = self.ctx_factory(step)
         # The settle -- through the console, or the operator's pause -- is
         # one helper shared with the `temperature` module; what comes back
@@ -350,9 +365,14 @@ class _Executor:
         if outcome.temperature_k is not None:
             # What was measured, or what the operator typed -- not the
             # setpoint: it goes into every folder name and metadata below
-            # this node.
+            # this node, and `how`/`source` travel with it so the file can
+            # say which of the two it was.
             node.temperature_k = float(outcome.temperature_k)
+            node.temperature_how = outcome.how
+            node.temperature_source = outcome.source or ""
         node.detail["temperature_k"] = node.temperature_k
+        node.detail["temperature_how"] = node.temperature_how
+        node.detail["temperature_source"] = node.temperature_source
         return False
 
     def _exit(self, step: Step, index_in_schedule: int) -> Iterator[E.Event]:
@@ -377,6 +397,8 @@ class _Executor:
                 out.led_v, out.led_low_v = node.led_v, node.led_low_v
             if node.temperature_k is not None:
                 out.temperature_k = node.temperature_k
+                out.temperature_how = node.temperature_how
+                out.temperature_source = node.temperature_source
         return out
 
     # -- modules ------------------------------------------------------------
@@ -396,7 +418,10 @@ class _Executor:
         self._hooks(ctx)
         values = step.values()
         given = self._bind(ctx, step, values)
-        bound_k = ctx.temperature_k
+        # The whole triple, not just the number: a `temperature` module that
+        # settles at exactly the number already in scope still changes what
+        # that number is worth, and that change must be recorded.
+        bound_temperature = (ctx.temperature_k, ctx.temperature_how, ctx.temperature_source)
         started = time.time()
         gen = None
         try:
@@ -431,16 +456,27 @@ class _Executor:
             # The module measured its own V_oc (measure_dc): the session's
             # rail should show it, as it shows a jv_bace curve's.
             self.on_voc(ctx.voc)
-        if ctx.temperature_k is not None and ctx.temperature_k != bound_k:
-            # A `temperature` module settled (or the operator answered it):
-            # what it measured binds the nodes after it, as a temperature
-            # loop's iteration binds the nodes under it -- otherwise the
-            # bace beside it would be labelled with the session's number
-            # while the cryostat sits somewhere else.
-            holder = self.open[-1] if self.open else self.root
-            holder.temperature_k = float(ctx.temperature_k)
-            if self.open:
-                holder.detail["temperature_k"] = holder.temperature_k
+        if ctx.temperature_k is not None and (
+                ctx.temperature_k, ctx.temperature_how,
+                ctx.temperature_source) != bound_temperature:
+            # A `temperature` module settled (or the operator answered it).
+            # The cryostat is now there and stays there until another
+            # temperature node moves it, so this binds the rest of the run,
+            # not just the rest of this iteration: `root`, because the next
+            # iteration of an enclosing loop builds a fresh `_Open` that
+            # copies from the outer scope, and every node already open,
+            # which would otherwise shadow `root` with the value it copied
+            # on its way in. A temperature loop is unaffected -- its `_enter`
+            # writes its own setpoint again for each iteration.
+            kelvin = float(ctx.temperature_k)
+            for holder in (self.root, *self.open):
+                holder.temperature_k = kelvin
+                holder.temperature_how = ctx.temperature_how
+                holder.temperature_source = ctx.temperature_source
+                if holder is not self.root:
+                    holder.detail.update(temperature_k=kelvin,
+                                         temperature_how=ctx.temperature_how,
+                                         temperature_source=ctx.temperature_source)
         self.modules_done += 1
         if tally.aborted is None:
             # A module that ran to its end is what the next one of its kind
@@ -494,6 +530,8 @@ class _Executor:
                 ctx.led_low_v = outer.led_low_v
         if outer.temperature_k is not None:
             ctx.temperature_k = outer.temperature_k
+            ctx.temperature_how = outer.temperature_how
+            ctx.temperature_source = outer.temperature_source
 
         src = step.detail.get("voc")
         ctx.voc = None
@@ -565,6 +603,8 @@ class _Executor:
             detail["led_v"] = led_v
         if ctx.temperature_k is not None:
             detail["temperature_k"] = ctx.temperature_k
+            detail["temperature_how"] = ctx.temperature_how
+            detail["temperature_source"] = ctx.temperature_source
         if error is not None:
             detail["error"] = error
         return detail

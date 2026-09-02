@@ -225,7 +225,11 @@ def main(argv=None) -> int:
 
     # -- output -----------------------------------------------------------
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out = a.out or os.path.join(here, "runs", f"lightpower{stamp}.csv")
+    # `lightpower_<stamp>.csv`, not `lightpower<stamp>.csv`: this sits at the
+    # top of `runs/` beside `bare_<stamp>` and `<T>K_..._<stamp>`, which
+    # separate the stamp. (The files *inside* a run folder deliberately do
+    # not -- `0_parameters20260807_111521.txt` is the archive's own shape.)
+    out = a.out or os.path.join(here, "runs", f"lightpower_{stamp}.csv")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=["t_s", "phase", "shutter", "watts",
