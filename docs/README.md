@@ -35,7 +35,12 @@ beyond a web font, and they fall back cleanly without it.
 | `bace-status.html` | The running record of the port **through 31 August 2026**. Carries a 2026-09-02 banner listing what has since changed. |
 | `port-plan.html` | The original plan, written before any of it was built. Kept for the reasoning. It is where the 47 ns error started; that paragraph is corrected in place. |
 
-`BACE Console - Round 3.dc.html` is a UI design canvas, not a document.
+## The UI design canvas
+
+| file | what it is |
+|---|---|
+| `bace-console-round3.html` | 《BACE console — Round 3 · B》 — the console mockup: home is the five modules as cards, each card parameters + Run + result; the bench rail across the top; the pipeline composed from the cards as they stand; the rig diagram on its own tab. Three turns — cold bench, the same bench mid-check, and the rig tab. **Self-contained**: all 33 assets it needs (React, the stylesheet, the web font) are inlined, so it opens from disk with no network and no account. This is the current version — its chain-timing lane carries the corrected light path, 502 ns with delay zero at 0. |
+| `BACE Console - Round 3.dc.html` | The editable canvas source for the same design, and **neither current nor openable as it stands.** It still reads `+ 47 ns` — see the overturned table below — and it references `./support.js`, `_ds/modernist-…/styles.css` and `BACE Console - Round 1 / 2.dc.html`, none of which are in this folder, so a browser renders it unstyled and inert. Kept only as the source form; read `bace-console-round3.html` instead. |
 
 ## What has been overturned
 
