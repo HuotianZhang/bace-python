@@ -1,4 +1,11 @@
-# 组合 ④ 的正式测量 —— invert_polarity = true + :OUTP1:POL = INV。
+# ⚠ 2026-09-02 晚更正：④（true + INV）已被推翻，本配方改为 ③（true + NORM）。
+# 02:08 的 bare.py --invert 在发生器 NORM 下与 LabVIEW 差 4%，02:20 逐位读回
+# 显示 LabVIEW 自己收工也停在 NORM；15:37 服务层用 NORM 复现（Q −1.7e−10，
+# 尾部归零），而 14:52 用 INV 时尖峰翻号、photo 峰塌到 0.23 mA——经反相 ×4
+# 放大器，INV 让器件光照期间歇在 v_coll，抽取不停，积不下电荷。下面 ④ 时代的
+# 注释保留作历史；判据（light − dark 稳态必须为零）本身仍然成立。
+#
+# （原文）组合 ④ 的正式测量 —— invert_polarity = true + :OUTP1:POL = INV。
 #
 # 为什么是 ④：它是四格里唯一一个**衰减到零**的。这不是风格问题，是判据：
 # light − dark 的稳态必须为零，否则抽取期间还在产生载流子，测的就不是抽取电荷。
@@ -60,9 +67,9 @@ pulse_width_ns = 5000.0
 pulse_frequency_hz = 500.0
 duty_percent = 50.0
 
-# --- 这两行是 ④ ---------------------------------------------------------------
+# --- 验证过的组合是 ③（2026-09-02 晚更正，见文件头） --------------------------
 invert_polarity = true          # 软件层：两个电压取负（大小排序跟着翻）
-output_polarity = "INV"         # 仪器层
+output_polarity = "NORM"        # 仪器层。INV 让器件歇在 v_coll，抽取不停
 inverted_output = false         # output_polarity 不是 "auto" 时被忽略
 
 settle_s = 0.2

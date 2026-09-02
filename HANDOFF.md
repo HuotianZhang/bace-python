@@ -112,8 +112,13 @@ validates, dry-runs and executes the tree with the three bindings and a
 `NeedsOperator` pause at each temperature. Two stop verbs, `after_shot` and
 `abort`; every ending parks the bench. It rewrites no measurement logic and
 imports `pyvisa` only inside `rigs.py`, so `--sim --fast` runs on a machine
-with no VISA backend. `bace/service/README.md` is how to run and drive it. It
-has run on the simulator only.
+with no VISA backend. `bace/service/README.md` is how to run and drive it.
+**Proven on the rig 2026-09-02 (evening)**: jv_dark → jv_bace → bace end to
+end on the lab PC, the bace against LabVIEW fifteen minutes apart — Q −1.72e−10
+vs −2.24e−10 C at a vpre 2 mV apart, within the single-shot scatter
+(σ 5.2e−11 at n = 2), photo peak −0.76 vs −1.26 mA, both tails at zero. The
+six defects the rig day exposed are §6 items 10–11 and the
+HANDOVER-2026-09-02.md evening section.
 
 Design rules that are load-bearing:
 
@@ -346,15 +351,17 @@ to reach for the same shortcuts.
 
 ## 10. Suggested order
 
-1. **`service/`** — done, 2026-09-02, on the simulator. The first thing on the
-   lab PC is `scripts\Run Service.bat`, a `jv_dark` from `curl`, and a read of
-   `/bench` against what the instruments actually say
-   (`bace/service/README.md`, "Driving it by hand").
-2. **`ui/`** — in Claude Design, shaped for this measurement. See §3. The
-   contract it talks to is `docs/service-contract.md`; `--ui DIR` serves it.
-3. **Side-by-side** — same device, same settings, LabVIEW and Python back to
-   back, against `Q:\Huotian\2026\BACE\20260831\220K`. Agreement on Q within
-   noise is the acceptance test.
+1. **`service/`** — done, 2026-09-02, simulator and rig (see §2). Merged to
+   main the same day.
+2. **`ui/`** — the next step. `docs/ui-kickoff.md` is the brief for that
+   session: the contract it talks to is `docs/service-contract.md`, the design
+   is the Round 3 canvas, `--sim --fast` is the dev backend, `--ui DIR`
+   serves the result.
+3. **Side-by-side** — done 2026-09-02 evening, through the service: LabVIEW
+   15:06 vs service 15:37, same device, Q within the single-shot scatter,
+   both tails at zero (HANDOVER-2026-09-02.md, evening section). A longer
+   confirmation against `Q:\Huotian\2026\BACE\20260831\220K` at proper
+   n_loops remains worthwhile but is no longer the gate.
 4. **Temperature** — done since (contract section 7): the 331 console is a
    `TemperatureController` on the rig, a temperature node settles through it
    when `RigConfig.temperature_console` names it and it answers, and pauses

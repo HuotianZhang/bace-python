@@ -60,9 +60,11 @@ pulse_width_ns = 5000.0
 pulse_frequency_hz = 500.0
 duty_percent = 50.0
 
-output_polarity = "INV"         # 第二轮确认的正确极性，见 run-delay.toml 的注释
+output_polarity = "NORM"        # 2026-09-02 晚更正：INV 已被推翻（见
+                                # run-bace.toml 文件头）。灯光检查本不看偏压，
+                                # 但配方不该带着一个已知错误的极性被照抄
 inverted_output = false
-invert_polarity = false
+invert_polarity = true
 
 settle_s = 0.3
 dark_settle_s = 0.3

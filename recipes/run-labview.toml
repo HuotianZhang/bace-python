@@ -84,7 +84,9 @@ duty_percent = 50.0             # 面板 Duty Cycle 50 %
 
 # --- ④ 的极性 -----------------------------------------------------------------
 invert_polarity = true
-output_polarity = "INV"
+output_polarity = "NORM"        # 2026-09-02 晚更正：④=INV 已被推翻。02:20 逐位
+                                # 读回显示 LabVIEW 收工停在 NORM，02:08 bare
+                                # --invert 在 NORM 下与它差 4%；照抄面板 = NORM
 inverted_output = false
 
 # --- 快门与采样之间的等待 -----------------------------------------------------

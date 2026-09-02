@@ -73,7 +73,8 @@ offset_correct = true
 # 脉冲后 1.91 mA（抽取）。形状对了。
 # 仍未解决的是**光根本没关**，见 claude/bace-delay-scan-01.md 第三节 —— 那个
 # INV 修不了。
-output_polarity = "INV"         # auto | NORM | INV | leave
+output_polarity = "NORM"        # 2026-09-02 晚更正：INV 已被推翻，见
+                                # run-bace.toml 文件头
 inverted_output = true         # output_polarity = "leave" 时被忽略
 invert_polarity = true
 

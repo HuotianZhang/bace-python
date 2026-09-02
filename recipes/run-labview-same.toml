@@ -95,7 +95,8 @@ duty_percent = 50.0             # 面板 Duty Cycle 50 %
 
 # --- ④ 的极性 -----------------------------------------------------------------
 invert_polarity = true
-output_polarity = "INV"
+output_polarity = "NORM"        # 2026-09-02 晚更正：④=INV 已被推翻，见
+                                # run-bace.toml 文件头；照抄面板 = NORM
 inverted_output = false
 
 # --- 快门与采样之间的等待 -----------------------------------------------------

@@ -51,6 +51,7 @@ Markdown, not figure pages. Read in this order.
 | `service-plan.md` | 《BACE 服务层规划》 — why the service is a thin shell around the engine: one process, one worker thread as the bench lock, the API by tab, the three pipeline bindings, `NeedsOperator` for a cryostat that is not wired, the verdict rule, and the P0 core cleanups to make first. Chinese. |
 | `service-contract.md` | The contract `bace/service/` was built to, derived from the plan and the Round 3 canvas: package layout, the concurrency and stop semantics, every endpoint's shape, the wire and journal payload policy, the tree schema, the check catalogue and the cost model. Where it and the plan disagree the plan wins; where it and the code disagree, fix one and say so there. |
 | `../bace/service/README.md` | How to run the service and drive it by hand with `curl`, `httpx` and a WebSocket client. |
+| `ui-kickoff.md` | The brief for the session that builds `ui/`: the design inputs, the dev backend (`--sim --fast`), what the service guarantees the UI, and the known gaps. Start there. |
 
 ## What has been overturned
 

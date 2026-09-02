@@ -67,8 +67,9 @@ explicit by-hand actions, the module catalogue with every parameter's
 provenance, manual runs and the pipeline tree (validate, dry run, execute), the
 two stop verbs, an append-only journal per session, and a temperature node
 that settles through the 331 console when `rig.toml` names it and pauses for
-the operator (`NeedsOperator`) when it does not. It runs end to end on the simulator with
-`--sim --fast` and has not yet been run against the real rig. `bace/service/README.md`
+the operator (`NeedsOperator`) when it does not. Proven on the rig 2026-09-02:
+jv_dark → jv_bace → bace end to end on the lab PC, the bace matching a LabVIEW
+run fifteen minutes apart within the single-shot scatter. `bace/service/README.md`
 says how to run and drive it; `docs/service-contract.md` is what it was built to.
 
 `ui/` is still to come — see `HANDOFF.md` §3, which carries the user's explicit

@@ -1,5 +1,11 @@
 # BACE 服务层规划 — v1
 
+> **状态（2026-09-02 晚）**：P0、P1、P2 全部完成并在真机上验证（HANDOVER 的
+> 晚间小节）；温度的 331 控制台接线提前于 P3 做完（契约 §7），temperature loop
+> 在 rig.toml 指到控制台时自动稳定、否则按本文的 NeedsOperator 暂停。P3 剩
+> results tab（未设计）与失败恢复。实现契约 `service-contract.md`，UI 开工看
+> `ui-kickoff.md`。
+
 2026-09-02。输入：Round 3 UI（`docs/BACE Console - Round 3.dc.html`）、
 项目文档 `bace-ui-flow-model.md`、`bace-ui-round2-brief.md`（三层判决、来源标记）、
 `bace-open-defects.md`（第四批 = 写 service/ 之前定）。
