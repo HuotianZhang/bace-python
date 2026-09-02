@@ -89,7 +89,13 @@ DC -> pulse. Elapsed time is counted on this clock (polls x this), not on
 the wall clock, so `--fast` is instant and a test can say exactly how long
 the wait took."""
 
-LED_SETTLE_WINDOW = 3
+LED_SETTLE_SPAN_S = 10.0
+"""How long the meter must read flat before the LED counts as settled.
+Three readings in 1.5 s passed on the rig at 14:52 (2026-09-02) while the
+LED was still drooping: the scan then watched the intensity fall 20.8 to
+17.0 uW over the next 40 s. A slow thermal drift is invisible inside any
+window shorter than itself; ten seconds of flat readings is what the
+operator's own eyes-on-the-meter check amounts to."""
 """How many consecutive readings must agree before the LED counts as settled."""
 
 MODULE_NAMES: tuple[str, ...] = ("jv_dark", "jv_bace", "bace", "power",
@@ -1378,8 +1384,11 @@ def _settle_led(rig: Rig, ctx: RunContext, *, settle_s: float, max_s: float,
     charge in the first steps was taken under an intensity that was not the
     one recorded. The 1918-C behind the shutter sees exactly the light the
     device does, so it is asked: `read_power()` every `LED_SETTLE_POLL_S`
-    until the last `LED_SETTLE_WINDOW` readings agree within `tolerance`
-    (their spread over their mean) and at least `settle_s` has passed. A
+    until every reading of the last `LED_SETTLE_SPAN_S` agrees within
+    `tolerance` (spread over mean) and at least `settle_s` has passed. A
+    short window is blind to a slow drift -- three readings in 1.5 s
+    passed at 14:52 on the rig while the intensity went on to fall 18 %
+    over the next 40 s -- so the window is a span of time, not a count. A
     meter that never agrees gives up at `max_s` with a warning and the scan
     goes on -- a bace that never starts is worse than one that says its
     light may not have been steady. Elapsed time is counted as polls times
@@ -1415,13 +1424,14 @@ def _settle_led(rig: Rig, ctx: RunContext, *, settle_s: float, max_s: float,
                                       f"({exc}); waiting the fixed {settle_s:g} s instead")
             ctx.sleep(max(0.0, settle_s - elapsed))
             return
-        if elapsed >= settle_s and _agree(readings[-LED_SETTLE_WINDOW:], tolerance):
+        span = _span_readings(readings)
+        if elapsed >= settle_s and _agree(span, tolerance):
             yield E.Notice("info", f"LED settled in {elapsed:g} s at {readings[-1]:.2e} W "
-                                   f"({LED_SETTLE_WINDOW} readings within "
-                                   f"{tolerance * 100:g} %)")
+                                   f"({len(span)} readings over {LED_SETTLE_SPAN_S:g} s "
+                                   f"within {tolerance * 100:g} %)")
             break
         if elapsed >= max_s:
-            last = ", ".join(f"{r:.2e}" for r in readings[-LED_SETTLE_WINDOW:])
+            last = ", ".join(f"{r:.2e}" for r in readings[-3:])
             yield E.Notice("warning", f"LED did not stabilise within {max_s:g} s: last "
                                       f"readings {last} W; going on")
             break
@@ -1429,12 +1439,20 @@ def _settle_led(rig: Rig, ctx: RunContext, *, settle_s: float, max_s: float,
                              "led_settle_s": f"{elapsed:g}"})
 
 
+_SPAN_POLLS = max(2, int(round(LED_SETTLE_SPAN_S / LED_SETTLE_POLL_S)))
+
+
+def _span_readings(readings: list[float]) -> list[float]:
+    """The readings of the last `LED_SETTLE_SPAN_S`, newest last."""
+    return readings[-_SPAN_POLLS:]
+
+
 def _agree(readings: list[float], tolerance: float) -> bool:
-    """`LED_SETTLE_WINDOW` readings whose spread is within `tolerance` of
+    """A full span of readings whose spread is within `tolerance` of
     their mean. Fewer readings than the window is not agreement; a mean of
     zero (the shutter shut, the LED dark) agrees only if every reading is
     exactly zero, which a real meter never returns."""
-    if len(readings) < LED_SETTLE_WINDOW:
+    if len(readings) < _SPAN_POLLS:
         return False
     mean = sum(readings) / len(readings)
     if mean == 0.0:

@@ -909,10 +909,13 @@ def _settle_transcript(b, tmp_path, **params):
 def test_the_led_settle_reads_the_simulated_meter_behind_the_open_shutter(tmp_path):
     """The rig: LED -> shutter -> fibre -> splitter -> (meter + device), so the
     meter only sees light with the shutter open. The module opens it, polls
-    every 0.5 s, and with the simulated LED stable at once three readings
-    agree on the third poll: settled in 1.5 s at the pulse level's power,
-    said on the stream and written to the file as a read-back."""
-    from bace.service.modules import LED_SETTLE_POLL_S
+    every 0.5 s, and settles once a FULL FLAT SPAN has been seen: 10 s, not a
+    count of readings -- three flat readings in 1.5 s passed on the rig at
+    14:52 (2026-09-02) while the LED went on to droop 18 % over the next
+    40 s. With the simulated LED flat from the start that is exactly one
+    span's worth of polls, said on the stream and written into the file."""
+    from bace.service.modules import (LED_SETTLE_POLL_S, LED_SETTLE_SPAN_S,
+                                      _SPAN_POLLS)
     b = bench()
     seen = {}
 
@@ -926,13 +929,14 @@ def test_the_led_settle_reads_the_simulated_meter_behind_the_open_shutter(tmp_pa
     b.sim.power.read_power = watched
     evs, notices, states, polls, _ = _settle_transcript(b, tmp_path, led_settle_s=0.0)
     assert seen == {"shutter": True, "led": ("PULSE", 1.02)}, "read under the pulse, shutter open"
-    assert polls == 3
+    assert polls == _SPAN_POLLS == 20
     expected = b.sim.bench.device.led_current(1.02) * b.sim.power.w_per_unit
     [notice] = notices
     assert notice.level == "info"
-    assert notice.text == f"LED settled in {3 * LED_SETTLE_POLL_S:g} s at " \
-                          f"{float(states[0].values['led_power_w']):.2e} W (3 readings within 2 %)"
-    assert states[0].values["led_settle_s"] == "1.5"
+    assert notice.text == f"LED settled in {_SPAN_POLLS * LED_SETTLE_POLL_S:g} s at " \
+                          f"{float(states[0].values['led_power_w']):.2e} W " \
+                          f"({_SPAN_POLLS} readings over {LED_SETTLE_SPAN_S:g} s within 2 %)"
+    assert states[0].values["led_settle_s"] == "10"
     assert float(states[0].values["led_power_w"]) == pytest.approx(expected, rel=0.02)
     kinds = [type(e).__name__ for e in evs[:4]]
     assert kinds == ["InstrumentState", "Notice", "InstrumentState", "RunStarted"], (
@@ -942,32 +946,38 @@ def test_the_led_settle_reads_the_simulated_meter_behind_the_open_shutter(tmp_pa
 
 def test_the_led_settle_waits_for_a_drifting_meter_to_agree_and_for_led_settle_s(tmp_path):
     """A LED still warming after DC -> pulse: the meter reads a rising value,
-    and the run must not start until three consecutive readings agree within
-    the tolerance AND `led_settle_s` has passed -- on the poll clock, so the
-    number the notice quotes is polls times 0.5 s, not wall time."""
+    and the run must not start until a FULL SPAN (10 s) of readings agrees
+    within the tolerance -- on the poll clock, so the number the notice
+    quotes is polls times 0.5 s, not wall time. The rig at 14:52 drooped
+    about 0.25 %/s, which is ~2.5 % inside any 10 s window: outside the 2 %
+    tolerance, so exactly the drift the span exists to catch."""
+    from bace.service.modules import _SPAN_POLLS
     b = bench()
-    # 2 %/poll drift for six polls (any three span about 4 %), then flat:
-    # readings 7, 8, 9 are the first three within 2 % of each other.
+    # six drifting polls (2 % step each), then flat: the span is clean of
+    # the drift only once the last drifting reading has left it.
     drifting = [1.00e-4, 1.02e-4, 1.04e-4, 1.06e-4, 1.08e-4, 1.10e-4]
-    b.rig.power = _Meter(drifting + [1.130e-4, 1.131e-4, 1.130e-4])
+    b.rig.power = _Meter(drifting + [1.130e-4] * 40)
     evs, notices, states, polls, _ = _settle_transcript(b, tmp_path, led_settle_s=0.0)
-    assert polls == 9 and b.rig.power.reads == 9
-    assert notices[0].text.startswith("LED settled in 4.5 s at 1.13e-04 W")
-    assert states[0].values == {"led_power_w": "1.13e-04", "led_settle_s": "4.5"}
+    assert polls == b.rig.power.reads == len(drifting) + _SPAN_POLLS
+    assert notices[0].text.startswith(f"LED settled in {polls * 0.5:g} s at 1.13e-04 W")
+    assert states[0].values == {"led_power_w": "1.13e-04",
+                                "led_settle_s": f"{polls * 0.5:g}"}
 
-    # the same meter, agreeing at once, still waits out led_settle_s = 3 s
+    # led_settle_s below the span changes nothing (the span is the floor);
+    # above it, the extra polls are waited out
     b = bench()
     b.rig.power = _Meter([1.0e-4])
-    evs, notices, states, polls, _ = _settle_transcript(b, tmp_path, led_settle_s=3.0)
-    assert polls == 6 and states[0].values["led_settle_s"] == "3"
-    assert notices[0].text.startswith("LED settled in 3 s")
+    evs, notices, states, polls, _ = _settle_transcript(b, tmp_path, led_settle_s=12.0)
+    assert polls == 24 and states[0].values["led_settle_s"] == "12"
+    assert notices[0].text.startswith("LED settled in 12 s")
 
-    # a wider tolerance takes the same drift as settled at once
+    # a wider tolerance takes the same slow drift as flat: one span, no more
     b = bench()
-    b.rig.power = _Meter(drifting)
+    b.rig.power = _Meter(drifting + [1.10e-4] * 40)
     _, notices, _, polls, _ = _settle_transcript(b, tmp_path, led_settle_s=0.0,
-                                                 led_settle_tolerance=0.05)
-    assert polls == 3 and notices[0].text.startswith("LED settled in 1.5 s")
+                                                 led_settle_tolerance=0.15)
+    assert polls == _SPAN_POLLS
+    assert notices[0].text.startswith(f"LED settled in {_SPAN_POLLS * 0.5:g} s")
 
 
 def test_a_meter_that_never_settles_is_given_up_on_with_a_warning_and_the_run_goes_on(tmp_path):

@@ -67,10 +67,19 @@ inverted_output = false   # unused while output_polarity is set explicitly below
                                 # First light on 2026-09-01 gave Q = -2.07e-10 C
                                 # where the archive at the same Vcoll and delay
                                 # gives +3.65e-10 C -- see BENCH.md.
-invert_polarity = true   # combination 4 with output_polarity INV: the only one of the four whose light-minus-dark returns to zero (docs/bace-polarity.html, bare.py --invert 02:08)
+invert_polarity = true   # swap-and-negate the computed levels (the original's "New Sample?")
                                 # both levels for an inverted device. A sign
                                 # convention — wrong here flips every charge.
-output_polarity = "INV"        # :OUTP1:POL, written by the run. With invert_polarity above this is combination 4 (pure negation); read back into the file either way
+output_polarity = "NORM"       # :OUTP1:POL. The validated pair is invert_polarity = true
+                               # WITH NORM: bare.py --invert ran at 02:08 with the generator
+                               # at NORM and matched LabVIEW to 4 %, and the 02:20 read-back
+                               # shows LabVIEW itself finishes at NORM. Through the INVERTING
+                               # x4 amplifier, NORM rests the device at v_pre and pulses to
+                               # v_coll -- BACE. The recipes' "combination 4" = INV label is
+                               # stale: every INV run (23:41-01:22, and the service run at
+                               # 14:52 on 2026-09-02) rests the device at v_coll instead,
+                               # extraction never stops, and the photo peak collapses from
+                               # ~3 mA to ~0.5 mA with Q an order of magnitude small.
 settle_s = 0.3   # after the levels are written (bare.py --level-settle 0.3)
 dark_settle_s = 0.3   # after the dark levels, before the shutter shuts
 shutter_settle_s = 5.0          # after the shutter has moved, BOTH traces, before acquiring. bare.py --settle 5

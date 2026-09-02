@@ -596,7 +596,12 @@ def test_run_toml_builds_a_usable_plan():
     # the validated 2026-09-02 recipe: 200 averages, LED 1.000 V (run.toml header)
     assert run.n_averages == 200
     assert drive.level == pytest.approx(1.000)
-    assert run.invert_polarity and run.output_polarity == "INV"
+    # invert_polarity WITH the generator at NORM: bare.py --invert matched
+    # LabVIEW at 02:08 with NORM in force, the 02:20 read-back shows LabVIEW
+    # itself finishes at NORM, and every INV run collapsed the photo peak
+    # from ~3 mA to ~0.5 mA (the device rests at v_coll through the
+    # inverting amplifier, so extraction never stops).
+    assert run.invert_polarity and run.output_polarity == "NORM"
     assert run.shutter_settle_s == pytest.approx(5.0)
     assert meta.temperature_k == pytest.approx(290.0)
 
