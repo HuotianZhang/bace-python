@@ -73,8 +73,17 @@ both the loop node and the module node.
 ### What changes
 
 - `SessionStarted` gains the `[sample]` block — `sample`, `material`, `pixel`,
-  `operator`, `comment`. It is session-scoped, it is already in `GET /session`,
-  and it is the identity the results grid groups by.
+  `operator`, `comment`. It is session-scoped and already in `GET /session`.
+
+  **Writing it into the header is necessary and not sufficient.** `_Parsed`
+  keeps `header` beside `runs` and never joins them; `run_index()` is
+  `out.extend(run.summary() for run in reversed(parsed.runs))`; `_Run.summary()`
+  emits no identity at all; and `GET /runs` returns that list unchanged. A grid
+  reading `?session=all` would still be parsing folder names. So the identity
+  has to reach the rows: `run_index()` merges its file's header into each
+  summary, and `run_record()` does the same for the full record. One session's
+  header covers every run in that file, which is what makes the merge cheap —
+  the files are already parsed once and kept.
 - `executor._node_detail` builds its metadata fields from the same
   `RunMetadata` the recorder wrote, rather than assembling them from whichever
   `RunContext` fields happen to be set. In practice: call `ctx.temperature()`

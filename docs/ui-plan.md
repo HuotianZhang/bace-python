@@ -208,9 +208,21 @@ The generated field and card components from decision 1, the five module cards.
 Editing writes the `edited` layer through `PUT`; `null` resets one;
 `POST …/params/reset` drops the layer.
 
-Verdicts render three-tier and behave accordingly: only hardware safety is
-`crit` and only `crit` blocks Start; `warn` states evidence and never blocks;
-the fix is the bench action `fix` names, which the operator clicks.
+Verdicts render three-tier and behave accordingly. **Start is disabled by
+`invalid` and by `crit`** — `pipeline.validate` is `valid = not any(c.level in
+("invalid", "crit"))`, and both `session.submit` and the Start re-check refuse
+on the same pair, so a UI that only blocks on `crit` offers a button that
+answers 422. The two are not the same failure and should not look the same:
+*"a `crit` is the safety block; an `invalid` here is an instrument that went
+away since the Dry run, and a run the builder would refuse must not be started
+to fail"* (`service/session.py`). So `crit` keeps the loudest treatment
+`ui-rules` §3 reserves for hardware safety, and `invalid` — a malformed tree,
+an axis geometry the dataclass refuses, a missing instrument, a `centre_on_voc`
+with no V_oc in scope — disables Start while reading as "this tree is not
+runnable yet", which is what it is.
+
+`warn` states evidence and never blocks. The fix is the bench action `fix`
+names, which the operator clicks.
 
 **Proves:** `ui-rules` §8's bar — a dark J–V in **fifteen seconds** by someone
 who has not seen the UI before. This is the first phase whose output an
@@ -279,7 +291,7 @@ phase runs short.
 | before | must be done |
 |---|---|
 | anything on the rig | the folder-name defect in `docs/naming-plan.md` §2 — `material = "PTQ10:IT-4F"` builds a path segment with a colon, which fails on Windows and passes on Linux |
-| M6 | `docs/naming-plan.md` rule 1 — the journal carries the sample block and the temperature triple on every node |
+| M6 | `docs/naming-plan.md` rule 1 — the journal carries the sample block and the temperature triple on every node, **and `GET /runs` exposes them on each row**; writing them into `SessionStarted` alone leaves `run_index()` emitting summaries with no identity |
 | M6 | a Round 3 design pass on results, with the user, in Claude Design |
 | M3 | nothing — the chart foundation is new code with no service dependency |
 
