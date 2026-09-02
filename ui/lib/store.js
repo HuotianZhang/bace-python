@@ -268,11 +268,7 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
           outcome: data.outcome, detail, finished_at: frame.ts,
           kept: detail.kept, requested: detail.requested, folder: detail.folder, summary: detail.summary,
         });
-        // A pipeline's counts are the sum over its module nodes, the same sum
-        // the session's record makes; a manual run has one node and the sum is
-        // that node. Either way the rail says "kept of requested" (§9).
-        record.kept = sumNodes(record, 'kept');
-        record.requested = sumNodes(record, 'requested');
+        rollUp(record);
         for (const folder of detail.folders || (detail.folder ? [detail.folder] : [])) {
           if (!record.folders.includes(folder)) record.folders.push(folder);
         }
@@ -281,13 +277,16 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         break;
       }
 
-      case 'RunStarted':
+      case 'RunStarted': {
         Object.assign(record, {
           description: data.description, n_shots: data.n_shots, n_steps: data.n_steps,
           n_loops: data.n_loops, config: data.config || null,
         });
-        record.requested = record.requested || data.n_shots || null;
+        const node = nodeOf(record, frame.node_path);
+        if (typeof data.n_shots === 'number') node.requested = data.n_shots;
+        rollUp(record);
         break;
+      }
 
       case 'AxisResolved': {
         const node = nodeOf(record, frame.node_path);
@@ -367,14 +366,21 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         log(frame, 'crit', data.error || 'failed');
         break;
 
-      case 'JVStarted':
+      case 'JVStarted': {
         record.jv = data;
+        const node = nodeOf(record, frame.node_path);
+        if (typeof data.n_curves === 'number') node.requested = data.n_curves;
+        rollUp(record);
         break;
+      }
 
       case 'JVCurveDone': {
         const curve = { ...data, node_path: frame.node_path || '', ts: frame.ts };
+        const node = nodeOf(record, frame.node_path);
         record.curves.push(curve);
-        nodeOf(record, frame.node_path).curves.push(curve);
+        node.curves.push(curve);
+        node.kept = node.curves.length;
+        rollUp(record);
         break;
       }
 
@@ -487,7 +493,8 @@ function foldStepDone(record, node, frame, data) {
   }
   record.lastShot = shot;
   node.lastShot = shot;
-  record.kept = record.shots.length;
+  node.kept = node.shots.length;
+  rollUp(record);
   if (shot.verdict && shot.verdict.level === 'warn') {
     record.shotWarnings.push({ index: data.index, loop: data.loop, text: shot.verdict.text, ts: frame.ts });
   }
@@ -519,13 +526,23 @@ function nodeOf(record, path) {
   return created;
 }
 
-function sumNodes(record, field) {
-  let total = null;
+/**
+ * `kept of requested` for the run: the sum over its module nodes, which is the
+ * same sum the session's record makes, so the rail and `GET /runs` agree.
+ * Every module counts in its own currency — a transient in shots, a J-V in
+ * curves — and both are counted as they arrive rather than at `NodeDone`,
+ * because a J-V on the rig takes minutes and a rail with no numbers on it for
+ * the length of a sweep is the screen saying nothing while the bench works.
+ */
+function rollUp(record) {
+  let kept = null;
+  let requested = null;
   for (const node of Object.values(record.nodes)) {
-    if (node[field] === undefined || node[field] === null) continue;
-    total = (total || 0) + node[field];
+    if (typeof node.kept === 'number') kept = (kept || 0) + node.kept;
+    if (typeof node.requested === 'number') requested = (requested || 0) + node.requested;
   }
-  return total === null ? record[field] : total;
+  if (kept !== null) record.kept = kept;
+  if (requested !== null) record.requested = requested;
 }
 
 export function emptyRun(runId) {

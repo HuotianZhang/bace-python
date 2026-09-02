@@ -149,7 +149,19 @@ async function boot() {
   } catch (error) {
     console.warn('the service did not answer:', error.message);
   }
-  stream.start(null);
+  // `since=0`, not "no since". Opening or refreshing the console while a run
+  // is going has to rebuild that run, and `/bench` carries its summary, not
+  // its axis, its curves or its shots — a chart drawn from the live frames
+  // alone would start blank in the middle of a scan. The two HTTP requests
+  // above are another reason: a run that parks while they are in flight would
+  // otherwise leave a record that never stops running.
+  //
+  // The cost is bounded by the ring the service keeps deliberately small: 5000
+  // envelopes, of which only the last 200 shots still carry their traces, so
+  // the worst case is one loopback read of a few tens of megabytes and the
+  // rest arrive with `decimated[…].replay` set, which the store already knows
+  // means *redraw from the scalars*.
+  stream.start(0);
 }
 
 boot();
