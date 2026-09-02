@@ -9,16 +9,27 @@ REM         Charge           ~ -9.2e-10 C   (three Vpre points within 0.7 %)
 REM         PhotoCurrent     peak ~ -3.7 mA, back to zero inside 2 us
 REM         raw light/dark   peak ~ -27 mA
 REM
+REM     Those are the 23:16 panel numbers and they are NOT a baseline.
+REM     LabVIEW ran again at 02:16 with not one parameter changed and gave
+REM     -3.3e-10 C, tau 71 ns against 190 ns: the device drifted 2.8x in three
+REM     hours. Compare only against a LabVIEW run taken minutes away, never
+REM     against these. (HANDOVER-2026-09-02.md)
+REM
 REM PANEL VALUES COPIED  (full list and reasoning in recipes\run-labview.toml)
 REM     Vpre 1.00354 -> 1.02354 step 0.01     Vcoll -1 V      Delay 90 ns
 REM     Timebase 200 ns   Record Length 5e3   t0 Integration 320e-9 (record)
 REM     Averages 200      Loops 1             Pulse Width 5e3 ns
 REM     LED 1.000 / 0.400 V, 500 Hz, 50 %     offset corr ON
 REM
-REM POLARITY
-REM     invert_polarity = true + :OUTP1:POL INV -- combination 4, the only one
-REM     of the four whose light-minus-dark decays back to zero. See
-REM     claude/bace-polarity-verdict.md.
+REM POLARITY  (corrected 2026-09-02 -- this file used to say the opposite)
+REM     invert_polarity = true + :OUTP1:POL NORM -- combination 3, and it is
+REM     the validated pair. "Combination 4 = INV" was overturned on the rig:
+REM     the 02:20 bit-by-bit read-back showed LabVIEW itself finishing in
+REM     NORM, and INV parks the device at v_coll through the inverting
+REM     amplifier, collapsing the photocurrent peak to about 0.5 mA -- that is
+REM     what the "3x too small" hunt of 23:41-01:22 was chasing.
+REM     recipes\run-labview.toml is corrected; the overturned
+REM     table is in docs\README.md.
 REM
 REM SAMPLING
 REM     200 ns/div with 5000 points is 0.4 ns a sample, four times finer than
