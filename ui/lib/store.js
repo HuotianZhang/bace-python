@@ -162,6 +162,56 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
       notify();
     },
 
+    /**
+     * `GET /runs/{id}` for a run the stream cannot fully rebuild.
+     *
+     * The ring holds 5000 envelopes, and a 100 x 51 scan produces three times
+     * that in `StepStarted`/`StepDone`/`Progress` alone — so a console opened
+     * late in a long run replays a *tail*: no `RunQueued`, no `RunStarted`, no
+     * `AxisResolved`. `/bench` carries the run's summary and not its shape, so
+     * the record and the data endpoint are asked for the rest.
+     *
+     * Nothing here moves anything backwards: the stream is the newer source
+     * for whatever it has already said, and a count that has been folded from
+     * shots the ring did carry is not undone by the smaller number a request
+     * in flight was answered with.
+     */
+    applyRunRecord(payload) {
+      if (!payload || !payload.run_id) return;
+      const record = run(payload.run_id);
+      for (const key of ['kind', 'module', 'name', 'tree', 'folder', 'queued_at', 'started_at']) {
+        if (record[key] === null || record[key] === undefined) record[key] = payload[key] ?? record[key];
+      }
+      if (!record.state) record.state = payload.state || null;
+      if (payload.params_as_executed && !Object.keys(record.resolved).length) {
+        record.resolved = payload.params_as_executed;
+      }
+      for (const folder of payload.folders || []) {
+        if (!record.folders.includes(folder)) record.folders.push(folder);
+      }
+      if (payload.progress && !record.progress) record.progress = payload.progress;
+      if (payload.eta && !record.eta) record.eta = payload.eta;
+      if (payload.error && !record.error) record.error = { text: payload.error, where: '', ts: null };
+      record.hydrated = true;
+      notify();
+    },
+
+    /** `GET /runs/{id}/data` for the same run: the axis, and what it has kept. */
+    applyRunData(runId, nodePath, data) {
+      if (!data || !runId) return;
+      const record = run(runId);
+      const node = nodeOf(record, nodePath || record.node_path || '');
+      if (data.axis) node.axis = record.axis = record.axis || data.axis;
+      if (data.values) node.values = record.values = (record.values.length ? record.values : data.values);
+      if (data.q_mean) node.q_mean = record.q_mean = record.q_mean || data.q_mean;
+      if (data.q_std) node.q_std = record.q_std = record.q_std || data.q_std;
+      if (data.voc !== undefined && data.voc !== null && record.voc === null) record.voc = data.voc;
+      if (typeof data.kept === 'number') node.kept = Math.max(node.kept || 0, data.kept);
+      if (typeof data.requested === 'number') node.requested = data.requested;
+      rollUp(record);
+      notify();
+    },
+
     /** The stream's `Hello`: the bench whole, and where the cursor stands. */
     applyHello(frame) {
       const data = frame.data || {};
@@ -223,6 +273,7 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
           // `parked` where it should read `failed` is the bench lying quietly.
           record.parked_at = frame.ts;
           record.phase = null;
+          record.needsOperator = null;
           if (state.activeRunId === frame.run_id) {
             state.activeRunId = null;
             state.benchState = 'idle';
@@ -258,6 +309,12 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         if (TERMINAL.has(data.state)) {
           record.finished_at = frame.ts;
           record.phase = null;
+          // A run stopped, aborted or failed while waiting at a pause emits no
+          // `OperatorResumed` — nobody answered it — so the prompt has to go
+          // with the run, as the service drops its own `pending` on every
+          // terminal state. A finished run still asking for an operator is a
+          // screen asking for something nothing is waiting for.
+          record.needsOperator = null;
           // The run still owns the worker while `park()` makes the bench safe,
           // and on hardware that can block on instrument I/O for a while. So
           // `activeRunId` is cleared at `parked` above, not here: cleared now,
@@ -522,7 +579,10 @@ function foldStepDone(record, node, frame, data) {
   }
   record.lastShot = shot;
   node.lastShot = shot;
-  node.kept = node.shots.length;
+  // Never downwards: a run whose opening frames have fallen out of the ring is
+  // hydrated from `GET /runs/{id}/data`, and the shots the replay did carry
+  // are fewer than the shots that ran.
+  node.kept = Math.max(node.kept || 0, node.shots.length);
   rollUp(record);
   if (shot.verdict && shot.verdict.level === 'warn') {
     record.shotWarnings.push({ index: data.index, loop: data.loop, text: shot.verdict.text, ts: frame.ts });
@@ -588,7 +648,7 @@ export function emptyRun(runId) {
     curves: [], jv: null, jvFinished: null, seriesPoints: [],
     progress: null, progressByNode: {}, eta: null, finished: null, aborted: null, error: null,
     needsOperator: null, resumes: [],
-    nodes: {}, verdicts: [], notices: [], instruments: {},
+    nodes: {}, verdicts: [], notices: [], instruments: {}, hydrated: false,
     kept: null, requested: null,
   };
 }

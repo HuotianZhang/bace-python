@@ -94,7 +94,41 @@ function renderRail(state) {
  * Start. Nothing on the stream carries the snapshot, so it is re-fetched when
  * a run parks — the one moment it is known to have changed.
  */
+/**
+ * Fill in a run the stream could not rebuild whole.
+ *
+ * Two cases, one cause: the ring is 5000 envelopes and a long scan is more
+ * than that. Opening the console late in one replays a tail with no
+ * `AxisResolved` in it, and a client dropped for longer than the ring comes
+ * back the same way — the stream counts a gap and says so. Either way the run
+ * is asked for its own record.
+ */
+async function hydrate(runId, nodePath) {
+  if (!runId || hydrating.has(runId)) return;
+  hydrating.add(runId);
+  try {
+    store.applyRunRecord(await api.run(runId));
+    store.applyRunData(runId, nodePath, await api.runData(runId, nodePath || undefined));
+  } catch (error) {
+    console.warn(`could not hydrate ${runId}:`, error.message);
+  } finally {
+    hydrating.delete(runId);
+  }
+}
+
+const hydrating = new Set();
+let gapsSeen = 0;
+
 function afterFrame(frame) {
+  // A gap means the ring could not supply what we asked for: whatever is
+  // running has a beginning we will never be sent.
+  const { stats, } = stream.state;
+  if (stats && stats.gaps > gapsSeen) {
+    gapsSeen = stats.gaps;
+    const state = store.getState();
+    const active = state.activeRunId && state.runs[state.activeRunId];
+    if (active && !active.axis) hydrate(state.activeRunId, active.node_path);
+  }
   // Live frames only. The boot replay carries every `parked` the ring still
   // holds, and one read-back per historical run would be hundreds of requests
   // racing each other on the way in.
@@ -147,8 +181,13 @@ window.addEventListener('hashchange', show);
 async function boot() {
   show();
   try {
-    store.applyBench(await api.bench());
+    const bench = await api.bench();
+    store.applyBench(bench);
     store.applyModules(await api.modules());
+    // A run in progress is older than the ring may be able to say. Ask it for
+    // its own record before the replay starts, so the axis and the counts are
+    // there whether or not its opening frames survived.
+    if (bench.run && bench.run.run_id) await hydrate(bench.run.run_id, bench.run.node_path);
   } catch (error) {
     console.warn('the service did not answer:', error.message);
   }

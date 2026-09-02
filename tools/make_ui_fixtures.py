@@ -136,7 +136,10 @@ def main(argv: list[str] | None = None) -> int:
             "cumulative_q": _list(cumulative),
             "t0_int_record_s": _round(t0_record, 6),
             "t0_int_record_source": source,
-            "index": int(photo.shape[0] - 1),
+            # `StepDone.index` counts shots flat across every loop and step
+            # ((loop-1)*n_steps + step-1), not steps: two loops of one step end
+            # at index 1, not 0.
+            "index": int(q_all.shape[0] * photo.shape[0] - 1),
             "loop": int(q_all.shape[0]),
             "step": int(photo.shape[0]),
             "axis_value": float(np.asarray(f["axis/values"])[-1]),

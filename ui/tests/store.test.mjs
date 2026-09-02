@@ -296,6 +296,54 @@ test('a stop accepted during preflight is not undone by the worker catching up',
   assert.equal(s.getState().runs.r.state, 'stopped');
 });
 
+test('a run whose beginning left the ring is filled in, and not overwritten', () => {
+  // The ring is 5000 envelopes and a 100 x 51 scan is three times that in
+  // `StepStarted`/`StepDone`/`Progress` alone, so a console opened late in one
+  // replays a tail: no `RunQueued`, no `RunStarted`, no `AxisResolved`. The
+  // record and the data endpoint supply the shape; the stream stays the newer
+  // source for everything it has already said.
+  const s = store();
+  const frames = parseJsonl(fixture('stream_bace_sim.jsonl'));
+  // What a truncated replay is: the shot frames still in the ring, and none of
+  // the run's opening ones.
+  const tail = frames.filter((f) => ['StepStarted', 'StepPhase', 'StepDone', 'Progress'].includes(f.type))
+    .filter((f) => f.type === 'StepDone' || f.type === 'Progress').slice(-4);
+  s.applyFrames(tail);
+  const runId = tail[0].run_id;
+  assert.equal(s.getState().runs[runId].axis, null, 'the tail alone has no axis');
+
+  s.applyRunRecord({ run_id: runId, kind: 'manual', module: 'bace', state: 'running',
+                     kept: 6, requested: 6, folders: ['runs/290K_20260902'] });
+  s.applyRunData(runId, 'bace', { axis: { name: 'delay_ns', start: 0, stop: 200, step: 100 },
+                                  values: [0, 100, 200], kept: 6, requested: 6, voc: null });
+  const run = s.getState().runs[runId];
+  assert.equal(run.module, 'bace');
+  assert.equal(run.axis.name, 'delay_ns');
+  assert.deepEqual(run.values, [0, 100, 200]);
+  assert.equal(run.kept, 6, 'the count is the run\'s, not the tail we happen to hold');
+  assert.equal(run.requested, 6);
+  assert.equal(run.shots.length, 2, 'and the shots the ring did carry are still there');
+  assert.deepEqual(run.shots.map((shot) => shot.index), [4, 5], 'the tail, not the whole run');
+
+  // A shot arriving after hydration does not drop the count back to what we hold.
+  const another = { ...frames.find((f) => f.type === 'StepDone'), seq: 99999 };
+  s.applyFrame({ ...another, data: { ...another.data, index: 9, loop: 9 } });
+  assert.equal(s.getState().runs[runId].kept, 6);
+});
+
+test('a pause nobody answered goes with the run that ended', () => {
+  // Stopped, aborted or failed at a `NeedsOperator`, there is no
+  // `OperatorResumed` — nobody answered it — and a finished run still showing
+  // an operator prompt is a screen asking for something nothing waits for.
+  const s = store();
+  s.applyFrame({ seq: 1, ts: 1, run_id: 'r', node_path: '', type: 'NeedsOperator',
+                 data: { what: 'temperature', node_path: 'T=250K', detail: { setpoint_k: 250 } } });
+  assert.ok(s.getState().runs.r.needsOperator);
+  s.applyFrame({ seq: 2, ts: 2, run_id: 'r', node_path: '', type: 'RunStateChanged',
+                 data: { state: 'aborted' } });
+  assert.equal(s.getState().runs.r.needsOperator, null);
+});
+
 test('the Hello frame carries the whole bench', () => {
   const s = store();
   const hello = JSON.parse(fixture('hello_sim.json'));
