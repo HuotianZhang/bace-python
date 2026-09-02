@@ -238,13 +238,28 @@ means the same file names and the second run lands on the first. Under
 `--sim --fast` a run takes milliseconds and same-second pairs are ordinary; on
 the rig they are not.
 
-So `_start()` stops reusing a folder that already holds a run: it takes the
-next free `-2`, `-3` suffix instead. That is one small change and it closes the
-whole class — the sentinel, the three slug cases above, and the same-second
-case that was there all along. The suffix rides on the last part
+So a folder that already holds a run is not reused: the next free `-2`, `-3`
+suffix is taken instead. The suffix rides on the last part
 (`…_20260902_183355-2`), so the count stays nine and the stamp stays readable
 at parts 8–9; the files inside keep the plain LabVIEW stamp, because they are
 in a different directory and never clash.
+
+**One helper, called by every `folder_name()` consumer** — not a change inside
+`RunRecorder`. All three callers listed in §3 allocate their own directory and
+all three would otherwise stay exposed:
+
+| caller | how it lands there |
+|---|---|
+| `RunRecorder._start()` | `os.makedirs(self.folder, exist_ok=True)` (`recorder.py:96`) |
+| `jv_*`, via `modules.py:981` | builds the path itself, then `JVRecorder` does its own `os.makedirs(..., exist_ok=True)` (`jv.py:97`, `:211`) and writes HDF5 with mode `"w"` — a truncating open |
+| `SeriesRecorder` | `os.makedirs(self.folder, exist_ok=True)` (`series.py:187`) on the `_series` parent |
+
+The J-V path is the sharpest of the three: `h5py.File(path, "w")` does not
+merely reuse the directory, it truncates the file. So the allocation is a
+function in `storage/naming.py` that reserves a directory and returns the name
+it actually got, and the three call it rather than calling `makedirs`
+themselves. That closes the sentinel case, the three slug cases, and the
+same-second case that predates the grid, on every path that writes a run.
 
 An injective encoding was the alternative and is the wrong trade: it buys
 uniqueness by making every name unreadable, when the name exists to be read.
