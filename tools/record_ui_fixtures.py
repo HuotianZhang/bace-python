@@ -109,6 +109,10 @@ async def _run_and_capture(ws_url: str, base: str, body: dict,
         run_id = posted["run_id"]
         deadline = time.monotonic() + timeout_s
         state = posted["state"]
+        # Read to `parked`, not to the terminal state: every run reaches its
+        # outcome *through* `parked`, and a recording that stopped at `done`
+        # would be a run the bench never made safe -- the one transition a
+        # console keys on to say the worker is free again.
         while time.monotonic() < deadline:
             try:
                 frame = json.loads(await asyncio.wait_for(ws.recv(), timeout=deadline - time.monotonic()))
@@ -116,8 +120,11 @@ async def _run_and_capture(ws_url: str, base: str, body: dict,
                 break
             frames.append(frame)
             if frame.get("type") == "RunStateChanged" and frame.get("run_id") == run_id:
-                state = frame["data"].get("state", state)
-                if state in ("done", "stopped", "aborted", "failed", "blocked", "cancelled"):
+                new_state = frame["data"].get("state", state)
+                if new_state == "parked":
+                    break
+                state = new_state
+                if state == "cancelled":          # never touched the bench
                     break
         else:
             raise SystemExit(f"{body.get('module', 'the pipeline')} did not finish within {timeout_s} s")
@@ -153,11 +160,14 @@ def main(argv: list[str] | None = None) -> int:
 
     base = a.url.rstrip("/")
     ws_url = base.replace("http://", "ws://").replace("https://", "wss://") + "/events"
-    index = _request(f"{base}/")
-    tag = a.tag or index["session"]["mode"]
-    fast = index["session"].get("fast")
-    print(f"recording off {base} — session {index['session']['id']}, "
-          f"mode {index['session']['mode']}{' fast' if fast else ''}, tag {tag!r}")
+    # `/session`, not `/`: with `--ui` mounted the index redirects to `/ui/`,
+    # and urllib follows it, so the recorder would try to parse the console's
+    # HTML as JSON before it had recorded anything. The service the README
+    # tells you to develop against is exactly the one with `--ui`.
+    who = _request(f"{base}/session")
+    tag = a.tag or who["mode"]
+    print(f"recording off {base} — session {who['id']}, "
+          f"mode {who['mode']}{' fast' if who.get('fast') else ''}, tag {tag!r}")
 
     # 1 · a J-V with a light curve and a dark one: the curves, and the HDF5.
     print("jv_bace …")

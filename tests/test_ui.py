@@ -85,6 +85,19 @@ def test_the_recorded_stream_is_the_wire_and_not_the_journal():
         assert kept == expected
 
 
+def test_every_recorded_stream_runs_through_to_parked():
+    """A recording that stopped at `done` would be a run the bench never made
+    safe. Every terminal state is reached *through* `parked` (contract §2), and
+    that transition is what tells a console the worker is free again -- so the
+    fixtures have to carry it or the state the rail shows cannot be tested.
+    """
+    for name in ("stream_bace_sim.jsonl", "stream_jv_sim.jsonl", "stream_pipeline_sim.jsonl"):
+        frames = _fixture(name)
+        states = [f["data"]["state"] for f in frames if f["type"] == "RunStateChanged"]
+        assert states[-1] == "parked", f"{name} stops at {states[-1]}"
+        assert "done" in states
+
+
 def test_the_pipeline_fixture_reuses_its_shot_numbers():
     """The fixture is only a test of node identity if the nodes collide.
 
