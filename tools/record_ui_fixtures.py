@@ -90,7 +90,7 @@ async def _hello(ws_url: str) -> dict:
 
 
 async def _run_and_capture(ws_url: str, base: str, body: dict,
-                           *, timeout_s: float) -> tuple[list[dict], dict]:
+                           *, timeout_s: float, path: str = "/runs") -> tuple[list[dict], dict]:
     """Post one run with the socket already open, and keep every frame of it.
 
     The socket is opened first and the run posted from inside it, so the
@@ -105,7 +105,7 @@ async def _run_and_capture(ws_url: str, base: str, body: dict,
         if first.get("type") != "Hello":
             raise SystemExit(f"first frame was {first.get('type')!r}, not Hello")
 
-        posted = _request(f"{base}/runs", "POST", body)
+        posted = _request(f"{base}{path}", "POST", body)
         run_id = posted["run_id"]
         deadline = time.monotonic() + timeout_s
         state = posted["state"]
@@ -120,9 +120,10 @@ async def _run_and_capture(ws_url: str, base: str, body: dict,
                 if state in ("done", "stopped", "aborted", "failed", "blocked", "cancelled"):
                     break
         else:
-            raise SystemExit(f"{body['module']} did not finish within {timeout_s} s")
+            raise SystemExit(f"{body.get('module', 'the pipeline')} did not finish within {timeout_s} s")
     if state != "done":
-        raise SystemExit(f"{body['module']} ended {state}, not done — see the service log")
+        raise SystemExit(f"{body.get('module', 'the pipeline')} ended {state}, not done — "
+                         f"see the service log")
     return frames, posted
 
 
@@ -198,7 +199,26 @@ def main(argv: list[str] | None = None) -> int:
         # it in exactly this endpoint's shape.
         _dump(os.path.join(a.out, f"bace_{tag}.json"), _request(f"{base}/runs/{bace_id}/data"))
 
-    # 3 · the bench snapshot, as the console gets it on connect — recorded
+    # 3 · a pipeline: two module nodes under one `run_id`, each numbering its
+    #     own shots from one. Nothing else in the fixture set has a `node_path`
+    #     that is not the module's own name, and node identity is exactly what
+    #     a store gets wrong quietly — the second node's shots landing on the
+    #     first's, the loop's progress counter overwritten by the shot's.
+    #     `record_length` is small on purpose: this fixture is about paths, and
+    #     a full-length trace per shot would be half a megabyte of them.
+    print("pipeline …")
+    tree = {"kind": "loop", "loop": "repeat", "count": 2, "children": [
+        {"kind": "module", "module": "bace",
+         "params": {"axis_name": "delay_ns", "axis_start": 0.0, "axis_stop": 100.0,
+                    "axis_step": 100.0, "centre_on_voc": False, "n_loops": 1,
+                    "vpre": 1.0, "vcoll": -2.0, "store_shots": False,
+                    "record_length": 500}}]}
+    pipe_frames, _ = asyncio.run(_run_and_capture(
+        ws_url, base, {"tree": tree, "name": "ui-fixture-pipeline"},
+        timeout_s=a.timeout_s, path="/pipelines"))
+    _dump(os.path.join(a.out, f"stream_pipeline_{tag}.jsonl"), pipe_frames, jsonl=True)
+
+    # 4 · the bench snapshot, as the console gets it on connect — recorded
     #     last, so it carries the V_oc the J-V measured and both runs on the
     #     modules' `last`, which is what the rail and the cards develop against.
     _request(f"{base}/bench/read", "POST")

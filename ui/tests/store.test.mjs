@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 
 import { createStore, currentRun } from '../lib/store.js';
 import { parseJsonl, replayInto } from '../lib/replay.js';
-import { sigmaQ } from '../lib/format.js';
+import { sigmaQ, density } from '../lib/format.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const journal = (name) => parseJsonl(readFileSync(
@@ -136,6 +136,41 @@ test('a replayed StepDone keeps its scalars and does not blank the chart', () =>
   assert.equal(shot.tracesGone, true, 'the view must redraw from scalars, not blank the chart');
 });
 
+test('a pipeline keeps each node\'s shots and each scope\'s progress apart', () => {
+  // One `run_id` over two `bace` nodes, each numbering its own shots from one:
+  // `loop:index` alone is not an identity, and the second node would land on
+  // the first. And the counters are three *events* — the executor emits
+  // `Progress(node_path: "rep=1")` for the loop while the leaf emits its own
+  // with `node_path: ""` — so one `progress` field would leave the loop
+  // counter holding the shot counter's numbers.
+  const s = store();
+  const frames = parseJsonl(fixture('stream_pipeline_sim.jsonl'));
+  replayInto(s, frames);
+  const run = currentRun(s.getState());
+
+  const steps = frames.filter((f) => f.type === 'StepDone');
+  assert.equal(steps.length, 4);
+  assert.equal(new Set(steps.map((f) => `${f.data.loop}:${f.data.index}`)).size, 2,
+               'the fixture is only a test of identity if the two nodes reuse their numbers');
+  assert.equal(run.shots.length, 4, 'four shots ran, and four are folded');
+
+  for (const path of ['rep=1/bace', 'rep=2/bace']) {
+    assert.equal(run.nodes[path].shots.length, 2, `${path} kept its own two`);
+    assert.ok(run.nodes[path].axis, 'and its own axis');
+    assert.ok(run.nodes[path].finished, 'and its own RunFinished');
+  }
+  assert.deepEqual(run.shots.map((shot) => shot.node_path),
+                   ['rep=1/bace', 'rep=1/bace', 'rep=2/bace', 'rep=2/bace']);
+
+  assert.deepEqual(Object.keys(run.progressByNode).sort(), ['', 'rep=1', 'rep=2']);
+  assert.deepEqual(run.progressByNode['rep=2'].done, 2, 'the loop counter is the loop\'s');
+  assert.equal(run.progress.node_path, '', 'and `progress` stays the run\'s own');
+
+  assert.equal(run.kept, 4, 'a pipeline\'s counts are the sum over its module nodes');
+  assert.equal(run.requested, 4);
+  assert.equal(run.state, 'done');
+});
+
 test('the Hello frame carries the whole bench', () => {
   const s = store();
   const hello = JSON.parse(fixture('hello_sim.json'));
@@ -147,6 +182,15 @@ test('the Hello frame carries the whole bench', () => {
   assert.equal(state.connection.session, hello.data.session.id);
   assert.equal(state.session.mode, 'sim');
   assert.ok(state.bench.instruments.voc.value > 0, 'the recording was taken after a jv_bace');
+});
+
+test('a current density is A/cm² on the wire, and mA/cm² only after converting', () => {
+  // `JVCurveDone.density` is `current / pixel_area_cm2`, so 0.02 there is
+  // 20.0 mA/cm². Stamping the label on the number as it came would understate
+  // every measured density by a factor of a thousand.
+  assert.equal(density(0.02), '20.0 mA/cm²');
+  assert.equal(density(-1.9e-9), '-1.90 nA/cm²');
+  assert.equal(density(null), '—', 'pixel_area_cm2 = 0 has no density at all');
 });
 
 test('sigma_Q of zero is an absence, not a value', () => {

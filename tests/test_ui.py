@@ -85,6 +85,23 @@ def test_the_recorded_stream_is_the_wire_and_not_the_journal():
         assert kept == expected
 
 
+def test_the_pipeline_fixture_reuses_its_shot_numbers():
+    """The fixture is only a test of node identity if the nodes collide.
+
+    Two `bace` nodes under one `run_id`, each numbering `loop`/`index` from
+    one, so `loop:index` alone is not an identity -- and the loop's `Progress`
+    carries `data.node_path = "rep=1"` where the leaf's carries `""`, which is
+    the three counters of `docs/ui-rules.md` §5 arriving as three events.
+    """
+    frames = _fixture("stream_pipeline_sim.jsonl")
+    steps = [f for f in frames if f["type"] == "StepDone"]
+    assert len(steps) == 4
+    assert len({(f["data"]["loop"], f["data"]["index"]) for f in steps}) == 2
+    assert len({f["node_path"] for f in steps}) == 2
+    scopes = {f["data"]["node_path"] for f in frames if f["type"] == "Progress"}
+    assert scopes == {"", "rep=1", "rep=2"}
+
+
 def test_the_transient_fixture_is_the_data_endpoints_shape():
     """The rig day's HDF5, rendered as `GET /runs/{id}/data` answers."""
     data = _fixture("transient_20260902_153722.json")

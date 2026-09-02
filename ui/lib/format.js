@@ -47,10 +47,22 @@ export function volts(v, { decimals = 4, unit = true } = {}) {
   return v.toFixed(decimals) + (unit ? ' V' : '');
 }
 
-/** Current density to 3 significant figures. `pixel_area_cm2 = 0` has none. */
+/**
+ * Current density to 3 significant figures. The service hands it in **A/cm²**
+ * (`JVCurveDone.density` is `current / pixel_area_cm2`), so the prefix is
+ * computed rather than assumed: 0.02 A/cm² is 20.0 mA/cm², and a formatter
+ * that stamped "mA/cm²" on the number as it came would understate every
+ * measured density by a factor of a thousand.
+ *
+ * `pixel_area_cm2 = 0` means there is no density at all — the service sends
+ * `null` and the caller reports amps instead, rather than defaulting to 1 cm²
+ * and silently mislabelling A as A/cm² (`docs/ui-rules.md` §6).
+ */
 export function density(j, { unit = true } = {}) {
   if (j === null || j === undefined || Number.isNaN(j)) return ABSENT;
-  return sig(j, 3) + (unit ? ' mA/cm²' : '');
+  if (j === 0) return '0' + (unit ? ' A/cm²' : '');
+  const [value, prefix] = prefixed(j);
+  return sig(value, 3) + (unit ? ` ${prefix}A/cm²` : '');
 }
 
 /** Temperature to one decimal. */
