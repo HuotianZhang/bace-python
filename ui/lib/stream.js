@@ -55,6 +55,14 @@ export function createStream({
   let session = null;
   /** `id` plus `started_at`: which *incarnation* of the service this is. */
   let incarnation = null;
+  /**
+   * The seq the service was at when this socket opened. Everything at or below
+   * it is replay — the ring catching us up — and everything above it is
+   * happening now. A consumer that acts on a frame (re-reading the bench when
+   * a run parks, say) needs to know which it is, or opening the console fires
+   * one of those actions per historical frame.
+   */
+  let head = null;
   /** What we asked this socket to replay from; `null` means "no replay". */
   let asked = null;
 
@@ -147,6 +155,7 @@ export function createStream({
       }
       session = id;
       incarnation = now;
+      head = frame.data ? frame.data.seq : null;
       if (asked === null || asked === undefined) {
         // We asked for no replay, so we are current as of `data.seq`. On a
         // reconnect we did ask, and adopting it here would swallow the replay.
@@ -168,7 +177,7 @@ export function createStream({
         status('behind', { since: lastSeq });
       }
       stats.frames += 1;
-      return onFrame(frame);
+      return onFrame(frame, { replay: false });
     }
     if (lastSeq !== null && seq <= lastSeq) {
       stats.duplicates += 1;
@@ -181,7 +190,7 @@ export function createStream({
     lastSeq = seq;
     stats.frames += 1;
     if (hasReplayedTraces(frame)) stats.tracesGone += 1;
-    onFrame(frame);
+    onFrame(frame, { replay: head !== null && seq <= head });
   }
 
   return {
@@ -195,7 +204,7 @@ export function createStream({
       status('closed');
     },
     /** For the status line, and for the tests. */
-    get state() { return { session, incarnation, lastSeq, asked, stats: { ...stats }, connected: !!socket }; },
+    get state() { return { session, incarnation, lastSeq, head, asked, stats: { ...stats }, connected: !!socket }; },
     /** Feed a frame in as if it had arrived — the offline replay uses this. */
     inject(frame) { handle(frame); },
   };

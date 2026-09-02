@@ -34,20 +34,21 @@ const frame = (seq, type = 'Notice') => ({ seq, ts: 1, run_id: null, node_path: 
 function harness(options = {}) {
   FakeSocket.reset();
   const frames = [];
+  const live = [];
   const hellos = [];
   const changes = [];
   const timers = [];
   const stream = createStream({
     url: 'ws://bench/events',
     WebSocketImpl: FakeSocket,
-    onFrame: (f) => frames.push(f),
+    onFrame: (f, meta) => { frames.push(f); if (meta && !meta.replay) live.push(f); },
     onHello: (f) => hellos.push(f),
     onSessionChange: (c) => changes.push(c),
     setTimeoutImpl: (fn) => { timers.push(fn); return timers.length; },
     clearTimeoutImpl: () => {},
     ...options,
   });
-  return { stream, frames, hellos, changes, timers, fire: () => timers.shift()() };
+  return { stream, frames, live, hellos, changes, timers, fire: () => timers.shift()() };
 }
 
 test('a first connection asks for no replay and takes the cursor from Hello', () => {
@@ -177,6 +178,22 @@ test('StepPhase passes the dedupe untouched', () => {
                             data: { index: 0, phase: 'acquire light', k: 3, of: 7 }, decimated: {} });
   assert.equal(frames.length, 1);
   assert.equal(stream.state.lastSeq, 500, 'an ephemeral frame consumes no number');
+});
+
+test('a replayed frame is marked as one', () => {
+  // Boot asks for `since=0`, so the ring's whole history arrives first. A
+  // consumer that acts on a frame — re-reading the bench when a run parks —
+  // must not do it once per historical run, so the stream says which is which:
+  // at or below the seq the service was at when we connected is replay.
+  const { stream, frames, live } = harness();
+  stream.start(0);
+  FakeSocket.last.deliver(hello('S1', 300));
+  FakeSocket.last.deliver(frame(12));
+  FakeSocket.last.deliver(frame(300));
+  FakeSocket.last.deliver(frame(301));
+  assert.equal(frames.length, 3);
+  assert.deepEqual(live.map((f) => f.seq), [301], 'only what happened after we connected');
+  assert.equal(stream.state.head, 300);
 });
 
 test('a gap in the ring is counted, not chased', () => {

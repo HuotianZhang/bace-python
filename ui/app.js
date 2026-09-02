@@ -24,7 +24,7 @@ const store = createStore({ schedule: (fn) => requestAnimationFrame(fn) });
 
 const stream = createStream({
   onHello: (frame) => store.applyHello(frame),
-  onFrame: (frame) => { store.applyFrame(frame); afterFrame(frame); },
+  onFrame: (frame, meta) => { store.applyFrame(frame); if (!meta.replay) afterFrame(frame); },
   onStatus: (status) => store.applyConnection(status),
   onSessionChange: ({ from, to }) => {
     // The service restarted. Everything the old session numbered is gone;
@@ -95,6 +95,9 @@ function renderRail(state) {
  * a run parks — the one moment it is known to have changed.
  */
 function afterFrame(frame) {
+  // Live frames only. The boot replay carries every `parked` the ring still
+  // holds, and one read-back per historical run would be hundreds of requests
+  // racing each other on the way in.
   if (frame.type !== 'RunStateChanged' || !frame.data || frame.data.state !== 'parked') return;
   // `readBack`: take the instruments, the chain and the verdicts, and leave
   // the run, the queue and the bench state to the stream — this response and
