@@ -299,12 +299,27 @@ def resolve_t0_int(config: RunConfig, trace_t0: float,
     return config.t0_int_s - trace_t0
 
 
+PROVISIONAL_TRIGGER_V = 0.5
+"""Where the scope triggers on the sync channel while the sync is being
+measured. The calibration is circular otherwise: `max(CHAN3)` over a 2 us
+record only sees a 5 us pulse at 500 Hz if the record *starts on it*, and the
+scope only starts on it if it is already triggering on it. Every earlier
+calibration inherited a trigger level the LabVIEW VI or a previous session
+had left on CHAN3; session 125751 on the rig (2026-09-02) inherited the
+0.25 mV level of the session before it, free-ran, and measured 4.5 mV of a
+1.2 V sync with both generators demonstrably on. Half a volt triggers a TTL
+sync and nothing else; the measured half-amplitude replaces it afterwards."""
+
 MIN_SYNC_SWING_V = 0.1
 """The least peak-to-peak swing on the trigger channel that counts as a sync.
 The 81150A sync into the scope is about 1.2 V (bench sessions of 2026-09-01
 calibrated 0.115 V thresholds from 0.23 V of it seen through the 1/R
 division); noise on an open CHAN3 is under a millivolt. A tenth of the
 real thing is a generous floor, and anything under it is not a trigger."""
+
+
+class BiasOutputError(RuntimeError):
+    """`:OUTP1 ON` was sent and the 81150A still reports its output off."""
 
 
 class SyncError(RuntimeError):
@@ -397,7 +412,8 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                 "this run does not assume it"
                 if left_alone else ""))
         # The generator is enabled BEFORE the scope calibrates its trigger, at
-        # the first step's light levels with the shutter still shut -- the
+        # the first step's light levels, the shutter wherever the caller left
+        # it (a lit device at its first setpoint is a shot, not a hazard) -- the
         # order `Agilent 81150StandardWaveformTDCF` and then the scope VIs
         # take. Until 2026-09-02 the calibration came first, and it worked only
         # because every earlier run inherited an 81150A the LabVIEW VI had left
@@ -415,10 +431,24 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
         # member; the real driver asks `:OUTP1?`), else the cached flag: a
         # generator that did not take `:OUTP1 ON` gives no sync and no
         # pulse, and the file should say which it was.
-        yield InstrumentState({"bias_output": _output_state(rig.bias)})
+        bias_on = _output_state(rig.bias)
+        yield InstrumentState({"bias_output": bias_on})
+        if bias_on == "OFF":
+            # The instrument, not the driver, says the output did not come
+            # on. Nothing downstream can work -- no pulse, no sync -- and
+            # the operator asked, watching the panel, whether it ever did.
+            raise BiasOutputError(
+                "the 81150A answers :OUTP1? = 0 after :OUTP1 ON: its output did "
+                "not come on, so no pulse reaches the device and no sync reaches "
+                "the scope. Check the front panel (Output 1), the error queue, and "
+                "whether another program holds the instrument.")
 
         threshold = None
         if config.calibrate_trigger:
+            rig.scope.configure_edge_trigger(cfg.trigger_source,
+                                             positive=cfg.trigger_positive,
+                                             high_threshold=PROVISIONAL_TRIGGER_V,
+                                             sweep=config.trigger_sweep)
             probe = rig.scope.acquire(16, source=cfg.trigger_source,
                                       autorange_first=True,
                                       timeout_s=config.acquisition_timeout_s)

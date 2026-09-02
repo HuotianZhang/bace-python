@@ -10,6 +10,12 @@ The recovered strings, verbatim:
                          FUNC:PULS:DCYC <duty>
     :OUTP <0|1>
 
+Read back, not recovered from the VI (`read_state`): `:OUTP?`, `FUNC:SHAP?`,
+`:VOLT:HIGH?`, `:VOLT:LOW?`, `:VOLT:OFFS?`, `:FREQ?`, `:OUTP:POL?` and
+`OUTP:SYNC?` -- the last because the Sync connector is what arms the 81150A,
+and a front panel with Sync switched off (it has its own key) runs a scan
+that measures noise with no other symptom.
+
 Two modes are used within one intensity point and **the level must be the same
 number in both** — DC for the V_oc measurement, then the identical value as the
 pulse high level for the transient. `core.illumination` owns that invariant and
@@ -181,9 +187,12 @@ class Agilent33220A:
     def read_state(self) -> dict[str, Any]:
         """`output`, `polarity`, `mode` (OFF / DC / PULSE, or the shape as the
         instrument spelt it), `shape`, `high_v`, `low_v`, `offset_v`,
-        `frequency_hz` -- from the instrument, None/`?` where it would not
-        answer. `mode` is OFF whenever the output reads off, whatever shape
-        the generator holds: a waveform nobody can see is dark."""
+        `frequency_hz`, `sync_output` -- from the instrument, None/`?` where
+        it would not answer. `mode` is OFF whenever the output reads off,
+        whatever shape the generator holds: a waveform nobody can see is
+        dark. `sync_output` is `OUTP:SYNC?`: the Sync connector arms the
+        81150A, which triggers the scope, so with it off a bace measures
+        noise and nothing else in the chain says why."""
         on = self.read_output()
         shape = word(ask(self._io, "FUNC:SHAP?"), tuple(SHAPES))
         mode = "?" if shape == "?" else SHAPES.get(shape, shape)
@@ -200,6 +209,7 @@ class Agilent33220A:
             "low_v": number(ask(self._io, ":VOLT:LOW?")),
             "offset_v": number(ask(self._io, ":VOLT:OFFS?")),
             "frequency_hz": number(ask(self._io, ":FREQ?")),
+            "sync_output": on_off(ask(self._io, "OUTP:SYNC?")),
         }
 
     def errors(self) -> list[str]:

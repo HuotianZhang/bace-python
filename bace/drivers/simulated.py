@@ -547,17 +547,25 @@ class SimulatedSourceMeter:
 
     def sweep(self, start_v: float, stop_v: float, points: int, *,
               settle_s: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
-        """A linear voltage sweep through the single-diode model.
+        """A linear voltage sweep through the single-diode model, under the
+        light that actually reaches the sample.
 
         The current is **clipped at the configured compliance**, exactly as the
         instrument would clip it. That makes a compliance set too low visible as
         a flat top on the curve rather than as a quietly wrong fill factor.
+
+        The shutter counts, as it does in `measure_dc`: since 2026-09-02 a
+        dark J-V leaves the LED generator as it is and shuts the shutter, so a
+        sweep that followed the drive level alone would draw a lit curve under
+        a dark label -- the exact mistake the sequence has to be caught in.
         """
         if points < 2:
             raise ValueError("a sweep needs at least two points")
         b = self.bench
+        lit = b.shutter_open and b.led_mode in ("DC", "PULSE")
+        drive = b.led_drive_v if lit else 0.0
         v = np.linspace(float(start_v), float(stop_v), int(points))
-        i = np.array([b.device.current(float(x), b.led_drive_v) for x in v])
+        i = np.array([b.device.current(float(x), drive) for x in v])
         i += b.rng.normal(0.0, self.noise_a, i.size)
         self.clipped = bool((np.abs(i) > self.compliance_a).any())
         return v, np.clip(i, -self.compliance_a, self.compliance_a)
@@ -576,11 +584,23 @@ class SimulatedSourceMeter:
 
 # -- power meter ----------------------------------------------------------
 class SimulatedPowerMeter:
-    """Stand-in for the Newport 1918-C."""
+    """Stand-in for the Newport 1918-C.
 
-    def __init__(self, bench: Bench, *, w_per_unit: float = 1.0e-3):
+    It sits behind the shutter, as the real one does (LED -> shutter -> fibre
+    -> beam splitter -> meter + device), so it reads the LED only while the
+    shutter is open, and it reads the drive level at once: the simulated LED
+    has no thermal settling, so the meter-based wait in the service's bace
+    module settles on its first three polls here. `noise` is 0.2 % rms --
+    what the 1918-C reads on a settled LED -- and not more, because that
+    wait asks three readings to agree within 2 % and a simulator noisier
+    than the instrument would make a fixed-seed test wait a random time.
+    """
+
+    def __init__(self, bench: Bench, *, w_per_unit: float = 1.0e-3,
+                 noise: float = 0.002):
         self.bench = bench
         self.w_per_unit = w_per_unit
+        self.noise = float(noise)
         self.wavelength_nm = 530.0
 
     def set_wavelength(self, nm: float) -> None:
@@ -591,7 +611,7 @@ class SimulatedPowerMeter:
         base = b.device.led_current(b.led_drive_v) * self.w_per_unit
         if not b.shutter_open:
             base *= 1e-4
-        return float(base * (1.0 + b.rng.normal(0.0, 0.01)))
+        return float(base * (1.0 + b.rng.normal(0.0, self.noise)))
 
     def read_statistics(self, n: int) -> tuple[float, float]:
         vals = np.array([self.read_power() for _ in range(max(2, n))])

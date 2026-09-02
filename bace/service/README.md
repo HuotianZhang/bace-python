@@ -118,6 +118,30 @@ Shapes are in `docs/service-contract.md` (section numbers below).
 A manual run is a pipeline with one module node, on the same code path, so
 everything said about pipelines below applies to a card's Run button too.
 
+## Light
+
+No module switches the LED generator off. A `bace` leaves the 33220A pulsing
+and a J-V leaves it at DC; every unwind, and `park`, shuts the **shutter**,
+which is the light switch on this rig (LED → shutter → 85 m fibre → beam
+splitter → power meter + device). This is the operator's instruction of
+2026-09-02, after watching a real run: a generator that is cycled loses its
+thermal steady state, and the next module waits for it all over again. The
+one exception is a rig with no shutter, where a dark J-V still switches the
+LED off because nothing else can make it dark. `led-off` remains a by-hand
+bench action.
+
+After the 33220A goes from DC to pulse a `bace` opens the shutter and waits
+for the power meter behind it to read stable, not a fixed time: the meter
+is polled every 0.5 s until the last three readings agree within
+`led_settle_tolerance` (default 0.02, relative) and at least `led_settle_s`
+has passed; past `led_settle_max_s` (default 60 s) it goes on with a
+`Notice(warning)` that quotes the last readings. The wait is counted on the
+poll clock, so `--fast` is instant. It is announced as `Notice(info, "LED
+settled in 4.5 s at 7.81e-05 W (3 readings within 2 %)")` and written to the
+file as the read-back `led_power_w` / `led_settle_s`. Without a meter (or
+with one that raises, said once) the fixed `led_settle_s` is slept as
+before. The 2 s fixed wait was seen not to be enough on the rig that day.
+
 ## Run states and the two stop verbs
 
 ```

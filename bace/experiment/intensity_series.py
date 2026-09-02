@@ -23,6 +23,12 @@ rather than documented:
 
 Events from the nested transient runs are forwarded unchanged, so one consumer
 sees the whole series as a single stream.
+
+The LED generator is never switched off here: the unwind shuts the shutter,
+which is the light switch on this rig, and leaves the 33220A as it was set
+(operator instruction, 2026-09-02 -- a generator that is cycled loses its
+thermal steady state and the next run waits for it again). Only a rig with no
+shutter, which this series cannot run on anyway, would still switch it off.
 """
 from __future__ import annotations
 
@@ -280,7 +286,10 @@ def run_intensity_series(rig: Rig, series: SeriesConfig, spec: ScanSpec,
             rig.shutter.shut()
         except Exception:
             pass
-        if rig.led is not None:
+        if rig.led is not None and rig.shutter is None:
+            # Only where there is no shutter to make the dark. With one, the
+            # LED keeps its mode and its thermal steady state for whatever
+            # runs next; the shutter just shut is what makes the bench dark.
             try:
                 rig.led.off()
             except Exception:

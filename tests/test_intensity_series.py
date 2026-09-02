@@ -201,12 +201,15 @@ def test_an_untrustworthy_intensity_reading_is_surfaced():
 
 # -- unwinding ------------------------------------------------------------
 def test_everything_is_parked_when_the_series_finishes():
+    """Parked means the sources off and the shutter shut. The LED is left
+    pulsing at the last level: since 2026-09-02 the shutter is the light
+    switch, and a generator that is cycled has to be waited for again."""
     sim, rig, _ = build()
     run(rig, TWO_LEVELS, bace_at_voc(1))
     assert sim.bench.bias_output is False
     assert sim.bench.smu_output is False
     assert sim.bench.shutter_open is False
-    assert sim.led.output_enabled is False
+    assert sim.led.output_enabled is True and sim.bench.led_mode == "PULSE"
 
 
 def test_walking_away_mid_series_parks_everything():
@@ -218,7 +221,8 @@ def test_walking_away_mid_series_parks_everything():
     gen.close()
     assert sim.bench.bias_output is False
     assert sim.bench.smu_output is False
-    assert sim.led.output_enabled is False
+    assert sim.bench.shutter_open is False
+    assert sim.led.output_enabled is True, "left as set; the shutter made the dark"
 
 
 def test_an_instrument_failure_mid_series_parks_everything():
@@ -237,7 +241,8 @@ def test_an_instrument_failure_mid_series_parks_everything():
         run(rig, TWO_LEVELS, bace_at_voc(2))
     assert sim.bench.bias_output is False
     assert sim.bench.smu_output is False
-    assert sim.led.output_enabled is False
+    assert sim.bench.shutter_open is False
+    assert sim.led.output_enabled is True, "left as set; the shutter made the dark"
 
 
 def test_abort_stops_between_levels():

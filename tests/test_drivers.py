@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import json
 
+import re
+
 import numpy as np
 import pytest
 
@@ -34,11 +36,22 @@ class FakeIO:
 
     def write(self, cmd):
         self.log.append(cmd)
+        # The one piece of state a run path reads back after writing it:
+        # the output switch. A fake that answered `0` to `:OUTP1?` after
+        # `:OUTP1 ON` would trip the run's own guard (BiasOutputError),
+        # which exists because a real generator once appeared to.
+        head = cmd.strip().upper()
+        if head.startswith((":OUTP1 ON", ":OUTP1 1", ":OUTP ON", ":OUTP 1", "OUTP1 ON", "OUTP 1", "OUTP ON")):
+            self.output_on = True
+        elif head.startswith((":OUTP1 OFF", ":OUTP1 0", ":OUTP OFF", ":OUTP 0", "OUTP1 OFF", "OUTP 0", "OUTP OFF")):
+            self.output_on = False
 
     def query(self, cmd):
         self.log.append(cmd)
         if "*IDN?" in cmd:
             return self.idn
+        if cmd.strip().upper().rstrip(";") in (":OUTP1?", ":OUTP?", "OUTP?", "OUTP1?"):
+            return "1" if getattr(self, "output_on", False) else "0"
         if ":SYST:ERR?" in cmd:
             return "0,No error"
         if ":READ?" in cmd:
@@ -778,12 +791,14 @@ def test_the_33220a_read_back_reports_mode_levels_and_polarity_from_the_instrume
 
     io = ScriptedIO({":OUTP?": "1", ":OUTP:POL?": "NORM", "FUNC:SHAP?": "PULS",
                      ":VOLT:HIGH?": "+1.02000E+00", ":VOLT:LOW?": "+4.00000E-01",
-                     ":VOLT:OFFS?": "+7.10000E-01", ":FREQ?": "+5.00000E+02"})
+                     ":VOLT:OFFS?": "+7.10000E-01", ":FREQ?": "+5.00000E+02",
+                     "OUTP:SYNC?": "1"})
     g = Agilent33220A(io)
     assert g.output_enabled is False and g.mode == "OFF"
     state = g.read_state()
     assert state == {"output": True, "polarity": "NORM", "mode": "PULSE", "shape": "PULS",
-                     "high_v": 1.02, "low_v": 0.4, "offset_v": 0.71, "frequency_hz": 500.0}
+                     "high_v": 1.02, "low_v": 0.4, "offset_v": 0.71, "frequency_hz": 500.0,
+                     "sync_output": True}
     assert g.output_enabled is True and g.mode == "PULSE"
 
     off = Agilent33220A(ScriptedIO({":OUTP?": "0", "FUNC:SHAP?": "DC", ":OUTP:POL?": "INV"}))
@@ -798,7 +813,25 @@ def test_the_33220a_read_back_reports_mode_levels_and_polarity_from_the_instrume
     dead = Agilent33220A(ScriptedIO({}))
     assert dead.read_state() == {"output": None, "polarity": "?", "mode": "?", "shape": "?",
                                  "high_v": None, "low_v": None, "offset_v": None,
-                                 "frequency_hz": None}
+                                 "frequency_hz": None, "sync_output": None}
+
+
+def test_the_33220a_read_back_asks_for_the_sync_output():
+    """The Sync connector is what arms the 81150A, which is what triggers the
+    scope; it has its own front-panel key, and a scan run with it off measures
+    noise with no other symptom in the chain. So the read-back asks
+    `OUTP:SYNC?` and reports it as `sync_output`; a generator that will not
+    answer gives None, never a plausible True."""
+    from bace.drivers.agilent33220a import Agilent33220A
+
+    io = ScriptedIO({":OUTP?": "1", "FUNC:SHAP?": "PULS", "OUTP:SYNC?": "0\n"})
+    g = Agilent33220A(io)
+    state = g.read_state()
+    assert state["sync_output"] is False and state["output"] is True
+    assert "OUTP:SYNC?" in io.log, "the Sync was asked, not assumed"
+    assert not any(c for c in io.log if not c.endswith("?")), "a read-back writes nothing"
+    assert Agilent33220A(ScriptedIO({"OUTP:SYNC?": "ON"})).read_state()["sync_output"] is True
+    assert Agilent33220A(ScriptedIO({":OUTP?": "1"})).read_state()["sync_output"] is None
 
 
 def test_the_keithley_read_back_refreshes_the_interlock_flag():

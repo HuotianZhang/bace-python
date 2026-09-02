@@ -211,11 +211,15 @@ def test_the_canonical_tree_runs_with_the_three_bindings(tmp_path):
         ("jv_bace", 1.04, "T=250K/led=1.040V/jv_bace")]
     assert [v.value for v in vocs] == [measured[v.node_path] for v in vocs]
 
-    # binding 1: the loop's level drove the LED, for the curve and the pulse
+    # binding 1: the loop's level drove the LED, for the curve and the pulse.
+    # A dark curve is dark through the shutter; the LED is whatever the
+    # module before left (off before the first, pulsing at the previous
+    # level after a bace), since no module switches it off (2026-09-02).
     for p, ev, s in h.of(JVCurveDone):
         level = float(p.split("/")[1][4:-1])
         if ev.dark:
-            assert (s["led_mode"], s["led_drive"], s["shutter"]) == ("OFF", 0.0, False)
+            assert s["shutter"] is False
+            assert abs(ev.metrics.jsc) < 1e-5, "dark through the shutter, whatever the LED does"
         else:
             assert ev.led_level_v == level
             assert (s["led_mode"], s["led_drive"], s["shutter"]) == ("DC", level, True)
@@ -269,9 +273,10 @@ def test_the_canonical_tree_runs_with_the_three_bindings(tmp_path):
                          ("T=295K/led=1.020V", 1, 2)]
     assert loops[-1] == ("T=250K", 2, 2)
 
-    # parked on the way out
+    # parked on the way out: sources off, shutter shut, the LED left pulsing
     assert not sim.bench.bias_output and not sim.bench.smu_output
-    assert not sim.led.output_enabled and not sim.bench.shutter_open
+    assert not sim.bench.shutter_open
+    assert sim.led.output_enabled and sim.bench.led_mode == "PULSE"
     assert job.parked
 
 
@@ -290,16 +295,19 @@ def test_a_manual_run_takes_the_sessions_voc_as_the_source_it_is(tmp_path):
                             ctx_factory=factory(None, str(tmp_path), store),
                             on_voc=vocs.append, session_voc=session_voc))
     kinds = [type(e).__name__ for e in evs]
-    # the LED read-back (InstrumentState) sits between NodeStarted and RunStarted
-    assert kinds[:4] == ["NodeStarted", "InstrumentState", "RunStarted", "AxisResolved"]
-    assert evs[3].voc == 0.9
+    # the LED read-back (InstrumentState), then the settle on the meter (a
+    # Notice and its read-back), sit between NodeStarted and RunStarted
+    assert kinds[:6] == ["NodeStarted", "InstrumentState", "Notice", "InstrumentState",
+                         "RunStarted", "AxisResolved"]
+    assert evs[2].text.startswith("LED settled in") and "led_power_w" in evs[3].values
+    assert evs[5].voc == 0.9
     done = evs[-1]
     assert isinstance(done, E.NodeDone) and done.node_path == "bace" and done.outcome == "ok"
     assert done.detail["voc"] == {**session_voc.as_dict()}
     assert "900mVVOC" in os.path.basename(done.detail["folder"])
     assert vocs == [], "the session's own source is not announced back to it"
     assert store["bace"]["voc"] == 0.9
-    assert not b.sim.led.output_enabled and not b.sim.bench.bias_output
+    assert b.sim.led.output_enabled and not b.sim.bench.bias_output
 
 
 def test_measure_dc_becomes_the_sessions_next_voc(tmp_path):
@@ -344,7 +352,7 @@ def test_after_shot_keeps_the_shot_closes_the_open_nodes_and_runs_nothing_more(t
     assert (store["led=1.020V/bace"]["kept"], store["led=1.020V/bace"]["requested"]) == (1, 3)
     assert not any(p.startswith("led=1.040V") for p, _, _ in h.events), "later steps never ran"
     assert h.state_names() == ["preflight", "running", "stopping", "stopped", "parked"]
-    assert not sim.led.output_enabled and not sim.bench.bias_output
+    assert sim.led.output_enabled and not sim.bench.bias_output
     assert not sim.bench.shutter_open and job.state == "stopped"
 
 
@@ -396,7 +404,8 @@ def test_abort_discards_the_shot_unwinds_and_parks(tmp_path):
         "the bace and the loop above it were unwound, not reported")
     assert h.state_names() == ["preflight", "running", "aborted", "parked"]
     assert job.state == "aborted" and job.parked
-    assert not sim.led.output_enabled and sim.bench.led_mode == "OFF"
+    assert sim.led.output_enabled and sim.bench.led_mode == "PULSE", (
+        "parked leaves the LED pulsing (2026-09-02); the shutter is what is shut")
     assert not sim.bench.bias_output and not sim.bench.shutter_open
 
 
@@ -528,7 +537,7 @@ def test_with_the_331_attached_a_temperature_loop_settles_on_its_own(tmp_path):
     # the ETA learned the settle the console took
     progress = [(p, ev.done, ev.eta_s) for p, ev, _ in h.of(E.Progress) if ev.node_path]
     assert progress[-1] == ("T=250K", 2, 0.0)
-    assert not b.sim.bench.bias_output and not b.sim.led.output_enabled
+    assert not b.sim.bench.bias_output and not b.sim.bench.shutter_open
 
 
 def test_a_settle_that_times_out_pauses_and_the_operator_resumes_or_stops(tmp_path):

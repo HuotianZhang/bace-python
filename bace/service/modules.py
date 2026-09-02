@@ -27,6 +27,15 @@ catalogue holds only the edited layer and rebuilds the `ParamSet` fresh on
 every `param_set()` call, so a resolver that adds an inherited layer to one
 copy cannot leak it into the bench card.
 
+The light. No module switches the LED generator off: a `bace` leaves the
+33220A pulsing and a J-V leaves it at DC, and the shutter -- which every
+unwind shuts -- is the light switch (operator instruction, 2026-09-02, after
+a real run: a generator that is cycled loses its thermal steady state and
+the next module waits for it again). After the 33220A goes from DC to pulse
+a `bace` opens the shutter and waits for the power meter behind it to read
+stable (`_settle_led`) rather than a fixed `led_settle_s`, because the fixed
+2 s was seen not to be enough on the rig that day.
+
 Nothing here imports FastAPI, and nothing here sleeps except through
 `RunContext.sleep`, so `--fast` and the tests run a 20-loop scan in seconds.
 """
@@ -74,6 +83,15 @@ VOC_LEVEL_TOLERANCE_V = 1e-9
 pulsed. The same number `core.illumination.assert_axis_centre` uses: the
 coupling is an equality, and this is only floating-point slack."""
 
+LED_SETTLE_POLL_S = 0.5
+"""How often `_settle_led` reads the power meter while the LED settles after
+DC -> pulse. Elapsed time is counted on this clock (polls x this), not on
+the wall clock, so `--fast` is instant and a test can say exactly how long
+the wait took."""
+
+LED_SETTLE_WINDOW = 3
+"""How many consecutive readings must agree before the LED counts as settled."""
+
 MODULE_NAMES: tuple[str, ...] = ("jv_dark", "jv_bace", "bace", "power",
                                  "temperature", "park", "wait", "note")
 
@@ -85,9 +103,10 @@ reads from it. Not module parameters: they describe the session."""
 
 def _read_led_state(led) -> dict[str, str]:
     """The LED generator as it answers: `output`, `mode`, `frequency_hz`,
-    `high_v`, `low_v`, `polarity` -- strings, `?` for what it will not say.
-    `read_state` is the real driver's (not a protocol member); a driver
-    without it reports its cached flags, which is what the simulator has."""
+    `high_v`, `low_v`, `polarity`, `sync_output` -- strings, `?` for what it
+    will not say. `read_state` is the real driver's (not a protocol member);
+    a driver without it reports its cached flags, which is what the
+    simulator has."""
     read = getattr(led, "read_state", None)
     state: dict = {}
     if callable(read):
@@ -109,6 +128,11 @@ def _read_led_state(led) -> dict[str, str]:
         except Exception:                               # noqa: BLE001
             pol = "?"
     out["polarity"] = str(pol or "?").upper()
+    # The Sync connector (`OUTP:SYNC?`) is what arms the 81150A, which is
+    # what triggers the scope; it has its own front-panel key and nothing
+    # else in the chain shows it off. Only the real driver answers it.
+    sync = state.get("sync_output", None) if state else None
+    out["sync_output"] = "?" if sync is None else ("ON" if sync else "OFF")
     # The error queue, drained: `:VOLT:HIGH` below the LOW in force, or a
     # width that no longer fits the period, is refused by the 33220A with
     # `-221 Settings conflict` and no other symptom, and the run path
@@ -129,6 +153,8 @@ def _led_problems(state: dict[str, str], wanted: dict) -> list[str]:
     problems = []
     if state.get("output") == "OFF":
         problems.append("output is OFF (:OUTP? = 0)")
+    if state.get("sync_output") == "OFF":
+        problems.append("Sync output is OFF (OUTP:SYNC? = 0): nothing arms the 81150A")
     mode = state.get("mode", "?").upper()
     if mode not in ("PULSE", "?", "PULS"):
         problems.append(f"shape is {mode}, not PULSE: a DC output has no Sync edge to arm the 81150A")
@@ -390,7 +416,18 @@ def _bace_specs(rig_config: RigConfig) -> list[ParamSpec]:
                   doc="Bias at which J_sat is measured (measure_dc)."),
         ParamSpec("led_settle_s", "float", 2.0, unit="s", group="illumination",
                   minimum=0.0,
-                  doc="After the LED is set to pulse, before anything is measured."),
+                  doc="The least time after the LED is set to pulse before anything is "
+                      "measured; with a power meter the wait goes on past it until the "
+                      "meter reads stable (measure_dc: also the DC settle before V_oc)."),
+        ParamSpec("led_settle_max_s", "float", 60.0, unit="s", group="illumination",
+                  minimum=0.0,
+                  doc="The most time to wait for the power meter to read stable after "
+                      "DC -> pulse; past it the scan goes on with a warning. A 2 s fixed "
+                      "wait was seen not to be enough (2026-09-02)."),
+        ParamSpec("led_settle_tolerance", "float", 0.02, group="illumination",
+                  minimum=0.0,
+                  doc="The LED counts as settled when the last three power readings, "
+                      "0.5 s apart, agree within this fraction of their mean."),
     ]
     run = _regroup(specs_from_dataclass(RunConfig, choices=RUN_CHOICES, units=RUN_UNITS),
                    RUN_GROUPS, RunConfig)
@@ -1013,6 +1050,8 @@ class Catalogue:
         store_shots = bool(p["store_shots"])
         v_sat = float(p["v_sat"])
         led_settle_s = float(p["led_settle_s"])
+        led_settle_max_s = float(p["led_settle_max_s"])
+        led_settle_tolerance = float(p["led_settle_tolerance"])
         rig_cfg = self.rig_config
 
         def run() -> Iterator[E.Event]:
@@ -1052,21 +1091,34 @@ class Catalogue:
                 rig.led.set_pulse(s["high"], s["low"], frequency_hz=s["frequency"],
                                   duty_percent=s["duty"])
                 rig.led.enable_output(True)
-                ctx.sleep(led_settle_s)
                 # The 33220A is the master clock: its Sync arms the 81150A,
                 # whose Sync triggers the scope. Read it back (the real
-                # driver asks :OUTP? / FUNC:SHAP? / :FREQ?) and refuse a
-                # generator that is off, in DC, or at another frequency
-                # before the scan calibrates against a silent CHAN3. The
-                # first real service run (2026-09-02, session 115857) had
-                # nothing in its file saying whether either generator was
-                # on; the reading goes into the file either way.
+                # driver asks :OUTP? / FUNC:SHAP? / :FREQ? / OUTP:SYNC?)
+                # and refuse a generator that is off, in DC, at another
+                # frequency, or with its Sync off before the scan calibrates
+                # against a silent CHAN3. The first real service run
+                # (2026-09-02, session 115857) had nothing in its file
+                # saying whether either generator was on; the reading goes
+                # into the file either way. Before the settle below, so a
+                # generator that took nothing is refused at once and not
+                # after a minute spent watching a meter read stable dark.
                 led_state = _read_led_state(rig.led)
                 yield E.InstrumentState({f"led_{k}": v for k, v in led_state.items()})
                 problems = _led_problems(led_state, s)
                 if problems:
                     raise ModuleError(f"{name}: the 33220A is not driving the LED as "
                                       f"the recipe asks: {'; '.join(problems)}")
+
+                # Then the light: the shutter open, so the meter behind it
+                # sees the LED and the device is lit, as in the LabVIEW
+                # program, which keeps the light on; and the LED given
+                # until the meter reads stable, not a fixed led_settle_s.
+                # The shutter stays open: the scan's first shot unblocks it
+                # anyway and its finally shuts it.
+                rig.shutter.unblock()
+                yield from _settle_led(rig, ctx, settle_s=led_settle_s,
+                                       max_s=led_settle_max_s,
+                                       tolerance=led_settle_tolerance)
 
                 if voc_src is not None:
                     ctx.voc = voc_src
@@ -1096,11 +1148,15 @@ class Catalogue:
                         acc.handle(ev)
                         yield ev
             finally:
-                # The LED is this module's to switch off: run_transient_scan
-                # never touched it, and a run that ends with the LED pulsing
-                # leaves the sample lit for as long as nobody notices.
+                # The LED is left pulsing on purpose: the shutter is the
+                # light switch (operator instruction, 2026-09-02), and a
+                # generator switched off here would have to be waited for
+                # again by the next module. run_transient_scan's finally
+                # shuts the shutter once the scan has started; this one
+                # covers a walk-away during the settle, when the shutter
+                # was opened above and the scan never began.
                 try:
-                    rig.led.off()
+                    rig.shutter.shut()
                 except Exception:
                     pass
                 if ctx.on_data is not None and acc.started:
@@ -1311,6 +1367,81 @@ def jsonable(value: Any) -> Any:
 
 
 # -- helpers ----------------------------------------------------------------
+def _settle_led(rig: Rig, ctx: RunContext, *, settle_s: float, max_s: float,
+                tolerance: float) -> Iterator[E.Event]:
+    """Wait for the LED to reach its steady state after DC -> pulse, on the
+    power meter when the rig has one, on the clock otherwise.
+
+    The operator watched a real run on 2026-09-02 and saw the fixed 2 s
+    `led_settle_s` was not enough after the 33220A switched from DC to
+    pulse: the LED's output was still moving when the scan began, and every
+    charge in the first steps was taken under an intensity that was not the
+    one recorded. The 1918-C behind the shutter sees exactly the light the
+    device does, so it is asked: `read_power()` every `LED_SETTLE_POLL_S`
+    until the last `LED_SETTLE_WINDOW` readings agree within `tolerance`
+    (their spread over their mean) and at least `settle_s` has passed. A
+    meter that never agrees gives up at `max_s` with a warning and the scan
+    goes on -- a bace that never starts is worse than one that says its
+    light may not have been steady. Elapsed time is counted as polls times
+    `LED_SETTLE_POLL_S`, never on the wall clock, so `--fast` is instant
+    and a test can say when it settled.
+
+    A meter that raises is treated as absent -- one warning, then the fixed
+    wait -- because a dead console must not stop a scan that does not need
+    it. The stop flag is not polled here: an `after_shot` stop never cuts a
+    settle short (the README's rule, and the scan reports the stop before
+    its first step), and an `abort` closes the generator at its next yield.
+    """
+    meter = rig.power
+    if meter is None:
+        ctx.sleep(settle_s)
+        return
+    readings: list[float] = []
+    elapsed = 0.0
+    while True:
+        ctx.sleep(LED_SETTLE_POLL_S)
+        elapsed += LED_SETTLE_POLL_S
+        # `abort` means now: the session's sleep returns early on it and
+        # this is the next chance to act. `after_shot` is left alone -- a
+        # settle in progress is not a shot, and the scan's own check
+        # before its first step honours it without acquiring anything.
+        if ctx.stop_mode is not None and ctx.stop_mode() == "abort":
+            from .worker import AbortNow
+            raise AbortNow("LED settle abandoned: abort requested")
+        try:
+            readings.append(float(meter.read_power()))
+        except Exception as exc:                        # noqa: BLE001
+            yield E.Notice("warning", f"power meter not read during the LED settle "
+                                      f"({exc}); waiting the fixed {settle_s:g} s instead")
+            ctx.sleep(max(0.0, settle_s - elapsed))
+            return
+        if elapsed >= settle_s and _agree(readings[-LED_SETTLE_WINDOW:], tolerance):
+            yield E.Notice("info", f"LED settled in {elapsed:g} s at {readings[-1]:.2e} W "
+                                   f"({LED_SETTLE_WINDOW} readings within "
+                                   f"{tolerance * 100:g} %)")
+            break
+        if elapsed >= max_s:
+            last = ", ".join(f"{r:.2e}" for r in readings[-LED_SETTLE_WINDOW:])
+            yield E.Notice("warning", f"LED did not stabilise within {max_s:g} s: last "
+                                      f"readings {last} W; going on")
+            break
+    yield E.InstrumentState({"led_power_w": f"{readings[-1]:.2e}",
+                             "led_settle_s": f"{elapsed:g}"})
+
+
+def _agree(readings: list[float], tolerance: float) -> bool:
+    """`LED_SETTLE_WINDOW` readings whose spread is within `tolerance` of
+    their mean. Fewer readings than the window is not agreement; a mean of
+    zero (the shutter shut, the LED dark) agrees only if every reading is
+    exactly zero, which a real meter never returns."""
+    if len(readings) < LED_SETTLE_WINDOW:
+        return False
+    mean = sum(readings) / len(readings)
+    if mean == 0.0:
+        return all(r == 0.0 for r in readings)
+    return (max(readings) - min(readings)) / abs(mean) <= tolerance
+
+
 def _axis_of(p: Mapping[str, Any]) -> Axis:
     try:
         return Axis(name=p["axis_name"], start=float(p["axis_start"]),

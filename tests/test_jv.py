@@ -65,15 +65,41 @@ def test_dark_and_light_land_in_one_run():
     assert curves[0].label == "dark" and curves[1].label == "1.02 V"
 
 
-def test_dark_means_the_led_output_is_off_not_merely_low():
-    """A sub-threshold level is right for the transient, where the generator has
-    to keep producing a waveform. For a dark J-V there is nothing to keep."""
+def test_dark_means_the_shutter_shut_and_the_led_left_exactly_as_it_was():
+    """Operator instruction, 2026-09-02: do not switch the LED generator off;
+    use the shutter when no light is wanted. A generator that is cycled loses
+    its thermal steady state and the next module waits for it again. So a
+    dark curve on a rig with a shutter leaves the LED as the last module set
+    it (here: lit, at DC) and the curve is dark because the shutter is shut
+    -- which the simulated SourceMeter now sees: its J_sc is nothing."""
     sim, rig = build()
+    sim.led.set_dc(1.020)
+    sim.led.enable_output(True)          # as a light run before this left it
+    seen = []
+    for ev in run_jv(rig, JVConfig(dark=True, led_levels_v=()), sleep=NO_SLEEP):
+        if isinstance(ev, JVCurveDone):
+            seen.append((sim.bench.led_mode, sim.led.output_enabled, sim.bench.shutter_open))
+            assert abs(ev.metrics.jsc) < 1e-5, "dark through the shutter, not through the LED"
+    assert seen == [("DC", True, False)]
+    assert sim.led.output_enabled and sim.bench.led_mode == "DC", "left as it was"
+    assert sim.bench.shutter_open is False
+
+
+def test_without_a_shutter_dark_still_means_the_led_output_off():
+    """The exception to the rule above: a rig with no shutter has no other
+    way to be dark, so the LED output is switched off -- off, not merely a
+    low level, because an output that is off cannot leak."""
+    sim = make_bench(seed=4)
+    rig = Rig(bias=sim.bias, scope=sim.scope, shutter=None, config=RigConfig(),
+              smu=sim.smu, led=sim.led)
+    sim.led.set_dc(1.020)
+    sim.led.enable_output(True)
     seen = []
     for ev in run_jv(rig, JVConfig(dark=True, led_levels_v=()), sleep=NO_SLEEP):
         if isinstance(ev, JVCurveDone):
             seen.append((sim.bench.led_mode, sim.led.output_enabled))
     assert seen == [("OFF", False)]
+    assert sim.led.output_enabled is False, "and off on the way out"
 
 
 def test_a_dark_curve_reports_no_voc():
@@ -157,14 +183,23 @@ def test_the_sweep_happens_on_the_sourcemeter_side_of_the_relay():
     assert positions == ["sourcemeter"]
 
 
-def test_walking_away_leaves_the_sourcemeter_and_led_off():
+def test_walking_away_leaves_the_sourcemeter_off_the_shutter_shut_and_the_led_as_set():
+    """The unwind parks what is the run's to park: the SourceMeter off and
+    the shutter shut. The LED is left as it was set (2026-09-02: the shutter
+    is the light switch), so whatever runs next finds a generator that has
+    kept its steady state."""
     sim, rig = build()
     gen = run_jv(rig, JVConfig(dark=True, led_levels_v=(1.020, 1.060)),
                  sleep=NO_SLEEP)
-    next(gen); next(gen)
+    for ev in gen:
+        if isinstance(ev, JVCurveDone) and not ev.dark:
+            break
+    assert sim.bench.shutter_open is True            # mid light curve
     gen.close()
     assert sim.smu.output_enabled is False
-    assert sim.led.output_enabled is False
+    assert sim.bench.shutter_open is False
+    assert sim.led.output_enabled is True and sim.bench.led_mode == "DC"
+    assert sim.bench.led_drive_v == 1.020
 
 
 def test_abort_stops_before_the_next_illumination():
@@ -185,12 +220,11 @@ def test_abort_stops_before_the_next_illumination():
 def test_a_light_curve_opens_the_shutter_and_a_dark_curve_shuts_it():
     """Recorded gap (ui-brief 01-modules section 4): `run_jv` never touched the
     shutter, so a light J-V taken with it shut was a dark J-V wearing a light
-    label. The simulated SourceMeter does not see the shutter -- its current
-    follows the LED drive only -- so this pins the sequence, not the physics:
-    the shutter position at the moment each sweep is taken, the
-    `InstrumentState` the run yields for a console or recorder to pick up
-    (`JVRecorder` writes it, see the storage tests), and the shutter shut
-    afterwards."""
+    label. This pins the sequence: the shutter position at the moment each
+    sweep is taken, the `InstrumentState` the run yields for a console or
+    recorder to pick up (`JVRecorder` writes it, see the storage tests), and
+    the shutter shut afterwards. (The simulated SourceMeter sees the shutter
+    since 2026-09-02, so the dark curve's J_sc says the same thing.)"""
     sim, rig = build()
     seen, states = [], []
     for ev in run_jv(rig, JVConfig(dark=True, led_levels_v=(1.020, 1.060)),
@@ -265,16 +299,19 @@ def test_a_shutter_alone_still_earns_the_settle():
     assert slept == [0.5]
 
 
-def test_an_led_that_will_not_switch_off_stops_a_dark_curve():
-    """Before 2026-09-02 a failing `off()` on the dark branch was swallowed
+def test_an_led_that_will_not_switch_off_stops_a_dark_curve_on_a_shutterless_rig():
+    """On a rig with no shutter the LED output off is the only dark there
+    is. Before 2026-09-02 a failing `off()` on the dark branch was swallowed
     and the sweep went ahead under whatever the LED was doing -- a dark curve
     taken lit, labelled dark. Now it stops the run before any curve is taken,
-    and the unwind still parks everything it can: the SourceMeter off, the
-    shutter shut, and the LED off on the retry."""
-    sim, rig = build()
+    and the unwind still parks everything it can: the SourceMeter off, and
+    the LED off on the retry. (A rig with a shutter never calls `off()`:
+    the shutter is its light switch.)"""
+    sim = make_bench(seed=4)
+    rig = Rig(bias=sim.bias, scope=sim.scope, shutter=None, config=RigConfig(),
+              smu=sim.smu, led=sim.led)
     sim.led.set_dc(1.020)
     sim.led.enable_output(True)          # lit going in, as after a light run
-    sim.shutter.unblock()                # and open, so the unwind has work to do
     calls = {"off": 0}
 
     class Flaky:
@@ -296,7 +333,26 @@ def test_an_led_that_will_not_switch_off_stops_a_dark_curve():
     assert calls["off"] == 2             # the unwind tried again, and succeeded
     assert sim.led.output_enabled is False
     assert sim.smu.output_enabled is False
-    assert sim.bench.shutter_open is False
+
+
+def test_a_rig_with_a_shutter_never_calls_off_on_the_led():
+    """The whole of a dark-and-light run, and its unwind, without one `off()`:
+    the operator's instruction of 2026-09-02, checked on the transcript."""
+    sim, rig = build()
+    log = []
+
+    class Watched:
+        def __init__(self, inner): self._i = inner
+        def off(self): log.append("off"); return self._i.off()
+        def set_dc(self, v): log.append(("dc", v)); return self._i.set_dc(v)
+        def enable_output(self, on=True): log.append(("enable", on)); return self._i.enable_output(on)
+        def __getattr__(self, n): return getattr(self._i, n)
+
+    rig.led = Watched(sim.led)
+    evs = run(rig, JVConfig(dark=True, led_levels_v=(1.020,)))
+    assert isinstance(evs[-1], JVFinished)
+    assert log == [("dc", 1.020), ("enable", True)]
+    assert sim.bench.shutter_open is False and sim.led.output_enabled
 
 
 # -- storage --------------------------------------------------------------

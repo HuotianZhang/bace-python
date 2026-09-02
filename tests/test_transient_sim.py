@@ -719,3 +719,68 @@ def test_the_bias_output_state_in_the_file_is_read_from_the_instrument_when_it_c
     assert _output_state(Stubborn()) == "OFF"
     assert _output_state(Mute()) == "?"
     assert _output_state(Plain()) == "ON"
+
+
+def test_the_scope_triggers_on_the_sync_at_a_provisional_level_before_measuring_it():
+    """Session 125751 on the rig: both generators read ON, CHAN3 swung 4.5 mV.
+    The probe record only contains the 5 us sync if the scope starts the
+    record on it, and the scope was still on the 0.25 mV level the previous
+    session had left, free-running. So the trigger is put at half a volt on
+    the sync channel first, the sync is measured from triggered records, and
+    the measured half-amplitude replaces the provisional level."""
+    from bace.experiment.transient import PROVISIONAL_TRIGGER_V
+
+    sim, rig = build()
+    calls: list[tuple] = []
+    real_cfg, real_acq = rig.scope.configure_edge_trigger, rig.scope.acquire
+
+    def cfg_trigger(source="CHAN3", **kw):
+        calls.append(("trigger", source, kw.get("high_threshold"), kw.get("sweep")))
+        return real_cfg(source, **kw)
+
+    def acquire(n, *, source="CHAN2", autorange_first=False, timeout_s=30.0):
+        calls.append(("acquire", source))
+        return real_acq(n, source=source, autorange_first=autorange_first,
+                        timeout_s=timeout_s)
+
+    rig.scope.configure_edge_trigger = cfg_trigger    # type: ignore[method-assign]
+    rig.scope.acquire = acquire                       # type: ignore[method-assign]
+    cfg = RunConfig(n_averages=8, settle_s=0.0, dark_settle_s=0.0,
+                    t0_int_s=2.71e-7, calibrate_trigger=True, trigger_sweep="AUTO")
+    list(run_transient_scan(rig, bace_sweep(0.9, 0.9, 0.0), cfg, sleep=NO_SLEEP))
+    triggers = [c for c in calls if c[0] == "trigger"]
+    probe = calls.index(("acquire", "CHAN3"))
+    assert calls.index(triggers[0]) < probe, "the provisional level comes before the probe"
+    assert triggers[0][2] == PROVISIONAL_TRIGGER_V and triggers[0][3] == "AUTO"
+    assert calls.index(triggers[1]) > probe, "the measured level comes after it"
+    assert 0.0 < triggers[1][2] < PROVISIONAL_TRIGGER_V * 3
+    assert triggers[1][2] != PROVISIONAL_TRIGGER_V
+
+
+def test_a_generator_that_reports_its_output_still_off_stops_the_run():
+    """The operator watched the 81150A's panel during session 125751 and did
+    not see Output 1 come on. The run now asks the instrument (`read_output`,
+    `:OUTP1?`) right after `:OUTP1 ON` and stops with the answer in the file
+    if it says 0, instead of calibrating against a silent CHAN3 and blaming
+    the sync cable."""
+    from bace.experiment.transient import BiasOutputError
+
+    sim, rig = build()
+
+    class Deaf:
+        """The simulated generator, answering :OUTP1? = 0 whatever was sent."""
+        def __init__(self, inner): self._inner = inner
+        def read_output(self): return False
+        def __getattr__(self, name): return getattr(self._inner, name)
+
+    rig = Rig(bias=Deaf(sim.bias), scope=sim.scope, shutter=sim.shutter,
+              config=RigConfig(), power=sim.power)
+    cfg = RunConfig(n_averages=8, settle_s=0.0, dark_settle_s=0.0,
+                    t0_int_s=2.71e-7, calibrate_trigger=True)
+    seen = []
+    with pytest.raises(BiasOutputError, match=":OUTP1\? = 0"):
+        for ev in run_transient_scan(rig, bace_sweep(0.9, 0.9, 0.0), cfg, sleep=NO_SLEEP):
+            seen.append(ev)
+    states = [e.values for e in seen if isinstance(e, E.InstrumentState)]
+    assert any(v.get("bias_output") == "OFF" for v in states)
+    assert sim.bench.shots == 0, "nothing was acquired, not even the probe"

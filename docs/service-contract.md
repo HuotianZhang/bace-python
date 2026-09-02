@@ -469,7 +469,7 @@ what the run will centre on — rather than `default · null` with an empty
 |---|---|---|
 | `jv_dark` | `run_jv(rig, JVConfig(dark=True, led_levels_v=()))` | `start_v stop_v step_v settle_s both_directions pixel_area_cm2` → JVConfig; `smu_current_compliance_a smu_voltage_compliance_v smu_nplc` → SourceMeterConfig (real rig: `Keithley2400(res, config=…)`; sim: ignored) |
 | `jv_bace` | `run_jv(rig, JVConfig(dark=<dark>, led_levels_v=<levels>))` | all of `jv_dark` + `led_start_v led_stop_v led_step_v` (or inherited `led_v` → one level), `led_settle_s`, `dark: bool = True` (include the dark curve), `led_low_v` (unused by run_jv, carried for the rail) |
-| `bace` | `run_transient_scan(rig, ScanSpec, RunConfig, voc=…)` inside `router.transient()` with the LED pulsed at `led_v` | `axis_name axis_start axis_stop axis_step centre_on_voc` → Axis; `vpre vcoll delay_ns n_loops` → ScanSpec; `vpre_on_voc: bool = False` (group `pinned`: the pinned `vpre` is an *offset from the V_oc in scope* — the design's inherited "vpre = V_oc + 0.000 V" when `delay_ns` or `vcoll` is the axis, TDCF at V_oc; resolved in `build()` from the same V_oc source `centre_on_voc` uses, under the same coupling check, so the engine still gets an absolute prebias; invalid with the `vpre` axis, where `centre_on_voc` is the flag); every `RunConfig` field verbatim; `store_shots`; `led_v led_low_v` (33220A pulse levels; inherited inside an illumination loop); `voc` (derived from the V_oc source, or edited = typed by hand → warn); `measure_dc: bool = False` (measure V_oc/J_sc/J_sat on the Keithley under the LED first, like the intensity series; `v_sat`) ; `smu_*` as above |
+| `bace` | `run_transient_scan(rig, ScanSpec, RunConfig, voc=…)` inside `router.transient()` with the LED pulsed at `led_v` | `axis_name axis_start axis_stop axis_step centre_on_voc` → Axis; `vpre vcoll delay_ns n_loops` → ScanSpec; `vpre_on_voc: bool = False` (group `pinned`: the pinned `vpre` is an *offset from the V_oc in scope* — the design's inherited "vpre = V_oc + 0.000 V" when `delay_ns` or `vcoll` is the axis, TDCF at V_oc; resolved in `build()` from the same V_oc source `centre_on_voc` uses, under the same coupling check, so the engine still gets an absolute prebias; invalid with the `vpre` axis, where `centre_on_voc` is the flag); every `RunConfig` field verbatim; `store_shots`; `led_v led_low_v` (33220A pulse levels; inherited inside an illumination loop); `voc` (derived from the V_oc source, or edited = typed by hand → warn); `measure_dc: bool = False` (measure V_oc/J_sc/J_sat on the Keithley under the LED first, like the intensity series; `v_sat`); `led_settle_s` (the least wait after DC → pulse), `led_settle_max_s: float = 60.0` s and `led_settle_tolerance: float = 0.02` (group `illumination`: the power meter behind the open shutter is polled every 0.5 s until three readings agree within the tolerance, giving up with a warning at the maximum; see the README's "Light"); `smu_*` as above |
 | `power` | `PowerReading` from the console; `Read` is a worker job, `Monitor` is an observer | `wavelength_nm samples` |
 | `temperature` | `service.temperature.settle`: through the 331 console when `Rig.temperature` holds one (setpoint written, band held for `hold_s`), else `NeedsOperator` + wait; status `partial` | `setpoint_k tolerance_k hold_s timeout_s` |
 | `park` | `Rig.park()` | — |
@@ -506,13 +506,18 @@ level (`LedDrive.dc_settings`), the **shutter open** (`Rig.park()` shut it befor
 the job — an LED that is on is not light at the sample), `led_settle_s` for the
 device to reach its light steady state, `smu.measure_dc` inside `router.dc()`,
 then the shutter shut. Only then does it switch to pulse mode at
-`led_v/led_low_v` at `pulse_frequency_hz/duty_percent`, enable, settle again, and
-run the transient inside `router.transient()`. A V_oc read under the pulse (a
-slow Keithley integrates over the on and off phases) or with the shutter shut
-(the dark V_oc) would centre the axis on nobody's V_oc, and the coupling check —
-which compares drive *levels* — cannot tell; the simulator's `measure_dc` now
-returns the dark 0 V when the shutter is shut, so the test catches the class of
-mistake. After the scan the LED is switched off.
+`led_v/led_low_v` at `pulse_frequency_hz/duty_percent`, enable, read the 33220A
+back (refusing OFF, DC, another frequency, or `OUTP:SYNC?` = 0), open the
+shutter and wait for the power meter to read stable (`led_settle_s`,
+`led_settle_max_s`, `led_settle_tolerance`; the fixed `led_settle_s` alone
+without a meter), and run the transient inside `router.transient()`. A V_oc
+read under the pulse (a slow Keithley integrates over the on and off phases)
+or with the shutter shut (the dark V_oc) would centre the axis on nobody's
+V_oc, and the coupling check — which compares drive *levels* — cannot tell;
+the simulator's `measure_dc` now returns the dark 0 V when the shutter is shut,
+so the test catches the class of mistake. After the scan the shutter is shut
+and the LED is left pulsing: no module switches the generator off (operator
+instruction 2026-09-02; the shutter is the light switch).
 
 V_oc source resolution for a **manual** run (`build()`): `voc` param typed →
 `how="typed"`, else the source in scope (`ctx.voc` — the session's most recent

@@ -234,9 +234,15 @@ def test_estimates_follow_the_cost_model():
 
 
 # -- jv ------------------------------------------------------------------------------
-def test_jv_dark_leaves_the_led_off_and_the_shutter_shut_and_writes_the_files(tmp_path):
+def test_jv_dark_shuts_the_shutter_leaves_the_led_as_it_was_and_writes_the_files(tmp_path):
+    """The LED is lit going in, as a bace before it would leave it, and it
+    is lit coming out: since 2026-09-02 no module switches the generator
+    off, the shutter is the light switch. The curve is dark all the same --
+    the simulated SourceMeter sees the shutter, and its J_sc is nothing."""
     b = bench()
     sim = b.sim
+    sim.led.set_pulse(1.02, 0.4, frequency_hz=500.0)
+    sim.led.enable_output(True)
     cat = catalogue()
     got: dict = {}
     ctx = make_ctx(tmp_path, node_path="jv_dark", on_data=lambda path, d: got.update({path: d}))
@@ -245,10 +251,12 @@ def test_jv_dark_leaves_the_led_off_and_the_shutter_shut_and_writes_the_files(tm
         if isinstance(ev, JVCurveDone):
             seen.append((sim.bench.led_mode, sim.led.output_enabled,
                          sim.bench.shutter_open, sim.router.position))
+            assert abs(ev.metrics.jsc) < 1e-5, "dark through the shutter"
         evs.append(ev)
-    assert seen == [("OFF", False, False, "sourcemeter")]
+    assert seen == [("PULSE", True, False, "sourcemeter")]
     assert isinstance(evs[-1], JVFinished) and sim.bench.shots == 0
     assert not sim.bench.smu_output and not sim.bench.shutter_open
+    assert sim.led.output_enabled and sim.bench.led_mode == "PULSE", "left exactly as it was"
 
     assert len(ctx.folders) == 1
     folder = ctx.folders[0]
@@ -276,7 +284,9 @@ def test_jv_bace_measures_one_level_when_led_v_is_inherited_else_the_range(tmp_p
             seen.append((ev.label, sim.bench.led_mode, sim.bench.led_drive_v,
                          sim.bench.shutter_open))
     assert seen == [("dark", "OFF", 0.0, False), ("1.06 V", "DC", 1.06, True)]
-    assert not sim.led.output_enabled and not sim.bench.shutter_open
+    assert sim.led.output_enabled and sim.bench.led_mode == "DC", (
+        "left at DC on the way out; the shutter, shut, is the light switch")
+    assert not sim.bench.shutter_open
     assert "1060mVLED" in os.path.basename(ctx.folders[0])
 
     ctx = make_ctx(tmp_path / "range", node_path="jv_bace")
@@ -286,10 +296,12 @@ def test_jv_bace_measures_one_level_when_led_v_is_inherited_else_the_range(tmp_p
         if isinstance(ev, JVCurveDone)]
     assert labels == ["1.02 V", "1.06 V"]
     assert "LED" not in os.path.basename(ctx.folders[0]), "two levels: no single level to name"
+    before = (sim.bench.led_mode, sim.bench.led_drive_v, sim.led.output_enabled)
     with pytest.raises(ModuleError, match="^jv_bace: led_step_v: must be positive"):
         cat.build("jv_bace", {"led_v": None, "led_start_v": 1.02, "led_stop_v": 1.06,
                               "led_step_v": 0.0}, ctx, b.rig)
-    assert not sim.led.output_enabled
+    assert (sim.bench.led_mode, sim.bench.led_drive_v, sim.led.output_enabled) == before, (
+        "refused before anything was touched")
 
 
 # -- bace ----------------------------------------------------------------------------
@@ -312,7 +324,9 @@ def test_bace_pulses_the_led_runs_on_the_amplifier_and_records_the_folder(tmp_pa
     assert seen and all(s == ("PULSE", 1.02, True, (1.02, 0.4), 500.0, "amplifier")
                         for s in seen)
     assert axis.voc == 0.906 and axis.values[0] == pytest.approx(0.906)
-    assert not sim.led.output_enabled and not sim.bench.bias_output
+    assert sim.led.output_enabled and sim.bench.led_mode == "PULSE", (
+        "the LED keeps pulsing on the way out (2026-09-02); the shutter is the light switch")
+    assert not sim.bench.bias_output
     assert not sim.bench.shutter_open
     assert ctx.voc is voc
 
@@ -359,13 +373,16 @@ def test_bace_refuses_centre_on_voc_without_a_source(tmp_path):
     gen = cat.build("bace", {**FAST, "centre_on_voc": False, "axis_start": 0.9,
                              "axis_stop": 0.9, "n_loops": 1}, ctx, b.rig)
     # The LED read-back comes first (what the 33220A answered after being
-    # set to pulse), then the engine starts.
+    # set to pulse), then the settle on the power meter, then the engine.
     first = next(gen)
     assert isinstance(first, E.InstrumentState) and first.values["led_output"] == "ON"
     assert first.values["led_mode"] == "PULSE"
+    settled = next(gen)
+    assert isinstance(settled, E.Notice) and settled.text.startswith("LED settled in")
+    assert isinstance(next(gen), E.InstrumentState)
     assert isinstance(next(gen), E.RunStarted)
     gen.close()
-    assert not b.sim.led.output_enabled
+    assert b.sim.led.output_enabled and not b.sim.bench.shutter_open
 
 
 def test_measure_dc_supplies_the_voc_and_centres_the_axis_on_it(tmp_path):
@@ -446,21 +463,44 @@ def test_after_shot_stop_keeps_the_shot_and_still_serves_what_it_has(tmp_path):
     assert (data["kept"], data["requested"]) == (2, 3)
     assert data["q_all"].shape == (3, 1) and np.isnan(data["q_all"][2, 0])
     assert np.isfinite(data["q_mean"]).all() and data["last_shot"]["loop"] == 2
-    assert not b.sim.led.output_enabled
+    assert b.sim.led.output_enabled and not b.sim.bench.shutter_open
     assert os.path.isdir(ctx.folders[0])
 
 
-def test_walking_away_mid_run_switches_the_led_off(tmp_path):
+def test_walking_away_mid_run_shuts_the_shutter_and_leaves_the_led_pulsing(tmp_path):
+    """The unwind: bias off, shutter shut, and the 33220A left exactly as the
+    run set it. Switching it off here was what the operator asked to stop
+    (2026-09-02): the next module then waits for the LED all over again."""
     b = bench()
     cat = catalogue()
     ctx = make_ctx(tmp_path, voc=voc_at(1.02))
     gen = cat.build("bace", {**FAST, "n_loops": 5, "centre_on_voc": True, "led_v": 1.02},
                     ctx, b.rig)
-    for _ in range(4):
-        next(gen)
+    for ev in gen:
+        if isinstance(ev, E.StepDone):
+            break
     assert b.sim.led.output_enabled and b.sim.bench.led_mode == "PULSE"
     gen.close()
-    assert not b.sim.led.output_enabled and not b.sim.bench.bias_output
+    assert b.sim.led.output_enabled and b.sim.bench.led_mode == "PULSE"
+    assert b.sim.led.last_levels == (1.02, 0.4)
+    assert not b.sim.bench.bias_output and not b.sim.bench.shutter_open
+
+
+def test_walking_away_during_the_led_settle_still_shuts_the_shutter(tmp_path):
+    """The settle opens the shutter before the scan exists, so the scan's own
+    finally cannot cover a walk-away there; the module's does."""
+    b = bench()
+    cat = catalogue()
+    ctx = make_ctx(tmp_path, voc=voc_at(1.02))
+    gen = cat.build("bace", {**FAST, "n_loops": 1, "centre_on_voc": True, "led_v": 1.02},
+                    ctx, b.rig)
+    first = next(gen)                                       # the LED read-back
+    assert isinstance(first, E.InstrumentState) and "led_output" in first.values
+    settled = next(gen)
+    assert isinstance(settled, E.Notice) and b.sim.bench.shutter_open, "open for the meter"
+    gen.close()
+    assert not b.sim.bench.shutter_open and b.sim.led.output_enabled
+    assert b.sim.bench.shots == 0 and ctx.folders == []
 
 
 def test_build_refuses_bad_parameters_by_name_and_touches_nothing(tmp_path):
@@ -723,42 +763,55 @@ def test_the_temperature_module_polls_live_while_it_waits_and_an_abort_unwinds(t
     assert [type(e).__name__ for e in evs] == ["RunAborted"] and evs[0].reason == "requested"
 
 
+class _Led33220A:
+    """A scripted 33220A for the read-back tests: takes every command, logs
+    it, and answers `read_state` with whatever `state` says it holds."""
+    output_enabled = True
+    mode = "PULSE"
+
+    def __init__(self, **state):
+        self.log = []
+        self.state = {"output": True, "polarity": "INV", "mode": "PULSE", "shape": "PULS",
+                      "high_v": 1.02, "low_v": 0.4, "frequency_hz": 500.0,
+                      "sync_output": True, **state}
+        self.error_queue: list[str] = []
+
+    def set_pulse(self, *a, **k): self.log.append("set_pulse")
+    def set_dc(self, *a, **k): self.log.append("set_dc")
+    def enable_output(self, on=True): self.log.append(f"enable({on})")
+    def disable_output(self): self.log.append("enable(False)")
+    def off(self): self.log.append("off")
+    def set_polarity(self, inverted): pass
+    def polarity(self): return "INV"
+    def read_state(self): return dict(self.state)
+    def errors(self): return list(self.error_queue)
+
+
 def test_bace_refuses_a_33220a_that_did_not_take_pulse_mode_or_its_output(tmp_path):
     """The 33220A is the master clock: in DC, or with the output off, nothing
     arms the 81150A and the scope has no sync. The first real service run
     (session 115857) had no read-back of either generator in its file; now the
     33220A is read back after being set, written into the file, and a
-    generator that answers OFF or DC stops the module before the scan."""
+    generator that answers OFF or DC stops the module before the scan -- and
+    before the settle, so the refusal does not wait a minute on a meter
+    reading stable darkness."""
     from bace.service.modules import ModuleError, _led_problems, _read_led_state
 
-    class Led:
-        """A 33220A that took nothing: reads back OFF and DC."""
-        output_enabled = True
-        mode = "PULSE"
-        def __init__(self): self.log = []
-        def set_pulse(self, *a, **k): self.log.append("set_pulse")
-        def set_dc(self, *a, **k): self.log.append("set_dc")
-        def enable_output(self, on=True): self.log.append(f"enable({on})")
-        def disable_output(self): self.log.append("enable(False)")
-        def off(self): self.log.append("off")
-        def set_polarity(self, inverted): pass
-        def polarity(self): return "INV"
-        def read_state(self):
-            return {"output": False, "polarity": "INV", "mode": "DC", "shape": "DC",
-                    "high_v": 1.02, "low_v": 0.4, "frequency_hz": 500.0}
-        def errors(self): return ['-221,"Settings conflict"']
-
-    state = _read_led_state(Led())
+    led = _Led33220A(output=False, mode="DC", shape="DC")
+    led.error_queue = ['-221,"Settings conflict"']
+    state = _read_led_state(led)
     assert state["output"] == "OFF" and state["mode"] == "DC" and "Settings conflict" in state["errors"]
+    assert state["sync_output"] == "ON"
     problems = _led_problems(state, {"frequency": 500.0})
     assert any("OFF" in p for p in problems)
     assert any("DC" in p for p in problems)
     assert any("Settings conflict" in p for p in problems)
+    assert not any("Sync output" in p for p in problems), "the Sync answered ON"
     # NORM polarity is the chain card's warn, never a refusal here
     assert not any("POL" in p for p in problems)
 
     b = bench()
-    b.rig.led = Led()
+    b.rig.led = led
     cat = catalogue()
     ctx = make_ctx(tmp_path)
     gen = cat.build("bace", {**FAST, "centre_on_voc": False, "axis_start": 0.9,
@@ -768,12 +821,213 @@ def test_bace_refuses_a_33220a_that_did_not_take_pulse_mode_or_its_output(tmp_pa
     with pytest.raises(ModuleError, match="33220A is not driving the LED"):
         next(gen)
     assert b.sim.bench.shots == 0, "nothing was acquired"
-    assert "off" in b.rig.led.log, "the module still switches the LED off on its way out"
+    assert not b.sim.bench.shutter_open, "refused before the shutter was opened for the settle"
+    assert "off" not in led.log, "the module leaves the generator alone; the shutter is the light switch"
+
+
+def test_bace_refuses_a_33220a_whose_sync_output_is_off(tmp_path):
+    """The Sync connector has its own front-panel key. With it off the 33220A
+    pulses the LED as asked, the read-back says PULSE, ON, 500 Hz -- and
+    nothing arms the 81150A, so the scope triggers on nothing and the scan
+    measures noise. `OUTP:SYNC?` is the only place the chain says so."""
+    from bace.service.modules import ModuleError, _led_problems, _read_led_state
+
+    led = _Led33220A(sync_output=False)
+    state = _read_led_state(led)
+    assert state["sync_output"] == "OFF" and state["output"] == "ON" and state["mode"] == "PULSE"
+    problems = _led_problems(state, {"frequency": 500.0})
+    assert problems == ["Sync output is OFF (OUTP:SYNC? = 0): nothing arms the 81150A"]
+
+    b = bench()
+    b.rig.led = led
+    cat = catalogue()
+    ctx = make_ctx(tmp_path)
+    gen = cat.build("bace", {**FAST, "centre_on_voc": False, "axis_start": 0.9,
+                             "axis_stop": 0.9, "n_loops": 1}, ctx, b.rig)
+    first = next(gen)
+    assert first.values["led_sync_output"] == "OFF", "in the file, whatever happens next"
+    with pytest.raises(ModuleError, match=r"Sync output is OFF \(OUTP:SYNC\? = 0\)"):
+        next(gen)
+    assert b.sim.bench.shots == 0 and ctx.folders == []
 
 
 def test_a_simulated_33220a_that_answers_nothing_definite_is_not_refused(tmp_path):
     """`?` is not a problem: the simulator has no `read_state`, and a driver
-    that cannot answer is not a generator that said no."""
-    from bace.service.modules import _led_problems
-    assert _led_problems({"output": "?", "mode": "?", "frequency_hz": "?", "polarity": "?"},
-                         {"frequency": 500.0}) == []
+    that cannot answer is not a generator that said no. The Sync included:
+    only the real driver asks `OUTP:SYNC?`."""
+    from bace.service.modules import _led_problems, _read_led_state
+    assert _led_problems({"output": "?", "mode": "?", "frequency_hz": "?", "polarity": "?",
+                          "sync_output": "?"}, {"frequency": 500.0}) == []
+    assert _read_led_state(bench().sim.led)["sync_output"] == "?"
+
+
+# -- the LED settle after DC -> pulse ---------------------------------------------
+class _Meter:
+    """A power meter that answers a scripted sequence of readings, the last
+    one repeated for ever; `raises` makes every read fail."""
+
+    def __init__(self, readings=(), raises=None):
+        self.readings = list(readings)
+        self.raises = raises
+        self.reads = 0
+
+    def read_power(self):
+        self.reads += 1
+        if self.raises is not None:
+            raise self.raises
+        i = min(self.reads, len(self.readings)) - 1
+        return float(self.readings[i])
+
+    def read_statistics(self, n):
+        return self.read_power(), 0.0
+
+    def set_wavelength(self, nm):
+        pass
+
+
+def _settle_transcript(b, tmp_path, **params):
+    """Run a one-shot bace and return its events, the settle's notices and
+    read-back, how many settle polls were slept, and every sleep. The
+    scan's own per-step intensity read is off so a fake meter's `reads`
+    counts the settle's polls and nothing else."""
+    from bace.service.modules import LED_SETTLE_POLL_S
+    cat = catalogue()
+    slept: list[float] = []
+    ctx = make_ctx(tmp_path, voc=voc_at(1.02), sleep=slept.append)
+    evs = list(cat.build("bace", {**FAST, "n_loops": 1, "centre_on_voc": True, "led_v": 1.02,
+                                  "read_intensity": False, **params}, ctx, b.rig))
+    notices = [e for e in evs if isinstance(e, E.Notice) and "LED" in e.text]
+    states = [e for e in evs if isinstance(e, E.InstrumentState) and "led_power_w" in e.values]
+    polls = sum(1 for s in slept if s == LED_SETTLE_POLL_S)
+    return evs, notices, states, polls, slept
+
+
+def test_the_led_settle_reads_the_simulated_meter_behind_the_open_shutter(tmp_path):
+    """The rig: LED -> shutter -> fibre -> splitter -> (meter + device), so the
+    meter only sees light with the shutter open. The module opens it, polls
+    every 0.5 s, and with the simulated LED stable at once three readings
+    agree on the third poll: settled in 1.5 s at the pulse level's power,
+    said on the stream and written to the file as a read-back."""
+    from bace.service.modules import LED_SETTLE_POLL_S
+    b = bench()
+    seen = {}
+
+    real = b.sim.power.read_power
+
+    def watched():
+        seen.setdefault("shutter", b.sim.bench.shutter_open)
+        seen.setdefault("led", (b.sim.bench.led_mode, b.sim.bench.led_drive_v))
+        return real()
+
+    b.sim.power.read_power = watched
+    evs, notices, states, polls, _ = _settle_transcript(b, tmp_path, led_settle_s=0.0)
+    assert seen == {"shutter": True, "led": ("PULSE", 1.02)}, "read under the pulse, shutter open"
+    assert polls == 3
+    expected = b.sim.bench.device.led_current(1.02) * b.sim.power.w_per_unit
+    [notice] = notices
+    assert notice.level == "info"
+    assert notice.text == f"LED settled in {3 * LED_SETTLE_POLL_S:g} s at " \
+                          f"{float(states[0].values['led_power_w']):.2e} W (3 readings within 2 %)"
+    assert states[0].values["led_settle_s"] == "1.5"
+    assert float(states[0].values["led_power_w"]) == pytest.approx(expected, rel=0.02)
+    kinds = [type(e).__name__ for e in evs[:4]]
+    assert kinds == ["InstrumentState", "Notice", "InstrumentState", "RunStarted"], (
+        "read-back, settle, then the engine")
+    assert isinstance(evs[-1], E.RunFinished)
+
+
+def test_the_led_settle_waits_for_a_drifting_meter_to_agree_and_for_led_settle_s(tmp_path):
+    """A LED still warming after DC -> pulse: the meter reads a rising value,
+    and the run must not start until three consecutive readings agree within
+    the tolerance AND `led_settle_s` has passed -- on the poll clock, so the
+    number the notice quotes is polls times 0.5 s, not wall time."""
+    b = bench()
+    # 2 %/poll drift for six polls (any three span about 4 %), then flat:
+    # readings 7, 8, 9 are the first three within 2 % of each other.
+    drifting = [1.00e-4, 1.02e-4, 1.04e-4, 1.06e-4, 1.08e-4, 1.10e-4]
+    b.rig.power = _Meter(drifting + [1.130e-4, 1.131e-4, 1.130e-4])
+    evs, notices, states, polls, _ = _settle_transcript(b, tmp_path, led_settle_s=0.0)
+    assert polls == 9 and b.rig.power.reads == 9
+    assert notices[0].text.startswith("LED settled in 4.5 s at 1.13e-04 W")
+    assert states[0].values == {"led_power_w": "1.13e-04", "led_settle_s": "4.5"}
+
+    # the same meter, agreeing at once, still waits out led_settle_s = 3 s
+    b = bench()
+    b.rig.power = _Meter([1.0e-4])
+    evs, notices, states, polls, _ = _settle_transcript(b, tmp_path, led_settle_s=3.0)
+    assert polls == 6 and states[0].values["led_settle_s"] == "3"
+    assert notices[0].text.startswith("LED settled in 3 s")
+
+    # a wider tolerance takes the same drift as settled at once
+    b = bench()
+    b.rig.power = _Meter(drifting)
+    _, notices, _, polls, _ = _settle_transcript(b, tmp_path, led_settle_s=0.0,
+                                                 led_settle_tolerance=0.05)
+    assert polls == 3 and notices[0].text.startswith("LED settled in 1.5 s")
+
+
+def test_a_meter_that_never_settles_is_given_up_on_with_a_warning_and_the_run_goes_on(tmp_path):
+    """A bace that never starts is worse than one that says its light may not
+    have been steady: at `led_settle_max_s` the wait ends with a warning that
+    quotes the last readings, and the scan runs."""
+    from bace.service.modules import LED_SETTLE_POLL_S
+
+    class Drifting(_Meter):
+        def read_power(self):
+            self.reads += 1
+            return 1.0e-4 * 1.05 ** self.reads      # 5 % per poll, for ever
+
+    b = bench()
+    b.rig.power = Drifting()
+    evs, notices, states, polls, _ = _settle_transcript(b, tmp_path, led_settle_s=0.0)
+    assert polls * LED_SETTLE_POLL_S == 60.0 and b.rig.power.reads == 120
+    [warning] = notices
+    assert warning.level == "warning"
+    assert warning.text.startswith("LED did not stabilise within 60 s: last readings ")
+    assert warning.text.endswith(" W; going on")
+    assert states[0].values["led_settle_s"] == "60"
+    assert isinstance(evs[-1], E.RunFinished), "the scan ran regardless"
+    assert b.sim.bench.shots > 0
+
+    b = bench()
+    b.rig.power = Drifting()
+    _, notices, states, polls, _ = _settle_transcript(b, tmp_path, led_settle_s=0.0,
+                                                      led_settle_max_s=5.0)
+    assert polls == 10 and "within 5 s" in notices[0].text
+    assert states[0].values["led_settle_s"] == "5"
+
+
+def test_a_meter_that_raises_is_treated_as_absent_for_the_settle(tmp_path):
+    """The 1918-C console down must not stop a scan that does not need it:
+    one warning, then the fixed `led_settle_s`, as on a bench with no meter."""
+    b = bench()
+    b.rig.power = _Meter(raises=OSError("console not answering"))
+    evs, notices, states, polls, slept = _settle_transcript(b, tmp_path, led_settle_s=2.0)
+    [warning] = notices
+    assert warning.level == "warning" and "console not answering" in warning.text
+    assert "waiting the fixed 2 s" in warning.text
+    assert polls == 1 and 1.5 in slept, "the poll spent, then the rest of the fixed wait"
+    assert states == [], "no reading, no read-back"
+    assert isinstance(evs[-1], E.RunFinished)
+
+    b = bench()
+    b.rig.power = None
+    evs, notices, states, polls, slept = _settle_transcript(b, tmp_path, led_settle_s=2.0)
+    assert notices == [] and states == [] and polls == 0 and 2.0 in slept, "no meter: the fixed wait"
+    assert isinstance(evs[-1], E.RunFinished)
+
+
+def test_the_settle_parameters_are_on_the_bace_card_with_provenance(tmp_path):
+    """Plain parameters with defaults: run.toml has no key for them, the
+    journal's last-used and the edited layer apply as to any other."""
+    cat = catalogue(history=FakeHistory(last_used={"bace": {"led_settle_max_s": 30.0}}))
+    ps = cat.param_set("bace")
+    assert ps.get("led_settle_max_s") == ParamValue(30.0, Source.LAST_USED, "previous run")
+    assert ps.get("led_settle_tolerance") == ParamValue(0.02, Source.DEFAULT, "")
+    specs = {s.name: s for s in cat._params["bace"]}
+    assert specs["led_settle_max_s"].unit == "s" and specs["led_settle_max_s"].group == "illumination"
+    assert specs["led_settle_tolerance"].group == "illumination"
+    cat.edit("bace", {"led_settle_tolerance": 0.05})
+    assert cat.param_set("bace").get("led_settle_tolerance").value == 0.05
+    with pytest.raises(ModuleError, match="led_settle_tolerance"):
+        cat.edit("bace", {"led_settle_tolerance": -1.0})

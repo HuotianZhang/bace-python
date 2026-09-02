@@ -338,7 +338,8 @@ def test_stop_abort_and_cancel_through_the_session(tmp_path):
         with pytest.raises(Conflict):
             s.stop(run_id, "abort")
         assert s.run_data(run_id)["kept"] >= 1, "what was measured is still served"
-        assert not s.bench.sim.bench.bias_output and not s.bench.sim.led.output_enabled
+        assert not s.bench.sim.bench.bias_output and not s.bench.sim.bench.shutter_open
+        assert s.bench.sim.led.output_enabled, "the LED is left pulsing; the shutter is the light switch"
 
         run_id, _ = s.submit(bace(200, voc=0.9))
         wait_until(lambda: any(f["type"] == "StepDone" for f in frames_of(s, run_id)))

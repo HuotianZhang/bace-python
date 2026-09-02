@@ -79,7 +79,9 @@ def test_the_overlay_follows_a_simulated_scan_event_by_event(tmp_path):
             assert (over["led"]["mode"], over["led"]["output"]) == ("DC", True)
         if isinstance(ev, E.NodeStarted) and ev.node_path.endswith("/bace"):
             assert over["relay"]["position"] == "amplifier" and over["relay"]["how"] == "inferred"
-            assert over["led"]["output"] is False, "the jv's unwind switched the LED off"
+            assert (over["led"]["output"], over["led"]["mode"]) == (True, "DC"), (
+                "the jv's unwind shut the shutter and left the LED at DC (2026-09-02)")
+            assert over["shutter"]["open"] is False
         if isinstance(ev, E.RunStarted):
             assert over["bias"]["output"] is True and over["bias"]["how"] == "inferred"
             assert over["bias"]["frequency_hz"] == 500.0
@@ -103,7 +105,9 @@ def test_the_overlay_follows_a_simulated_scan_event_by_event(tmp_path):
         live2.apply(ev, schedule)
         if ev is done[0]:
             over = live2.overlay(base)
-            assert over["led"]["output"] is False and over["shutter"]["open"] is False
+            assert over["shutter"]["open"] is False
+            assert (over["led"]["output"], over["led"]["mode"]) == (True, "PULSE"), (
+                "the bace's unwind leaves the LED pulsing; the shutter is the light switch")
             assert over["bias"]["output"] is False and over["smu"]["output"] is False
             assert over["relay"]["position"] == "amplifier", "the relay stays where it is"
     live2.apply(E.RunStateChanged("done", "finished"), schedule)

@@ -9,10 +9,14 @@ What it does that the original did not:
 
 * **Dark and light in one run.** The original swept the Keithley under whatever
   the 33220A happened to be doing. Here `dark` and the LED levels are explicit,
-  the LED output is actually switched off for a dark scan rather than set low,
   the shutter is opened for a light curve and shut for a dark one, and both
   land in the same file set so the pair is kept together — a dark curve is
-  only useful next to the light curve it belongs to.
+  only useful next to the light curve it belongs to. The shutter is the light
+  switch: the LED generator is left exactly as it is for a dark curve and on
+  the way out (operator instruction, 2026-09-02 -- a generator that is cycled
+  loses its thermal steady state and the next module waits for it again).
+  Only a rig with no shutter still switches the LED off, because that is the
+  only way it can be dark.
 * **Both sweep directions, optionally.** Forward and reverse curves that differ
   is hysteresis, which for many device chemistries is the most interesting thing
   in the measurement and is invisible if you only ever sweep one way. Off by
@@ -58,7 +62,8 @@ class JVConfig:
     doubles the run and makes 'the' curve ambiguous, so it is opt-in."""
 
     dark: bool = True
-    """Include a dark scan with the LED output off."""
+    """Include a dark scan: the shutter shut (the LED output off only on a rig
+    with no shutter)."""
 
     led_levels_v: tuple[float, ...] = ()
     """Drive levels for the light scans, at the 33220A output. Empty means no
@@ -196,8 +201,10 @@ def run_jv(rig: Rig, config: JVConfig = JVConfig(), *,
     shutter position (when the rig has a shutter) and a `JVCurveDone` per
     sweep, then `JVFinished`.
     Unwinds the same way the transient run does: the `finally` disables the
-    SourceMeter, the LED and the shutter whether the run finished, was
-    aborted, raised, or the consumer simply stopped iterating.
+    SourceMeter and shuts the shutter whether the run finished, was aborted,
+    raised, or the consumer simply stopped iterating. The LED is left as it
+    was set -- the shutter is the light switch -- except on a rig with no
+    shutter, where switching it off is the only way to leave the bench dark.
     """
     if rig.smu is None:
         raise RuntimeError(
@@ -283,28 +290,38 @@ def run_jv(rig: Rig, config: JVConfig = JVConfig(), *,
             rig.smu.disable_output()
         except Exception:
             pass
-        _led_off(rig)
         if rig.shutter is not None:
             try:
                 rig.shutter.shut()
             except Exception:
                 pass
+        else:
+            _led_off(rig)
 
 
 def _set_illumination(rig: Rig, dark: bool, level: float | None) -> None:
-    """Dark means the LED output *off*, not merely a low level.
+    """A light curve sets the LED to DC at the level; a dark curve leaves the
+    LED exactly as it is and lets the shutter make the dark.
 
-    A sub-threshold level is right for the transient, where the generator has to
-    keep producing a waveform. For a dark J-V there is nothing to keep, and an
-    output that is off cannot leak.
+    Operator instruction, 2026-09-02, after watching a real run: do not switch
+    the LED generator's output off any more; when no light is wanted, use the
+    shutter. A generator that is cycled loses its thermal steady state, and
+    the next module -- a bace after this J-V, or the light curve after this
+    dark one -- waits for it all over again, which is what the operator saw
+    the fixed settle fail to cover. The shutter (LED -> shutter -> fibre ->
+    device) is the light switch, and it is `_set_shutter` that shuts it for a
+    dark curve.
 
-    Loud, not swallowed: an `off()` that fails mid-run leaves the LED on under
-    a curve labelled dark, which is worse than a stopped run.
+    The one exception is a rig with no shutter: there the LED output off is
+    the only way to be dark, so it is still switched off -- loud, not
+    swallowed, because an `off()` that fails on such a rig leaves the LED on
+    under a curve labelled dark, which is worse than a stopped run.
     """
     if rig.led is None:
         return
     if dark:
-        rig.led.off()
+        if rig.shutter is None:
+            rig.led.off()
     else:
         rig.led.set_dc(float(level))
         rig.led.enable_output(True)
@@ -332,9 +349,11 @@ def _set_shutter(rig: Rig, dark: bool) -> str | None:
 
 
 def _led_off(rig: Rig) -> None:
-    """The unwind: never raises, so a dead LED cannot mask the exception that
-    is already propagating. `off()` is in the `LedSource` contract, so there
-    is no fallback spelling to try."""
+    """The unwind on a rig with no shutter: never raises, so a dead LED cannot
+    mask the exception that is already propagating. `off()` is in the
+    `LedSource` contract, so there is no fallback spelling to try. A rig with
+    a shutter never comes here -- its unwind shuts the shutter and leaves the
+    LED as set."""
     if rig.led is None:
         return
     try:

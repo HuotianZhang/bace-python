@@ -236,6 +236,16 @@ Nine, and they are the reason the harness exists. Each is documented at its site
     (`transient.SyncError`) rather than measure noise. The 1/R factor had
     been there all along, unnoticed because 0.115 V still triggers a 1.2 V
     sync.
+11. **The trigger calibration was circular.** `max(CHAN3)` over a 2 us
+    record only sees the 5 us sync if the record starts on it, and the scope
+    only starts on it if it is already triggering on it. Every earlier
+    calibration inherited a level the LabVIEW VI or the previous session had
+    left; session 125751 (2026-09-02) inherited the 0.25 mV of the session
+    before, free-ran, and measured 4.5 mV of a 1.2 V sync with both
+    generators read back ON. The run now triggers on the sync channel at a
+    provisional 0.5 V, measures the sync from triggered records, then sets
+    the measured half-amplitude. It also reads `:OUTP1?` back after
+    `:OUTP1 ON` and stops (`BiasOutputError`) if the instrument says 0.
 
 ---
 
@@ -256,6 +266,18 @@ Each is a decision, not an accident, and each is documented where it lives.
 - **`FUNC:PULS:HOLD DCYC`** before `:FREQ` on the 33220A, to avoid a real
   `-221 Settings conflict`.
 - **A 2 % deadband** on the auto-range, so a correct range is not rewritten.
+- **The LED generator is never switched off by a module; the shutter is the
+  light switch.** A `bace` leaves the 33220A pulsing, a J-V leaves it at DC,
+  and every unwind shuts the shutter instead (only a rig with no shutter
+  still switches the LED off for a dark J-V). After DC → pulse a `bace`
+  opens the shutter and waits for the power meter behind it to read stable
+  (three readings 0.5 s apart within `led_settle_tolerance`, at least
+  `led_settle_s`, at most `led_settle_max_s`) rather than a fixed 2 s.
+  Operator instruction, 2026-09-02, after watching a real run: the fixed
+  wait was not enough, and a generator that is cycled loses its thermal
+  steady state and has to be waited for again. The read-back also asks
+  `OUTP:SYNC?` and refuses a 33220A whose Sync output is off, since that
+  is what arms the 81150A.
 
 ---
 

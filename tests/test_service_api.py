@@ -494,7 +494,8 @@ def test_stop_after_shot_keeps_the_shot_and_abort_discards_it(service):
     fs = frames(client, run_id=run_id)
     assert [f["data"]["reason"] for f in fs if f["type"] == "RunAborted"] == ["aborted"]
     assert states_of(fs)[-2:] == ["aborted", "parked"]
-    assert not session.bench.sim.bench.bias_output and not session.bench.sim.led.output_enabled
+    assert not session.bench.sim.bench.bias_output and not session.bench.sim.bench.shutter_open
+    assert session.bench.sim.led.output_enabled, "parked leaves the LED pulsing; the shutter is shut"
     assert client.get("/bench").json()["state"] == "idle"
 
     r = client.post(f"/runs/{run_id}/stop")

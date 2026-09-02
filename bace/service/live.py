@@ -72,8 +72,10 @@ class LiveState:
                 self._set("relay", position=RELAY_SIDE[step.relay])
         elif isinstance(ev, E.NodeDone):
             if self.step is not None and ev.node_path == self.step.node_path:
-                # The module's own unwind: outputs off, LED off, shutter shut
-                # (`_build_bace`/`run_jv` finally blocks); the relay stays.
+                # The module's own unwind: outputs off, shutter shut
+                # (`_build_bace`/`run_jv` finally blocks); the relay stays,
+                # and so does the LED -- since 2026-09-02 no module switches
+                # it off, the shutter is the light switch.
                 self._parked()
                 self.step = None
                 self.run_config = None
@@ -150,13 +152,14 @@ class LiveState:
     def _parked(self) -> None:
         self._set("bias", output=False)
         self._set("smu", output=False)
-        self._set("led", output=False, mode="OFF")
         self._set("shutter", open=False)
 
     def _jv_light(self, lit: bool) -> None:
         """`run_jv` sets the LED to DC before it opens the shutter for a
-        light curve and switches it off for a dark one; the shutter's state
-        event is the only one it yields, so it stands for both."""
+        light curve and leaves it alone for a dark one; the shutter's state
+        event is the only one it yields, so it stands for the LED too. A
+        dark curve therefore infers nothing about the LED: it is whatever
+        the last module left, which the overlay already holds."""
         if self.step is None or self.step.module not in ("jv_bace", "jv_dark"):
             return
         if lit:
@@ -164,8 +167,6 @@ class LiveState:
             level = _float(values.get("led_v"))
             self._set("led", output=True, mode="DC",
                       **({"high_v": level} if level is not None else {}))
-        else:
-            self._set("led", output=False, mode="OFF")
 
     def _pulse_levels(self, setpoint):
         cfg = self.run_config
