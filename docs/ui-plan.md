@@ -170,6 +170,17 @@ the J–V component nothing at all.
 Capture both off a `--sim` service and again off the rig, and check them in
 beside the journals.
 
+*Recorded 2026-09-02 (M0).* Both exist now, off `--sim`, and they landed in
+**`ui/fixtures/`** rather than beside the journals: the browser can only read
+what is served under `/ui`, and the acceptance set is a rig-day record that
+simulator output does not belong in. `tools/record_ui_fixtures.py` writes them
+— `--tag rig` records the same set on the bench, which is still to do — and
+every file says `sim` in its name, because a simulated J-V is a
+plausible-looking curve. The journals stay where they are; the offline page
+reaches them through the repo root (`tools/serve_ui.py`). The one thing a
+browser cannot read at all is the HDF5, so `tools/make_ui_fixtures.py` renders
+the rig day's `bace-run/2` in the shape `GET /runs/{id}/data` answers.
+
 **The split is not optional.** The journal payload policy (contract §3) stores
 *"enough to render the session log and the history queries, never the traces"*:
 a journalled `StepDone` is `index, loop, step, setpoint, axis_value, q, q_mean,
@@ -183,7 +194,8 @@ The third shape — a live WebSocket frame, traces decimated with `stride` and
 by hand from the HDF5.
 
 **The fixtures do not exercise the reconnect path**, and one line of
-`docs/ui-kickoff.md` implies they do. Its "real `seq` gaps" is not so: `seq` in
+`docs/ui-kickoff.md` implies they do. (`tests/test_ui.py` now asserts the
+correction: all three journals are 0…N with no gap.) Its "real `seq` gaps" is not so: `seq` in
 all three files runs 0…N with no gap at all, which is what the journal is —
 one monotonic counter, and `StepPhase`, the only unjournalled frame, consumes
 no number. Gaps and `decimated.replay` belong to the *socket*, where a client

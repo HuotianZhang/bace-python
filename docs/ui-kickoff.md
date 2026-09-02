@@ -119,6 +119,11 @@ a module; the shutter is the light switch, and a bace waits for the power
 meter to read a flat 10 s before scanning.
 
 Those journals are also the most realistic sample of the event stream the UI
-will consume — real `seq` gaps, real verdicts, a `RunFailed`, a
+will consume — ~~real `seq` gaps~~, real verdicts, a `RunFailed`, a
 `NeedsOperator`-free rig session — worth replaying against a draft console
-before the first live run.
+before the first live run. (**Corrected 2026-09-02**: there are no `seq` gaps
+in them and there cannot be. A journal is one monotonic counter, and
+`StepPhase` — the only unjournalled frame — consumes no number; all three files
+run 0…N, which `tests/test_ui.py` asserts. Gaps and `decimated.replay` belong
+to the *socket*, where a client falls behind and is dropped at 1008, and are
+proved against a live `--sim --fast` scan in `ui/tests/live.test.mjs`.)

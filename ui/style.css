@@ -1,0 +1,145 @@
+/* The register, from `docs/ui-rules.md` §1: light, clean, dense — a working
+   instrument, closer to a well-set scientific paper than to a dashboard.
+   Density is a requirement, not a preference: if a screen feels comfortable,
+   it is probably hiding something the operator needs.
+
+   The palette is the one the Round 3 canvas settled on and no written brief
+   recorded (`docs/design/README.md`). Saturation is reserved for meaning, in
+   the order §3 gives: alert, warning, accent, then greys with the type doing
+   the hierarchy. */
+
+:root {
+  --ink: #201e1d;
+  --grey: #7d7979;
+  --rule: #d7d3d3;
+  --fill: #eae7e7;
+  --paper: #ffffff;
+  --accent: #ec3013;          /* the swept quantity, and the primary button */
+  --accent-dark: #ae1800;
+  --alert: #ec3013;           /* a live bias output, a crit, a saturation verdict */
+  --warn: #b06a00;            /* evidence, never a block */
+  --ok: #3f7d53;
+
+  --font-body: 'IBM Plex Sans', system-ui, sans-serif;
+  --font-num: 'IBM Plex Mono', ui-monospace, monospace;
+  --font-head: 'Archivo', 'IBM Plex Sans', system-ui, sans-serif;
+
+  --rail-height: 46px;
+  --tabs-height: 38px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* Every number that can change, in the mono face with tabular figures: a
+   charge that jitters horizontally while it converges is a bug (§2). */
+.num, code, pre {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+h1, h2, h3, .wordmark, button {
+  font-family: var(--font-head);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+#app { display: flex; flex-direction: column; height: 100%; }
+
+/* -- the rail: fixed, everything else scrolls (§1) ------------------------- */
+.rail {
+  display: flex; align-items: center; gap: 18px;
+  height: var(--rail-height);
+  padding: 0 14px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper);
+  flex: 0 0 auto;
+}
+.rail .wordmark { font-size: 15px; text-transform: lowercase; }
+.rail .spacer { flex: 1 1 auto; }
+.rail .slot { display: flex; flex-direction: column; line-height: 1.15; }
+.rail .slot .key { font-size: 10px; color: var(--grey); text-transform: uppercase; letter-spacing: .04em; }
+.rail .slot .value { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 13px; }
+
+/* -- the tabs ------------------------------------------------------------- */
+.tabs {
+  display: flex; gap: 2px; align-items: stretch;
+  height: var(--tabs-height);
+  padding: 0 10px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--fill);
+  flex: 0 0 auto;
+}
+.tabs a {
+  display: flex; align-items: center; padding: 0 14px;
+  color: var(--grey); text-decoration: none;
+  font-family: var(--font-head); font-weight: 600; font-size: 13px;
+  border-bottom: 2px solid transparent;
+}
+.tabs a.on { color: var(--ink); border-bottom-color: var(--accent); background: var(--paper); }
+
+/* -- the view ------------------------------------------------------------- */
+.view { flex: 1 1 auto; overflow: auto; padding: 16px 18px 40px; }
+.view h1 { font-size: 17px; margin: 0 0 2px; }
+.view .lede { color: var(--grey); margin: 0 0 16px; max-width: 74ch; }
+
+.card {
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  padding: 10px 12px;
+  margin: 0 0 12px;
+}
+.card > h2 { font-size: 13px; margin: 0 0 8px; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+
+table.rows { border-collapse: collapse; width: 100%; }
+table.rows th, table.rows td { text-align: left; padding: 2px 10px 2px 0; vertical-align: top; }
+table.rows th { color: var(--grey); font-weight: 400; white-space: nowrap; }
+table.rows td.num, table.rows td .num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+
+/* -- levels, in the order of loudness §3 gives ---------------------------- */
+.level-crit, .level-invalid { color: var(--alert); font-weight: 600; }
+.level-warn { color: var(--warn); }
+.level-ok { color: var(--ok); }
+.level-info { color: var(--grey); }
+.absent { color: var(--grey); }
+
+/* -- the stream footer: what the socket is doing, always visible ---------- */
+.stream-bar {
+  display: flex; align-items: center; gap: 16px;
+  height: 24px; padding: 0 14px;
+  border-top: 1px solid var(--rule);
+  background: var(--fill);
+  color: var(--grey);
+  font-family: var(--font-num); font-size: 11px;
+  flex: 0 0 auto;
+}
+.stream-bar .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--grey); }
+.stream-bar.live .dot { background: var(--ok); }
+.stream-bar.offline .dot, .stream-bar.behind .dot { background: var(--alert); }
+.stream-bar.connecting .dot { background: var(--warn); }
+
+/* -- the session log ------------------------------------------------------ */
+.log { max-height: 260px; overflow: auto; border: 1px solid var(--rule); background: var(--paper); }
+.log div { display: flex; gap: 10px; padding: 1px 8px; font-family: var(--font-num); font-size: 11px; }
+.log div:nth-child(even) { background: #fbfafa; }
+.log .ts { color: var(--grey); }
+.log .type { color: var(--grey); min-width: 15ch; }
+
+button {
+  font-size: 12px; padding: 4px 12px; cursor: pointer;
+  border: 1px solid var(--ink); background: var(--paper); color: var(--ink);
+}
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: .45; cursor: not-allowed; }
