@@ -44,6 +44,8 @@ vs 端口 02:08）：峰值差 6.0%、τ 差 2.8%、Q 差 4.0%，尖峰都在记
 | `D:\BACE\DELIB` | Deditec DELIB (32-bit only; the 64-bit `delib64.dll` was installed separately into `C:\Windows\System32`) |
 | `Q:\Huotian\2026\BACE\20260831\220K` | **LabVIEW reference data for the device currently mounted**, 220 K. Not yet connected to a session — ask for folder access |
 | `bench-archive/` | a copy of the 2026-08-07 run, used by the numerical regression |
+| `acceptance/20260902_service-vs-labview/` | the service's acceptance evidence: the LabVIEW run of 15:06 and the service run of 15:37 on the same device, plus three journals of that rig day. Read its `README.md`; `tests/test_acceptance_20260902.py` reads the data |
+| `Q:\Huotian\bace-python\service-layer-dev-04d292\runs\` | the full output of the 2026-09-02 rig day — every run folder, every journal, the PNGs. The curated subset above is what the repository keeps |
 
 **These two trees are NOT one store.** They looked like it for a while and I said
 so; that was wrong. Write to `D:` with `device_commit_files`, then mirror with

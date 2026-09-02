@@ -1,6 +1,8 @@
 # Measurement output. Stays on disk; deliberately out of git — 32 MB of
 # scope traces per session, and .h5/.dat blobs do not diff usefully.
-# The one run that IS tracked is bench-archive/, which the regression test reads.
+# Two sets of measurements ARE tracked, because a claim with no evidence beside
+# it gets rediscovered: bench-archive/ (the numerical regression) and
+# acceptance/ (the 2026-09-02 LabVIEW-vs-service pair and that day's journals).
 runs/
 bench-reports/
 

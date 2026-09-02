@@ -36,6 +36,8 @@ recipes/        the named recipe variants, passed with --run
 tests/          the suite
 docs/           the figure pages; docs/README.md indexes them
 bench-archive/  the 2026-08-07 reference run the regression test reproduces
+acceptance/     the 2026-09-02 pair — LabVIEW and the service on the same
+                device half an hour apart — and three journals of that rig day
 runs/           measurement output. On disk, not in git
 ```
 

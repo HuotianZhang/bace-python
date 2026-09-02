@@ -71,9 +71,16 @@ The scripted walk-through of the whole operator flow is
 ## State of the bench code (so the UI session does not re-litigate it)
 
 The service matched LabVIEW on the rig on 2026-09-02 evening (HANDOVER,
-evening section). The validated recipe is in `run.toml` — combination ③
-(`invert_polarity = true`, `:OUTP1:POL NORM`), 200 averages, 5 s shutter
-settles, LED 1.000 V; the "④ = INV" claim in older docs is overturned
-(`docs/README.md`, the table). The LED is never switched off by a module; the
-shutter is the light switch, and a bace waits for the power meter to read a
-flat 10 s before scanning.
+evening section; the two runs and three journals of that day are in
+`acceptance/20260902_service-vs-labview/`, with a README, and
+`tests/test_acceptance_20260902.py` reads them). The validated recipe is in
+`run.toml` — combination ③ (`invert_polarity = true`, `:OUTP1:POL NORM`), 200
+averages, 5 s shutter settles, LED 1.000 V; the "④ = INV" claim in older docs
+is overturned (`docs/README.md`, the table). The LED is never switched off by
+a module; the shutter is the light switch, and a bace waits for the power
+meter to read a flat 10 s before scanning.
+
+Those journals are also the most realistic sample of the event stream the UI
+will consume — real `seq` gaps, real verdicts, a `RunFailed`, a
+`NeedsOperator`-free rig session — worth replaying against a draft console
+before the first live run.
