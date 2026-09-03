@@ -511,11 +511,18 @@ def illumination_state(rig: Rig) -> dict:
         # holds whatever amplitude the last pulse left. Taking `high_v` would
         # label a DC J-V with a stale number and register its V_oc at that
         # level, which is exactly what the coupling check compares.
+        #
+        # And there is **no fallback between the two**. A first version of this
+        # fell back to `high_v` when `:VOLT:OFFS?` went unanswered, which is
+        # the same "unread is not cached" mistake in a new place: the answer
+        # would have been the stale pulse amplitude, presented as the DC drive.
+        # An unread level is simply absent -- the curve is labelled
+        # `as found lit` rather than with a number nobody read. It does not
+        # make the *illumination* unknown, because whether light reaches the
+        # sample is the other three readings' business, not this one's.
         mode_now = str(out["led_mode"] or "").upper()
         level = state.get("offset_v") if mode_now == "DC" else state.get("high_v")
-        if level is None and mode_now == "DC":
-            level = state.get("high_v")
-        if level is None:
+        if level is None and not asked:
             # `last_levels` is the spelling the drivers keep -- the simulated
             # ones and the 33220A both -- and the one `service.rigs._levels`
             # reads for the bench card. One vocabulary for one fact.

@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { cardModel, foldCount, points, effectivePolarity, BENCH_CARDS } from '../lib/fields.js';
+import { cardModel, foldCount, points, effectivePolarity, driveLevel, BENCH_CARDS } from '../lib/fields.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const CATALOGUE = JSON.parse(fs.readFileSync(path.join(here, '..', 'fixtures', 'modules_sim.json'), 'utf8'));
@@ -55,7 +55,11 @@ test('jv is six fields and a read-back, and no illumination parameter at all', (
 });
 
 test('the jv card reads the light off the bench, and unknown is not dark', () => {
-  const lit = cardModel(entry('jv'), { bench: bench({ open: true, output: true, mode: 'DC', high_v: 1.02 }) });
+  // DC reports its level as the *offset* — `set_dc` writes `:VOLT:OFFS` —
+  // and this fixture said `high_v`, which is what the row used to read.
+  const lit = cardModel(entry('jv'), {
+    bench: bench({ open: true, output: true, mode: 'DC', offset_v: 1.02 }),
+  });
   assert.equal(lit.readback.lit, true);
   assert.equal(lit.readback.text, '1.02 V');
 
@@ -249,8 +253,37 @@ function bench(led) {
   return {
     instruments: {
       shutter: { open: led.open, how: 'readback' },
-      led: { output: led.output, mode: led.mode, high_v: led.high_v ?? null },
+      led: {
+        output: led.output, mode: led.mode, high_v: led.high_v ?? null,
+        ...('offset_v' in led ? { offset_v: led.offset_v } : {}),
+      },
     },
     inferred: [],
   };
 }
+
+
+test('the read-back row shows the level the LED is actually driven at', () => {
+  // In DC the level is the *offset*: `set_dc` writes `:VOLT:OFFS`, and
+  // `/bench` reports it apart from `high_v`, which keeps the previous pulse
+  // amplitude. Showing `high_v` there would make this row predict one level
+  // while the `jv` that follows records another — and both come from the same
+  // reading, so the disagreement is worse than either being wrong alone.
+  const dc = cardModel(entry('jv'), {
+    bench: bench({ open: true, output: true, mode: 'DC', high_v: 1.30, offset_v: 1.02 }),
+  });
+  assert.equal(dc.readback.text, '1.02 V', 'the DC offset, not the stale amplitude');
+
+  const pulse = cardModel(entry('jv'), {
+    bench: bench({ open: true, output: true, mode: 'PULSE', high_v: 1.02, offset_v: 0.71 }),
+  });
+  assert.equal(pulse.readback.text, '1.02 V', 'and the high level when pulsing');
+
+  // Unread is absent, not the other register: `as found lit` is the honest
+  // label for a curve taken under light of an unknown level.
+  const unread = cardModel(entry('jv'), {
+    bench: bench({ open: true, output: true, mode: 'DC', high_v: 1.30 }),
+  });
+  assert.equal(unread.readback.text, 'lit');
+  assert.equal(driveLevel({ mode: 'DC', high_v: 1.3 }), null);
+});

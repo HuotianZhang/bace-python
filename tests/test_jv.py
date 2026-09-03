@@ -652,3 +652,15 @@ def test_a_dc_level_is_the_offset_not_a_stale_pulse_amplitude():
     # In PULSE the high level is the level, as before.
     rig.led = Generator(output=True, mode="PULSE", offset_v=0.71, high_v=1.02)
     assert illumination_state(rig)["led_level_v"] == 1.02
+
+    # And there is no falling back between the two. `:VOLT:OFFS?` unanswered
+    # while `:VOLT:HIGH?` answers would have recorded the stale pulse
+    # amplitude *as the DC drive* -- the same "unread is not cached" mistake
+    # in a new place, and the first version of this fix made it.
+    rig.led = Generator(output=True, mode="DC", high_v=1.30)
+    got = illumination_state(rig)
+    assert got["led_level_v"] is None, "an unread level is absent, not the other register"
+    assert got["lit"] is True, "but the light is still known to be reaching the sample"
+    curve = [e for e in run(rig, _leave()) if isinstance(e, JVCurveDone)][0]
+    assert curve.label == "as found lit" and curve.dark is False
+    assert curve.led_level_v is None
