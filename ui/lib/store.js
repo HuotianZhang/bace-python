@@ -16,6 +16,31 @@ import { hasReplayedTraces } from './stream.js';
 const LOG_LIMIT = 800;
 
 /**
+ * How many shots keep their decimated traces — across the whole store, not
+ * per node.
+ *
+ * This is `session.RING_TRACES_KEPT`, and it is global there too: `_traces` is
+ * one `deque(maxlen=200)` for the session, appended on every `StepDone`
+ * whatever run or node it belongs to (`session.py`). So the ring replays the
+ * traces of the last 200 shots *anyone* took, and strips the rest
+ * (`decimated[…].replay`). Mirroring it globally makes an invariant out of
+ * what was already half true: a console that had ever been dropped held
+ * exactly those, and one that had not held every trace that arrived while its
+ * socket stayed up.
+ *
+ * Global is also the only version that bounds anything. Measured on
+ * `--sim --fast`, a decimated shot costs ~14.6 kB of heap; capped per *node*
+ * this would keep 200 per leaf, so the canonical 9 T x 5 level tree of
+ * `docs/ui-plan.md` M5 — 45 leaves — would hold 9000 of them, ~130 MB. One
+ * ring of 200 is ~3 MB whatever the tree.
+ *
+ * Nothing on screen needs more: the live monitor draws the shot that is
+ * arriving, the loop curve comes from the scalars, and the results tab redraws
+ * from `GET /runs/{id}/data` at full precision.
+ */
+const TRACES_KEPT = 200;
+
+/**
  * A run's state as `GET /bench` says it — `session._bench_state`, mirrored so
  * the rail does not read `idle` for the length of a run. The snapshot is
  * fetched once at boot and again when a run parks; between those two the only
@@ -47,6 +72,13 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
   let state = emptyState();
   const listeners = new Set();
   let pending = false;
+  /**
+   * The shots that still carry their arrays, oldest first — the store's
+   * counterpart to the service's `_traces`, and global for the same reason.
+   * Not on `state`: no view reads it, and it holds the same objects
+   * `runs[id].shots` does.
+   */
+  let traced = [];
 
   function notify() {
     if (pending) return;
@@ -69,6 +101,10 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
   }
 
   function log(frame, level, text) {
+    // Counted as well as kept: the log is appended to and trimmed from the
+    // front, so its length stops changing once it is full and a view that
+    // keyed on the length would freeze at 800 lines.
+    state.logged += 1;
     state.log.push({
       seq: frame.seq, ts: frame.ts, type: frame.type, level,
       run_id: frame.run_id || null, node_path: frame.node_path || '', text,
@@ -88,6 +124,7 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
     /** Wholesale: a new session, or the page reloading. */
     reset() {
       state = emptyState();
+      traced = [];
       notify();
     },
 
@@ -159,6 +196,8 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
       if (!entry || !entry.name) return;
       state.modules.byName = { ...state.modules.byName, [entry.name]: entry };
       if (!state.modules.order.includes(entry.name)) state.modules.order.push(entry.name);
+      // `at` is when this catalogue last changed, which is what a view keys on.
+      state.modules.at = Date.now() / 1000;
       notify();
     },
 
@@ -393,7 +432,7 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         break;
 
       case 'StepDone':
-        foldStepDone(record, nodeOf(record, frame.node_path), frame, data);
+        foldStepDone(record, nodeOf(record, frame.node_path), frame, data, traced);
         break;
 
       case 'LoopDone': {
@@ -537,7 +576,7 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
  * held are left alone. A client that blanked the chart here would have a bug
  * that only appears after being dropped at 1008.
  */
-function foldStepDone(record, node, frame, data) {
+function foldStepDone(record, node, frame, data, traced) {
   // Two ways a shot arrives without its arrays, and they mean the same thing
   // on screen: the ring dropped them (`decimated[…].replay`, after a
   // reconnect), or the journal never stored them at all
@@ -583,9 +622,35 @@ function foldStepDone(record, node, frame, data) {
   // hydrated from `GET /runs/{id}/data`, and the shots the replay did carry
   // are fewer than the shots that ran.
   node.kept = Math.max(node.kept || 0, node.shots.length);
+  if (shot.traces) keepTraces(traced, shot, previous);
   rollUp(record);
   if (shot.verdict && shot.verdict.level === 'warn') {
     record.shotWarnings.push({ index: data.index, loop: data.loop, text: shot.verdict.text, ts: frame.ts });
+  }
+}
+
+/**
+ * Remember this shot's arrays, and forget the oldest beyond `TRACES_KEPT`.
+ *
+ * `tracesGone` is the store's existing word for *no curve, the loop point
+ * comes from the scalars* — the same state a shot is in when the ring replayed
+ * it without its arrays — so a chart needs no second case for this one. The
+ * shot object is edited in place because `record.shots`, `node.shots` and
+ * `record.shotsByKey` all hold the same object, and replacing it would mean
+ * finding it in three places to say the same thing.
+ *
+ * A shot that arrives twice (the replay path, where `previous` exists and its
+ * arrays may be reused) takes the place its predecessor held rather than
+ * queueing behind it: two entries for one shot would let the trim null the
+ * arrays out from under the copy that is on the record.
+ */
+function keepTraces(traced, shot, previous) {
+  const at = previous ? traced.indexOf(previous) : -1;
+  if (at === -1) traced.push(shot);
+  else traced[at] = shot;
+  while (traced.length > TRACES_KEPT) {
+    const old = traced.shift();
+    if (old.traces) { old.traces = null; old.tracesGone = true; }
   }
 }
 
@@ -671,6 +736,7 @@ export function emptyState() {
     temperature: null,
     notices: [],
     log: [],
+    logged: 0,
     lastFrame: null,
   };
 }

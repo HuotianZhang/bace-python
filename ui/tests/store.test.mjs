@@ -415,3 +415,79 @@ test('sigma_Q of zero is an absence, not a value', () => {
   assert.equal(sigmaQ(null), null);
   assert.ok(sigmaQ(4e-11).startsWith('4.00e-11'));
 });
+
+test('the store remembers the traces the ring would replay, and no more', () => {
+  // The service keeps the arrays of the last `RING_TRACES_KEPT` = 200 shots
+  // and strips the rest, in **one** deque for the whole session whatever run
+  // or node the shot belongs to (`session.py`). So a console that had ever
+  // been dropped held exactly those and one that had not held every shot of
+  // the run. The store now keeps the service's number, globally, either way —
+  // which bounds the tab as well as settling the invariant: measured on
+  // `--sim --fast`, a decimated shot is ~14.6 kB of heap, and a cap *per node*
+  // would keep 200 for each of the canonical tree's 45 leaves, ~130 MB.
+  //
+  // No fixture in the repo is 200 shots long, so the shape is a recorded
+  // `StepDone` off the wire, renumbered: the arrays and the `decimated` block
+  // are the service's own.
+  const frames = parseJsonl(fixture('stream_bace_sim.jsonl'));
+  const template = frames.find((f) => f.type === 'StepDone');
+  assert.ok(template.data.light.y.length, 'the template carries its arrays');
+
+  const s = store();
+  s.applyFrames(frames.filter((f) => ['RunQueued', 'NodeStarted', 'RunStarted'].includes(f.type)));
+  const runId = template.run_id;
+  for (let i = 1; i <= 250; i += 1) {
+    s.applyFrame({ ...template, seq: 10000 + i,
+      data: { ...template.data, loop: Math.ceil(i / 25), index: i } });
+  }
+
+  const run = s.getState().runs[runId];
+  assert.equal(run.shots.length, 250, 'every shot is still on the record');
+  const withTraces = run.shots.filter((shot) => shot.traces);
+  assert.equal(withTraces.length, 200, 'and two hundred of them still have their arrays');
+  assert.equal(run.shots[249].traces.light.y.length, template.data.light.y.length,
+    'the newest shot is whole');
+
+  const forgotten = run.shots[0];
+  assert.equal(forgotten.traces, null);
+  assert.equal(forgotten.tracesGone, true, 'which is what a replayed shot says too');
+  assert.equal(typeof forgotten.q, 'number', 'the charge survives: the loop curve is still drawable');
+  assert.ok(forgotten.verdict, 'and so does its verdict');
+});
+
+test('the trace cap is one ring for the store, not one per node', () => {
+  // The mistake this pins: `session.py`'s `_traces` is a single
+  // `deque(maxlen=200)` appended on every `StepDone` whatever node it came
+  // from, so a per-node cap does not mirror it and does not bound anything —
+  // 200 per leaf across M5's 45-leaf tree is 9000 shots of arrays.
+  const frames = parseJsonl(fixture('stream_bace_sim.jsonl'));
+  const template = frames.find((f) => f.type === 'StepDone');
+  const s = store();
+  s.applyFrames(frames.filter((f) => ['RunQueued', 'RunStarted'].includes(f.type)));
+
+  // Two module nodes under one run_id, 150 shots each: under the cap alone,
+  // over it together.
+  for (const node of ['rep=1/bace', 'rep=2/bace']) {
+    s.applyFrame({ ...template, seq: 0, node_path: node, type: 'NodeStarted',
+      data: { node_path: node, kind: 'module', label: node } });
+    for (let i = 1; i <= 150; i += 1) {
+      s.applyFrame({ ...template, seq: 20000 + i, node_path: node,
+        data: { ...template.data, loop: 1, index: i } });
+    }
+  }
+
+  const run = s.getState().runs[template.run_id];
+  const nodes = ['rep=1/bace', 'rep=2/bace'].map((n) => run.nodes[n]);
+  assert.deepEqual(nodes.map((n) => n.shots.length), [150, 150], 'every shot is on its node');
+
+  const withTraces = nodes.flatMap((n) => n.shots).filter((shot) => shot.traces);
+  assert.equal(withTraces.length, 200, 'two hundred across both nodes, not two hundred each');
+  // And it is the newest 200 that survive, so the older node gives up first.
+  assert.equal(nodes[0].shots.filter((shot) => shot.traces).length, 50);
+  assert.equal(nodes[1].shots.filter((shot) => shot.traces).length, 150);
+  for (const shot of nodes[0].shots.slice(0, 100)) {
+    assert.equal(shot.traces, null);
+    assert.equal(shot.tracesGone, true);
+    assert.equal(typeof shot.q, 'number', 'the charge survives the forgetting');
+  }
+});
