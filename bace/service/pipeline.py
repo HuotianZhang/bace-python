@@ -54,6 +54,7 @@ from ..core.illumination import IlluminationError, LedDrive, assert_axis_centre
 from ..core.pulses import pulse_levels
 from ..drivers.keithley2400 import SourceMeterConfig
 from ..experiment.events import Verdict
+from ..experiment.jv import JVConfig
 from ..experiment.rig import RigConfig
 from ..experiment.transient import RunConfig
 from ..experiment.wire import to_wire
@@ -1220,6 +1221,27 @@ def _c_axis_geometry(f: _Facts) -> list[Verdict]:
     for s in f.modules:
         v = s.values()
         if "axis_name" not in v:
+            # A J-V sweep has geometry too, and until now nothing checked it:
+            # `step_v = 0` validated clean, was queued, and died at build time
+            # with `jv: step_v: step_v must be positive`. The estimate already
+            # said "cannot estimate" on the card while the button beside it
+            # stayed enabled. Same construction the builder makes, so the two
+            # cannot come to disagree about what is runnable.
+            if "step_v" in v:
+                sweep = {k: v.get(k) for k in ("start_v", "stop_v", "step_v")}
+                try:
+                    points = JVConfig(start_v=float(v["start_v"]), stop_v=float(v["stop_v"]),
+                                      step_v=float(v["step_v"])).points()
+                except (ValueError, TypeError) as exc:
+                    failures.append((s, f"{s.module}: {exc}", sweep))
+                    continue
+                levels = {k: v.get(k) for k in ("led_start_v", "led_stop_v", "led_step_v")}
+                if float(v.get("led_step_v", 1.0)) <= 0 and \
+                        float(v.get("led_start_v", 0.0)) != float(v.get("led_stop_v", 0.0)):
+                    failures.append((s, f"{s.module}: led_step_v: must be positive for a "
+                                        "range of levels", levels))
+                    continue
+                described.append(f"{s.module}: {int(points.size)} pts")
             continue
         try:
             axis = _axis_of(v)

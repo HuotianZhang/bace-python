@@ -203,18 +203,30 @@ def test_a_light_node_puts_its_led_read_back_on_the_rail(tmp_path):
     assert live.overlay(base)["led"]["output"] is False
 
 
-def test_an_unreadable_light_leaves_the_rail_alone():
-    """`illumination_state` reports `None` for what it could not read, and the
-    event carries those Nones. None is not False: the overlay must not claim
-    the LED is off because nobody could say."""
+def test_an_unreadable_light_reads_as_unknown_not_as_the_snapshots_stale_value():
+    """The run asked and the bench could not say, and *that is newer* than the
+    snapshot Start took.
+
+    The first attempt at this skipped the unread `?` so a good read-back could
+    not be overwritten with "unknown" — but leaving Start's stale values in
+    place is worse: `ui/lib/fields.js` combines the LED's mode and output with
+    the shutter to decide whether the card says lit or dark, so a stale pair
+    makes the screen claim a definite illumination for a curve the file is
+    recording as `as found unknown`. The screen disagreeing with the file is
+    the one thing this read-back exists to prevent."""
     live = LiveState(RigConfig())
     base = Bench.build_simulated(RigConfig()).read_back()["instruments"]
-    base = {**base, "led": {**base["led"], "output": True}}
+    base = {**base, "led": {**base["led"], "output": True, "mode": "DC"},
+            "shutter": {**base["shutter"], "open": True}}
     live.apply(E.InstrumentState({"shutter": "?", "illumination": "unknown",
                                   "led_mode": "?", "led_level_v": None,
                                   "led_output": None}), None)
     over = live.overlay(base)
-    assert over["led"]["output"] is True, "nothing was read, so nothing is claimed"
-    assert over["shutter"] == base["shutter"], "and `?` is not a shutter position"
-    assert over["led"]["mode"] == base["led"]["mode"], (
-        "`?` must not overwrite a real mode with 'unknown' *and* mark it inferred")
+    assert over["led"]["output"] is None, "unread, and not the stale True"
+    assert over["led"]["mode"] == "?", "unread, and not the stale DC"
+    assert over["shutter"]["open"] is None, "unread, and not the stale open"
+
+    # Which is exactly what the card needs to say unknown: `fields.js` reads
+    # `null`/`?` on any of the three as "cannot tell", the same rule
+    # `illumination_state` applies.
+    assert over["led"]["how"] == "inferred" and over["shutter"]["how"] == "inferred"
