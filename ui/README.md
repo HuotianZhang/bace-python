@@ -154,8 +154,13 @@ cards, the `edited` layer through `PUT`, and Start disabled by `invalid` *and*
 by `crit`. **M3 is next**: the scale and axis foundation, then the J-V and
 transient charts.
 
-One thing the measurement above still owes M2: `views/bench.js` renders on
-every store notify, so the six cards and every `<input>` in them are rebuilt at
-frame rate. `dom.keyed` is what that is for and the cards do not use it yet.
+The cards are keyed on their own model, for the reason the rail is: measured
+before it, all six were rebuilt **737 times each in four seconds** of a scan,
+and the operator's caret went with them — focus a parameter field and it is
+gone, on an idle bench too, because a power monitor is enough. `cardModel` is
+the pure function an entry becomes rows through, so its output is the key, and
+a card is replaced *in place* so rebuilding one does not blur a field in
+another. Idle with a monitor ticking: zero rebuilds. Through a scan: six, in
+the three cards whose read-back row actually moved.
 
 The phases, and what each one has to prove, are in `docs/ui-plan.md`.

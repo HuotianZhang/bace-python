@@ -59,6 +59,14 @@ export function fill(el, ...children) {
  * key**: build it (it is cheap and pure), and touch the DOM only where it
  * differs. Nothing has to remember to invalidate anything, which is the one
  * thing a hand-maintained dirty flag always gets wrong.
+ *
+ * **`keyed` owns the element's children.** The key it compares lives on the
+ * element, so anything else that adds, removes or replaces a child behind its
+ * back leaves that key describing content which is no longer there — and the
+ * next call with a matching key does nothing, for ever. `views/bench.js`
+ * manages its six cards itself, one at a time, so that a rebuild of one does
+ * not blur a field in another; a container managed that way must not also be
+ * handed to `keyed`, and that mistake shipped once before this paragraph did.
  */
 export function keyed(el, key, build) {
   if (el.__key === key) return false;

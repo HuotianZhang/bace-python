@@ -338,6 +338,22 @@ Neither is a micro-optimisation to do later: both are properties of the layer
 M2–M6 are written *on*, and both get more expensive to retrofit with every
 card, chart and field added above them.
 
+*And M2 proved that, 2026-09-03.* The cards landed before this decision did,
+rendering on every store notify: all six were rebuilt **737 times each in four
+seconds** of a scan, and the operator's caret went with them — focus a
+parameter field and it is gone within 2.5 s, on an *idle* bench too, because a
+power monitor at 1 Hz is enough to do it. The fix is this decision applied
+where it was written for: `cardModel` is already the pure function an entry
+becomes rows through, so its output is the key. Two details the shell did not
+need: a card is replaced **in place**, because detaching an element blurs
+whatever inside it had the focus and a rebuild of the `bace` card must not take
+the caret out of the `jv` card beside it; and the model must carry no clock, or
+the 700 ms `/bench` refetch above would rebuild every card twice a second and
+the fix would arrive through the fix (`ui/tests/fields.test.mjs` pins that).
+Idle with a monitor ticking: zero rebuilds. Through a scan: six, in the three
+cards whose read-back row actually moved. 435 506 elements became 19 762, and
+the rail’s worst stale stretch went back to the 2.8 s the shell alone gets.
+
 ### What the front end is made of
 
 Plain ES modules and hand-written DOM, served by `--ui DIR` —
