@@ -844,14 +844,14 @@ class Catalogue:
                     text += ": " + str(unavailable["temperature"])
                 out.append({"code": "temperature", "text": text})
             elif bench and temperature.get("error"):
-                # The read itself failed: the console that answered at
-                # Start is not answering now -- the program, not the bus.
+                # The read itself failed: what answered at Start is not
+                # answering now -- the link, not the instrument behind it.
                 out.append({"code": "temperature",
-                            "text": "331 console attached at Start, not answering now · "
-                                    "pauses for a manual set (start the console)"})
+                            "text": "331 attached at Start, not answering now · "
+                                    "pauses for a manual set"})
             elif bench and temperature.get("connected") is False:
                 out.append({"code": "temperature",
-                            "text": "331 console up, instrument silent · pauses for a "
+                            "text": "331 reachable, instrument silent · pauses for a "
                                     "manual set"})
         return out
 

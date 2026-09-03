@@ -75,12 +75,14 @@ The scripted walk-through of the whole operator flow is
 - **Where a temperature came from travels with it** (contract §7, added
   2026-09-02): every run and journalled node carries `temperature_how` ×
   `temperature_source` — `typed`/`""` (nobody read an instrument),
-  `setpoint`/`""` (**requested, not reached**), `settled`/`console|simulated`,
-  `operator`/`operator` (typed at the pause), `operator`/`console|simulated`
-  (the pause ended without a number; this is the last polled reading). `how`
-  alone does not separate the last two, so render both — and never let a
-  `simulated` source read as a measured one. The folder name says `290K`
-  either way; it is not evidence.
+  `setpoint`/`""` (**requested, not reached**),
+  `settled`/`instrument|console|simulated`, `operator`/`operator` (typed at
+  the pause), `operator`/`instrument|console|simulated` (the pause ended
+  without a number; this is the last polled reading). `how` alone does not
+  separate the last two, so render both — and never let a `simulated` source
+  read as a measured one. `instrument` and `console` are both measured and
+  differ only in who held the bus. The folder name says `290K` either way; it
+  is not evidence.
 - `[sample] comment` is slugged into the folder name and kept verbatim in the
   metadata. Show the sentence, not the slug.
 
@@ -97,16 +99,33 @@ The scripted walk-through of the whole operator flow is
   true` renders as "at least", never as a promise.
 - σ_Q of 0 means *not recorded*; intensity without the calibration factor is
   watts, never mW/cm² (design pack, `04-data.md`).
-- Temperature settles automatically only when `[temperature] console` is set
-  in rig.toml; otherwise every temperature node pauses (`NeedsOperator`) and
-  the UI must surface resume with a typed `temperature_k` — and both ways of
+- Temperature settles automatically when the bench has a 331 that answered
+  at Start; otherwise every temperature node pauses (`NeedsOperator`) and the
+  UI must surface resume with a typed `temperature_k` — and both ways of
   ending that pause are recorded differently, see `temperature_how` above.
+  **Under `--sim` the pause is the default**: there is no instrument to
+  answer, so `--sim` does not follow `[temperature] address`; set
+  `[temperature] console` to any non-empty string to get a simulated 331 that
+  settles. Build both paths, and note the pause is the one you get for free.
 - A `temperature` module binds the **rest of the run**, not the rest of one
   loop iteration (the cryostat does not reset between iterations); a
   temperature *loop* still wins for its own subtree. The pipeline tab's "what
   it will do, in order" must show it that way.
 
 ## State of the bench code (so the UI session does not re-litigate it)
+
+**The service needs no other program running** (2026-09-03). The 1918-C and
+the Lake Shore 331 used to be reached through their own console programs over
+HTTP; on this rig nobody starts those, so a run recorded no intensity and
+every temperature node paused. Both drivers are now in `bace/drivers/`
+(`newport1918c/`, `lakeshore331/`, the device code vendored from those
+projects) and this process opens both. `[power_meter] console` and
+`[temperature] console` remain as escape hatches for a bench where one of
+those programs *is* running and holds the device. For the UI this means: the
+bench card's power and temperature blocks are live on the real rig without
+any setup step, `PowerReading.source` is now `usb` rather than a URL, and
+`TemperatureRead.source` gained `instrument` beside `console` and
+`simulated`.
 
 The service matched LabVIEW on the rig on 2026-09-02 evening (HANDOVER,
 evening section; the two runs and three journals of that day are in

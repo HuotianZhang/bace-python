@@ -143,9 +143,9 @@ def test_a_refusal_is_the_consoles_sentence_and_an_outage_is_not_a_refusal():
     assert (warn.level, warn.code) == ("warn", "temperature.timeout")
     assert warn.data["reason"] == "unreachable" and warn.data["written"] is False
     assert warn.data["error"] == str(dead) and warn.data["polls"] == 1
-    assert warn.text == (f"250 K: the 331 console did not answer the setpoint write ({dead}); "
-                         "last reading 294.80 K -- pausing for the operator; start the console, "
-                         "then resume or stop")
+    assert warn.text == (f"250 K: the 331 did not answer the setpoint write ({dead}); "
+                         "last reading 294.80 K -- pausing for the operator; fix the "
+                         "connection, then resume or stop")
     assert "no instrument behind it" not in warn.text
     need = events[2]
     assert need.what == "temperature timeout"
@@ -215,9 +215,9 @@ def test_a_console_that_stops_answering_mid_settle_says_so_not_instrument_silent
     warn = events[2]
     assert (warn.data["reason"], warn.data["polls"], warn.data["written"]) == ("unreachable", 5, True)
     assert warn.data["kelvin"] == 279.0 and warn.data["error"] == str(dead)
-    assert warn.text == (f"250 K: the 331 console did not answer 3 polls ({dead}); last reading "
-                         "279.00 K -- pausing for the operator; start the console, then resume "
-                         "or stop")
+    assert warn.text == (f"250 K: the 331 did not answer 3 polls ({dead}); last reading "
+                         "279.00 K -- pausing for the operator; fix the connection, then "
+                         "resume or stop")
     assert c.setpoints == [250.0]
     assert out.how == "operator" and out.temperature_k == 279.0 and out.polls == 5
 

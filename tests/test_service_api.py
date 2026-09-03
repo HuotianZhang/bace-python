@@ -932,7 +932,7 @@ def test_the_dry_run_names_the_folder_pattern_the_run_will_use(service):
 def test_the_temperature_monitor_route_refuses_without_a_console(service):
     client, session = service
     r = client.post("/monitors/temperature", json={"interval_s": 1.0})
-    assert r.status_code == 422 and "not wired" in r.json()["error"]
+    assert r.status_code == 422 and "no 331 on this bench" in r.json()["error"]
     assert client.delete("/monitors/temperature").status_code == 404
     assert client.get("/monitors").json() == {"monitors": []}
     paths = {(e["method"], e["path"]) for e in client.get("/").json()["routes"]}

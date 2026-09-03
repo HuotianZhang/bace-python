@@ -1456,20 +1456,31 @@ class Session:
         return m is not None and m.running
 
     def start_temperature_monitor(self, interval_s: float = 5.0) -> dict:
-        """`POST /monitors/temperature`: the 331 console read every
-        `interval_s` beside whatever the worker is doing (HTTP, never the
-        bus). One at most (409); `ValueError` when no console is named in
-        rig.toml or the interval is out of range."""
+        """`POST /monitors/temperature`: the 331 read every `interval_s`
+        beside whatever the worker is doing -- through the attached driver's
+        lock when this process owns the GPIB session, over HTTP when a
+        console does. One at most (409); `ValueError` when no 331 is on the
+        bench at all or the interval is out of range."""
         interval_s = float(interval_s)
         if not MIN_INTERVAL_S <= interval_s <= MAX_INTERVAL_S:
             raise ValueError(f"interval_s must be between {MIN_INTERVAL_S:g} and "
                              f"{MAX_INTERVAL_S:g} s, not {interval_s:g}")
         if self.temperature_monitor_running:
             raise Conflict("the temperature monitor is already running")
+        controller = self.bench.rig.temperature
+        # When this process holds the 331's GPIB session, the monitor's thread
+        # would be a second thread on GPIB0 -- the one thing the bench-lock
+        # rule forbids. It skips its tick while the worker has a job instead;
+        # a settling temperature node emits its own readings from the worker,
+        # so nothing is lost. A console-backed controller is HTTP and never
+        # skips.
+        on_the_bus = getattr(controller, "resource", None) is not None
         monitor = TemperatureMonitor(self.rig_config.temperature_console,
                                      emit=lambda ev: self._dispatch(None, ev, node_path=""),
                                      interval_s=interval_s,
-                                     controller=self.bench.rig.temperature)
+                                     controller=controller,
+                                     skip_while=(None if not on_the_bus
+                                                 else lambda: not self.worker.idle))
         self._temperature_monitor = monitor
         monitor.start()
         return monitor.info()

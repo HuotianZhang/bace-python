@@ -42,7 +42,8 @@ from typing import Any, Callable
 from ..bench.checks import fingerprint
 from ..core.illumination import IlluminationError, LedDrive
 from ..drivers.keithley2400 import SourceMeterConfig
-from ..drivers.lakeshore331 import ConsoleTemperatureController
+from ..drivers.lakeshore331 import (ConsoleTemperatureController,
+                                    open_temperature_controller)
 from ..drivers.simulated import SimulatedRig, make_bench
 from ..experiment import events as E
 from ..experiment.rig import Rig, RigConfig
@@ -133,6 +134,12 @@ class BenchActionRefused(RuntimeError):
         super().__init__(text)
         self.level = level
         self.text = text
+
+
+class _NoCryostat(Exception):
+    """`[temperature]` names neither an address nor a console: there is no 331
+    on this bench, which is a configuration and not a failure. Internal to
+    `build_real`, and never reported as an unavailable role."""
 
 
 class BenchUnavailable(RuntimeError):
@@ -288,14 +295,30 @@ def power_reading(meter, *, samples: int = 1) -> E.PowerReading:
         wavelength = _float_or_none(getattr(last, "wavelength_nm", None))
     if wavelength is None:
         wavelength = _float_or_none(getattr(meter, "wavelength_nm", None))
-    source = getattr(meter, "base_url", None) or "simulated"
+    # `source` before `base_url`: the direct driver has no URL, and falling
+    # through to "simulated" would render a real watt reading as a made-up
+    # one -- the exact confusion this field exists to prevent.
+    source = (getattr(meter, "source", None) or getattr(meter, "base_url", None)
+              or "simulated")
     return E.PowerReading(watts=float(watts), trustworthy=trustworthy,
                           wavelength_nm=wavelength, source=str(source))
 
 
 def temperature_source(controller: Any) -> str:
-    """`console` for the HTTP driver, `simulated` for the stand-in."""
-    return "console" if getattr(controller, "base_url", None) else "simulated"
+    """Where a temperature came from: `instrument` when this process holds the
+    331's GPIB session (the default), `console` when the 331 console holds it
+    and we asked over HTTP, `simulated` for the stand-in.
+
+    The first two are measured and the third is not, and a UI must never let
+    a simulated number read as a measured one (`docs/ui-kickoff.md`), so the
+    fall-through is deliberately last: a driver that is neither is a
+    stand-in.
+    """
+    if getattr(controller, "base_url", None):
+        return "console"
+    if getattr(controller, "resource", None):
+        return "instrument"
+    return "simulated"
 
 
 def read_temperature_console(source: Any, *, timeout_s: float = 2.0) -> dict:
@@ -386,11 +409,14 @@ class Bench:
         The simulator takes the rig's `current_sign`, sense resistor and
         amplifier gain from the `RigConfig` in force, so a simulated file and
         a real one written under the same `rig.toml` carry the same
-        conventions. The simulated 331 is attached only when the config
-        names a console (any value -- `"sim"` will do): the default
-        `rig.toml` leaves it empty, so `--sim` pauses at each temperature
-        exactly as the real bench does without the console, and a session
-        that wants to see a settle names one.
+        conventions. The simulated 331 is attached only when the config names
+        a console (any value -- `"sim"` will do), and deliberately *not* from
+        `[temperature] address`, which on the real bench now decides whether
+        this process opens the instrument. There is no instrument to answer
+        under `--sim`, so whether this bench has a cryostat is a scenario to
+        choose rather than a fact to discover: empty is the operator-pause
+        path, which is the one a console has to handle well and the one worth
+        getting by default.
         """
         sim = make_bench(seed=seed, current_sign=rig_config.current_sign)
         sim.bench.sense_resistor_ohm = rig_config.sense_resistor_ohm
@@ -428,7 +454,7 @@ class Bench:
         from ..drivers.agilent81150 import Agilent81150
         from ..drivers.infiniium import Infiniium
         from ..drivers.keithley2400 import Keithley2400
-        from ..drivers.newport1918c import ConsolePowerMeter
+        from ..drivers.newport1918c import open_power_meter
         from ..drivers.routing import BiasRouter, RoutingError
 
         unavailable: dict[str, str] = {}
@@ -523,56 +549,69 @@ class Bench:
                 unavailable["relay"] = f"{type(exc).__name__}: {exc}"
                 relay_line = None
 
-        # The power meter, through the console that owns the USB handle.
-        # Absent console = no intensity, not a refusal.
+        # The power meter. This process opens the USB device unless
+        # `[power_meter] console` names the meter's own console, in which case
+        # that program holds the handle and we ask it instead. No meter = no
+        # intensity, not a refusal: a bace still runs, it just waits on the
+        # clock instead of on a flat reading (`modules._settle_led`).
         power = None
         try:
-            candidate = ConsolePowerMeter(rig_config.power_meter_console,
-                                          timeout_s=5.0)
-            if candidate.available():
-                candidate.set_units_watts()
-                writes.append("1918-C console: units watts")
-                candidate.set_wavelength(rig_config.power_meter_wavelength_nm)
-                writes.append(f"1918-C console: wavelength "
-                              f"{rig_config.power_meter_wavelength_nm:g} nm")
-                power = candidate
-            else:
-                unavailable["power"] = (
-                    f"the 1918-C console is not answering at "
-                    f"{rig_config.power_meter_console} (start it with "
-                    "Start Console.bat); intensity will not be recorded")
+            power = open_power_meter(rig_config)
+            how = ("the 1918-C console" if rig_config.power_meter_console
+                   else "1918-C (this process owns the USB device)")
+            writes.append(f"{how}: units watts")
+            writes.append(f"{how}: wavelength "
+                          f"{rig_config.power_meter_wavelength_nm:g} nm")
+            closers.append(getattr(power, "close", lambda: None))
         except Exception as exc:                            # noqa: BLE001
             unavailable["power"] = f"{type(exc).__name__}: {exc}"
 
-        # The 331, through the console that owns its GPIB session. Named and
-        # answering = a temperature loop settles through it; named and
-        # silent = wired-but-silent on the card, and the loop pauses for the
-        # operator as it does with no console at all. Never opened directly:
-        # a second session on the bus would read the console's replies.
+        # The 331. This process opens its GPIB session unless `[temperature]
+        # console` names the 331 console, which owns the bus while it runs.
+        # Attached and answering = a temperature loop settles through it;
+        # absent = the loop pauses and the operator types the number, exactly
+        # as before this instrument moved in-process. A cryostat that is not
+        # on the bench is the ordinary case, not a fault, so its absence is a
+        # line on the card and never a refusal to start.
         temperature = None
-        if rig_config.temperature_console:
-            try:
-                candidate = ConsoleTemperatureController(rig_config.temperature_console)
-                state = candidate.probe()
-                if state is not None and "max_setpoint_k" in state:
-                    temperature = candidate
-                elif state is not None and "connected" in state:
-                    # The console's state before its first successful poll
-                    # (`ls331/service.py`, `{"connected": False}`): the
-                    # program is up, the instrument has not answered it yet.
-                    # Telling the operator to start it would be wrong.
-                    unavailable["temperature"] = (
-                        f"the 331 console at {rig_config.temperature_console} is up but "
-                        "has not read its instrument yet (check the 331 and its GPIB "
-                        "cable, then restart the service); temperature loops pause for "
-                        "a manual set")
-                else:
-                    unavailable["temperature"] = (
-                        f"the 331 console is not answering at "
-                        f"{rig_config.temperature_console} (start it with "
-                        "Start 331 Console.bat); temperature loops pause for a manual set")
-            except Exception as exc:                        # noqa: BLE001
-                unavailable["temperature"] = f"{type(exc).__name__}: {exc}"
+        try:
+            # Neither an address nor a console: this bench has no cryostat.
+            # Deliberately absent, so no reason is recorded -- an operator
+            # who cleared both does not need a line telling them so, and a
+            # run that asks for no temperature never notices.
+            if not (rig_config.temperature_address or rig_config.temperature_console):
+                raise _NoCryostat
+            candidate = open_temperature_controller(rig_config)
+            state = candidate.probe()
+            if state is not None and state.get("max_setpoint_k") is not None:
+                temperature = candidate
+                closers.append(getattr(candidate, "close", lambda: None))
+                if not rig_config.temperature_console:
+                    writes.append(
+                        f"331 {rig_config.temperature_address}: configuration read "
+                        f"back (ceiling {rig_config.temperature_max_setpoint_k:g} K, "
+                        f"loop {rig_config.temperature_control_loop})")
+            elif state is not None and "connected" in state:
+                # Named console, up, but it has not polled its instrument yet
+                # (`ls331/service.py`, `{"connected": False}`). Telling the
+                # operator to start it would be wrong.
+                unavailable["temperature"] = (
+                    f"the 331 console at {rig_config.temperature_console} is up but "
+                    "has not read its instrument yet (check the 331 and its GPIB "
+                    "cable, then restart the service); temperature loops pause for "
+                    "a manual set")
+            else:
+                unavailable["temperature"] = (
+                    f"the 331 console is not answering at "
+                    f"{rig_config.temperature_console}; clear [temperature] console "
+                    "in rig.toml to let the service open the instrument itself. "
+                    "Temperature loops pause for a manual set")
+        except _NoCryostat:
+            pass
+        except Exception as exc:                            # noqa: BLE001
+            unavailable["temperature"] = (
+                f"{type(exc).__name__}: {exc}; temperature loops pause for a "
+                "manual set")
 
         if scope is not None:
             try:

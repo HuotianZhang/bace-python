@@ -1,14 +1,25 @@
-"""The observers: threads that read a console beside a run and never touch VISA.
+"""The observers: threads that read an instrument beside a run, off the bus.
 
-The 1918-C sits on a beam splitter and is owned by its own console
-(`:8918`); the Lake Shore 331, when it is wired, by its own on `:8331`. So
-reading either is an HTTP request and not a bus transaction, and that is
-what lets a reading arrive *during* a bace scan (the design's R3·2 power
-sparkline, and the temperature card's "294.8 K · 331 reads" while a scan
-runs): the worker thread holds the instruments, these threads hold nothing,
-and the only place they meet is the session's event stream. They are the
-concurrent things the bench-lock rule allows, and they stay the only ones: a
-monitor that reached for a VISA resource would be a second thread on the bus.
+A reading has to be able to arrive *during* a bace scan (the design's R3·2
+power sparkline, and the temperature card's "294.8 K · 331 reads" while a
+scan runs), and the bench-lock rule says the worker thread owns the
+instruments. These threads are the one concurrency it allows, and each pays
+for it differently:
+
+* **The 1918-C is not on the bus at all** — USB when this process owns it
+  (the default), HTTP when the meter's console does. Either way a reading is
+  not a VISA transaction, so it never interleaves with the scope or the
+  generators. It is serialised against the worker's own reads by
+  `rigs._METER_LOCK` and by the driver's internal lock.
+* **The 331 is on GPIB when this process owns it** (since 2026-09-03), and
+  that *is* the bus. So the temperature monitor takes `skip_while`: while
+  the worker has a job in flight it skips the tick entirely rather than
+  putting a second thread on GPIB0 mid-acquisition. Nothing is lost, because
+  a temperature node emits its own `TemperatureRead` from the worker while
+  it settles. With a console named the 331 is HTTP again and nothing is
+  skipped.
+
+A skipped tick is not a failure and is not counted as one.
 
 Threads rather than asyncio tasks so the same objects work under the FastAPI
 loop and in a test with no loop at all; the interval is a `threading.Event`
@@ -39,7 +50,7 @@ class Monitor:
     name = "monitor"
 
     def __init__(self, *, emit: Callable[[E.Event], None], interval_s: float = 1.0,
-                 console: str = ""):
+                 console: str = "", skip_while: Callable[[], bool] | None = None):
         interval_s = float(interval_s)
         if not MIN_INTERVAL_S <= interval_s <= MAX_INTERVAL_S:
             raise ValueError(f"interval_s must be between {MIN_INTERVAL_S:g} and "
@@ -47,6 +58,11 @@ class Monitor:
         self.emit = emit
         self.interval_s = interval_s
         self.console = console
+        self.skip_while = skip_while
+        """Asked before every tick. True = do not read now. For a monitor
+        whose instrument is on the bus the worker owns, this is how the
+        bench-lock rule is kept: skip, do not queue and do not fail."""
+        self.skipped = 0
         self.started_at: float | None = None
         self.readings = 0
         self.failures = 0
@@ -92,13 +108,23 @@ class Monitor:
     def info(self) -> dict:
         return {"name": self.name, "running": self.running, "interval_s": self.interval_s,
                 "started_at": self.started_at, "readings": self.readings,
-                "failures": self.failures, "console": self.console or None,
+                "failures": self.failures, "skipped": self.skipped,
+                "console": self.console or None,
                 "last": self.last_info(), "last_at": self.last_at,
                 "last_error": self.last_error}
 
     def _loop(self) -> None:
         while not self._stop.is_set():
-            self._read_once()
+            skip = False
+            if self.skip_while is not None:
+                try:
+                    skip = bool(self.skip_while())
+                except Exception:                           # noqa: BLE001
+                    skip = True     # cannot tell whether the bus is free: do not touch it
+            if skip:
+                self.skipped += 1
+            else:
+                self._read_once()
             if self._stop.wait(self.interval_s):
                 return
 
@@ -160,25 +186,33 @@ class PowerMonitor(Monitor):
 
 class TemperatureMonitor(Monitor):
     """Read the 331 every `interval_s` and emit `TemperatureRead`s
-    (`source = "console"`, or `"simulated"` under `--sim`). The console is
-    `RigConfig.temperature_console`; with it empty there is nothing to
-    monitor and the constructor says so -- naming the console in rig.toml is
-    the lab's step, not this one's. `controller` is the rig's attached
-    driver when it has one, so a `--sim` bench monitors its own stand-in and
-    the real bench the very object a settle drives; without one (the console
-    was silent at start-up) the URL is read, so a console started later is
-    seen without a restart."""
+    (`source = "instrument"`, `"console"`, or `"simulated"` under `--sim`).
+
+    Either half is enough to monitor: `controller` is the rig's attached
+    driver -- normally the one holding the GPIB session, so the monitor reads
+    the very object a settle drives -- and `console` is a 331-console URL,
+    read directly when no driver was attached at start-up, so a console
+    started later is seen without a restart. With neither there is no 331 on
+    this bench and the constructor says so.
+
+    The monitor polls on its own thread while the worker may be mid-run, so
+    every exchange goes through the driver's own lock
+    (`lakeshore331.controller._LOCK`); the console path is HTTP and never
+    touches the bus at all.
+    """
 
     name = "temperature"
-    what = "331 console"
+    what = "331"
 
     def __init__(self, console: str, *, emit: Callable[[E.Event], None],
-                 interval_s: float = 5.0, controller: Any = None):
-        if not console:
-            raise ValueError("no temperature console: [temperature] console in rig.toml "
-                             "is empty, so the 331 is not wired and there is nothing "
-                             "to monitor")
-        super().__init__(emit=emit, interval_s=interval_s, console=console)
+                 interval_s: float = 5.0, controller: Any = None,
+                 skip_while: Callable[[], bool] | None = None):
+        if not console and controller is None:
+            raise ValueError("no 331 on this bench: nothing is attached at "
+                             "[temperature] address and [temperature] console is "
+                             "empty, so there is nothing to monitor")
+        super().__init__(emit=emit, interval_s=interval_s, console=console,
+                         skip_while=skip_while)
         self.controller = controller
 
     def read(self) -> E.Event:
@@ -187,7 +221,8 @@ class TemperatureMonitor(Monitor):
             raise RuntimeError(t.get("error") or t.get("status_text")
                                or "the console answered with no temperature")
         return E.TemperatureRead(kelvin=float(t["kelvin"]), setpoint_k=t.get("setpoint_k"),
-                                 in_band=None, source=str(t.get("source") or "console"))
+                                 in_band=None,
+                                 source=str(t.get("source") or "instrument"))
 
     def last_info(self) -> dict | None:
         last = self.last
