@@ -108,6 +108,28 @@ def test_the_catalogue_lists_the_contract_modules():
         cat.param_set("nope")
 
 
+def test_a_retired_module_name_says_what_replaces_it():
+    """A recipe saved through `/pipelines/save` is a file on disk and outlives
+    the catalogue, so an operator can open a tree naming `jv_dark` long after
+    it stopped existing. Without this the answer is `jv_dark: 'jv_dark'` -- a
+    `KeyError` repr that says neither what happened nor what to do.
+
+    Refused, never rewritten: `jv_dark` maps to *two* nodes, so translating it
+    would change the tree's shape and its node paths (and so its folder
+    names); translating it to `jv` alone would change what is measured, from
+    "make it dark and sweep" to "sweep under whatever is there", which is the
+    failure the split exists to prevent."""
+    cat = catalogue()
+    with pytest.raises(KeyError, match="no longer a module"):
+        cat.spec("jv_dark")
+    text = str(pytest.raises(KeyError, cat.spec, "jv_dark").value)
+    assert "light" in text and "shutter = shut" in text and "jv" in text
+    # An name that never existed still reads as one, not as a retirement.
+    with pytest.raises(KeyError) as plain:
+        cat.spec("nope")
+    assert "no longer" not in str(plain.value)
+
+
 def test_bace_params_layer_default_run_toml_last_used_edited_and_inherited():
     """The provenance chain the console shows, end to end on the real recipe."""
     hist = FakeHistory(last_used={"bace": {"n_loops": 7, "settle_s": 0.3,
@@ -326,6 +348,55 @@ def test_jv_records_a_shut_shutter_as_dark_because_it_read_it_not_because_it_shu
     assert curve.illumination["shutter"] == "shut" and curve.illumination["lit"] is False
     assert abs(curve.metrics.jsc) < 1e-5, "dark through the shutter"
     assert curve.metrics.voc is None, "a curve read as dark gets the dark metrics"
+
+
+def test_an_unknown_curve_stays_unknown_through_every_consumer(tmp_path):
+    """`JVCurveDone.dark` is three-valued, and `None` is falsy -- so every
+    consumer that wrote `not ev.dark` or `bool(ev.dark)` silently promoted a
+    curve nobody could read into a *known light* one. That has now been the
+    same bug in four places (the V_oc capture, the HDF5 attribute, the data
+    endpoint, the run summary), so this walks one unknown curve through all of
+    them at once rather than pinning them one at a time.
+
+    The bench has no shutter, so `illumination_state` cannot say whether light
+    reached the sample -- which is the whole of the unknown case."""
+    import h5py
+    from bace.service.executor import _Tally
+
+    b = bench()
+    b.rig.shutter = None
+    b.sim.led.set_dc(1.02)
+    b.sim.led.enable_output(True)
+    cat = catalogue()
+    got: dict = {}
+    ctx = make_ctx(tmp_path, node_path="jv", on_data=lambda path, d: got.update({path: d}))
+    tally = _Tally(module="jv")
+    curves = []
+    for ev in cat.build("jv", {"step_v": 0.1}, ctx, b.rig):
+        tally.handle(ev)
+        if isinstance(ev, JVCurveDone):
+            curves.append(ev)
+
+    assert len(curves) == 1 and curves[0].dark is None
+    assert curves[0].metrics.voc is not None, "the interpolation still happens"
+
+    # 1 · the run summary must not advertise it as a measured V_oc
+    assert tally.last_voc is None, "an unknown curve is not a light one"
+
+    # 2 · the data endpoint carries the tri-state rather than coercing it
+    curve = got["jv"]["curves"][0]
+    assert curve["dark"] is None and curve["illumination"] == "unknown"
+    json.dumps(jsonable(got["jv"]))                  # and it is still JSON
+
+    # 3 · the file says unknown, and omits `dark` rather than claiming False
+    path = [f for f in os.listdir(ctx.folders[0]) if f.endswith(".h5")][0]
+    with h5py.File(os.path.join(ctx.folders[0], path), "r") as f:
+        group = f["curves"][sorted(f["curves"])[0]]
+        assert group.attrs["illumination"] == "unknown"
+        assert "dark" not in group.attrs
+
+    # 4 · and it never becomes the V_oc a bace would centre its axis on
+    assert ctx.voc is None
 
 
 # -- light ----------------------------------------------------------------------------

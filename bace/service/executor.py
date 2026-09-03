@@ -188,7 +188,10 @@ class _Tally:
             self.requested, self.kept = ev.n_curves, 0
         elif isinstance(ev, JVCurveDone):
             self.kept = (self.kept or 0) + 1
-            if not ev.dark and ev.metrics.voc is not None:
+            # `is False`, not `not`: an unknown curve is not a light one, and
+            # its "V_oc" may be a dark curve's noise crossing. This number is
+            # what the card advertises as the run's result.
+            if ev.dark is False and ev.metrics.voc is not None:
                 self.last_voc = float(ev.metrics.voc)
         elif isinstance(ev, JVFinished):
             n = len(ev.curves)
