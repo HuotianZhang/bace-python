@@ -899,7 +899,7 @@ def test_the_worker_holds_its_bus_lock_for_the_whole_of_a_job(tmp_path):
     mid-acquisition and no test would notice."""
     with make_session(tmp_path) as s:
         assert not s.worker.bus.locked()
-        run_id, _ = s.submit(tree_for_module("jv_dark", {"step_v": 0.2}))
+        run_id, _ = s.submit(tree_for_module("jv", {"step_v": 0.2}))
         wait_until(lambda: s.worker.bus.locked() or
                    s.run_record(run_id)["state"] == "done")
         assert s.wait_run(run_id, TIMEOUT)
