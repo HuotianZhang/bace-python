@@ -561,9 +561,10 @@ def _light_specs() -> list[ParamSpec]:
                   minimum=0.0, maximum=100.0,
                   doc="The 33220A's light/dark split within one period, so at 500 Hz "
                       "and 50 % the device gets 1 ms of light then 1 ms of dark "
-                      "(`pulse` only). The on-phase is the part that matters: the "
-                      "device has to reach its light V_oc within it, which is why "
-                      "`LedDrive` refuses an on-phase under 5 tau."),
+                      "(`pulse` only). The on-phase is the part that matters -- the "
+                      "device has to reach its light V_oc within it -- and nothing "
+                      "checks it for you, because that depends on the device's own "
+                      "settling time and no parameter carries it."),
         ParamSpec("settle_s", "float", 0.0, unit="s", group="timing", minimum=0.0,
                   doc="Wait after the light is set, before the node finishes -- so "
                       "the step that follows starts under a settled lamp. 0 does not "
