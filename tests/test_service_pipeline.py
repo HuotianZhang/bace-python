@@ -106,8 +106,8 @@ def _bace_specs() -> list[ParamSpec]:
 
 
 SPECS = {
-    "jv_dark": ModuleSpec("jv_dark", "jv_dark", "measurement", "built", "dc", False,
-                          None, (), ("jv", "sourcemeter")),
+    "jv": ModuleSpec("jv", "jv", "measurement", "built", "dc", False,
+                     None, (), ("jv", "sourcemeter")),
     "jv_bace": ModuleSpec("jv_bace", "jv_bace", "measurement", "built", "dc", True,
                           None, ("led_start_v", "led_stop_v", "led_step_v", "led_low_v"),
                           ("jv", "led", "sourcemeter")),
@@ -124,7 +124,7 @@ SPECS = {
 
 
 def _specs_for(name: str) -> list[ParamSpec]:
-    if name == "jv_dark":
+    if name == "jv":
         return _jv_specs(light=False)
     if name == "jv_bace":
         return _jv_specs(light=True)
@@ -587,9 +587,9 @@ def test_a_compliance_above_the_bench_ceiling_is_crit():
     [bad] = v.by_code("smu.ceiling")
     assert bad.level == "crit" and "0.1 A" in bad.text and "0.05 A" in bad.text
     assert bad.data["max_current_compliance_a"] == RIG.max_current_compliance_a
-    v = validate(module("jv_dark", smu_voltage_compliance_v=9.0))
+    v = validate(module("jv", smu_voltage_compliance_v=9.0))
     assert levels(v, "smu.ceiling") == ["crit"]
-    v = validate(module("jv_dark"))
+    v = validate(module("jv"))
     assert levels(v, "smu.ceiling") == ["ok"]
 
 
@@ -747,7 +747,7 @@ def test_the_chain_read_back_becomes_warnings_with_named_fixes():
     assert i.level == "info" and "leaves" in i.text
 
     # a J-V-only tree does not use the Sync edge
-    v = validate(module("jv_dark"), bench=bench_snapshot(led_pol="NORM"))
+    v = validate(module("jv"), bench=bench_snapshot(led_pol="NORM"))
     assert levels(v, "chain.led-polarity") == ["info"]
     assert levels(v, "chain.bias-arm") == ["ok"]
 
@@ -954,24 +954,24 @@ def test_an_unreadable_33220a_polarity_is_a_warn_for_a_transient_and_info_for_a_
     assert w.level == "warn" and w.data["fix"] == "set-33220a-pol-inv"
     assert "unproven" in w.text and w.data["value"] == "?"
     assert v.valid
-    v = validate(module("jv_dark"), bench=bench_snapshot(led_pol="?"))
+    v = validate(module("jv"), bench=bench_snapshot(led_pol="?"))
     assert levels(v, "chain.led-polarity") == ["info"]
 
 
 def test_a_module_whose_instrument_is_unplugged_is_refused_at_validate():
     """The real catalogue knows what each module cannot run without; with a
-    read-back that lists the Keithley as unavailable a jv_dark is refused
+    read-back that lists the Keithley as unavailable a jv is refused
     with a check, not accepted, queued and failed at preflight."""
     from bace.service.modules import Catalogue
 
     cat = Catalogue(rig_config=RIG, run_toml={}, history=None)
     snap = bench_snapshot()
     snap["unavailable"] = {"smu": "GPIB0::24::INSTR: VisaIOError: VI_ERROR_RSRC_NFOUND"}
-    v = validate(module("jv_dark"), catalogue=cat, bench=snap)
+    v = validate(module("jv"), catalogue=cat, bench=snap)
     assert not v.valid
     [c] = v.by_code("bench.instrument")
     assert c.level == "invalid" and c.data["missing"] == ["smu"]
-    assert "VI_ERROR_RSRC_NFOUND" in c.text and c.node_path == "jv_dark"
+    assert "VI_ERROR_RSRC_NFOUND" in c.text and c.node_path == "jv"
 
     # bace inside the canonical tree: the same read-back says the scope is gone
     snap["unavailable"] = {"scope": "TCPIP0::PwM-DSO9054H.local::inst0::INSTR: timeout"}
@@ -982,8 +982,8 @@ def test_a_module_whose_instrument_is_unplugged_is_refused_at_validate():
 
     # nothing missing: ok, and a bench not read yet is information
     snap["unavailable"] = {}
-    assert levels(validate(module("jv_dark"), catalogue=cat, bench=snap), "bench.instrument") == ["ok"]
-    assert levels(validate(module("jv_dark"), catalogue=cat, bench=None), "bench.instrument") == ["info"]
+    assert levels(validate(module("jv"), catalogue=cat, bench=snap), "bench.instrument") == ["ok"]
+    assert levels(validate(module("jv"), catalogue=cat, bench=None), "bench.instrument") == ["info"]
     # the power meter is advisory for a bace (intensity NaN) and required by `power`
     snap["unavailable"] = {"power": "the 1918-C console is not answering"}
     assert levels(validate(module("bace", measure_dc=True), catalogue=cat, bench=snap),

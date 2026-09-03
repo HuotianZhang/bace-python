@@ -7,7 +7,7 @@ Node at all, so the JavaScript tests **skip** there rather than fail, and what
 is left is what Python can assert on its own — that the fixtures exist and are
 the shapes `docs/ui-plan.md` M0 named.
 
-The live proofs (a `jv_dark` reaching `done`, and a client dropped at 1008
+The live proofs (a `jv` reaching `done`, and a client dropped at 1008
 coming back without missing a numbered frame) need a running service and are
 not in this file. They are `ui/tests/live.test.mjs`, run against one:
 

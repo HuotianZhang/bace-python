@@ -293,6 +293,56 @@ def power_reading(meter, *, samples: int = 1) -> E.PowerReading:
                           wavelength_nm=wavelength, source=str(source))
 
 
+def apply_led(led, mode: str, *, level: float | None = None,
+              low: float | None = None, frequency_hz: float | None = None,
+              duty_percent: float | None = None,
+              threshold_v: float | None = None) -> dict:
+    """Put the LED generator into `dc`, `pulse` or `off`, and report what it
+    left. The read-back the caller does afterwards is the authority; this is
+    what was asked for.
+
+    Shared by the `set-led-*` / `led-off` bench actions and the `light`
+    module, so a click on the bench card and a `light` node in a pipeline
+    cannot drive the LED differently. `LedDrive` is what enforces the level
+    rules (the low level below the threshold, above all), and it raises
+    `IlluminationError`, which the callers turn into their own refusal.
+    """
+    mode = str(mode).lower()
+    if mode == "off":
+        led.off()
+        return {"mode": "OFF", "output": False}
+    if mode == "dc":
+        if level is None:
+            raise ValueError("dc needs a level")
+        led.set_dc(float(level))
+        led.enable_output(True)
+        return {"mode": "DC", "level_v": float(level), "output": True}
+    if mode == "pulse":
+        if level is None or low is None or frequency_hz is None or duty_percent is None:
+            raise ValueError("pulse needs level, low, frequency_hz and duty_percent")
+        drive = LedDrive(level=float(level), low_level=float(low),
+                         frequency_hz=float(frequency_hz),
+                         duty_percent=float(duty_percent),
+                         threshold_v=threshold_v)
+        s = drive.pulse_settings()
+        led.set_pulse(s["high"], s["low"], frequency_hz=s["frequency"],
+                      duty_percent=s["duty"])
+        led.enable_output(True)
+        return {"mode": "PULSE", "high_v": s["high"], "low_v": s["low"],
+                "frequency_hz": s["frequency"], "duty_percent": s["duty"],
+                "output": True}
+    raise ValueError(f"unknown LED mode {mode!r}: dc, pulse or off")
+
+
+def apply_shutter(shutter, open_it: bool) -> dict:
+    """Open or shut, and report the position read back off the driver."""
+    if open_it:
+        shutter.unblock()
+    else:
+        shutter.shut()
+    return {"open": bool(shutter.is_open)}
+
+
 def temperature_source(controller: Any) -> str:
     """`console` for the HTTP driver, `simulated` for the stand-in."""
     return "console" if getattr(controller, "base_url", None) else "simulated"
@@ -1031,17 +1081,13 @@ class Bench:
                              "duty_percent: from the bace parameters in force, or "
                              "in the body")
         try:
-            drive = LedDrive(level=float(level), low_level=float(low),
-                             frequency_hz=float(frequency), duty_percent=float(duty),
-                             threshold_v=self.rig_config.led_threshold_v)
+            out = apply_led(led, "pulse", level=level, low=low,
+                            frequency_hz=frequency, duty_percent=duty,
+                            threshold_v=self.rig_config.led_threshold_v)
         except IlluminationError as exc:
             raise BenchActionRefused("warn", str(exc)) from None
-        s = drive.pulse_settings()
-        led.set_pulse(s["high"], s["low"], frequency_hz=s["frequency"],
-                      duty_percent=s["duty"])
-        led.enable_output(True)
-        return {"mode": "PULSE", "high_v": s["high"], "low_v": s["low"],
-                "frequency_hz": s["frequency"], "duty_percent": s["duty"],
+        return {"mode": out["mode"], "high_v": out["high_v"], "low_v": out["low_v"],
+                "frequency_hz": out["frequency_hz"], "duty_percent": out["duty_percent"],
                 "output": True}
 
     def _act_set_led_dc(self, args: dict, params: dict) -> dict:
@@ -1051,9 +1097,7 @@ class Bench:
         if level is None:
             raise ValueError("set-led-dc needs a level: from the bace parameters in "
                              "force, or in the body")
-        led.set_dc(float(level))
-        led.enable_output(True)
-        return {"mode": "DC", "level_v": float(level), "output": True}
+        return apply_led(led, "dc", level=level)
 
     def _act_led_off(self, args: dict, led: dict) -> dict:
         self._only(args)
@@ -1072,15 +1116,11 @@ class Bench:
 
     def _act_shutter_open(self, args: dict, led: dict) -> dict:
         self._only(args)
-        shutter = self._need("shutter")
-        shutter.unblock()
-        return {"open": bool(shutter.is_open)}
+        return apply_shutter(self._need("shutter"), True)
 
     def _act_shutter_shut(self, args: dict, led: dict) -> dict:
         self._only(args)
-        shutter = self._need("shutter")
-        shutter.shut()
-        return {"open": bool(shutter.is_open)}
+        return apply_shutter(self._need("shutter"), False)
 
     def _move_relay(self, enter: str) -> dict:
         """Enter the router's context manager and leave it at once, so the

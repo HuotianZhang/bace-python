@@ -12,7 +12,7 @@ import pytest
 from bace.drivers.simulated import make_bench
 from bace.experiment import events as E
 from bace.experiment.jv import (JVConfig, JVCurveDone, JVFinished, JVStarted,
-                                metrics, run_jv)
+                                illumination_state, metrics, run_jv)
 from bace.experiment.rig import Rig, RigConfig
 from bace.storage.jv import JVRecorder, record
 
@@ -404,7 +404,7 @@ def test_the_file_says_which_curves_were_taken_with_the_shutter_open(tmp_path):
     list(record(run_jv(rig, JVConfig(dark=True, led_levels_v=(1.020,)),
                        sleep=NO_SLEEP), rec))
     with h5py.File([p for p in rec.written if p.endswith(".h5")][0], "r") as f:
-        assert f.attrs["schema"] == "bace-jv/2"
+        assert f.attrs["schema"] == "bace-jv/3"
         assert f["config/resolved"].attrs["led_output_polarity"] == "INV"
         assert f["config/resolved"].attrs["shutter"] == "open"   # the last one
         by_name = {n: f["curves"][n].attrs["shutter"] for n in f["curves"]}
@@ -423,3 +423,108 @@ def test_hdf5_keeps_dark_and_light_together(tmp_path):
         assert len(names) == 2
         assert any("dark" in n for n in names)
         assert f["curves"][names[0]].attrs["dark"]
+
+
+# -- light_control="leave": the light is not this run's -------------------
+def _leave(**kw):
+    # The default sweep, so the lit curve actually reaches V_oc: the point of
+    # several of these is that an unknown curve gets the same metrics a lit
+    # one does, and a range that crosses nothing would prove it by accident.
+    return JVConfig(light_control="leave", **kw)
+
+
+def test_leave_touches_neither_shutter_nor_led_going_in_or_coming_out():
+    """The whole of the `jv` module is this test. A run that sets no light has
+    no business unwinding one, so the shutter is where it was found on both
+    sides of the sweep -- including the `finally`, which under `manage` shuts
+    it whatever happened."""
+    sim, rig = build()
+    rig.shutter.unblock()
+    rig.led.set_dc(1.02)
+    rig.led.enable_output(True)
+    before = (rig.shutter.is_open, rig.led.mode, rig.led.output_enabled)
+
+    events = run(rig, _leave())
+    assert (rig.shutter.is_open, rig.led.mode, rig.led.output_enabled) == before
+    assert rig.shutter.is_open, "the shutter was open before the run and stays open"
+
+    # And the same on the abort path, which is the one that goes through
+    # `finally` with the run unfinished.
+    gen = run_jv(rig, _leave(), sleep=NO_SLEEP)
+    next(gen)
+    gen.close()
+    assert rig.shutter.is_open
+
+    curves = [e for e in events if isinstance(e, JVCurveDone)]
+    assert len(curves) == 1, "one curve: there is no dark-plus-levels plan"
+    assert curves[0].dark is False and curves[0].led_level_v == 1.02
+    assert curves[0].label == "as found 1.02 V"
+    assert curves[0].metrics.voc is not None, "a lit curve reports its V_oc"
+
+
+def test_leave_reads_the_dark_it_finds_rather_than_making_one():
+    sim, rig = build()
+    rig.led.set_dc(1.02)
+    rig.led.enable_output(True)
+    rig.shutter.shut()
+    curves = [e for e in run(rig, _leave()) if isinstance(e, JVCurveDone)]
+    assert curves[0].dark is True and curves[0].label == "as found dark"
+    assert curves[0].illumination["shutter"] == "shut"
+    assert curves[0].metrics.voc is None, "a curve read as dark gets the dark metrics"
+
+
+def test_a_bench_that_cannot_say_gets_unknown_and_a_warning_never_dark():
+    """`None` is not `False`. A rig with no shutter cannot know whether light
+    reaches the sample however confident the generator is, and a curve
+    labelled dark there would be the failure `ui-rules` §9 is about."""
+    sim = make_bench(seed=5)
+    rig = Rig(bias=sim.bias, scope=sim.scope, shutter=None,
+              config=RigConfig(), smu=sim.smu, led=sim.led)
+    events = run(rig, _leave())
+    curve = [e for e in events if isinstance(e, JVCurveDone)][0]
+    assert curve.dark is None and curve.label == "as found unknown"
+    assert curve.illumination["lit"] is None
+    warnings = [e for e in events if isinstance(e, E.Notice) and e.level == "warning"]
+    assert any("unknown" in w.text and "not as dark" in w.text for w in warnings)
+    # Unknown gets the full metric set: V_oc and FF are interpolations of the
+    # curve either way, and withholding them would hide the operator's own
+    # evidence that the light was on.
+    assert curve.metrics.voc is not None
+
+
+def test_leave_refuses_led_levels_because_a_level_is_a_request_to_set_the_light():
+    with pytest.raises(ValueError, match="cannot take led_levels_v"):
+        JVConfig(light_control="leave", led_levels_v=(1.02,))
+    with pytest.raises(ValueError, match="must be 'manage' or 'leave'"):
+        JVConfig(light_control="off")
+
+
+def test_illumination_state_needs_all_three_to_say_lit():
+    sim, rig = build()
+    rig.led.set_dc(1.02)
+    rig.led.enable_output(True)
+    rig.shutter.unblock()
+    assert illumination_state(rig)["lit"] is True
+    rig.shutter.shut()
+    assert illumination_state(rig)["lit"] is False, "shutter shut is dark, LED or not"
+    rig.shutter.unblock()
+    rig.led.off()
+    assert illumination_state(rig)["lit"] is False, "LED off is dark, shutter or not"
+
+
+def test_an_unknown_curve_has_no_dark_attribute_in_the_file(tmp_path):
+    """`bace-jv/3`: absent, not False. A reader that asks for `dark` on an
+    unknown curve gets a KeyError, which is loud; a False would have been a
+    dark label on a curve nobody read."""
+    import h5py
+    sim = make_bench(seed=6)
+    rig = Rig(bias=sim.bias, scope=sim.scope, shutter=None,
+              config=RigConfig(), smu=sim.smu, led=sim.led)
+    rec = JVRecorder(str(tmp_path), "20260903_120000", metadata={},
+                     rig_config=rig.config.as_dict())
+    list(record(run_jv(rig, _leave(), sleep=NO_SLEEP), rec))
+    with h5py.File([p for p in rec.written if p.endswith(".h5")][0], "r") as f:
+        assert f.attrs["schema"] == "bace-jv/3"
+        group = f["curves"][sorted(f["curves"])[0]]
+        assert group.attrs["illumination"] == "unknown"
+        assert "dark" not in group.attrs
