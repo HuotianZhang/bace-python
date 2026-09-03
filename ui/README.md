@@ -32,7 +32,9 @@ repo root for the offline bench at `/ui/replay.html`, which needs
 | `lib/scale.js` | the scale and axis foundation, and the only thing in `ui/` written from nothing: linear and log scales, nice ticks, and the min/max thinning that keeps a transient's peak when 4000 samples go into 450 pixels |
 | `lib/charts/frame.js` | stacked panels over one x axis (or one each), their gridlines, captions, shading and crosshair. Every chart returns a *model* and this draws any of them |
 | `lib/charts/jv.js`, `transient.js`, `timing.js` | the three M3 components, as pure functions of the data — the same split the rail has |
-| `lib/results.js` | what goes in a card's result slot, and the key it is rebuilt on: the chart moves with every shot, the form does not |
+| `lib/charts/loops.js` | the M4 component: Q per loop, or Q(axis), with the switch between them in the caption — `ui-rules` §4's zero-width axis is a repeat, and the chart says so rather than drawing a curve through it |
+| `lib/results.js` | what goes in a card's result slot, and the key it is rebuilt on: the chart moves with every shot, the form does not. Since M4 the newest shot's own line comes first — Q, mean and σ at its point, the peaks, the digitiser's verdict and which `trigger_sweep` was in force |
+| `lib/monitor.js` | the run monitor (M4): `monitorModel(state)` is a pure function of the store — the loops at their three time scales, the shot, its segment from `StepPhase`, the ETA counting down, which of stop / abort / cancel apply, and the prompt a `NeedsOperator` opens — with the DOM beside it, under the rail on every tab |
 | `lib/replay.js`, `replay.html` | the offline bench: fixtures fed into the same store the socket feeds |
 | `views/` | bench is M2's six generated cards with M3's charts in three of them; pipeline · results · rig are stubs, and each says which milestone fills it |
 | `fonts/` | IBM Plex Sans and Mono, Archivo — 24 woff2, 387 KB, lifted out of the Round 3 mockup by `tools/extract_ui_fonts.py`. Nothing is fetched from a network at runtime |
@@ -77,6 +79,8 @@ shape `GET /runs/{id}/data` answers, because a browser cannot open HDF5.
 | `bench_running_sim.json` | `GET /bench` taken **mid-scan**: the four instruments the run implies, every one `how: "inferred"`. Nothing at rest carries a single one |
 | `stream_bace_sim.jsonl`, `stream_jv_sim.jsonl` | the wire: traces decimated with `stride`/`n_full`, and the `StepPhase` frames that are live-only |
 | `stream_pipeline_sim.jsonl` | node identity: two `bace` nodes under one `run_id`, each numbering its own shots from one, and the loop's `Progress` beside the leaf's |
+| `stream_tree_sim.jsonl` | the M4 tree, 2 T x 2 levels x a three-point scan of two loops: both `NeedsOperator`s and the recorder's answers to them, the executor's `Progress` at three scales, and a `TemperatureRead` typed by a person |
+| `stream_stopped_sim.jsonl` | a 20-loop scan stopped `after_shot` at loop 13 — 60 requested, 39 kept: the one `RunAborted`, `stopping`, `stopped`, and a node that ended `stopped` in the set |
 
 Everything with `_sim` in its name came off `--sim`, and says so in its name on
 purpose: a simulated J-V is a plausible-looking curve, and must never be
@@ -159,9 +163,83 @@ cards, the `edited` layer through `PUT`, and Start disabled by `invalid` *and*
 by `crit`.
 
 **M3 is built**: the scale and axis foundation, then the J–V, the transient
-and the timing diagram, each in the card that owns it. **M4 is next** — the
-live monitor, and Q per loop / Q(axis) with the zero-width-axis switch drawn
-rather than silent.
+and the timing diagram, each in the card that owns it.
+
+**M4 is built**: the run monitor under the rail, the newest shot's verdict
+beside its trace, and Q per loop / Q(axis). **M5 is next** — the pipeline
+tab: the tree editor, the Dry run against `POST /pipelines/validate`, and the
+schedule as "what it will do, in order".
+
+### What a run looks like while it runs
+
+`lib/monitor.js` is shell furniture like the rail: it appears under it on every
+tab for as long as a run holds the worker and is gone when the bench is parked.
+`docs/ui-rules.md` §5 is the whole shape of it — three counters at three time
+scales, never one number:
+
+* the loops, outermost first, each from the executor's own `Progress` for that
+  loop node (`T 250 K · 1 of 2 · LED 1.020 V · 2 of 2`), and a temperature
+  that is settling reads *waiting for the operator*, never as a step that runs;
+* the shots, from the leaf's own count (`shot 4 of 630 · loop 2 · point 1 of 21`);
+* the segment, from `StepPhase` (`5 · acquire light`) — live-only, so it is
+  shown only while the stream carries it;
+* the ETA, the executor's re-derived one, counting down from the newest
+  frame's clock rather than repeating the number the frame carried.
+
+And the three verbs: `after_shot` (the honest one: the shot in flight completes
+and is kept), `abort` (armed first, like Park — a discarded shot is a shot of
+the sample's life), and `cancel` for a run still queued. A `NeedsOperator`
+opens the prompt: what to set the cryostat to, which temperature of how many,
+the reading polled while the person decides when a controller is attached, a
+field for the `temperature_k` it actually reached and a note, and what a resume
+with nothing typed will bind. The prompt is keyed on *which* pause it is, so a
+reading arriving mid-keystroke does not take the caret; the buttons are keyed
+on the run's state, so a Stop pressed between two shots lands on a button that
+still exists.
+
+The evidence stays in the card that produced it. The `bace` card's panel is,
+during and after a run: the newest shot — Q, the running mean and σ at its
+point, the peak of each trace, the digitiser's verdict, and `trigger AUTO` said
+out loud when a charge near zero could be a loose sync cable (§9) — then the
+transient, then Q per loop or Q(axis), then the timing diagram, which describes
+the *next* run.
+
+The loop chart (`lib/charts/loops.js`) is one component with the switch inside
+it, and the switch is in the caption on every render: a zero-width axis plots
+Q per loop with the running mean and its ±σ band, and says *repeats, not a
+curve*; a swept axis plots Q(axis), the mean over the loops so far with an
+error bar where σ exists and a hollow square where it does not — one loop
+leaves `q_std = 0`, and a zero-length error bar drawn as a dot is a lie. A
+truncated run reads *kept of requested* and, on a repeat, draws the loops it
+never ran as the hatched space they would have filled. It reads only the
+scalars of a shot, which is what lets it survive a reconnect that replayed
+the shots without their arrays.
+
+### What the tree cost the console
+
+Measured on the 2 T x 2 level tree with 30 loops of 21 points per leaf — 2520
+shots in 8.3 s under `--sim --fast`, driven from headless Chromium through the
+console's own prompt (`ui/tests/live.test.mjs` holds the same proof down
+against the service without a browser):
+
+| | M4 |
+|---|---|
+| pauses answered from the monitor's prompt | 2 of 2 |
+| client dropped at 1008 · reconnected | 2 · 2 |
+| shots replayed without their arrays | 2707 |
+| shots folded | 2520 / 2520, every leaf's 21 points with a σ |
+| the monitor's counters rebuilt · its buttons rebuilt | 3997 · 16 |
+| card rebuilds | 38, at the run's edges and the read-back rows that moved |
+| JS heap at the end | 13.4 MB |
+| a caret held in a `bace` field | kept for the whole run; lost only to the one rebuild the run's end causes |
+
+Three findings, written up in `docs/ui-plan.md` M4: the segment indicator goes
+dark under `--fast` because the service stops queueing `StepPhase` for a
+subscriber fifty frames behind (`session.EPHEMERAL_BACKLOG`) — proven instead
+on `--sim` at the rig's cadence, where it walks the segments shot after shot; a
+replayed `StepStarted` from behind must not clear the phase of the shot in
+flight; and the ETA has to count down between the boundaries the executor
+re-derives it at.
 
 ### What the charts are for, and the three places they part from the artboards
 

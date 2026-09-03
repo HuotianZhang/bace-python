@@ -19,6 +19,8 @@ import { chart } from './charts/frame.js';
 import { transientModel } from './charts/transient.js';
 import { jvModel } from './charts/jv.js';
 import { timingModel } from './charts/timing.js';
+import { loopsModel, AXIS_UNITS } from './charts/loops.js';
+import * as fmt from './format.js';
 
 /** Which cards have a result panel at all. */
 export const RESULT_CARDS = new Set(['bace', 'jv', 'jv_bace']);
@@ -91,6 +93,13 @@ export function resultKeys(name, entry, found, bench) {
     data.push(record.run_id, record.state || '', node.node_path);
     const shot = node.lastShot;
     if (shot) data.push(`${shot.node_path}:${shot.loop}:${shot.index}:${shot.ts}:${shot.tracesGone ? 'gone' : 'traces'}`);
+    // M4: the loop chart moves with every shot *and* with what the run knows
+    // about itself — the axis arriving late from `GET /runs/{id}/data`, a
+    // `LoopDone` recomputing every point's σ, the node ending `stopped` with
+    // loops never acquired.
+    data.push(`shots:${node.shots ? node.shots.length : 0}`, `loops:${node.loops ? node.loops.length : 0}`,
+      `axis:${node.values ? node.values.length : 0}`, `kept:${node.kept ?? ''}/${node.requested ?? ''}`,
+      `outcome:${node.outcome || ''}`, `aborted:${record.aborted ? record.aborted.reason : ''}`);
     if (node.curves && node.curves.length) {
       const last = node.curves[node.curves.length - 1];
       data.push(`curves:${node.curves.length}:${last.label}:${last.ts}`);
@@ -187,27 +196,83 @@ export function resultPanel(name, { entry, found, bench }) {
   return [];
 }
 
+/**
+ * The `bace` card's panel. Before a run it is the shot the form describes;
+ * once there is a run it is the run first — the newest shot and its verdict,
+ * the transient, Q per loop or Q(axis) — and the diagram after, because a
+ * form that is being edited during a scan is the *next* run, and the one
+ * going is what the operator is watching (`ui-rules` §11: the running card
+ * is the monitor).
+ */
 function baceResult(entry, found, bench) {
   const values = valuesOf(entry);
   const rig = (bench && bench.rig && bench.rig.values) || {};
   const chain = (bench && bench.chain) || {};
   const timing = timingModel(values, { rig, chain });
-  const out = [chart(timing)];
-  if (timing.alerts.length) out.push(alertList(timing.alerts));
+  const diagram = [chart(timing)];
+  if (timing.alerts.length) diagram.push(alertList(timing.alerts));
 
   const shot = found && found.node.lastShot;
-  if (shot) {
-    out.push(chart(transientModel(shot, {
+  if (!shot) return [...diagram, h('p.absent', 'no shot yet — the transient appears with the first one')];
+
+  const config = (found.record.config && found.record.config.run) || {};
+  return [
+    shotBlock(shot, found, config),
+    chart(transientModel(shot, {
       t0_int_s: values.t0_int_s,
       t0_int_reference: values.t0_int_reference,
       pulse_delay_s: pulseDelayS(shot, values, rig),
       offset_corrected: values.offset_correct,
       dark_reference: values.dark_reference,
-    })));
-  } else {
-    out.push(h('p.absent', 'no shot yet — the transient appears with the first one'));
+    })),
+    chart(loopsModel(found)),
+    ...diagram,
+  ];
+}
+
+/**
+ * The newest shot, as R3·2 lists it beside the trace: Q, the running mean
+ * and σ at its point, the peak of each trace, and the digitiser's verdict —
+ * with `trigger_sweep` beside it, because *"AUTO plus a charge near zero is
+ * worth saying out loud"* (`ui-rules` §9): AUTO sweeps anyway when no
+ * trigger arrives, and a loose sync cable then produces a plausible
+ * near-zero Q from untriggered noise.
+ */
+export function shotBlock(shot, found, config) {
+  const v = shot.verdict || null;
+  const axis = (found && found.node && found.node.axis) || null;
+  const unit = axis ? AXIS_UNITS[axis.name] || '' : '';
+  const where = axis && shot.axis_value !== undefined && shot.axis_value !== null
+    ? ` · ${axis.name} ${fmt.sig(shot.axis_value, 4)}${unit ? ' ' + unit : ''}`
+    : '';
+  const level = v && v.level === 'warn' ? 'alert' : v ? 'ok' : '';
+  const sigma = fmt.sigmaQ(shot.q_std);
+  const nearZero = v && Number.isFinite(shot.q) && Number.isFinite(v.peak_light_a)
+    && Math.abs(shot.q) < 1e-13;
+  const rows = [
+    ['Q · shot ' + shot.index, fmt.charge(shot.q)],
+    [`running mean · point ${shot.step}`, fmt.charge(shot.q_mean)],
+    [`σ · point ${shot.step}`, sigma ? `${sigma} C` : 'not recorded'],
+  ];
+  if (v) {
+    rows.push(['peak · light', fmt.amps(v.peak_light_a)]);
+    rows.push(['peak · dark', fmt.amps(v.peak_dark_a)]);
   }
-  return out;
+  const trigger = config.trigger_sweep ? String(config.trigger_sweep).toUpperCase() : null;
+  return h('div.shot', { class: level },
+    h('div.shot-head',
+      h('span.shot-title', { text: `shot ${shot.index} · loop ${shot.loop}${where}` }),
+      shot.clipped ? h('span.tag.bad', { text: 'clipped' }) : null,
+      shot.tracesGone ? h('span.tag', { text: 'no traces' }) : null),
+    h('table.rows.shot-rows', rows.map(([k, val]) => h('tr', h('td.l', { text: k }), h('td.num', { text: val })))),
+    v ? h('div', { class: 'shot-verdict ' + level, text: `digitiser · ${v.text}` }) : null,
+    trigger ? h('div', {
+      class: 'shot-trigger' + (trigger === 'AUTO' ? ' auto' : ''),
+      title: trigger === 'AUTO'
+        ? 'AUTO sweeps anyway when no trigger arrives: a loose sync cable gives untriggered noise whose dark subtraction cancels to almost nothing'
+        : 'TRIG waits for the edge, and a missing trigger becomes a timeout with a message',
+      text: `trigger ${trigger}` + (trigger === 'AUTO' && nearZero ? ' · Q near zero under AUTO — check the sync before believing it' : ''),
+    }) : null);
 }
 
 /**

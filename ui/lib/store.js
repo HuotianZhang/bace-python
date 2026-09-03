@@ -421,7 +421,16 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
 
       case 'StepStarted':
         record.step = data;
-        record.phase = null;
+        // The phase is cleared only by a shot at or after the one it
+        // describes. `StepPhase` is live-only and the numbered frames are
+        // not: a client catching up after a 1008 drop folds the ring's
+        // `StepStarted` for shot 300 while the instrument is inside shot 560
+        // — and clearing the phase on every replayed start starved the
+        // indicator for the whole of a `--fast` scan, measured in a browser.
+        // The phase carries its own `index`, so it knows which shot it is.
+        if (!record.phase || typeof record.phase.index !== 'number' || data.index >= record.phase.index) {
+          record.phase = null;
+        }
         break;
 
       case 'StepPhase':

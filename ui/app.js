@@ -11,6 +11,7 @@ import { createStream } from './lib/stream.js';
 import { h, fill, keyed } from './lib/dom.js';
 import * as fmt from './lib/format.js';
 import { renderRail, renderChainStrip, PREREQUISITE } from './lib/rail.js';
+import { renderMonitor } from './lib/monitor.js';
 import { createBenchWatch } from './lib/watch.js';
 
 import bench from './views/bench.js';
@@ -26,7 +27,7 @@ const store = createStore({ schedule: (fn) => requestAnimationFrame(fn) });
 
 const stream = createStream({
   onHello: (frame) => store.applyHello(frame),
-  onFrame: (frame) => { store.applyFrame(frame); afterFrame(frame); },
+  onFrame: (frame, meta) => { store.applyFrame(frame); afterFrame(frame, meta || {}); },
   onStatus: (status) => store.applyConnection(status),
   onSessionChange: ({ from, to }) => {
     // The service restarted. Everything the old session numbered is gone;
@@ -45,13 +46,14 @@ const stream = createStream({
 const tabsEl = h('nav.tabs');
 const chipsEl = h('span.chips');
 const railEl = h('header.rail');
+const monitorEl = h('section.monitor', { hidden: true });
 const viewEl = h('main.view');
 const stripEl = h('div.strip');
 const barEl = h('footer.stream-bar');
 
 document.getElementById('app').replaceChildren(
   h('div.bar', h('span.wordmark', 'bace'), tabsEl, h('span.spacer'), chipsEl),
-  railEl, viewEl, stripEl, barEl);
+  railEl, monitorEl, viewEl, stripEl, barEl);
 
 let mounted = null;
 let mountedRoute = null;
@@ -203,6 +205,67 @@ async function park() {
 }
 
 /**
+ * The run monitor's three verbs — `docs/ui-plan.md` M4. None is taken by the
+ * console on its own; a refusal (409: already ended, or not paused) reaches
+ * the operator as the service's sentence, on the monitor itself.
+ */
+let abortArmed = false;
+let abortArmedTimer = null;
+let monitorStatus = null;
+
+function drawMonitor(state) {
+  renderMonitor(monitorEl, state, { onStop: stopRun, onAbort: abortRun, onResume: resumeRun, abortArmed, status: monitorStatus });
+}
+
+function armAbort(on) {
+  abortArmed = on;
+  clearTimeout(abortArmedTimer);
+  abortArmedTimer = on ? setTimeout(() => { abortArmed = false; drawMonitor(store.getState()); }, 6000) : null;
+  drawMonitor(store.getState());
+}
+
+async function stopRun(runId, mode) {
+  monitorStatus = { level: '', text: `${mode} …` };
+  drawMonitor(store.getState());
+  try {
+    const out = await api.stopRun(runId, mode);
+    // The stream says `stopping` the moment the stop was accepted; the
+    // status here is only the answer, and it clears with the run.
+    monitorStatus = { level: 'ok', text: out.state === 'cancelled' ? 'cancelled' : `${out.mode} accepted` };
+  } catch (error) {
+    monitorStatus = { level: 'bad', text: error.text || error.message };
+  }
+  drawMonitor(store.getState());
+}
+
+/**
+ * Abort discards the shot being acquired and starts nothing after it, which
+ * on a rig is a shot of the sample's life thrown away — so, like Park on a
+ * busy bench, it arms first and performs on the second click.
+ */
+async function abortRun(runId) {
+  if (!abortArmed) return armAbort(true);
+  armAbort(false);
+  await stopRun(runId, 'abort');
+}
+
+async function resumeRun(runId, detail) {
+  monitorStatus = { level: '', text: 'resume …' };
+  drawMonitor(store.getState());
+  const body = {};
+  if (detail.temperature_k !== null && detail.temperature_k !== undefined) body.temperature_k = detail.temperature_k;
+  if (detail.note) body.note = detail.note;
+  try {
+    await api.resumeRun(runId, body);
+    monitorStatus = null;
+  } catch (error) {
+    // 409: not paused — the pause was answered already, or ended with the run.
+    monitorStatus = { level: 'bad', text: error.text || error.message };
+  }
+  drawMonitor(store.getState());
+}
+
+/**
  * Fill in a run the stream could not rebuild whole.
  *
  * Two cases, one cause: the ring is 5000 envelopes and a long scan is more
@@ -239,7 +302,20 @@ const watch = createBenchWatch({
   onModules: (payload) => store.applyModules(payload),
 });
 
-function afterFrame(frame) {
+function afterFrame(frame, { replay = false } = {}) {
+  // A run that ends badly says so where the operator is looking. The monitor
+  // is gone the moment the bench is parked, a second later, so the sentence
+  // goes to the strip — at the foot of every view — like every other refusal.
+  if (frame.type === 'RunFailed' && !replay) {
+    notify(`${frame.run_id} failed · ${(frame.data && frame.data.error) || 'no reason given'}`, 'crit');
+  } else if (frame.type === 'RunAborted' && !replay) {
+    const d = frame.data || {};
+    notify(`${frame.run_id} ${d.reason === 'requested' ? 'stopped' : 'aborted'} · ${d.done ?? '?'} of ${d.total ?? '?'} shots`, 'warn');
+  }
+  if (frame.type === 'RunStateChanged' && frame.data && frame.data.state === 'parked') {
+    monitorStatus = null;
+    abortArmed = false;
+  }
   // A gap means the ring could not supply what we asked for: whatever is
   // running has a beginning we will never be sent.
   const { stats } = stream.state;
@@ -283,6 +359,7 @@ function renderBar(state) {
 store.subscribe((state) => {
   renderRail(railEl, state);
   renderChips(state);
+  drawMonitor(state);
   drawStrip(state);
   renderBar(state);
 });

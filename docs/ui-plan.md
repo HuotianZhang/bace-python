@@ -657,6 +657,85 @@ actually ran.
 finish, and a client dropped at 1008 during it comes back — via
 `decimated.replay` — without losing the loop curve.
 
+**Built 2026-09-03.** `lib/monitor.js` is the run monitor — a pure
+`monitorModel(state)` with the DOM beside it, the split the rail set — and
+`lib/charts/loops.js` is the fourth chart component, Q per loop or Q(axis)
+with the switch in its caption. The newest shot's own line — Q, the running
+mean and σ at its point, the peaks, the digitiser's verdict and which
+`trigger_sweep` was in force — is `shotBlock` in `lib/results.js`, at the top
+of the `bace` card's panel with the transient and the loop chart under it, and
+the timing diagram moved below the run: a form being edited during a scan is
+the *next* run, and the one going is what the operator is watching. Nothing in
+the service changed, as the table below predicted.
+
+Two recordings were added for it, because nothing in the set carried a pause,
+a loop's `Progress` at three scales, or a run that ended any way but `done`
+or `failed`: `stream_tree_sim.jsonl` is the 2 T × 2 level tree itself with
+both `NeedsOperator`s answered by the recorder, and `stream_stopped_sim.jsonl`
+a 20-loop scan stopped `after_shot` at loop 13 — 60 requested, 39 kept.
+`tools/record_ui_fixtures.py --only tree,stopped` records them.
+
+Two decisions depart from the artboards, and both are recorded here:
+
+* **The monitor is shell furniture, under the rail, not a header on the
+  running card.** R3·2 draws the counters, the segment and the two stop
+  buttons on the card, and §11 says *"the running card is the monitor"*. But
+  a pipeline's pause belongs to a loop node — `T=250K` — which has no card,
+  and a stop is about the bench, not about a view: at hour three of a
+  temperature sweep the prompt has to be answerable from whichever tab is
+  open, which is the same argument that put Park on the strip. So the
+  counters, the segment, the ETA, stop, abort and the operator's answer sit
+  in one strip on every tab; the *evidence* — the shot, its verdict, the
+  trace, the loop curve — stays in the card that produced it, which is the
+  half of §11 that was about reading rather than acting.
+* **The monitor's buttons are keyed apart from its counters.** Measured
+  first as one row: 4850 rebuilds in an eight-second `--fast` scan, and a
+  Stop pressed between two shots would have landed on a button that no
+  longer existed — the M2 finding, on the one control that must not miss.
+  Three keyed parts now: the counters move with every shot, the buttons only
+  with the run's state, and the prompt only with *which* pause it is, so a
+  `TemperatureRead` arriving mid-keystroke does not take the caret.
+
+**Measured**, on the 2 T × 2 level tree with 30 loops of 21 points per leaf —
+2520 shots in 8.3 s under `--sim --fast`, driven from a headless browser
+through the console's own prompt: both pauses answered from the monitor, the
+client dropped at 1008 twice and reconnected twice, 2707 shots replayed
+without their arrays, and the run `done` with 2520 of 2520. A caret placed in
+a `bace` field after the run started stayed there for the whole of it and
+left only with the one card rebuild the run's end causes. The heap ended at
+13.4 MB against M3's 11.0; the monitor's counters were rebuilt 3997 times,
+its buttons 16.
+
+**Three things the measurement found**, none of which the fixtures could:
+
+* **The segment indicator goes dark under `--fast`, by the service's own
+  policy.** A subscriber more than `EPHEMERAL_BACKLOG` (fifty) frames behind
+  is not queued another `StepPhase` — the frame says where the shot *is*,
+  and a client that far behind would read it after the shot — so on a scan
+  that outruns every socket the indicator shows the first few shots and then
+  nothing. It is not a console fault and it is not fixable in one: proven
+  instead on `--sim` without `--fast`, where a shot takes about a second as
+  it does on the rig, and the indicator walks `2 · light settle → 5 · dark
+  settle` shot after shot.
+* **A replayed `StepStarted` must not clear the phase of the shot in
+  flight.** After a drop the ring's numbered frames arrive behind the live
+  ephemeral ones: the store folded `StepStarted` for shot 300 while the
+  instrument was inside shot 560, and cleared the phase on every one. The
+  phase carries its own `index`; only a start at or after it clears it now.
+* **The ETA has to count down between boundaries.** The executor re-derives
+  it at every loop boundary, which for the outermost loop of a temperature
+  sweep is once every half hour; repeated as the number the frame carried,
+  it read `9.5 s` for four seconds. The finish time is what stands; the
+  seconds left are measured from the newest frame's clock.
+
+And one thing it found in the service, filed rather than fixed: a simulated
+`bace` with the LED driven above its threshold reports a photocurrent peak of
+about two million amps and a charge of `−0.04 C`, ten orders above the
+`3.65e-10 C` the simulated device claims to store. The manual fixtures never
+showed it because they drive the LED at exactly the threshold, where the
+photocharge is zero; the tree fixture does. The console draws it faithfully,
+which is the point of the console.
+
 ### M5 · The pipeline tab
 
 The tree editor, Dry run against `POST /pipelines/validate`, the schedule as
@@ -742,6 +821,7 @@ that have not started. They are here so they are not rediscovered there:
 | M6 | `docs/naming-plan.md` rule 1 — the journal carries the sample block and the temperature triple on every node, **and `GET /runs` exposes them on each row**; writing them into `SessionStarted` alone leaves `run_index()` emitting summaries with no identity |
 | M6 | a Round 3 design pass on results, with the user, in Claude Design |
 | M3 | ~~nothing — the chart foundation is new code with no service dependency~~ **built 2026-09-03**; nothing in the service changed |
+| M4 | ~~nothing~~ **built 2026-09-03**; nothing in the service changed. The simulator's lit-photocurrent magnitude is a defect in `--sim`, not on the path |
 
 Nothing else in the service is on the critical path. The API is complete for
 M0–M5 as it stands.

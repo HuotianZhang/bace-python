@@ -468,3 +468,138 @@ test('a pipeline node draws on the card of the module that ran it', () => {
   assert.equal(found.node.node_path, 'rep=2/bace');
   assert.equal(runFor(state, 'jv_bace'), null, 'and a module the tree never ran finds nothing');
 });
+
+// -- M4: Q per loop, or Q(axis) ----------------------------------------------
+
+import { loopsModel, isRepeat, pointSummary, loopSeries, chargeUnit } from '../lib/charts/loops.js';
+
+function nodeFrom(name, path, until = null) {
+  const store = createStore({ schedule: () => {} });
+  for (const frame of jsonl(name)) {
+    store.applyFrame(frame);
+    if (until && until(frame)) break;
+  }
+  const state = store.getState();
+  const record = state.runs[state.order[0]];
+  return { record, node: record.nodes[path] };
+}
+
+test('the chart switches on the axis, and says so', () => {
+  // `ui-rules` §4: a zero-width axis plots Q per loop, not a curve, and the
+  // switch is visible rather than silent.
+  const sweep = loopsModel(nodeFrom('stream_stopped_sim.jsonl', 'bace'));
+  assert.equal(sweep.switch.repeat, false);
+  assert.match(sweep.panels[0].label, /^Q\(delay_ns\)/);
+  assert.match(sweep.x.label, /delay_ns \/ ns/);
+
+  const repeat = loopsModel({
+    record: { state: 'running', n_loops: 20 },
+    node: { node_path: 'bace', kind: 'bace', axis: { name: 'vpre', start: 0.9, stop: 0.9, step: 0 }, values: [0.9],
+      loops: [], shots: [1, 2, 3].map((l) => ({ index: l - 1, loop: l, step: 1, q: 1e-10 * (1 + 0.1 * l), q_mean: 1e-10, q_std: 0, ts: l })),
+      kept: 3, requested: 20, outcome: null },
+  });
+  assert.equal(repeat.switch.repeat, true);
+  assert.match(repeat.panels[0].label, /^Q per loop/);
+  assert.match(repeat.panels[0].note, /zero-width axis · vpre 0\.9000 V = stop · repeats, not a curve/);
+  assert.equal(repeat.x.format(12), 'loop 12');
+});
+
+test('step is the point, index is the shot', () => {
+  // A three-point axis, two loops: the second loop's first shot is
+  // `index 3, step 1`, and lands on the first point.
+  const found = nodeFrom('stream_tree_sim.jsonl', 'T=250K/led=1.010V/bace');
+  const points = pointSummary(found.node);
+  assert.equal(points.length, 3);
+  assert.deepEqual(points.map((p) => p.n), [2, 2, 2]);
+  assert.deepEqual(found.node.shots.map((s) => [s.index, s.step]), [[0, 1], [1, 2], [2, 3], [3, 1], [4, 2], [5, 3]]);
+});
+
+test('σ_Q of zero is not recorded, and the marker says so', () => {
+  // After one loop every point carries `q_std = 0` — the service's sample
+  // deviation needs two — so the point is a hollow square and no error bar.
+  const one = loopsModel(nodeFrom('stream_stopped_sim.jsonl', 'bace', (f) => f.type === 'LoopDone' && f.data.loop === 1));
+  const squares = one.panels[0].dots.filter((d) => d.shape === 'square' && d.hollow);
+  assert.equal(squares.length, 3);
+  assert.equal(one.panels[0].rules.length, 0, 'no error bar of zero length');
+  assert.match(one.readout, /σ_Q not recorded yet — one loop/);
+  assert.ok(one.legend.some((e) => e.marker === 'square-hollow' && /not recorded/.test(e.label)));
+
+  // After the second loop the σ exists, and the marker changes with it.
+  const two = loopsModel(nodeFrom('stream_stopped_sim.jsonl', 'bace', (f) => f.type === 'LoopDone' && f.data.loop === 2));
+  assert.equal(two.panels[0].dots.filter((d) => d.shape === 'square').length, 0);
+  assert.equal(two.panels[0].rules.length, 3, 'one error bar per point');
+});
+
+test('the error bars reflect the loops that actually ran', () => {
+  // `ui-rules` §9: "100 loops requested, 20 completed." The stopped scan
+  // asked for 20 loops of 3 points and was stopped after 39 shots.
+  const model = loopsModel(nodeFrom('stream_stopped_sim.jsonl', 'bace'));
+  assert.ok(model.notes.some((n) => /^20 loops requested, 13 completed · stopped$/.test(n)), model.notes.join(' | '));
+  assert.match(model.readout, /^39 of 60 shots/);
+  assert.match(model.readout, /stopped$/);
+  const points = pointSummary(nodeFrom('stream_stopped_sim.jsonl', 'bace').node);
+  assert.deepEqual(points.map((p) => p.n), [13, 13, 13]);
+});
+
+test('a repeat that was stopped draws the loops it never ran as not acquired', () => {
+  const model = loopsModel({
+    record: { state: 'stopped', n_loops: 20, aborted: { reason: 'requested', done: 5, total: 20 } },
+    node: { node_path: 'bace', kind: 'bace', axis: { name: 'vpre', start: 1, stop: 1, step: 0 }, values: [1],
+      loops: [], shots: [1, 2, 3, 4, 5].map((l) => ({ index: l - 1, loop: l, step: 1, q: 1e-10 * (1 + 0.05 * Math.sin(l)), q_mean: 1e-10, q_std: 0, ts: l })),
+      kept: 5, requested: 20, outcome: 'stopped' },
+  });
+  const panel = model.panels[0];
+  assert.equal(panel.shades.length, 1);
+  assert.equal(panel.shades[0].hatch, true);
+  assert.ok(panel.marks.some((m) => m.text === 'loops 6 – 20 not acquired'));
+  assert.ok(panel.marks.some((m) => m.text === 'stopped at loop 5'));
+  assert.ok(model.notes.some((n) => /^20 loops requested, 5 completed · stopped$/.test(n)));
+});
+
+test('the running mean and its band use the sample deviation the service uses', () => {
+  const series = loopSeries({ shots: [
+    { index: 0, loop: 1, step: 1, q: 1e-10 }, { index: 1, loop: 2, step: 1, q: 3e-10 }, { index: 2, loop: 3, step: 1, q: 2e-10 },
+  ] });
+  assert.equal(series[0].sigma, null, 'one loop: no σ');
+  assert.ok(Math.abs(series[1].mean - 2e-10) < 1e-20);
+  assert.ok(Math.abs(series[1].sigma - Math.sqrt(2) * 1e-10) < 1e-20, 'ddof = 1');
+  assert.ok(Math.abs(series[2].mean - 2e-10) < 1e-20);
+  assert.ok(Math.abs(series[2].sigma - 1e-10) < 1e-20);
+});
+
+test('the charge axis is one power of ten for the whole chart, never a prefix per value', () => {
+  assert.deepEqual(chargeUnit([3.65e-10, 4.1e-10]), { factor: 1e-10, label: 'Q / 1e-10 C' });
+  assert.deepEqual(chargeUnit([-2.3e-12, 9e-13]), { factor: 1e-12, label: 'Q / 1e-12 C' });
+  assert.equal(chargeUnit([]).label, 'Q / 1e-12 C');
+});
+
+test('a shot without traces still puts its point on the loop curve', () => {
+  // The M4 proof's second half: a client dropped at 1008 comes back via
+  // `decimated.replay`, its shots without arrays, and the loop curve must
+  // not lose them. The chart never reads a trace.
+  const store = createStore({ schedule: () => {} });
+  for (const frame of jsonl('stream_stopped_sim.jsonl')) {
+    if (frame.type === 'StepDone') {
+      const stripped = { ...frame, data: { ...frame.data, light: null, dark: null, photo: null, photo_averaged: null },
+        decimated: Object.fromEntries(Object.keys(frame.decimated || {}).map((k) => [k, { omitted: true, replay: true }])) };
+      store.applyFrame(stripped);
+    } else {
+      store.applyFrame(frame);
+    }
+  }
+  const state = store.getState();
+  const record = state.runs[state.order[0]];
+  const node = record.nodes.bace;
+  assert.ok(node.shots.every((s) => s.tracesGone));
+  const model = loopsModel({ record, node });
+  assert.deepEqual(pointSummary(node).map((p) => p.n), [13, 13, 13]);
+  assert.equal(model.panels[0].rules.length, 3);
+  assert.ok(model.notes.some((n) => /39 shots without traces/.test(n)));
+});
+
+test('a node whose axis the ring never delivered says so rather than guessing', () => {
+  const model = loopsModel({ record: { state: 'running' }, node: { node_path: 'bace', kind: 'bace', axis: null, values: [], shots: [{ index: 0, loop: 1, step: 1, q: 1e-10 }], loops: [] } });
+  assert.ok(model.absent);
+  assert.match(model.absent.text, /axis is not known/);
+  assert.equal(isRepeat({ values: [], axis: null }), null);
+});

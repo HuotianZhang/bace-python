@@ -93,12 +93,22 @@ async def _hello(ws_url: str) -> dict:
 
 
 async def _run_and_capture(ws_url: str, base: str, body: dict,
-                           *, timeout_s: float, path: str = "/runs") -> tuple[list[dict], dict]:
+                           *, timeout_s: float, path: str = "/runs",
+                           answer_pauses: bool = False,
+                           stop_after_shots: int | None = None,
+                           expect: str = "done") -> tuple[list[dict], dict]:
     """Post one run with the socket already open, and keep every frame of it.
 
     The socket is opened first and the run posted from inside it, so the
     capture starts before `RunQueued` rather than after — which is also the
     only way to see the `StepPhase` frames, live-only and never replayed.
+
+    `answer_pauses` stands in for the operator: a `NeedsOperator` at a
+    temperature node (`--sim` with no console is the pause path, on purpose)
+    is answered with `POST /runs/{id}/resume` carrying a typed
+    `temperature_k` a tenth of a kelvin off the setpoint and a note — so the
+    recording holds the whole pair, the pause and the answer, and the
+    `TemperatureRead(source="operator")` the answer produces.
     """
     import websockets
 
@@ -110,6 +120,7 @@ async def _run_and_capture(ws_url: str, base: str, body: dict,
 
         posted = _request(f"{base}{path}", "POST", body)
         run_id = posted["run_id"]
+        shots = 0
         deadline = time.monotonic() + timeout_s
         state = posted["state"]
         # Read to `parked`, not to the terminal state: every run reaches its
@@ -122,6 +133,26 @@ async def _run_and_capture(ws_url: str, base: str, body: dict,
             except asyncio.TimeoutError:
                 break
             frames.append(frame)
+            if (stop_after_shots is not None and frame.get("type") == "StepDone"
+                    and frame.get("run_id") == run_id):
+                shots += 1
+                if shots == stop_after_shots:
+                    # `after_shot`: the shot in flight completes and is kept,
+                    # then the generator unwinds -- the honest verb, and the
+                    # one whose `RunAborted(reason="requested")` a console
+                    # has to render as a run that was stopped, not one that
+                    # failed.
+                    _request(f"{base}/runs/{run_id}/stop", "POST", {"mode": "after_shot"})
+            if (answer_pauses and frame.get("type") == "NeedsOperator"
+                    and frame.get("run_id") == run_id):
+                detail = frame.get("data", {}).get("detail") or {}
+                setpoint = float(detail.get("setpoint_k", 0.0))
+                # A beat, so the recording shows a run *paused* rather than a
+                # pause answered inside the same millisecond.
+                await asyncio.sleep(0.3)
+                _request(f"{base}/runs/{run_id}/resume", "POST",
+                         {"temperature_k": round(setpoint + 0.1, 3),
+                          "note": f"set to {setpoint:g} K by hand, reads {setpoint + 0.1:g} K"})
             if frame.get("type") == "RunStateChanged" and frame.get("run_id") == run_id:
                 new_state = frame["data"].get("state", state)
                 if new_state == "parked":
@@ -131,8 +162,8 @@ async def _run_and_capture(ws_url: str, base: str, body: dict,
                     break
         else:
             raise SystemExit(f"{body.get('module', 'the pipeline')} did not finish within {timeout_s} s")
-    if state != "done":
-        raise SystemExit(f"{body.get('module', 'the pipeline')} ended {state}, not done — "
+    if state != expect:
+        raise SystemExit(f"{body.get('module', 'the pipeline')} ended {state}, not {expect} — "
                          f"see the service log")
     return frames, posted
 
@@ -205,7 +236,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--timeout-s", type=float, default=600.0, help="per run")
     ap.add_argument("--with-full-data", action="store_true",
                     help="also dump the transient's undecimated /runs/{id}/data (megabytes)")
+    ap.add_argument("--only", default=None,
+                    help="record a subset: a comma-separated list of jv, bace, pipeline, "
+                         "tree, stopped, bench, hello (default: everything)")
     a = ap.parse_args(argv)
+    only = set(a.only.split(",")) if a.only else None
+    wanted = lambda step: only is None or step in only  # noqa: E731
 
     base = a.url.rstrip("/")
     ws_url = base.replace("http://", "ws://").replace("https://", "wss://") + "/events"
@@ -219,6 +255,62 @@ def main(argv: list[str] | None = None) -> int:
           f"mode {who['mode']}{' fast' if who.get('fast') else ''}, tag {tag!r}")
 
     # 1 · a J-V with a light curve and a dark one: the curves, and the HDF5.
+    if wanted("jv"):
+        _record_jv(a, base, ws_url, tag)
+
+    # 2 · a short transient scan: live StepDone frames, decimated as the wire
+    #     sends them, and the StepPhase frames that exist nowhere else.
+    if wanted("bace"):
+        _record_bace(a, base, ws_url, tag)
+
+    # 3 · a pipeline: two module nodes under one `run_id`, each numbering its
+    #     own shots from one. Nothing else in the fixture set has a `node_path`
+    #     that is not the module's own name, and node identity is exactly what
+    #     a store gets wrong quietly — the second node's shots landing on the
+    #     first's, the loop's progress counter overwritten by the shot's.
+    #     `record_length` is small on purpose: this fixture is about paths, and
+    #     a full-length trace per shot would be half a megabyte of them.
+    if wanted("pipeline"):
+        _record_pipeline(a, base, ws_url, tag)
+
+    # 3b · the tree `docs/ui-plan.md` M4 has to prove: two temperatures by two
+    #      levels, with the pauses a `--sim` service takes at each temperature
+    #      node and the operator's answers to them. It is the only recording
+    #      with a `NeedsOperator`, an `OperatorResumed`, a loop `Progress` at
+    #      three scales and a `TemperatureRead` typed by a person.
+    if wanted("tree"):
+        _record_tree(a, base, ws_url, tag)
+
+    # 3c · a scan stopped after its third shot. `docs/ui-rules.md` §9: a
+    #      truncated run is normal, not exceptional — the archive declares 100
+    #      loops and holds 20 — and the console has to show kept of requested
+    #      and the loops that were never acquired. Nothing else in the set
+    #      carries a `RunAborted`, a `stopped` state, or a node that ended
+    #      `stopped`; the acceptance journals have two `RunFailed`, which is a
+    #      different ending.
+    if wanted("stopped"):
+        _record_stopped(a, base, ws_url, tag)
+
+    # 4 · the bench mid-run: the `inferred` overlay, which exists nowhere at
+    #     rest. Recorded before the read-back below, because it needs a run.
+    if wanted("bench"):
+        print("bench, mid-run …")
+        _dump(os.path.join(a.out, f"bench_running_{tag}.json"),
+              _bench_running(base, timeout_s=a.timeout_s))
+
+    # 5 · the bench snapshot, as the console gets it on connect — recorded
+    #     last, so it carries the V_oc the J-V measured and both runs on the
+    #     modules' `last`, which is what the rail and the cards develop against.
+    if wanted("hello"):
+        _request(f"{base}/bench/read", "POST")
+        _dump(os.path.join(a.out, f"hello_{tag}.json"), asyncio.run(_hello(ws_url)))
+
+    print("done. `python3 tools/make_ui_fixtures.py` builds the derived ones "
+          "(the acceptance HDF5 as JSON) beside these.")
+    return 0
+
+
+def _record_jv(a, base: str, ws_url: str, tag: str) -> None:
     print("jv_bace …")
     jv_frames, jv_posted = asyncio.run(_run_and_capture(
         ws_url, base,
@@ -247,8 +339,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {os.path.relpath(dest, REPO)}  {os.path.getsize(dest)/1024:.0f} KB  "
               f"(from {h5})")
 
-    # 2 · a short transient scan: live StepDone frames, decimated as the wire
-    #     sends them, and the StepPhase frames that exist nowhere else.
+
+def _record_bace(a, base: str, ws_url: str, tag: str) -> None:
     print("bace …")
     bace_frames, bace_posted = asyncio.run(_run_and_capture(
         ws_url, base,
@@ -265,13 +357,8 @@ def main(argv: list[str] | None = None) -> int:
         # it in exactly this endpoint's shape.
         _dump(os.path.join(a.out, f"bace_{tag}.json"), _request(f"{base}/runs/{bace_id}/data"))
 
-    # 3 · a pipeline: two module nodes under one `run_id`, each numbering its
-    #     own shots from one. Nothing else in the fixture set has a `node_path`
-    #     that is not the module's own name, and node identity is exactly what
-    #     a store gets wrong quietly — the second node's shots landing on the
-    #     first's, the loop's progress counter overwritten by the shot's.
-    #     `record_length` is small on purpose: this fixture is about paths, and
-    #     a full-length trace per shot would be half a megabyte of them.
+
+def _record_pipeline(a, base: str, ws_url: str, tag: str) -> None:
     print("pipeline …")
     tree = {"kind": "loop", "loop": "repeat", "count": 2, "children": [
         {"kind": "module", "module": "bace",
@@ -284,21 +371,47 @@ def main(argv: list[str] | None = None) -> int:
         timeout_s=a.timeout_s, path="/pipelines"))
     _dump(os.path.join(a.out, f"stream_pipeline_{tag}.jsonl"), pipe_frames, jsonl=True)
 
-    # 4 · the bench mid-run: the `inferred` overlay, which exists nowhere at
-    #     rest. Recorded before the read-back below, because it needs a run.
-    print("bench, mid-run …")
-    _dump(os.path.join(a.out, f"bench_running_{tag}.json"),
-          _bench_running(base, timeout_s=a.timeout_s))
 
-    # 5 · the bench snapshot, as the console gets it on connect — recorded
-    #     last, so it carries the V_oc the J-V measured and both runs on the
-    #     modules' `last`, which is what the rail and the cards develop against.
-    _request(f"{base}/bench/read", "POST")
-    _dump(os.path.join(a.out, f"hello_{tag}.json"), asyncio.run(_hello(ws_url)))
+def _record_tree(a, base: str, ws_url: str, tag: str) -> None:
+    """The M4 tree: `T [250, 280] x led [1.010, 1.020] x bace`.
 
-    print("done. `python3 tools/make_ui_fixtures.py` builds the derived ones "
-          "(the acceptance HDF5 as JSON) beside these.")
-    return 0
+    Three points by two loops per leaf, so every leaf has a Q(axis) with a
+    σ that exists (one loop leaves `q_std = 0`, which is "not recorded"), and
+    `record_length` small for the reason the pipeline fixture's is. `hold_s`
+    is one second: `--fast` makes it a no-op, and on a bench it is the dwell
+    after the operator's answer, which a fixture has no use for.
+    """
+    print("tree, with the pauses answered …")
+    tree = {"kind": "loop", "loop": "temperature", "label": "T", "values_k": [250.0, 280.0],
+            "tolerance_k": 0.5, "hold_s": 1.0, "timeout_s": 60.0, "children": [
+                {"kind": "loop", "loop": "illumination", "levels_v": [1.010, 1.020],
+                 "led_low_v": 0.4, "led_settle_s": 0.1, "children": [
+                     {"kind": "module", "module": "bace",
+                      "params": {"axis_name": "delay_ns", "axis_start": 0.0, "axis_stop": 100.0,
+                                 "axis_step": 50.0, "centre_on_voc": False, "n_loops": 2,
+                                 "vpre": 1.0, "vcoll": -2.0, "store_shots": False,
+                                 "record_length": 500}}]}]}
+    frames, _ = asyncio.run(_run_and_capture(
+        ws_url, base, {"tree": tree, "name": "ui-fixture-tree"},
+        timeout_s=a.timeout_s, path="/pipelines", answer_pauses=True))
+    _dump(os.path.join(a.out, f"stream_tree_{tag}.jsonl"), frames, jsonl=True)
+
+
+def _record_stopped(a, base: str, ws_url: str, tag: str) -> None:
+    """A 3-point scan of 20 loops, stopped `after_shot` once three shots are
+    in: 60 requested, 3 kept, and the first loop never completed -- so the
+    Q(axis) has a point with one shot behind it and two with none, which is
+    what the chart has to say rather than draw a curve through."""
+    print("bace, stopped after three shots …")
+    frames, _ = asyncio.run(_run_and_capture(
+        ws_url, base,
+        {"module": "bace", "name": "ui-fixture-stopped",
+         "params": {"axis_name": "delay_ns", "axis_start": 0.0, "axis_stop": 100.0,
+                    "axis_step": 50.0, "centre_on_voc": False, "n_loops": 20,
+                    "vpre": 1.0, "vcoll": -2.0, "store_shots": False,
+                    "record_length": 500}},
+        timeout_s=a.timeout_s, stop_after_shots=3, expect="stopped"))
+    _dump(os.path.join(a.out, f"stream_stopped_{tag}.jsonl"), frames, jsonl=True)
 
 
 if __name__ == "__main__":

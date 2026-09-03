@@ -85,13 +85,34 @@ export function chart(model) {
 
 function legend(entries) {
   return h('div.chart-legend', entries.map((e) => h('span.legend-item',
-    s('svg', { width: 18, height: 8, style: { display: 'inline-block', verticalAlign: 'middle' } },
-      s('line', {
-        x1: 1, y1: 4, x2: 17, y2: 4,
+    s('svg', { width: 18, height: 10, style: { display: 'inline-block', verticalAlign: 'middle' } },
+      legendGlyph(e)),
+    h('span', { text: e.label }))));
+}
+
+/**
+ * A legend entry is a line unless it says otherwise. The markers exist for
+ * the loop chart, where the *shape* of a point is the statement — R2·3's
+ * `□ σ_Q not recorded · ● σ_Q measured` — and a line could not say it.
+ */
+function legendGlyph(e) {
+  switch (e.marker) {
+    case 'dot':
+      return s('circle', { cx: 9, cy: 5, r: 2.8, fill: paint(e.colour) });
+    case 'dot-faint':
+      return s('circle', { cx: 9, cy: 5, r: 1.8, fill: paint(e.colour), 'fill-opacity': 0.55 });
+    case 'square-hollow':
+      return s('rect', { x: 6.2, y: 2.2, width: 5.6, height: 5.6, fill: paint('paper'),
+        stroke: paint(e.colour), 'stroke-width': 1.1 });
+    case 'band':
+      return s('rect', { x: 1, y: 1.5, width: 16, height: 7, fill: paint(e.colour), 'fill-opacity': 0.12 });
+    default:
+      return s('line', {
+        x1: 1, y1: 5, x2: 17, y2: 5,
         stroke: paint(e.colour), 'stroke-width': e.width || 1.6,
         'stroke-dasharray': e.dash || null,
-      })),
-    h('span', { text: e.label }))));
+      });
+  }
 }
 
 /** Clip-path ids have to be unique in a document, and a card holds several charts. */
@@ -100,9 +121,16 @@ let uid = 0;
 function renderSvg(model, readout) {
   const kids = [];
   const clip = `chart-clip-${(uid += 1)}`;
-  kids.push(s('defs', model.panels.map((panel, i) => s('clipPath', { id: `${clip}-${i}` },
-    s('rect', { x: panel.rect.x, y: panel.rect.y, width: panel.rect.w, height: panel.rect.h })))));
-  model.panels.forEach((panel, i) => { panel.clip = `${clip}-${i}`; });
+  // The hatch is the design's own mark for "not acquired" (`ch-qloop-trunc`):
+  // the loops a stopped run never ran, drawn as the space they would have
+  // filled rather than left as a curve that happens to end early.
+  const hatch = `chart-hatch-${uid}`;
+  kids.push(s('defs',
+    model.panels.map((panel, i) => s('clipPath', { id: `${clip}-${i}` },
+      s('rect', { x: panel.rect.x, y: panel.rect.y, width: panel.rect.w, height: panel.rect.h }))),
+    s('pattern', { id: hatch, width: 6, height: 6, patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)' },
+      s('line', { x1: 0, y1: 0, x2: 0, y2: 6, stroke: paint('rule'), 'stroke-width': 2 }))));
+  model.panels.forEach((panel, i) => { panel.clip = `${clip}-${i}`; panel.hatch = hatch; });
   for (const panel of model.panels) kids.push(renderPanel(panel, model));
   // One x axis under the last panel when the panels share it, or one under
   // each when they do not. The timing diagram is the second case and could
@@ -128,8 +156,9 @@ function renderPanel(panel, model) {
   })];
   for (const shade of panel.shades || []) {
     kids.push(s('rect', {
-      x: shade.x, y: rect.y, width: shade.w, height: rect.h,
-      fill: paint(shade.colour || 'accent'), 'fill-opacity': shade.opacity ?? 0.055,
+      x: shade.x, y: rect.y, width: Math.max(0, shade.w), height: rect.h,
+      fill: shade.hatch ? `url(#${panel.hatch})` : paint(shade.colour || 'accent'),
+      'fill-opacity': shade.hatch ? 1 : shade.opacity ?? 0.055,
     }));
   }
   for (const tick of (panel.y && panel.y.ticks) || []) {
@@ -167,8 +196,18 @@ function renderPanel(panel, model) {
     }));
   }
   for (const dot of panel.dots || []) {
+    // A hollow square is a point whose σ was never recorded (`ui-rules` §2):
+    // the shape says so where a bare dot would claim a measurement.
+    if (dot.shape === 'square') {
+      const r = dot.r || 2.4;
+      kids.push(s('rect', { x: dot.x - r, y: dot.y - r, width: 2 * r, height: 2 * r,
+        fill: dot.hollow ? paint('paper') : paint(dot.colour || 'ink'),
+        stroke: paint(dot.colour || 'ink'), 'stroke-width': dot.hollow ? 1.1 : 0 }));
+      continue;
+    }
     kids.push(s('circle', { cx: dot.x, cy: dot.y, r: dot.r || 2.4,
-      fill: paint(dot.colour || 'ink'), 'fill-opacity': dot.opacity ?? 1 }));
+      fill: dot.hollow ? paint('paper') : paint(dot.colour || 'ink'), 'fill-opacity': dot.opacity ?? 1,
+      stroke: dot.hollow ? paint(dot.colour || 'ink') : null, 'stroke-width': dot.hollow ? 1.1 : null }));
   }
   for (const mark of panel.marks || []) {
     kids.push(s('text', {

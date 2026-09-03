@@ -493,3 +493,17 @@ test('the trace cap is one ring for the store, not one per node', () => {
     assert.equal(typeof shot.q, 'number', 'the charge survives the forgetting');
   }
 });
+
+test('a replayed StepStarted from behind does not clear the phase of the shot in flight', () => {
+  // `StepPhase` is live-only; the numbered frames replay from the ring. A
+  // client catching up after a drop folds old starts while the instrument is
+  // far ahead, and the indicator must describe the shot the bench is in.
+  const s = store();
+  const run = 'r1';
+  s.applyFrame({ seq: 1, ts: 1, run_id: run, node_path: 'bace', type: 'RunQueued', data: { kind: 'manual', module: 'bace' } });
+  s.applyFrame({ seq: null, ts: 2, run_id: run, node_path: 'bace', type: 'StepPhase', data: { index: 560, phase: 'acquire light', k: 3, of: 7 } });
+  s.applyFrame({ seq: 300, ts: 3, run_id: run, node_path: 'bace', type: 'StepStarted', data: { index: 300, loop: 15, step: 1 } });
+  assert.equal(s.getState().runs[run].phase.phase, 'acquire light', 'an older start leaves it');
+  s.applyFrame({ seq: 900, ts: 4, run_id: run, node_path: 'bace', type: 'StepStarted', data: { index: 561, loop: 27, step: 16 } });
+  assert.equal(s.getState().runs[run].phase, null, 'the next shot clears it');
+});
