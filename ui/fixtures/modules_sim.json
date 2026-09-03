@@ -427,7 +427,7 @@
      "type": "float",
      "unit": "s",
      "default": 2.0,
-     "doc": "How long the run waits after setting the 33220A to a new LED level, before it sweeps.",
+     "doc": "How long the run waits after arranging each curve's illumination -- the 33220A's level, the shutter, or both -- before it sweeps.",
      "doc_full": "",
      "choices": [],
      "group": "led",
