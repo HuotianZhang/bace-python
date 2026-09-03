@@ -356,6 +356,20 @@ def test_light_sets_the_shutter_and_the_led_and_reports_what_the_bench_then_read
     assert "dark at the sample" in [e for e in evs if isinstance(e, E.Notice)][-1].text
 
 
+def test_light_needs_only_the_half_it_is_actually_setting():
+    """The module exists so either half can be left alone, so a shutter-only
+    node on a bench with no LED is runnable and must not be blocked by one --
+    `bench.instrument` would otherwise refuse a pipeline `_build_light` is
+    perfectly happy to run."""
+    cat = catalogue()
+    blind = {"unavailable": {"led": "no such resource", "shutter": "no DIO"}}
+    codes = lambda p: [n["code"] for n in cat.needs("light", p, bench=blind)]   # noqa: E731
+    assert codes({"shutter": "open", "led_mode": "leave"}) == ["shutter"]
+    assert codes({"shutter": "leave", "led_mode": "dc"}) == ["led"]
+    assert sorted(codes({"shutter": "open", "led_mode": "dc"})) == ["led", "shutter"]
+    assert codes({"shutter": "leave", "led_mode": "leave"}) == [], "a node that sets nothing needs nothing"
+
+
 def test_light_refuses_before_it_touches_anything(tmp_path):
     b = bench()
     cat = catalogue()

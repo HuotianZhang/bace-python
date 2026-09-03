@@ -14,7 +14,7 @@
 
 import { h, fill } from './../lib/dom.js';
 import { moduleCard } from './../lib/card.js';
-import { BENCH_CARDS } from './../lib/fields.js';
+import { BENCH_CARDS, cardModel } from './../lib/fields.js';
 
 export default {
   route: 'bench',
@@ -31,6 +31,30 @@ export default {
       if (!open.has(name)) open.set(name, new Set());
       return open.get(name);
     };
+
+    /**
+     * Edits in flight. A text field commits on `change`, which the browser
+     * fires during the blur the button click itself causes — so a click on
+     * Run, DC or Pulse lands while the `PUT` for the value the operator just
+     * typed is still on the wire. Without this, the action goes with the old
+     * number while the input visibly shows the new one: for a `light` action,
+     * deterministically, since its arguments were computed when the card was
+     * last drawn.
+     *
+     * On a lab bench that is the LED driven at a level nobody chose, so
+     * nothing that acts starts until the edits before it have landed. The
+     * chain is per view rather than per card because an action can read a
+     * value from any of them.
+     *
+     * Awaiting is the whole fix, and deliberately the only one: disabling the
+     * buttons while a `PUT` is in flight would re-render between the
+     * mousedown that blurs the field and the mouseup that clicks, and the
+     * click would land on a button that no longer exists — the operator taps
+     * Run and nothing happens. Correctness comes from the await; the DOM is
+     * left alone until the answer arrives.
+     */
+    let edits = Promise.resolve();
+    const settled = () => edits;
 
     const fail = (err) => {
       // A refusal reaches the operator as its sentence, never as `-> 409`.
@@ -54,25 +78,39 @@ export default {
           if (set.has(group)) set.delete(group); else set.add(group);
           render();
         },
-        async edit(name, params) {
-          try {
-            // The response *is* the new card: value, provenance, `needs` and a
-            // freshly computed `estimate_text` with the point count in it.
-            store.applyModule(await api.setParams(name, params));
-          } catch (err) { fail(err); render(); }
+        edit(name, params) {
+          edits = edits.then(async () => {
+            try {
+              // The response *is* the new card: value, provenance, `needs` and
+              // a freshly computed `estimate_text` with the point count in it.
+              store.applyModule(await api.setParams(name, params));
+            } catch (err) { fail(err); render(); }
+          });
+          return edits;
         },
         async run(model, button) {
+          await settled();
           try {
             const params = button.kind === 'shot' ? { n_loops: 1 } : {};
             await api.startRun(model.name, params);
           } catch (err) { fail(err); }
         },
-        async act(action) {
+        async act(model, action) {
+          await settled();
           try {
+            // Re-derived after the edits land, never the arguments captured
+            // when the card was drawn: `cardModel` computes an action's args
+            // from the values it was given, and those are one `PUT` old the
+            // moment an edit is in flight.
+            const entry = store.getState().modules.byName[model.name];
+            const fresh = entry
+              ? (cardModel(entry, { bench: store.getState().bench }).actions
+                .find((a) => a.action === action.action) || action)
+              : action;
             // The action answers with the read-back that followed it, so the
             // card's illumination row and the rail move together and neither
             // waits on a separate GET.
-            const out = await api.action(action.action, action.args);
+            const out = await api.action(fresh.action, fresh.args);
             if (out && out.bench) store.applyBench(out.bench, { readBack: true });
           } catch (err) { fail(err); }
         },

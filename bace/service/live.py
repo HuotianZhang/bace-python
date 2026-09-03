@@ -99,6 +99,12 @@ class LiveState:
         elif isinstance(ev, E.InstrumentState):
             for key, value in ev.values.items():
                 if key in INSTRUMENT_STATE_KEYS:
+                    # `?` is a driver saying it got no answer. Overlaying it
+                    # would replace a real read-back with "unknown" *and* mark
+                    # it inferred -- worse on both counts than leaving the
+                    # snapshot's own value where it is.
+                    if value is None or str(value) == "?":
+                        continue
                     instrument, field = INSTRUMENT_STATE_KEYS[key]
                     self._set(instrument, **{field: str(value)})
                 elif key == "shutter":
@@ -107,6 +113,12 @@ class LiveState:
                     self._jv_light(str(value) == "open")
                 elif key == "led_level_v" and value is not None:
                     self._set("led", high_v=float(value))
+                elif key == "led_output" and value is not None:
+                    # A read-back, so it replaces the overlay's flag rather
+                    # than being inferred: a `light` node that switched the
+                    # generator on from parked, or off, is the one thing the
+                    # snapshot Start took cannot know.
+                    self._set("led", output=bool(value))
         elif isinstance(ev, E.StepStarted):
             self._levels = self._pulse_levels(ev.setpoint)
             if self._levels is not None:
