@@ -180,11 +180,18 @@ scales, never one number:
 * the loops, outermost first, each from the executor's own `Progress` for that
   loop node (`T 250 K · 1 of 2 · LED 1.020 V · 2 of 2`), and a temperature
   that is settling reads *waiting for the operator*, never as a step that runs;
-* the shots, from the leaf's own count (`shot 4 of 630 · loop 2 · point 1 of 21`);
+* the shots, from the leaf's own count and the shot in flight
+  (`shot 4 of 630 · loop 2 · point 1 of 21`) — or the curve being swept, for a
+  J-V, which has no per-curve start event to count from. Only `bace`, `jv` and
+  `jv_bace` acquire anything: a `wait` or a `light` node has no counter rather
+  than a `shot 0` that never moves;
 * the segment, from `StepPhase` (`5 · acquire light`) — live-only, so it is
   shown only while the stream carries it;
 * the ETA, the executor's re-derived one, counting down from the newest
-  frame's clock rather than repeating the number the frame carried.
+  frame's clock rather than repeating the number the frame carried — and where
+  nothing has been measured to re-derive it from, which is every J-V (`eta_s`
+  is `null` on their `Progress` on purpose), the cost model's prediction from
+  submit, written `ETA ~` and saying in its tooltip that it is a prediction.
 
 And the three verbs: `after_shot` (the honest one: the shot in flight completes
 and is kept), `abort` (armed first, like Park — a discarded shot is a shot of

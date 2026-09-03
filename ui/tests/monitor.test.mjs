@@ -338,3 +338,69 @@ test('a run waiting for the worker is reachable, so it can be cancelled', () => 
     [{ run_id: '20260903-009', position: 1, label: '20260903-009' }]);
   assert.deepEqual(queuedRuns({ queue: [], runs: {} }), []);
 });
+
+// -- which nodes have a counter, and what it counts ------------------------
+
+test('a J-V counts the curve it is sweeping, not the ones that finished', () => {
+  // There is no per-curve start: `JVStarted`, then a blocking sweep that on
+  // the rig is minutes, then `JVCurveDone`. Counted from what has completed
+  // the monitor reads `curve 0 of 2` for the whole of the first one.
+  const store = createStore({ schedule: () => {} });
+  const run = 'r1';
+  store.applyFrame({ seq: 1, ts: 1, run_id: run, node_path: 'jv_bace', type: 'RunQueued', data: { kind: 'manual', module: 'jv_bace' } });
+  store.applyFrame({ seq: 2, ts: 2, run_id: run, node_path: 'jv_bace', type: 'NodeStarted', data: { node_path: 'jv_bace', kind: 'jv_bace', label: 'jv_bace' } });
+  store.applyFrame({ seq: 3, ts: 3, run_id: run, node_path: 'jv_bace', type: 'JVStarted', data: { n_curves: 2 } });
+  const record = store.getState().runs[run];
+  const node = record.nodes.jv_bace;
+  assert.equal(shotCounter(record, node).text, 'curve 1 of 2', 'inside the first sweep');
+
+  store.applyFrame({ seq: 4, ts: 4, run_id: run, node_path: 'jv_bace', type: 'JVCurveDone',
+    data: { label: 'dark', dark: true, metrics: {}, n_points: 71 } });
+  assert.equal(shotCounter(record, node).text, 'curve 2 of 2', 'and inside the second');
+
+  store.applyFrame({ seq: 5, ts: 5, run_id: run, node_path: 'jv_bace', type: 'JVCurveDone',
+    data: { label: 'as found 1.02 V', dark: false, metrics: {}, n_points: 71 } });
+  assert.equal(shotCounter(record, node).text, 'curve 2 of 2', 'never past what was asked for');
+
+  store.applyFrame({ seq: 6, ts: 6, run_id: run, node_path: 'jv_bace', type: 'NodeDone',
+    data: { node_path: 'jv_bace', outcome: 'ok', detail: { kept: 2, requested: 2 } } });
+  assert.equal(shotCounter(record, node).text, 'curve 2 of 2', 'and the finished node counts what it kept');
+});
+
+test('a module that acquires nothing has no counter at all', () => {
+  // Of the nine modules only bace, jv and jv_bace produce shots or curves.
+  // Counted as a shot producer, a long `wait` read `shot 0` for its whole
+  // execution — the step that "runs" §5 says a settle must never look like.
+  const record = { step: null, nodes: {}, progressByNode: {} };
+  for (const kind of ['light', 'power', 'temperature', 'park', 'wait', 'note', 'repeat', 'illumination']) {
+    assert.equal(shotCounter(record, { node_path: kind, kind, shots: [], curves: [] }), null, kind);
+  }
+  assert.ok(shotCounter(record, { node_path: 'bace', kind: 'bace', shots: [], curves: [], kept: 0, requested: 6 }));
+  // A node whose `NodeStarted` left the ring is read from what it produced.
+  assert.equal(shotCounter(record, { node_path: 'x', kind: null, shots: [{ q: 1 }], curves: [], kept: 1, requested: 6 }).text,
+    'shot 1 of 6');
+  assert.equal(shotCounter(record, { node_path: 'x', kind: null, shots: [], curves: [], kept: 0 }), null,
+    'and one that produced nothing says nothing');
+});
+
+test('a run with no measured ETA still shows the one the cost model predicted', () => {
+  // A J-V's `Progress` carries `eta_s: null` on purpose, and the executor's
+  // ETA belongs to a loop a manual run does not have. The prediction made at
+  // submit is the only one a slow sweep ever has, and it says it is one.
+  const state = {
+    activeRunId: 'r1', lastFrame: { ts: 1000 },
+    runs: { r1: { run_id: 'r1', kind: 'manual', module: 'jv_bace', state: 'running', node_path: 'jv_bace',
+      nodes: { jv_bace: { node_path: 'jv_bace', kind: 'jv_bace', shots: [], curves: [], loops: [], kept: 0, requested: 2 } },
+      progressByNode: {}, progress: { done: 0, total: 2, eta_s: null }, eta: null, finish_at: 1180,
+      step: null, phase: null, needsOperator: null, resumes: [], parked_at: null, reason: '' } },
+    queue: [], temperature: null,
+  };
+  const model = monitorModel(state);
+  assert.equal(model.eta.from, 'predicted');
+  assert.equal(model.eta.seconds, 180, 'counting down from the newest frame\'s clock');
+  assert.equal(model.eta.finish_at, 1180);
+
+  // A measured one wins the moment there is one.
+  state.runs.r1.progress = { done: 1, total: 2, eta_s: 60, ts: 1000 };
+  assert.equal(monitorModel(state).eta.from, 'module');
+});

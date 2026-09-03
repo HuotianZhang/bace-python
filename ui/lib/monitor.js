@@ -21,7 +21,9 @@
 //     tells a slow settle from a hung acquisition (contract §3). Live-only,
 //     never replayed, so it is shown only while the stream carries it.
 //   * **the ETA**, the executor's re-derived one from the outermost loop's
-//     `Progress` when there is one, else the module's own.
+//     `Progress` when there is one, else the module's own — and, when neither
+//     has one (a J-V's `Progress` carries `eta_s: null` on purpose), the cost
+//     model's prediction from submit, marked `~` and labelled as predicted.
 //
 // And the two things the operator can *do*: stop — `after_shot`, the honest
 // verb, or `abort`, armed first like Park — and answer a `NeedsOperator`, with
@@ -33,7 +35,21 @@ import { h, keyed } from './dom.js';
 import * as fmt from './format.js';
 import { TERMINAL } from './store.js';
 
-const LOOP_KINDS = new Set(['temperature', 'illumination', 'repeat']);
+/**
+ * The module kinds that acquire something a counter can count. A leaf node's
+ * `kind` is its module name (`NodeStarted.data.kind`), and of the nine the
+ * service offers only these three produce shots or curves: `light`, `power`,
+ * `temperature`, `park`, `wait` and `note` produce neither, and a loop's kind
+ * is the loop. Counted as a shot producer, a long `wait` read `shot 0` for
+ * its whole execution and a settling temperature looked like a step that
+ * runs, which `ui-rules` §5 says it must never.
+ *
+ * A whitelist, not a blacklist: a module the service adds later gets no
+ * counter until this file knows what it acquires, and no counter is better
+ * than a wrong one.
+ */
+const SHOT_KINDS = new Set(['bace']);
+const CURVE_KINDS = new Set(['jv', 'jv_bace']);
 
 /** The seven segments of a shot, in the order `run_transient_scan` yields them. */
 export const PHASES = ['levels', 'light settle', 'acquire light', 'dark levels', 'dark settle', 'acquire dark', 'process'];
@@ -98,19 +114,30 @@ export function loopCounters(record, path) {
  * it is the floor.
  */
 export function shotCounter(record, node) {
-  // A loop node has no shots of its own: while a temperature settles the
-  // run is *at* `T=250K`, and a counter reading `shot 0` there would be the
-  // step that "runs" §5 says a settle must never look like.
-  if (!node || LOOP_KINDS.has(node.kind)) return null;
-  const isJv = node.kind === 'jv' || node.kind === 'jv_bace';
-  const kept = typeof node.kept === 'number' ? node.kept : (isJv ? node.curves.length : node.shots.length);
+  if (!node) return null;
+  const curves = (node.curves || []).length;
+  const shots = (node.shots || []).length;
+  const isJv = CURVE_KINDS.has(node.kind) || (!node.kind && curves > 0);
+  const acquires = isJv || SHOT_KINDS.has(node.kind) || (!node.kind && shots > 0);
+  // An unknown kind with nothing acquired says nothing; a node whose
+  // `NodeStarted` left the ring is read from what it has produced instead.
+  if (!acquires) return null;
+  const kept = typeof node.kept === 'number' ? node.kept : (isJv ? curves : shots);
   const requested = typeof node.requested === 'number' ? node.requested : null;
   const started = record.step;
   const step = !isJv && !node.outcome && started
     && (started.node_path || '') === (node.node_path || '')
     && typeof started.index === 'number' && started.index + 1 >= kept
     ? started : null;
-  const nth = step ? Math.max(kept, step.index + 1) : kept;
+  // A J-V has no per-curve start: `JVStarted`, then a blocking sweep that is
+  // minutes on the rig, then `JVCurveDone`. Counted from `kept` the monitor
+  // would read `curve 0 of 2` for the whole of the first one, so an open node
+  // is inside the curve after the last one that finished — capped, because
+  // the sweep that has just finished the last curve is not starting another.
+  const inFlight = isJv && !node.outcome
+    ? Math.min(kept + 1, requested === null ? kept + 1 : requested)
+    : null;
+  const nth = step ? Math.max(kept, step.index + 1) : inFlight ?? kept;
   const parts = [`${isJv ? 'curve' : 'shot'} ${nth}${requested !== null ? ' of ' + requested : ''}`];
   if (step) {
     parts.push(`loop ${step.loop}`);
@@ -277,8 +304,21 @@ function etaOf(outer, record, nowTs) {
     : record.progress && record.progress.eta_s !== null && record.progress.eta_s !== undefined ? record.progress
       : null;
   if (!source) {
-    return record.eta && record.eta.eta_s !== undefined
-      ? { seconds: record.eta.eta_s, finish_at: record.eta.finish_at, from: 'record' } : null;
+    if (record.eta && record.eta.eta_s !== undefined) {
+      return { seconds: record.eta.eta_s, finish_at: record.eta.finish_at, from: 'record' };
+    }
+    // A J-V emits `Progress` with `eta_s: null` deliberately — there is
+    // nothing measured to re-derive from until a curve finishes — and
+    // `record.eta` is the executor's, which a manual run has none of. What is
+    // left is the cost model's prediction, made when the run was submitted
+    // (`/bench`'s `run.finish_at`, `GET /runs/{id}`'s `cost.finish_at`). It
+    // is the only ETA a slow sweep ever has, and it is labelled as what it
+    // is: predicted, not measured.
+    if (record.finish_at) {
+      const at = nowTs !== null && nowTs !== undefined ? nowTs : Date.now() / 1000;
+      return { seconds: Math.max(0, record.finish_at - at), finish_at: record.finish_at, from: 'predicted' };
+    }
+    return null;
   }
   const finishAt = (source.ts || 0) + source.eta_s;
   const now = nowTs !== null && nowTs !== undefined ? nowTs : source.ts || 0;
@@ -385,8 +425,12 @@ function liveRow(model) {
   kids.push(h('span.spacer'));
   if (model.eta) {
     kids.push(h('span.mon-eta', {
-      title: model.eta.from === 'executor' ? 'the executor\'s ETA, re-derived from what this run has measured' : 'the module\'s own estimate',
-      text: `ETA ${fmt.duration(model.eta.seconds)} · finish ${fmt.clock(model.eta.finish_at)}`,
+      title: model.eta.from === 'executor'
+        ? 'the executor\'s ETA, re-derived from what this run has measured'
+        : model.eta.from === 'predicted'
+          ? 'the cost model\'s prediction, made when the run was submitted — nothing has been measured to re-derive it from yet'
+          : 'the module\'s own estimate',
+      text: `${model.eta.from === 'predicted' ? 'ETA ~' : 'ETA '}${fmt.duration(model.eta.seconds)} · finish ${fmt.clock(model.eta.finish_at)}`,
     }));
   }
   return kids;

@@ -162,6 +162,17 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         if ((verdict.ts || 0) > readAt) replaceVerdict(merged, verdict);
       }
       state.verdicts = merged;
+      // The cost model's finish time is a *constant* of the run, computed when
+      // it was submitted (`session.py`: `rec.cost`), so unlike `run`, `queue`
+      // and `state` it cannot race the stream and is taken from a read-back
+      // too. That is the only path it ever arrives by for a run started while
+      // the console was open: the boot snapshot is older than the run, and
+      // `applyRunRecord` is asked only when the ring fell short. Without it a
+      // J-V — whose every `Progress` carries `eta_s: null` on purpose — shows
+      // no ETA at all for the whole of a sweep that is minutes on the rig.
+      if (bench.run && bench.run.run_id && bench.run.finish_at) {
+        run(bench.run.run_id).finish_at = bench.run.finish_at;
+      }
       if (!readBack) {
         state.queue = bench.queue || [];
         state.benchState = bench.state || 'idle';
@@ -231,6 +242,9 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
       }
       if (payload.progress && !record.progress) record.progress = payload.progress;
       if (payload.eta && !record.eta) record.eta = payload.eta;
+      if (payload.cost && payload.cost.finish_at && !record.finish_at) {
+        record.finish_at = payload.cost.finish_at;
+      }
       adoptPending(record, payload.pending);
       if (payload.error && !record.error) record.error = { text: payload.error, where: '', ts: null };
       record.hydrated = true;
@@ -699,8 +713,13 @@ function keepTraces(traced, shot, previous) {
 function adoptPending(record, pending) {
   if (!record || !pending || !pending.what) return;
   if (record.parked_at || TERMINAL.has(record.state)) return;
-  if (record.needsOperator) return;
   const since = pending.since || 0;
+  // Newer than the prompt in hand, or there is no prompt. A console that was
+  // away while another client answered one pause and the run opened the next
+  // holds a prompt for a node the run has left — and Resume answers *the*
+  // open pause, whichever it is, so the operator would type a temperature
+  // for T=250K into the pause at T=280K and the metadata would say so.
+  if (record.needsOperator && (record.needsOperator.ts || 0) >= since) return;
   if (record.resumes.some((resume) => (resume.ts || 0) >= since)) return;
   record.needsOperator = {
     what: pending.what, node_path: pending.node_path || '',
@@ -765,7 +784,8 @@ export function emptyRun(runId) {
     shots: [], shotsByKey: {}, lastShot: null, shotWarnings: [],
     loops: [], q_mean: null, q_std: null,
     curves: [], jv: null, jvFinished: null, seriesPoints: [],
-    progress: null, progressByNode: {}, eta: null, finished: null, aborted: null, error: null,
+    progress: null, progressByNode: {}, eta: null, finish_at: null,
+    finished: null, aborted: null, error: null,
     needsOperator: null, resumes: [],
     nodes: {}, verdicts: [], notices: [], instruments: {}, hydrated: false,
     kept: null, requested: null,

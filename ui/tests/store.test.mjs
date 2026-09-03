@@ -573,3 +573,43 @@ test('a pause does not outlive the run it belonged to', () => {
     pending: { what: 'temperature', node_path: 'T=250K', since: 5, detail: {} } });
   assert.equal(s.getState().runs.r1.needsOperator, null, 'nobody is waiting for an answer');
 });
+
+test('a pause the run has moved on from is replaced by the one that is open', () => {
+  // This console was away while another client answered T=250K and the run
+  // opened T=280K, and those frames left the ring. Resume answers *the* open
+  // pause, so a prompt still showing the old node would have the operator
+  // type a temperature for a node the cryostat has left.
+  const s = store();
+  s.applyFrame({ seq: 1, ts: 1, run_id: 'r1', node_path: '', type: 'RunQueued', data: { kind: 'pipeline' } });
+  s.applyFrame({ seq: 2, ts: 100, run_id: 'r1', node_path: 'T=250K', type: 'NeedsOperator',
+    data: { what: 'temperature', node_path: 'T=250K', detail: { setpoint_k: 250 } } });
+  assert.equal(s.getState().runs.r1.needsOperator.node_path, 'T=250K');
+
+  s.applyBench({ state: 'paused', queue: [], instruments: {}, verdicts: [],
+    run: { run_id: 'r1', state: 'paused', node_path: 'T=280K',
+      pending: { what: 'temperature', node_path: 'T=280K', since: 900, detail: { setpoint_k: 280 } } } });
+  const held = s.getState().runs.r1.needsOperator;
+  assert.equal(held.node_path, 'T=280K', 'the open one');
+  assert.equal(held.detail.setpoint_k, 280);
+
+  // And a snapshot older than the prompt in hand changes nothing.
+  s.applyBench({ state: 'paused', queue: [], instruments: {}, verdicts: [],
+    run: { run_id: 'r1', state: 'paused',
+      pending: { what: 'temperature', node_path: 'T=250K', since: 100, detail: { setpoint_k: 250 } } } });
+  assert.equal(s.getState().runs.r1.needsOperator.node_path, 'T=280K');
+});
+
+test('the cost model\'s finish time is kept, for the runs that have no measured ETA', () => {
+  const s = store();
+  // On a read-back too: that is the only path it takes for a run started
+  // while the console was open, and it is a constant of the run rather than
+  // a state that could race the stream.
+  s.applyBench({ state: 'running', queue: [], instruments: {}, verdicts: [],
+    run: { run_id: 'r1', state: 'running', finish_at: 1788400000 } }, { readBack: true });
+  assert.equal(s.getState().runs.r1.finish_at, 1788400000);
+  assert.equal(s.getState().activeRunId, null, 'and the run block itself is still the stream\'s');
+
+  const other = store();
+  other.applyRunRecord({ run_id: 'r2', state: 'running', cost: { finish_at: 1788400111, lower_bound: false } });
+  assert.equal(other.getState().runs.r2.finish_at, 1788400111);
+});
