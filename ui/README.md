@@ -28,8 +28,13 @@ repo root for the offline bench at `/ui/replay.html`, which needs
 | `lib/card.js` | the generated card and the one field component every parameter goes through: provenance rendered, `doc` under the field and `doc_full` on hover |
 | `lib/watch.js` | when to ask `GET /bench` again — which frames move the bench, and the throttle that collapses a scan's worth of them into one request per 700 ms |
 | `lib/dom.js` | `h()`, and `keyed()`: rebuild an element only when its model differs from the one already on screen |
+| `lib/svg.js` | `h()` in the SVG namespace, because `createElement('svg')` is an `HTMLUnknownElement` — a tag with the right name and no geometry |
+| `lib/scale.js` | the scale and axis foundation, and the only thing in `ui/` written from nothing: linear and log scales, nice ticks, and the min/max thinning that keeps a transient's peak when 4000 samples go into 450 pixels |
+| `lib/charts/frame.js` | stacked panels over one x axis (or one each), their gridlines, captions, shading and crosshair. Every chart returns a *model* and this draws any of them |
+| `lib/charts/jv.js`, `transient.js`, `timing.js` | the three M3 components, as pure functions of the data — the same split the rail has |
+| `lib/results.js` | what goes in a card's result slot, and the key it is rebuilt on: the chart moves with every shot, the form does not |
 | `lib/replay.js`, `replay.html` | the offline bench: fixtures fed into the same store the socket feeds |
-| `views/` | bench is M2's six generated cards; pipeline · results · rig are stubs, and each says which milestone fills it |
+| `views/` | bench is M2's six generated cards with M3's charts in three of them; pipeline · results · rig are stubs, and each says which milestone fills it |
 | `fonts/` | IBM Plex Sans and Mono, Archivo — 24 woff2, 387 KB, lifted out of the Round 3 mockup by `tools/extract_ui_fonts.py`. Nothing is fetched from a network at runtime |
 | `fixtures/` | see below |
 | `tests/` | `node --test ui/tests/…` — and `tests/test_ui.py` runs them from the Python suite, skipping where there is no Node |
@@ -151,8 +156,142 @@ Reproduce any of it with a browser and `playwright-core`; the shapes are in
 **M2 is built**: `lib/fields.js` decides which rows a card has, `lib/card.js`
 draws them, and `views/bench.js` is the loop between them — six generated
 cards, the `edited` layer through `PUT`, and Start disabled by `invalid` *and*
-by `crit`. **M3 is next**: the scale and axis foundation, then the J-V and
-transient charts.
+by `crit`.
+
+**M3 is built**: the scale and axis foundation, then the J–V, the transient
+and the timing diagram, each in the card that owns it. **M4 is next** — the
+live monitor, and Q per loop / Q(axis) with the zero-width-axis switch drawn
+rather than silent.
+
+### What the charts are for, and the three places they part from the artboards
+
+The domain rules are the component, and every one of them is a test in
+`tests/charts.test.mjs` rather than a paragraph here: `density` is mA/cm² and
+the chart converts nothing; no pixel area means the axis is **amps**, never a
+density with an invented area; `metrics.jsc` keeps its amps because it is
+interpolated from the current; light, dark and photocurrent share a frame,
+because the photocurrent alone hides the failure where both parents sit on the
+digitiser's rail; a shot with no arrays states which of the two absences it is;
+σ_Q = 0 is *not recorded*.
+
+Three departures, all deliberate:
+
+* **The running integral gets its own panel.** `ch-transient` puts it on a
+  second y scale inside the photocurrent panel. Two scales in one frame make
+  the crossing point mean nothing, and `ui-rules` §4 asks for the *space*, not
+  the overlay — stacked on the same x, the charge still flattens where the
+  photocurrent decays, and there is one axis per panel.
+* **The illumination ramp is one hue.** The design's five values
+  (`#bab6b6 · #9b9797 · #ff9783 · #ff563c · #ae1800`) splice a grey pair to a
+  red trio, and measured in OKLab the first and third have the *same*
+  lightness, as do the second and fourth. Five levels that cannot be put in
+  order are not a sequential encoding, so this is the red half continued,
+  strictly darkening 0.78 → 0.48.
+* **The timing diagram is on the `bace` card**, where `docs/ui-plan.md` puts
+  it, not on the rig tab where R3·4 draws it. It is a function of the *form*:
+  it redraws as the operator types, and a wrong `output_polarity`, a delay
+  before its own trigger or a duty that has shortened the illumination is
+  visible before the run rather than in the file afterwards.
+
+The diagram is the code's own arithmetic, not a picture of it — the seven
+`StepPhase` segments in the order `run_transient_scan` yields them (six under
+`dark_reference = "same"`, which is also the case where `dark_settle_s` never
+sleeps at all), the shutter moves and the power read placed where the code
+does them since those are not reported, the lit fraction as `100 - duty` under
+the 33220A's INV, and the 81150A at INV resting the device at V_coll so
+extraction never stops (`docs/README.md`, the overturned table ④).
+
+### What a scan costs the console, with the charts in it
+
+M1 and M2 were each measured in a headless browser on a live `--sim --fast`
+scan rather than read off the screen, and M3 is held to the same bar. Same
+shape as before — one 21 x 60 scan, 1260 shots, about nine seconds — with a
+parameter field focused *after* the run started, so the one card rebuild that
+`busy` causes is not mistaken for the thing being measured:
+
+| | M3, first cut | M3, shipped |
+|---|---|---|
+| chart redraws | 4 043 | **184** |
+| SVG elements built | 77 282 | **3 543** |
+| HTML elements built | 23 818 | **10 275** |
+| JS heap at the end | 42.7 MB | **11.0 MB** |
+| `GET /bench`, median | 31.4 ms | **16.8 ms** |
+| `GET /bench`, worst | 204 ms | **56.4 ms** |
+| longest stretch with the rail unchanged | 2.9 s | **2.1 s** — the rail's own throttle |
+| a caret held in a parameter field | kept | kept |
+| shots folded | 1260 / 1260 | 1260 / 1260 |
+
+The first cut redrew every chart on every shot, which under `--sim --fast` is
+130 redraws a second of a plot no eye can follow — the M1 finding again, at
+chart scale, and it took `GET /bench` with it because they share a main
+thread. The answer is the one the rail already uses: **`REDRAW_MS`, a
+`REFETCH_MS` for pixels** (`lib/results.js`). A shot on the rig takes about
+0.8 s (`journal.shot_time_s`), so on the bench nothing is throttled at all;
+it exists for the simulator.
+
+The two cadences are not the same, and the key says so. `resultKeys` splits
+into a **form** half and a **data** half: anything the operator did — a
+keystroke, a bench read-back — draws at once, because a timing diagram that
+lags half a second behind the typing is not a function of the form; a shot
+draws through the throttle, and the deferred draw paints the *newest* shot
+rather than the one that was pending, because the frames in between are an
+animation nobody asked for.
+
+The card and its charts are keyed **apart**. One key for both would rebuild
+six cards' worth of fields between two shots, which is decision 5's failure
+with a chart in front of it: measured over the scan, 27 card rebuilds against
+184 chart redraws, and the caret survives.
+
+### What the review found
+
+Seven defects, all real, and all but one in the claims the charts make about
+the instrument rather than in how they draw:
+
+* **The record does not begin at the trigger.** `configure_timebase` writes
+  `:TIM:RANG` of ten divisions and `:TIM:POS` of *four*, so the record runs
+  from one division before the trigger to nine after it. Drawn from zero,
+  every edge and the whole shaded window sat a division early, and a window in
+  the tenth division was shown inside a record that had already ended. Both
+  recordings agree with the correction: at 200 ns/div the sim trace carries
+  `t0 = −200 ns` and the rig day's `−199.5 ns`.
+* **An unread LED polarity was drawn as INV.** `?` is what a driver answers
+  for a failed query and an absent chain is a bench nobody has read; neither
+  is the expected polarity. It now stays unknown — no light waveform, a
+  `warn`, and the Sync edge's meaning left unstated.
+* **`Math.abs(null)` is 0, and 0 is finite.** A sample the instrument never
+  returned became a point on the log floor with the dark curve drawn through
+  it: a leakage measurement out of an absence.
+* **The integration window was pinned to the form.** With
+  `t0_int_reference = "pulse"` the service recomputes it from each shot's own
+  `:PULS:DEL1`, and `run-bace.toml` sweeps exactly that axis — so the shading
+  stood still while the real window moved with every point. It takes the
+  shot's setpoint now, and `trigger_offset_s` with it.
+* **A pipeline's results never reached the card that produced them.** A
+  pipeline's `RunQueued.module` is `null` and the module names live on the
+  nodes, as `NodeStarted.data.kind` — so the result panel is per *node* now,
+  which is what M0 left on record for M5 anyway: each node numbers its shots
+  from one, and the run-level pointer is whichever node moved last.
+* **The J–V ramp encoded the curve, not the illumination.** Under
+  `both_directions` one level's forward and reverse arms took the brightest
+  and the darkest slot — two illuminations that never existed. And they shared
+  a *key*, so the crosshair built two dots with one identity, updated the
+  first for both, and drew the reverse arm's value in the forward arm's
+  colour.
+
+### What rendering it found
+
+The models are tested in `node`, and three faults were still only visible in a
+browser — which is the argument for looking at the thing:
+
+* every thinned column whose midpoint was not a whole number **collapsed to
+  x = 0**, because the x mapping is routinely a lookup into the sample times
+  and `time_s[1234.5]` is `undefined`;
+* the light-at-the-sample waveform, whose late edge wraps past the end of the
+  period, drew a second line **travelling backwards** across the panel;
+* half the timing diagram's captions printed over the waveform above them.
+
+Reproduce with `python3 tools/serve_ui.py` and `ui/replay.html`, which now
+draws all three charts off the fixtures with no service at all.
 
 The cards are keyed on their own model, for the reason the rail is: measured
 before it, all six were rebuilt **737 times each in four seconds** of a scan,

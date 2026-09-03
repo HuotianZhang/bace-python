@@ -179,3 +179,123 @@ test('keyed owns the children, and says so by not restoring what it did not remo
   assert.equal(keyed(el, 'absent+emptied', build), true);
   assert.equal(built, 2);
 });
+
+// -- M3: the chart is keyed apart from the card it sits in ----------------
+
+test('a shot moves the result key and leaves the card\'s own key alone', async () => {
+  // The card's key is `cardModel` plus its checks and its folds; the chart's
+  // is the data behind it. Sharing one key would rebuild six cards' worth of
+  // fields on every shot of a scan, which is the M2 failure with a chart in
+  // front of it: a rebuilt field is a different field, and the caret goes with
+  // the old one.
+  const { resultKey } = await import('../lib/results.js');
+  const entry = { name: 'bace', params: [{ name: 'vpre', value: 1.0 }] };
+  const bench = { chain: { items: [] }, rig: { values: {} } };
+  const shot = (index, ts) => ({ node_path: 'bace', loop: 1, index, ts, tracesGone: false });
+  const node = { node_path: 'bace', kind: 'bace', curves: [], shots: [shot(1, 10)], lastShot: shot(1, 10) };
+  const found = { record: { run_id: 'r1', state: 'running' }, node };
+
+  const first = resultKey('bace', entry, found, bench);
+  assert.equal(resultKey('bace', entry, found, bench), first, 'nothing new, nothing rebuilt');
+
+  node.lastShot = shot(2, 11);
+  assert.notEqual(resultKey('bace', entry, found, bench), first, 'a shot redraws the chart');
+
+  // And an edit to the form moves it too, because the timing diagram is a
+  // function of the form: that is the whole reason it is on this card.
+  const edited = { name: 'bace', params: [{ name: 'vpre', value: 1.1 }] };
+  assert.notEqual(resultKey('bace', edited, found, bench),
+    resultKey('bace', entry, found, bench));
+});
+
+test('a shot draws through the throttle; a keystroke does not wait on one', async () => {
+  // Measured on a live `--sim --fast` 21 x 60 scan with the charts in: 4043
+  // chart rebuilds for 1260 shots, 77 282 SVG elements, and a heap of
+  // 42.7 MB against M2's 9.8 MB. A shot on the rig takes ~0.8 s and draws
+  // every time; this exists for the simulator, which delivers 130 a second.
+  const { createChartThrottle } = await import('../lib/results.js');
+  let clock = 0;
+  const timers = [];
+  const charts = createChartThrottle({
+    redrawMs: 500,
+    now: () => clock,
+    setTimeoutImpl: (fn, ms) => { timers.push({ fn, at: clock + ms }); return timers.length; },
+    clearTimeoutImpl: (id) => { if (timers[id - 1]) timers[id - 1].cancelled = true; },
+  });
+  const run = () => {
+    for (const t of timers) {
+      if (!t.cancelled && !t.done && t.at <= clock) { t.done = true; t.fn(); }
+    }
+  };
+
+  let painted = 0;
+  const paint = () => { painted += 1; };
+
+  charts.request('bace', { paint });                 // the first draw is never deferred
+  assert.equal(painted, 1);
+
+  clock = 10;
+  for (let i = 0; i < 50; i += 1) { clock += 5; charts.request('bace', { paint }); }
+  assert.equal(clock, 260, 'still inside the window');
+  assert.equal(painted, 1, 'fifty shots inside the window drew nothing new');
+
+  clock = 520;
+  run();
+  assert.equal(painted, 2, 'and the last of them drew when the window opened');
+
+  // An edit is never deferred, whatever the scan is doing.
+  clock = 530;
+  charts.request('bace', { immediate: true, paint });
+  assert.equal(painted, 3);
+
+  // A deferred draw is never dropped: the run ends, no further request comes,
+  // and the timer still paints the final shot.
+  clock = 600;
+  charts.request('bace', { paint });
+  assert.equal(painted, 3, 'deferred');
+  clock = 1200;
+  run();
+  assert.equal(painted, 4, 'the last shot of a run is drawn even though nothing asked again');
+  assert.deepEqual(charts.stats(), { drawn: 4, deferred: 51 });
+});
+
+test('the deferred draw paints the newest state, not the one that was pending', async () => {
+  const { createChartThrottle } = await import('../lib/results.js');
+  let clock = 0;
+  const timers = [];
+  const charts = createChartThrottle({
+    redrawMs: 100,
+    now: () => clock,
+    setTimeoutImpl: (fn, ms) => { timers.push({ fn, at: clock + ms }); return timers.length; },
+    clearTimeoutImpl: () => {},
+  });
+  const seen = [];
+  charts.request('bace', { paint: () => seen.push('first') });
+  clock = 10;
+  charts.request('bace', { paint: () => seen.push('second') });
+  clock = 20;
+  charts.request('bace', { paint: () => seen.push('third') });
+  clock = 200;
+  for (const t of timers) if (!t.done && t.at <= clock) { t.done = true; t.fn(); }
+  assert.deepEqual(seen, ['first', 'third'], 'the middle frame is one nobody could have read');
+});
+
+test('the form half and the data half of the result key move apart', async () => {
+  const { resultKeys } = await import('../lib/results.js');
+  const entry = { name: 'bace', params: [{ name: 'vpre', value: 1.0 }] };
+  const bench = { chain: { items: [] }, rig: { values: {} } };
+  const node = { node_path: 'bace', kind: 'bace', curves: [], shots: [],
+    lastShot: { node_path: 'bace', loop: 1, index: 1, ts: 10, tracesGone: false } };
+  const found = { record: { run_id: 'r1', state: 'running' }, node };
+
+  const first = resultKeys('bace', entry, found, bench);
+  node.lastShot = { ...node.lastShot, index: 2, ts: 11 };
+  const afterShot = resultKeys('bace', entry, found, bench);
+  assert.equal(afterShot.form, first.form, 'a shot says nothing about the form');
+  assert.notEqual(afterShot.data, first.data);
+
+  const edited = { name: 'bace', params: [{ name: 'vpre', value: 1.1 }] };
+  const afterEdit = resultKeys('bace', edited, found, bench);
+  assert.notEqual(afterEdit.form, afterShot.form, 'and an edit redraws at once');
+  assert.equal(afterEdit.data, afterShot.data);
+});

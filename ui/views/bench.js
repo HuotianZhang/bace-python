@@ -12,9 +12,10 @@
 // posts and re-reads the bench. No value is cached here, because a cached
 // value is a second opinion about a number the service is the authority on.
 
-import { h, fill } from './../lib/dom.js';
+import { h, fill, keyed } from './../lib/dom.js';
 import { moduleCard } from './../lib/card.js';
 import { BENCH_CARDS, cardModel } from './../lib/fields.js';
+import { RESULT_CARDS, createChartThrottle, resultKeys, resultPanel, runFor } from './../lib/results.js';
 
 export default {
   route: 'bench',
@@ -179,6 +180,11 @@ export default {
         // a Start would queue behind it — so the cards say so rather than
         // offering buttons that will be refused.
         busy: Boolean(run && !run.parked_at),
+        // Whether the card is built with a result slot beside its form. Not
+        // *what* goes in it: the slot is filled after the card is built, and
+        // keyed on its own data, so a shot arriving redraws a chart and not a
+        // card (`lib/results.js`).
+        hasResult: (name) => RESULT_CARDS.has(name),
         toggle(name, group) {
           const set = opened(name);
           if (set.has(group)) set.delete(group); else set.add(group);
@@ -251,6 +257,10 @@ export default {
     const held = new Map();
     let order = '';
 
+    /** The result panels' redraw throttle, and the form key each last drew. */
+    const charts = createChartThrottle();
+    const drawn = new Map();
+
     /**
      * Everything `moduleCard` draws from, as one string.
      *
@@ -274,6 +284,7 @@ export default {
       const names = BENCH_CARDS.filter((n) => byName[n]);
       if (!names.length) {
         held.clear();
+        drawn.clear();
         order = '';
         // Plain `fill`, not `dom.keyed`: `keyed` owns an element's children,
         // and the loop below manages `body`'s directly. Keyed here, `body`'s
@@ -291,6 +302,7 @@ export default {
         // a module that was not in it before. Start the row again.
         order = names.join(',');
         held.clear();
+        drawn.clear();
         fill(body);
       }
       for (const name of names) {
@@ -298,11 +310,19 @@ export default {
         const open = opened(name);
         const key = cardKey(entry, c, open);
         const was = held.get(name);
-        if (was && was.key === key) continue;
+        if (was && was.key === key) {
+          // The card is unchanged; its result may not be. The two are keyed
+          // apart on purpose — the chart moves with every shot and the form
+          // does not, and rebuilding the form to redraw the chart would take
+          // the operator's caret out of a field between two shots.
+          renderResult(name);
+          continue;
+        }
         const card = moduleCard(entry, c, open);
         if (was && was.el.parentNode === body) body.replaceChild(card, was.el);
         else body.append(card);
         held.set(name, { key, el: card });
+        renderResult(name);
       }
 
       // Several of the checks are about the bench rather than the values —
@@ -317,8 +337,53 @@ export default {
       }
     }
 
+    /**
+     * The result panel beside one card's form: the timing diagram the form
+     * describes, and the transient or the J–V the run produced.
+     *
+     * `keyed` owns the slot's children, and the slot is a fresh empty element
+     * whenever the card around it was rebuilt — so a rebuilt card refills
+     * here rather than losing its chart, and an unchanged card redraws only
+     * when the data behind the chart moved.
+     *
+     * Two cadences, because the two halves of that key deserve different
+     * ones. Anything the operator did — a keystroke, a bench read-back — draws
+     * at once: the timing diagram is a function of the form, and a form whose
+     * picture lags half a second behind the typing is not one. A shot draws
+     * through the throttle, because `--sim --fast` delivers 130 a second and
+     * the measurement said what that costs (`lib/results.js`, `REDRAW_MS`).
+     *
+     * Everything is re-read inside `paint`, never captured here: a deferred
+     * redraw must show the newest shot, and the card element it draws into may
+     * have been replaced while it waited.
+     */
+    function renderResult(name) {
+      const holder = held.get(name);
+      if (!holder || !holder.el.querySelector('.res')) return;
+      const state = store.getState();
+      const entry = state.modules.byName[name];
+      if (!entry) return;
+      const keys = resultKeys(name, entry, runFor(state, name), state.bench);
+      const slot = holder.el.querySelector('.res');
+      const paint = () => {
+        const now = store.getState();
+        const current = held.get(name);
+        const target = current && current.el.querySelector('.res');
+        const fresh = current && now.modules.byName[name];
+        if (!target || !fresh) return;
+        const found = runFor(now, name);
+        const k = resultKeys(name, fresh, found, now.bench);
+        drawn.set(name, k.form);
+        keyed(target, `${k.form}|${k.data}`,
+          () => resultPanel(name, { entry: fresh, found, bench: now.bench }));
+      };
+      // A slot with no key has just been built with the card around it, and an
+      // empty result panel for half a second is a card that looks broken.
+      charts.request(name, { immediate: slot.__key === undefined || drawn.get(name) !== keys.form, paint });
+    }
+
     const off = store.subscribe(render);
     render();
-    return { dispose: off };
+    return { dispose() { off(); charts.dispose(); } };
   },
 };

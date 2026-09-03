@@ -582,6 +582,68 @@ absurd delay becomes visible **before** the run.
 **Proves:** the run from M2 draws; the HDF5 fixture draws; an operator can
 reject a bad shot definition without running it.
 
+**Built 2026-09-03.** `lib/scale.js` and `lib/charts/frame.js` are the
+foundation — a model per chart, one renderer for any of them, the same split
+`railModel` has had since M1 — and `lib/charts/{jv,transient,timing}.js` are the
+three components. They land in the card that owns them, through a **slot**
+`views/bench.js` fills and keys separately (`lib/results.js`): the chart moves
+with every shot and the form does not, and one key for both would rebuild six
+cards' worth of fields between two shots of a scan, which is decision 5's
+failure with a chart in front of it.
+
+Three decisions worth recording, because each departs from something:
+
+* **No two y scales in one panel.** `ch-transient` overlays the running
+  integral on the photocurrent with a right-hand axis. §4 asks for the space,
+  not the overlay, so the integral is a third panel on the same x: the charge
+  still flattens where the photocurrent decays, and nothing crosses a curve it
+  shares no scale with.
+* **The illumination ramp is single-hue.** The design's five values are a grey
+  pair spliced to a red trio, and in OKLab the first and third are the same
+  lightness (0.78), as are the second and fourth (0.68). A sequential encoding
+  that cannot be ordered is not one, so the ramp is the red half continued.
+* **The timing diagram is on the `bace` card**, as this file's own component
+  table says, rather than on the rig tab where R3·4 draws it. Confirmed with
+  the user, 2026-09-03.
+
+**Then measured**, on the same 21 x 60 `--sim --fast` scan M1 and M2 were held
+to. The first cut redrew every chart on every shot — 130 a second under
+`--fast`, 4043 redraws and 77 282 SVG elements for a plot no eye can follow,
+and it took `GET /bench` with it (median 31 ms, worst 204 ms) because they
+share a main thread. `REDRAW_MS` in `lib/results.js` is the answer, and it is
+`REFETCH_MS` for pixels: 4043 → 184 redraws, 77 282 → 3 543 elements, 42.7 →
+11.0 MB of heap, the worst `GET /bench` 204 → 56 ms, and the longest stale
+stretch back to the rail's own 2.1 s throttle. A shot on the rig takes ~0.8 s,
+so on the bench nothing is throttled; this exists for the simulator. The
+result key splits into a form half and a data half so that the two cadences
+can differ — typing draws at once, shots draw through the throttle — and the
+deferred draw paints the newest shot rather than the one that was pending.
+
+**Seven more came out of review.** Four are claims about the instrument: the
+record begins one division *before* the trigger (`:TIM:POS` is four of ten
+divisions — and both recordings' `t0` agree, −200 ns at 200 ns/div); an unread
+LED polarity was drawn as the expected INV rather than left unknown;
+`Math.abs(null)` is a finite 0, so a missing sample became a point on the dark
+sweep's log floor; and a `pulse`-referenced integration window was pinned to
+the form's `delay_ns` instead of the shot's own setpoint, which stands still on
+exactly the axis that moves it. Two are the J–V's colour and identity under
+`both_directions`: the ramp ranked curves rather than illumination levels, so
+one level's two arms became the brightest and the darkest, and they shared a
+series key, so the crosshair drew the reverse arm's value in the forward arm's
+colour. The seventh is M5's, arriving early — the result panel found its run by
+`RunQueued.module`, which is `null` for a pipeline, so a tree's nodes drew
+nothing on the cards that produced them. It is per node now, which is what this
+file's own M5 note asks for.
+
+And three faults that the models could not show, found by rendering the thing
+in a browser: a thinned column placed at a *fractional* index collapsed to
+x = 0 wherever the x mapping was a lookup into the sample times; the
+light-at-the-sample waveform, whose late edge wraps past the end of the period,
+drew a line travelling backwards across the panel; and half the timing
+captions printed over the waveform above them. All three are held down now —
+the first two by `tests/scale.test.mjs` and `tests/charts.test.mjs`, the third
+by the row geometry that gives every signal its own caption line.
+
 ### M4 · What a run looks like while it runs
 
 The live monitor: `StepPhase` as the shot-segment indicator, decimated traces
@@ -679,7 +741,7 @@ that have not started. They are here so they are not rediscovered there:
 | anything on the rig | the folder-name defect in `docs/naming-plan.md` §2 — `material = "PTQ10:IT-4F"` builds a path segment with a colon, which fails on Windows and passes on Linux |
 | M6 | `docs/naming-plan.md` rule 1 — the journal carries the sample block and the temperature triple on every node, **and `GET /runs` exposes them on each row**; writing them into `SessionStarted` alone leaves `run_index()` emitting summaries with no identity |
 | M6 | a Round 3 design pass on results, with the user, in Claude Design |
-| M3 | nothing — the chart foundation is new code with no service dependency |
+| M3 | ~~nothing — the chart foundation is new code with no service dependency~~ **built 2026-09-03**; nothing in the service changed |
 
 Nothing else in the service is on the critical path. The API is complete for
 M0–M5 as it stands.

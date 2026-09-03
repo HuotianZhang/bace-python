@@ -181,7 +181,8 @@ def test_every_offline_fixture_is_registered_and_present():
 @pytest.mark.skipif(shutil.which("node") is None, reason="no Node on this machine (the lab PC has none)")
 def test_the_console_suite_passes():
     """`node --test ui/tests/` — the fold, the socket, the numbers, the rail,
-    the card rows, and what the shell does per frame rather than what it draws.
+    the card rows, the scales and the charts, and what the shell does per frame
+    rather than what it draws.
 
     Every suite in `ui/tests/` but `live.test.mjs`, which needs a service. A
     suite that is written and not listed here does not run in CI or on the lab
@@ -190,6 +191,6 @@ def test_the_console_suite_passes():
     result = subprocess.run(
         ["node", "--test", "ui/tests/store.test.mjs", "ui/tests/stream.test.mjs",
          "ui/tests/format.test.mjs", "ui/tests/rail.test.mjs", "ui/tests/fields.test.mjs",
-         "ui/tests/render.test.mjs"],
+         "ui/tests/render.test.mjs", "ui/tests/scale.test.mjs", "ui/tests/charts.test.mjs"],
         cwd=REPO, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-2000:]
