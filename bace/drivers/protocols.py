@@ -222,7 +222,14 @@ class Shutter(Protocol):
 
 @runtime_checkable
 class PowerMeter(Protocol):
-    """Optical power reference (Newport 1918-C)."""
+    """Optical power reference (Newport 1918-C).
+
+    Two implementations, and only one may be live: `newport1918c.direct`
+    opens the USB device in this process (the default), `newport1918c.console`
+    asks the meter's own console over HTTP when that program holds the
+    handle. Only one process can hold the device, which is the whole reason
+    there are two.
+    """
 
     def set_wavelength(self, nm: float) -> None: ...
 
@@ -341,19 +348,21 @@ class TemperatureReading:
 
 @runtime_checkable
 class TemperatureController(Protocol):
-    """The cryostat's temperature controller (Lake Shore 331) -- as a
-    client of the console that owns it, not as a VISA driver.
+    """The cryostat's temperature controller (Lake Shore 331).
 
     The 331 answers only the last query it received and cannot arbitrate
-    between callers, so exactly one process may hold its GPIB session: on
-    this rig that is the 331 console (`D:\\TemperatureController`), which
-    polls it, logs it and enforces the setpoint ceiling. A second session
-    from here would interleave with that poller on the bus and the two would
-    read each other's replies -- the same one-owner rule the 1918-C meter
-    has. So the contract is the console's: write a setpoint, read the state,
-    mark the audit log. The heater range, the PID, the ramp and the loop
-    wiring are not in it, because the console offers the service no route to
-    them; what the console holds is what a run gets.
+    between callers, so exactly one process may hold its GPIB session. That
+    process is normally this one (`lakeshore331.controller`, the default),
+    and the rule is then kept by a lock rather than by a process boundary;
+    when the 331 console is running instead it owns the bus, and
+    `lakeshore331.console` asks it over HTTP. Two owners is the failure both
+    arrangements exist to prevent -- the same one-owner rule the 1918-C
+    meter has.
+
+    Either way the contract is small on purpose: write a setpoint, read the
+    state, mark the audit trail. The heater range, the PID, the ramp and the
+    loop wiring are not in it -- they are set on the front panel and only
+    read back -- so what the instrument holds is what a run gets.
     """
 
     def read(self) -> TemperatureReading: ...

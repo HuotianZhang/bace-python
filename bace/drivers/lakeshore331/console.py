@@ -38,7 +38,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from .protocols import TemperatureReading
+from ..protocols import TemperatureReading
 
 DEFAULT_CONSOLE = "http://127.0.0.1:8331"
 

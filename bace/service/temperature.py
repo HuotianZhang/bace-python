@@ -47,17 +47,21 @@ honoured at every poll, so the abort button is not dead for the length of a
 settle.
 
 **A refusal is not an outage.** The driver tells the two apart
-(`TemperatureError.refused`), and so does this helper: a 403 above the
-ceiling is `temperature.refused` (crit, the console's own sentence); a
-write the console did not answer is read back once -- a slow bus can apply
-a setpoint after the client gave up waiting -- and either settles as if the
+(`TemperatureError.refused`), and so does this helper: a setpoint above the
+ceiling is `temperature.refused` (crit, the controller's own sentence); a
+write that went unanswered is read back once -- a slow bus can apply a
+setpoint after the client gave up waiting -- and either settles as if the
 write had answered (with a notice) or pauses as `temperature.timeout` with
-`reason = "unreachable"`, which tells the operator to start the console, not
-to reconsider the setpoint.
+`reason = "unreachable"`, which tells the operator to fix the connection,
+not to reconsider the setpoint.
 
-Every temperature node is marked in the console's own audit log
-(`POST /api/note`, the hook its README reserves for the measurement program)
-at the setpoint write and at the settle, best effort: a log mark must never
+Both controllers raise the same `TemperatureError`, so this helper does not
+know or care which owns the instrument: `controller.DirectTemperatureController`
+on this process's GPIB session (the default) or `ConsoleTemperatureController`
+over HTTP when the 331 console holds the bus.
+
+Every temperature node is marked in the controller's audit trail at the
+setpoint write and at the settle, best effort: a log mark must never
 stop a run.
 """
 from __future__ import annotations
@@ -386,9 +390,10 @@ def settle(rig: Rig, ctx: "RunContext", detail: dict, *, node_path: str,
                 + last_text + " -- pausing for the operator")
     elif why == "unreachable":
         n = f"{p.misses} polls{stage}" if p.misses else "the setpoint write"
-        text = (f"{setpoint:g} K: the 331 console did not answer {n}"
+        text = (f"{setpoint:g} K: the 331 did not answer {n}"
                 + (f" ({p.error})" if p.error else "") + last_text
-                + " -- pausing for the operator; start the console, then resume or stop")
+                + " -- pausing for the operator; fix the connection, then resume "
+                  "or stop")
     else:
         text = (f"{setpoint:g} K not reached in {fmt_duration(p.elapsed)}: "
                 + (f"last reading {last_k:.2f} K" if last_k is not None else "no reading")

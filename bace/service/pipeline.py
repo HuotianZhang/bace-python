@@ -1532,41 +1532,46 @@ def _c_temperature_not_wired(f: _Facts) -> list[Verdict]:
     console = f.rig.temperature_console
     path = f.first_path(loops[0][0].key)
     t = f.instrument("temperature")
-    data: dict[str, Any] = {"setpoints": setpoints, "console": console,
+    # Where the 331 is, in words a verdict can end with. An empty `console` is
+    # the normal case now -- this process owns the instrument -- so it must
+    # never be rendered as a blank URL.
+    at = console or f.rig.temperature_address or "no address"
+    data: dict[str, Any] = {"setpoints": setpoints, "console": console, "at": at,
                             "wired": bool(t.get("wired", False)) if f.bench else None,
                             "connected": t.get("connected") if f.bench else None}
-    what = "simulated 331" if t.get("source") == "simulated" else "331 console"
+    what = {"simulated": "simulated 331", "console": "331 console",
+            "instrument": "331"}.get(t.get("source"), "331")
     if f.bench is not None and t.get("wired") and t.get("connected") is True:
         params = {k: loops[0][0].params.get(k, d) for k, d in TEMPERATURE_DEFAULTS.items()}
         text = (f"{what} attached: settles automatically at {where}, "
                 f"+/-{params['tolerance_k']:g} K, hold {fmt_duration(params['hold_s'])}, "
-                f"timeout {fmt_duration(params['timeout_s'])}; the console keeps its "
-                "ceiling and heater range")
+                f"timeout {fmt_duration(params['timeout_s'])}; the 350 K ceiling "
+                "and the heater range are read, never driven")
         return [_v("ok", "temperature.not-wired", text, path, **data,
                    tolerance_k=params["tolerance_k"], hold_s=params["hold_s"],
                    timeout_s=params["timeout_s"])]
     if f.bench is not None and t.get("wired") and t.get("error"):
-        text = (f"{what} attached at Start and not answering now -- the console at "
-                f"{console or '?'} did not answer the read-back ({t['error']}): the run "
-                f"pauses at {where} for the operator unless it answers again by then; "
-                "start the console")
+        text = (f"{what} attached at Start and not answering now -- {at} did not "
+                f"answer the read-back ({t['error']}): the run pauses at {where} for "
+                "the operator unless it answers again by then")
         return [_v("warn", "temperature.not-wired", text, path, **data, error=t.get("error"))]
     if f.bench is not None and t.get("wired") and t.get("connected") is None:
         text = (f"{what} attached and not read back yet: the run pauses at {where} "
-                "for the operator unless the console answers at the node")
+                "for the operator unless it answers at the node")
         return [_v("warn", "temperature.not-wired", text, path, **data)]
     if f.bench is not None and t.get("wired"):
-        text = (f"{what} named but silent -- the console at {console or '?'} is up "
-                f"and its instrument is not answering: the run pauses at {where} for "
+        text = (f"{what} attached but silent -- {at} is reachable and the "
+                f"instrument is not answering: the run pauses at {where} for "
                 "the operator")
         return [_v("warn", "temperature.not-wired", text, path, **data,
                    status=t.get("status_text"))]
     text = f"331 not wired: the run pauses at {where} for a manual set"
-    if console and f.bench is None:
-        text += (f"; {console} is named and not read back yet -- settles through it "
-                 "if it answers at Start")
-    elif console:
-        text += f"; {console} is named and not answering (start the 331 console)"
+    if f.bench is None:
+        text += (f"; {at} is not read back yet -- settles through it if it "
+                 "answers at Start")
+    else:
+        text += (f"; {at} is not answering"
+                 + (" (start the 331 console)" if console else ""))
         reason = (f.bench.get("unavailable") or {}).get("temperature")
         if reason:
             data["reason"] = reason
@@ -1646,18 +1651,21 @@ def _c_power_console(f: _Facts) -> list[Verdict]:
         return [_v("ok", "power.console", "no module reads the power meter")]
     available = _power_available(f)
     console = f.rig.power_meter_console
+    # As for the 331: with no console named this process owns the meter, so
+    # the verdict must name the meter and not an empty URL.
+    at = console or "the 1918-C on USB"
     if available is None:
-        return [_v("info", "power.console", f"power console {console} not read yet",
-                   console=console, readers=n)]
+        return [_v("info", "power.console", f"{at} not read yet",
+                   console=console, at=at, readers=n)]
     if available:
         watts = f.instrument("power").get("watts")
         return [_v("ok", "power.console",
-                   f"1918-C console answering at {console}"
+                   f"{at} answering"
                    + (f" ({watts:.3e} W)" if isinstance(watts, (int, float)) else ""),
-                   console=console, readers=n, watts=watts)]
+                   console=console, at=at, readers=n, watts=watts)]
     return [_v("warn", "power.console",
-               f"{console} not answering: intensity will be NaN on {n} "
-               f"reader{'s' if n != 1 else ''}", console=console, readers=n)]
+               f"{at} not answering: intensity will be NaN on {n} "
+               f"reader{'s' if n != 1 else ''}", console=console, at=at, readers=n)]
 
 
 def _c_intensity_factor(f: _Facts) -> list[Verdict]:

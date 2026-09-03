@@ -785,12 +785,55 @@ def test_run_record_answers_from_the_journal_for_a_run_of_an_earlier_session(tmp
         assert later.runs_index("all")[-1]["light_curves"] == 1
 
 
+def test_a_monitor_on_the_bus_skips_its_tick_while_the_worker_has_a_job():
+    """The bench-lock rule: one thread on GPIB0. The 1918-C is USB or HTTP and
+    reads right through a scan, but the 331 is on the bus when this process
+    owns it, so its monitor skips instead of interleaving with an
+    acquisition. A skipped tick is not a failure -- a settling node emits its
+    own readings from the worker, so nothing is lost."""
+    from bace.experiment import events as E
+    from bace.service.monitors import Monitor
+
+    busy = {"now": True}
+
+    class Counting(Monitor):
+        name = "counting"
+
+        def read(self):
+            return E.Notice("info", "read")
+
+    m = Counting(emit=lambda ev: None, interval_s=0.01,
+                 skip_while=lambda: busy["now"])
+    m.start()
+    try:
+        wait_until(lambda: m.skipped >= 3)
+        assert m.readings == 0 and m.failures == 0, "skipped, not failed"
+        busy["now"] = False
+        wait_until(lambda: m.readings >= 3)
+        assert m.info()["skipped"] >= 3
+    finally:
+        m.stop()
+
+    # a predicate that raises is read as "busy": if we cannot tell whether the
+    # bus is free, we do not touch it
+    def explode():
+        raise RuntimeError("cannot tell")
+
+    m = Counting(emit=lambda ev: None, interval_s=0.01, skip_while=explode)
+    m.start()
+    try:
+        wait_until(lambda: m.skipped >= 2)
+        assert m.readings == 0
+    finally:
+        m.stop()
+
+
 def test_the_temperature_monitor_reads_the_331_beside_the_bench(tmp_path):
     """Naming a console under `--sim` attaches the simulated 331, and the
     monitor reads the very controller a settle drives -- so its readings say
     `simulated`, and on the real bench the console's URL."""
     with make_session(tmp_path) as s:
-        with pytest.raises(ValueError, match="not wired"):
+        with pytest.raises(ValueError, match="no 331 on this bench"):
             s.start_temperature_monitor(0.05)
     wired = Session(RigConfig(temperature_console="http://127.0.0.1:8331"),
                     run_toml_layer(RECIPE), out=str(tmp_path / "runs"),
