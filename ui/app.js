@@ -10,6 +10,7 @@ import { createStore, currentRun } from './lib/store.js';
 import { createStream } from './lib/stream.js';
 import { h, fill } from './lib/dom.js';
 import * as fmt from './lib/format.js';
+import { renderRail, renderChainStrip, PREREQUISITE } from './lib/rail.js';
 
 import bench from './views/bench.js';
 import pipeline from './views/pipeline.js';
@@ -34,12 +35,16 @@ const stream = createStream({
   },
 });
 
-const railEl = h('header.rail');
 const tabsEl = h('nav.tabs');
+const chipsEl = h('span.chips');
+const railEl = h('header.rail');
 const viewEl = h('main.view');
+const stripEl = h('div.strip');
 const barEl = h('footer.stream-bar');
 
-document.getElementById('app').replaceChildren(railEl, tabsEl, viewEl, barEl);
+document.getElementById('app').replaceChildren(
+  h('div.bar', h('span.wordmark', 'bace'), tabsEl, h('span.spacer'), chipsEl),
+  railEl, viewEl, stripEl, barEl);
 
 let mounted = null;
 let mountedRoute = null;
@@ -67,33 +72,113 @@ function renderTabs() {
   })));
 }
 
-function renderRail(state) {
-  // M1 replaces this with the real rail — the eight live values, `how:
-  // "inferred"` distinct from a read-back, and the relay's own treatment.
-  // Until then it says what is known without pretending to be that.
+function renderChips(state) {
   const session = state.session || {};
-  const bench = state.bench || {};
-  const instruments = bench.instruments || {};
-  const voc = instruments.voc || {};
-  fill(railEl,
-    h('span.wordmark', 'bace'),
-    slot('session', session.id || fmt.ABSENT),
-    slot('bench', session.mode ? session.mode + (session.fast ? ' · fast' : '') : fmt.ABSENT),
-    slot('state', state.benchState || fmt.ABSENT),
-    slot('V_oc / V', voc.value === undefined || voc.value === null ? fmt.ABSENT : fmt.volts(voc.value, { unit: false })),
-    slot('T / K', fmt.kelvin(instruments.temperature ? instruments.temperature.kelvin : null, { unit: false })),
-    slot('power', instruments.power ? fmt.intensity(instruments.power.watts) : fmt.ABSENT),
-    h('span.spacer'),
-    slot('queue', String((state.queue || []).length)),
-    slot('run', runLabel(state)));
+  const sample = session.sample || {};
+  const chain = (state.bench && state.bench.chain) || null;
+  const bad = chain ? chain.total - chain.ok : 0;
+  const named = [sample.sample, sample.material, sample.pixel].filter(Boolean).join(' · ');
+  fill(chipsEl,
+    // The chain's own summary rides in the bar, so a check that reads wrong is
+    // visible from the pipeline and the results tabs too — the strip that
+    // fixes it is at the foot of whichever view is open.
+    bad ? h('span.chip.bad', { text: `chain ${chain.ok} / ${chain.total} · ${worstChain(chain)}` }) : null,
+    h('span.chip', { text: named || 'no sample named' }),
+    h('span.chip', { text: `${session.mode || fmt.ABSENT}${session.fast ? ' · fast' : ''}` }),
+    currentRun(state) ? h('span.chip.m', { text: runLabel(state) }) : null,
+    state.queue.length ? h('span.chip', { text: `queue ${state.queue.length}` }) : null,
+    h('span', { class: 'chip state ' + (state.benchState || 'idle'), text: state.benchState || 'idle' }));
+}
+
+function worstChain(chain) {
+  const bad = (chain.items || []).find((item) => item.level !== 'ok');
+  return bad ? `${bad.label} ${bad.value}` : '';
 }
 
 /**
- * The bench snapshot is a read-back, and the service re-takes it around a run:
- * the V_oc a `jv_bace` just measured, the module's `last`, the chain read at
- * Start. Nothing on the stream carries the snapshot, so it is re-fetched when
- * a run parks — the one moment it is known to have changed.
+ * The chain strip's two actions. Neither is ever taken by the console itself:
+ * `ui-rules` §3 — a warn states evidence and never blocks, and the fix is the
+ * bench action the check names, which the operator clicks.
  */
+let stripStatus = null;
+let parkArmed = false;
+let parkArmedTimer = null;
+
+function drawStrip(state) {
+  renderChainStrip(stripEl, state, { onFix: fix, onPark: park, status: stripStatus, parkArmed });
+}
+
+/** An armed Park disarms itself: it is a confirmation, not a mode. */
+function armPark(on) {
+  parkArmed = on;
+  clearTimeout(parkArmedTimer);
+  parkArmedTimer = on ? setTimeout(() => { parkArmed = false; drawStrip(store.getState()); }, 6000) : null;
+  drawStrip(store.getState());
+}
+
+async function fix(name, item) {
+  stripStatus = { level: '', text: `${name} …` };
+  drawStrip(store.getState());
+  try {
+    const out = await api.action(name);
+    // The action answers with the read-back that followed it, so the chain and
+    // the rail move without waiting for anything else. `readBack`: the run,
+    // the queue and the bench state stay the stream's to say.
+    if (out && out.bench) store.applyBench(out.bench, { readBack: true });
+    stripStatus = { level: 'ok', text: `${item.label}: ${describe(out)}` };
+  } catch (error) {
+    // 409 is the bench refusing — the LED is on, or a run holds the worker —
+    // and the service says why in a sentence written for this screen, which is
+    // shown as it stands. When the sentence names a remedy, the strip offers
+    // it as its own click rather than performing it.
+    stripStatus = {
+      level: 'bad',
+      text: error.text || error.message,
+      offer: error.refused ? PREREQUISITE[name] || null : null,
+    };
+  }
+  drawStrip(store.getState());
+}
+
+/**
+ * `result.before` is the read-back's values of what the action changed, which
+ * is there so a log can say "33220A :OUTP:POL NORM → INV · by hand" from the
+ * journal alone (contract §4). The rail already shows the value now; what the
+ * strip adds is what it was.
+ */
+function describe(out) {
+  const before = (out && out.result && out.result.before) || null;
+  if (!before) return 'done';
+  return Object.entries(before).map(([key, was]) => `${key} was ${was}`).join(' · ') + ' · done';
+}
+
+/**
+ * Park is allowed at any time, and while a run is active it **aborts that run
+ * and cancels the queue** — a person who clicks park wants the bench safe now,
+ * not after the runs behind this one. That is not a click to take on a stray
+ * mouse, so a busy bench arms the button first and performs it on the second.
+ */
+async function park() {
+  const busy = (store.getState().benchState || 'idle') !== 'idle';
+  if (busy && !parkArmed) return armPark(true);
+  armPark(false);
+  stripStatus = { level: '', text: 'park …' };
+  drawStrip(store.getState());
+  try {
+    const out = await api.action('park');
+    if (out && out.bench) store.applyBench(out.bench, { readBack: true });
+    stripStatus = out && out.pending
+      // The aborted run is inside a VISA call that outlasted the wait. The
+      // park is not cancelled; it runs when the worker frees, and saying so is
+      // the difference between "nothing happened" and "it is coming".
+      ? { level: '', text: 'park queued behind a run still in a VISA call' }
+      : { level: 'ok', text: 'parked' };
+  } catch (error) {
+    stripStatus = { level: 'bad', text: error.text || error.message };
+  }
+  drawStrip(store.getState());
+}
+
 /**
  * Fill in a run the stream could not rebuild whole.
  *
@@ -119,6 +204,82 @@ async function hydrate(runId, nodePath) {
 const hydrating = new Set();
 let gapsSeen = 0;
 
+/**
+ * The frames after which `GET /bench` says something new about the rail.
+ *
+ * They are the boundaries `service/live.py` folds: the relay at `NodeStarted`,
+ * the bias and the LED at `RunStarted`, the arming and the polarity a run read
+ * back, the shutter twice per shot at `StepPhase`, the SMU across a J-V, and
+ * the module's own unwind at `NodeDone`.
+ */
+const BENCH_MOVERS = new Set([
+  'NodeStarted', 'NodeDone', 'RunStarted', 'RunFinished', 'RunAborted', 'RunFailed',
+  'StepStarted', 'StepPhase', 'InstrumentState', 'JVStarted', 'JVFinished', 'DCMeasured',
+]);
+
+const BENCH_REFETCH_MS = 700;
+let benchFetching = false;
+let benchFetchedAt = 0;
+let benchTimer = null;
+let benchWanted = false;
+let benchWantsModules = false;
+
+/**
+ * Keep the rail alive for the length of a run.
+ *
+ * The snapshot is a read-back and a read-back is a job on the worker — which,
+ * while a run is on it, is running the run. So the service overlays what the
+ * running step *implies* (`service/live.py`) and marks every field of it
+ * `how: "inferred"`. That overlay only reaches a client that asks: nothing on
+ * the stream carries the snapshot, and a console that fetched it at boot and
+ * at `parked` would show a cold rail — relay on the SourceMeter, bias off,
+ * shutter shut — through hours of a scan driving the device.
+ *
+ * So the *stream* says when to ask and the *service* stays the only thing that
+ * infers anything (`ui-rules` §6: render provenance, never re-derive it). The
+ * alternative — folding `live.py` a second time in JavaScript — would put the
+ * two out of step the first time either changed.
+ *
+ * `GET /bench` touches no instrument and takes no lock (`app.py:307`), so the
+ * cost is a loopback request; the throttle is there because the shutter moves
+ * twice a shot and a shot is not long.
+ */
+function refetchBench({ modules = false } = {}) {
+  benchWanted = true;
+  benchWantsModules = benchWantsModules || modules;
+  pumpBench();
+}
+
+/**
+ * One request at a time, at most one per `BENCH_REFETCH_MS`, and never a
+ * dropped ask: a want raised while a request is in flight or the throttle is
+ * closed is served when it opens. Dropping them would be fine for the shutter,
+ * which moves again in a moment, and wrong for the read-back after `parked` —
+ * the one that has no frame behind it to ask again.
+ */
+function pumpBench() {
+  if (!benchWanted || benchFetching) return;
+  const wait = BENCH_REFETCH_MS - (Date.now() - benchFetchedAt);
+  if (wait > 0) {
+    if (!benchTimer) benchTimer = setTimeout(() => { benchTimer = null; pumpBench(); }, wait);
+    return;
+  }
+  benchWanted = false;
+  const modules = benchWantsModules;
+  benchWantsModules = false;
+  benchFetching = true;
+  benchFetchedAt = Date.now();
+  // `readBack`: take the instruments, the chain and the verdicts, and leave
+  // the run, the queue and the bench state to the stream — this response and
+  // the next run's `preflight` frame race, and the loser must not be the one
+  // that cannot arrive out of order.
+  api.bench()
+    .then((bench) => store.applyBench(bench, { readBack: true }))
+    .catch(() => {})
+    .finally(() => { benchFetching = false; pumpBench(); });
+  if (modules) api.modules().then(store.applyModules).catch(() => {});
+}
+
 function afterFrame(frame) {
   // A gap means the ring could not supply what we asked for: whatever is
   // running has a beginning we will never be sent.
@@ -132,17 +293,15 @@ function afterFrame(frame) {
   // Live frames only. The boot replay carries every `parked` the ring still
   // holds, and one read-back per historical run would be hundreds of requests
   // racing each other on the way in.
-  if (frame.type !== 'RunStateChanged' || !frame.data || frame.data.state !== 'parked') return;
-  // `readBack`: take the instruments, the chain and the verdicts, and leave
-  // the run, the queue and the bench state to the stream — this response and
-  // the next run's `preflight` frame race, and the loser must not be the one
-  // that cannot arrive out of order.
-  api.bench().then((bench) => store.applyBench(bench, { readBack: true })).catch(() => {});
-  api.modules().then(store.applyModules).catch(() => {});
-}
-
-function slot(key, value) {
-  return h('span.slot', h('span.key', { text: key }), h('span.value', { text: value }));
+  if (frame.type === 'RunStateChanged' && frame.data && frame.data.state === 'parked') {
+    // The one moment the snapshot is known to have changed for good: the run
+    // is off the worker, the overlay is gone, and what is on the rail now is
+    // the bench the next run will start from. The catalogue moved too — this
+    // run is the modules' `last`.
+    refetchBench({ modules: true });
+    return;
+  }
+  if (BENCH_MOVERS.has(frame.type)) refetchBench();
 }
 
 function runLabel(state) {
@@ -172,7 +331,12 @@ function renderBar(state) {
     stats.tracesGone ? h('span', { text: `${stats.tracesGone} traces replayed without their arrays` }) : null);
 }
 
-store.subscribe((state) => { renderRail(state); renderBar(state); });
+store.subscribe((state) => {
+  renderRail(railEl, state);
+  renderChips(state);
+  drawStrip(state);
+  renderBar(state);
+});
 window.addEventListener('hashchange', show);
 
 // The bench and the catalogue come over HTTP once; everything after that

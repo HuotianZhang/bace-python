@@ -1,7 +1,11 @@
-// The bench tab. M1 puts the pinned rail and the chain strip here, M2 the five
-// generated module cards, M4 the live monitor. M0 owes none of that — what it
-// shows is what the store already holds, so that the fold can be read off the
-// screen rather than off a test.
+// The bench tab. The rail and the chain strip landed in M1 and are *shell*
+// furniture, not this tab's — they are in every view, which is why they came
+// first. What is left here is M2's: the five generated module cards, and M4's
+// live monitor inside the running one.
+//
+// Until then this shows what the store holds, so the fold can be read off the
+// screen rather than off a test. The chain is not repeated here: the strip at
+// the foot of the window carries it, with the fix for each check.
 
 import { h, fill } from '../lib/dom.js';
 import * as fmt from '../lib/format.js';
@@ -15,13 +19,13 @@ export default {
     const body = h('div');
     fill(container,
       h('h1', 'bench'),
-      h('p.lede', 'M1 puts the pinned rail and the chain strip here — they come before the '
-        + 'cards because they are in every view. M2 generates the five module cards from '
-        + 'GET /modules. What follows is the store, as the event layer has folded it.'),
+      h('p.lede', 'The rail above and the strip below are M1, and they are in every view. '
+        + 'M2 generates the five module cards from GET /modules and puts Run on each; M4 '
+        + 'turns the running one into the monitor. What follows is the store, as the event '
+        + 'layer has folded it.'),
       body);
 
     const off = store.subscribe((state) => fill(body,
-      chainCard(state),
       verdictCard(state),
       modulesCard(state),
       runCard(state),
@@ -29,19 +33,6 @@ export default {
     return { dispose: off };
   },
 };
-
-function chainCard(state) {
-  const chain = state.bench && state.bench.chain;
-  if (!chain) return h('div.card', h('h2', 'chain'), h('p.absent', 'no read-back yet'));
-  return h('div.card',
-    h('h2', `chain · ${chain.ok}/${chain.total} ok`),
-    h('table.rows', chain.items.map((item) => h('tr',
-      h('th', { text: item.label }),
-      h('td', h('span.num', { text: item.value })),
-      h('td', h('span', { class: 'level-' + item.level, text: item.level })),
-      h('td', { text: item.expected ? `expected ${item.expected}` : '' }),
-      h('td', { text: item.text || '' })))));
-}
 
 function verdictCard(state) {
   const verdicts = state.verdicts || [];

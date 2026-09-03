@@ -18,11 +18,12 @@ repo root for the offline bench at `/ui/replay.html`, which needs
 
 | | |
 |---|---|
-| `index.html`, `app.js`, `style.css` | the shell: the rail, four tabs behind a hash router, the stream bar |
+| `index.html`, `app.js`, `style.css` | the shell: the bar and its chips, the rail, four tabs behind a hash router, the chain strip, the stream bar |
 | `lib/api.js` | every route in `docs/service-contract.md`, wrapped once |
 | `lib/stream.js` | the WebSocket, and the whole reconnect discipline — no view knows about any of it |
 | `lib/store.js` | the fold: the `/bench` snapshot and the `/events` frames become the state every view subscribes to |
 | `lib/format.js` | the number rules of `docs/ui-rules.md` §2, including the two zeros that are absences |
+| `lib/rail.js` | the pinned rail and the chain strip: `railModel(state)` is a pure function of the store, the DOM is beside it |
 | `lib/dom.js` | `h()`, and nothing else |
 | `lib/replay.js`, `replay.html` | the offline bench: fixtures fed into the same store the socket feeds |
 | `views/` | bench · pipeline · results · rig. Stubs, and each says which milestone fills it |
@@ -65,6 +66,7 @@ shape `GET /runs/{id}/data` answers, because a browser cannot open HDF5.
 | `transient_20260902_153722.json` | the transient charts, from that day's `bace-run/2` at full precision |
 | `jv_sim.json`, `jv_sim.h5` | the J-V chart. The journal reduces `JVCurveDone` to metrics with no arrays, so this had to be recorded |
 | `hello_sim.json` | the bench snapshot — the rail and the chain. No journal contains one |
+| `bench_running_sim.json` | `GET /bench` taken **mid-scan**: the four instruments the run implies, every one `how: "inferred"`. Nothing at rest carries a single one |
 | `stream_bace_sim.jsonl`, `stream_jv_sim.jsonl` | the wire: traces decimated with `stride`/`n_full`, and the `StepPhase` frames that are live-only |
 | `stream_pipeline_sim.jsonl` | node identity: two `bace` nodes under one `run_id`, each numbering its own shots from one, and the loop's `Progress` beside the leaf's |
 
@@ -84,13 +86,31 @@ BACE_SERVICE=http://127.0.0.1:8900 node --test ui/tests/live.test.mjs
 
 ## What is built, and what is next
 
-M0 is done: the event layer, the fixtures, and four tabs that are honest about
-being stubs. What building it taught — the rules the review turned up, and
-which later phase each one belongs to — is recorded in `docs/ui-plan.md`,
-under "What M0 taught the phases after it". M1 is the pinned rail and the chain strip — they come before the
-cards because they are in every view, and because they exercise the hardest
-semantics in `/bench` straight away: `how: "inferred"` must be visually
-distinct from a read-back, and the relay gets its own treatment because it is
-the interlock, not "info".
+**M0** is the event layer and the fixtures. **M1** is the pinned rail and the
+chain strip — shell furniture, in every view, because that is what they are:
+
+* the eight live values of `docs/ui-rules.md` §1, from `docs/design/BenchRail.dc.html`;
+* **`how: "inferred"` drawn as what it is.** While a run holds the worker the
+  snapshot is the one Start took with the running step's implications overlaid
+  (`service/live.py`), so during a `bace` the bias being LIVE and the relay
+  being on the amplifier are *inferred*, not read — a dashed rule and a mark on
+  the label, never the same as a read-back;
+* **the relay's own treatment**: it is the interlock, and the two positions are
+  physically different circuits, so it is a three-node diagram rather than a
+  level colour;
+* **the strip's fixes**, one `POST /bench/actions/{name}` per check that reads
+  wrong, never automatic, disabled while a run holds the worker — and when the
+  bench refuses one, its sentence, with a button for the remedy that sentence
+  names.
+
+The rail is kept alive by asking `/bench` again on the frames that move the
+overlay: the snapshot reaches a client only if it asks, and a console that
+asked at boot and at `parked` would draw a cold bench through hours of a scan.
+The service stays the only thing that infers anything.
+
+**M2 is next**: the generated field and card components, the five module cards,
+the `edited` layer through `PUT`, and Start disabled by `invalid` *and* by
+`crit`. Its bar is `ui-rules` §8 — a dark J-V in fifteen seconds by someone who
+has not seen the UI before.
 
 The phases, and what each one has to prove, are in `docs/ui-plan.md`.

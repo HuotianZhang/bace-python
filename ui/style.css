@@ -56,37 +56,150 @@ h1, h2, h3, .wordmark, button {
 
 #app { display: flex; flex-direction: column; height: 100%; }
 
-/* -- the rail: fixed, everything else scrolls (§1) ------------------------- */
-.rail {
-  display: flex; align-items: center; gap: 18px;
-  height: var(--rail-height);
-  padding: 0 14px;
-  border-bottom: 1px solid var(--rule);
-  background: var(--paper);
+/* -- the bar: brand, tabs and the state chips (R3·1) ---------------------- */
+.bar {
+  display: flex; align-items: stretch; gap: 0;
+  height: var(--tabs-height);
+  padding: 0 12px;
+  background: var(--ink);
+  color: #fff;
   flex: 0 0 auto;
 }
-.rail .wordmark { font-size: 15px; text-transform: lowercase; }
-.rail .spacer { flex: 1 1 auto; }
-.rail .slot { display: flex; flex-direction: column; line-height: 1.15; }
-.rail .slot .key { font-size: 10px; color: var(--grey); text-transform: uppercase; letter-spacing: .04em; }
-.rail .slot .value { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 13px; }
+.bar .wordmark { display: flex; align-items: center; font-size: 15px; text-transform: uppercase; letter-spacing: .02em; padding-right: 16px; }
+.bar .spacer { flex: 1 1 auto; }
+.bar .chips { display: flex; align-items: center; gap: 6px; }
+.chip {
+  display: inline-flex; align-items: center; height: 22px; padding: 0 8px;
+  border: 1px solid rgba(255,255,255,.35);
+  font-family: var(--font-num); font-size: 11px; color: rgba(255,255,255,.9);
+  white-space: nowrap;
+}
+.chip.m { font-size: 11px; color: rgba(255,255,255,.65); }
+/* A chain check that reads wrong is visible from every tab, because the strip
+   that fixes it is at the foot of every tab. */
+.chip.bad { border-color: #ff9783; color: #ffc4b8; }
+.chip.state { background: #fff; color: var(--ink); border-color: #fff; }
+.chip.state.running, .chip.state.preflight { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chip.state.stopping, .chip.state.paused { background: var(--warn); border-color: var(--warn); color: #fff; }
 
-/* -- the tabs ------------------------------------------------------------- */
-.tabs {
-  display: flex; gap: 2px; align-items: stretch;
-  height: var(--tabs-height);
-  padding: 0 10px;
-  border-bottom: 1px solid var(--rule);
+/* -- the rail: fixed, everything else scrolls (§1) -------------------------
+   Eight live values, from `docs/design/BenchRail.dc.html`. The relay is first
+   and widest because it is the interlock. */
+.rail {
+  display: grid;
+  /* The relay is widest because it carries the interlock diagram, the LED
+     because its line has to say polarity *and* low level without truncating —
+     "the LED low level must sit below turn-on" is one of the three things on
+     this rail that decide whether a result means anything. */
+  grid-template-columns: 236px 1.05fr 1fr 0.7fr 1.45fr 1.15fr 1fr 0.95fr;
+  align-items: stretch;
+  border-bottom: 2px solid var(--rule);
+  background: var(--paper);
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+.rail .brc {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 13px 9px;
+  border-left: 1px solid var(--rule);
+  min-width: 0;
+}
+.rail .brc:first-child { border-left: 0; }
+.rail .brl {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase;
+  color: var(--grey);
+}
+.rail .brv {
+  font-family: var(--font-num); font-weight: 500; font-size: 17px; line-height: 1.15;
+  letter-spacing: -.01em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rail .brs {
+  font-family: var(--font-num); font-size: 10.5px; line-height: 1.25; color: var(--grey);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* The one alert on the rail: the 81150A driving the device. §3 keeps this
+   intensity for a live bias, a crit and a saturation verdict, so nothing else
+   in this row may compete with it. */
+.rail .lv-alert { background: var(--alert); color: #fff; }
+.rail .lv-alert .brl, .rail .lv-alert .brs { color: rgba(255,255,255,.85); }
+.rail .lv-warn .brv, .rail .lv-warn .brs { color: var(--warn); }
+.rail .lv-crit .brv, .rail .lv-crit .brs { color: var(--alert); font-weight: 600; }
+.rail .lv-ok .brv { color: var(--ok); }
+.rail .lv-off .brv { color: var(--grey); }
+/* Typed, not measured: the temperature that goes into every folder name when
+   no controller is wired. A claim, rendered as one. */
+.rail .lv-typed .brv { color: var(--warn); }
+.rail .lv-typed .brv::after { content: ''; }
+
+/* Inferred, not read back. The dashed rule is the same language the artboard
+   uses for an inherited parameter — a value that is true because something
+   else made it true, rather than because anyone looked. */
+.rail .inferred .brv {
+  border-bottom: 1px dashed var(--accent);
+  align-self: flex-start;
+  padding-bottom: 1px;
+}
+.rail .lv-alert.inferred .brv { border-bottom-color: rgba(255,255,255,.8); }
+.tag-inferred {
+  font-family: var(--font-num); font-size: 8.5px; font-weight: 500;
+  letter-spacing: .04em; text-transform: none;
+  padding: 1px 4px; margin-left: auto;
+  border: 1px dashed #ff9783; background: #fff2ef; color: var(--accent-dark);
+}
+.rail .lv-alert .tag-inferred { border-color: rgba(255,255,255,.7); background: transparent; color: #fff; }
+
+/* The interlock diagram: which circuit the device is actually in. */
+.rail .relay { display: flex; align-items: center; margin-top: 3px; }
+.rail .rn {
+  font-family: var(--font-num); font-weight: 500; font-size: 9px;
+  padding: 3px 5px; border: 1px solid var(--rule); color: var(--grey);
+}
+.rail .rn.on { border-color: var(--ink); background: var(--ink); color: #fff; }
+.rail .rw { flex: 1; height: 2px; background: var(--rule); }
+.rail .rw.on { background: var(--ink); }
+
+/* -- the chain strip: the trigger chain, and the fix for each check -------- */
+.strip {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--rule);
   background: var(--fill);
   flex: 0 0 auto;
+  overflow-x: auto;
 }
+.strip .sk {
+  font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase;
+  color: var(--grey); white-space: nowrap;
+}
+.strip .st {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 8px; background: var(--paper); border: 1px solid var(--rule);
+  font-family: var(--font-num); font-size: 11px; white-space: nowrap;
+}
+.strip .st .mark { color: var(--ok); }
+.strip .st.bad { border-color: #ff9783; color: var(--accent-dark); }
+.strip .st.bad .mark { color: var(--accent-dark); }
+.strip .st.quiet { border: 0; background: none; color: var(--grey); }
+.strip .st.status.ok { border-color: var(--ok); color: var(--ok); }
+.strip .st.status.bad { border-color: var(--alert); color: var(--alert); }
+.strip .spacer { flex: 1 1 auto; }
+.strip button.btns { font-size: 11px; padding: 3px 8px; font-family: var(--font-body); font-weight: 500; }
+/* Park while a run is active aborts it and cancels the queue, so the second
+   click is a different button from the first. */
+.strip button.armed { background: var(--alert); border-color: var(--alert); color: #fff; }
+
+/* -- the tabs, inside the bar --------------------------------------------- */
+.tabs { display: flex; gap: 2px; align-items: stretch; }
 .tabs a {
   display: flex; align-items: center; padding: 0 14px;
-  color: var(--grey); text-decoration: none;
+  color: rgba(255,255,255,.6); text-decoration: none;
   font-family: var(--font-head); font-weight: 600; font-size: 13px;
   border-bottom: 2px solid transparent;
 }
-.tabs a.on { color: var(--ink); border-bottom-color: var(--accent); background: var(--paper); }
+.tabs a.on { color: #fff; border-bottom-color: var(--accent); }
 
 /* -- the view ------------------------------------------------------------- */
 .view { flex: 1 1 auto; overflow: auto; padding: 16px 18px 40px; }

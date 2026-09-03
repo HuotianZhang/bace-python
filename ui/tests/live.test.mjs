@@ -1,4 +1,4 @@
-// The two proofs M0 owes that no fixture can give, run against a live service:
+// The proofs no fixture can give, run against a live service:
 //
 //     python3 -m bace.service --sim --fast --port 8900
 //     BACE_SERVICE=http://127.0.0.1:8900 node --test ui/tests/live.test.mjs
@@ -18,6 +18,7 @@ import assert from 'node:assert/strict';
 import { createApi } from '../lib/api.js';
 import { createStore } from '../lib/store.js';
 import { createStream } from '../lib/stream.js';
+import { railModel } from '../lib/rail.js';
 
 const base = process.env.BACE_SERVICE || '';
 const options = { skip: base ? false : 'set BACE_SERVICE to a running --sim service' };
@@ -156,4 +157,58 @@ test('a run hydrates from its own endpoints, in the shapes they answer',
   } finally {
     stream.close();
   }
+});
+
+test('the rail follows a run that is holding the worker', options, async () => {
+  // M1's own proof, and the one the fixtures cannot make on their own: while a
+  // run has the bench, `GET /bench` is the snapshot Start took with the
+  // running step's implications overlaid, and a console that fetched it at
+  // boot and at `parked` would draw a cold rail — relay on the SourceMeter,
+  // bias off, shutter shut — through the whole of a scan driving the device.
+  //
+  // So the shell re-asks on the frames that move the overlay. This is that
+  // loop, without the browser: post a run, ask while it runs, and read the
+  // rail off the answer.
+  const api = createApi({ base });
+  const store = createStore({ schedule: () => {} });
+  store.applyBench(await api.bench());
+  const posted = await api.startRun('bace', {
+    axis_name: 'delay_ns', axis_start: 0, axis_stop: 100, axis_step: 100,
+    centre_on_voc: false, vpre: 1.0, vcoll: -2.0, n_loops: 2, store_shots: false,
+    record_length: 500,
+  });
+
+  const deadline = Date.now() + 120000;
+  let live = null;
+  while (Date.now() < deadline && !live) {
+    const bench = await api.bench();
+    store.applyBench(bench, { readBack: true });
+    const model = railModel(store.getState());
+    const bias = model.find((c) => c.key === 'bias');
+    if (bias.value === 'LIVE') live = model;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.ok(live, 'the bias never read LIVE while the run was on the worker');
+
+  const cell = (key) => live.find((c) => c.key === key);
+  assert.equal(cell('bias').level, 'alert');
+  assert.ok(cell('bias').inferred, 'a live bias during a run is inferred, never a read-back');
+  assert.equal(cell('relay').value, 'amplifier', 'a bace drives the device through the amplifier');
+  assert.ok(cell('relay').inferred);
+  assert.ok(!cell('power').inferred, 'the monitors are still read, not implied');
+
+  // And nothing inferred outlives the step that implied it: after the run
+  // parks the same request answers a read-back again.
+  while (Date.now() < deadline) {
+    const bench = await api.bench();
+    if (bench.state === 'idle') {
+      store.applyBench(bench, { readBack: true });
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  const rested = railModel(store.getState());
+  assert.equal(rested.filter((c) => c.inferred).length, 0, 'the overlay is gone with the run');
+  assert.notEqual(rested.find((c) => c.key === 'bias').value, 'LIVE');
+  assert.equal(posted.state, 'queued');
 });

@@ -131,6 +131,27 @@ whatever it has already said, and a count is a **maximum**, never an
 assignment, or the shots the ring happened to carry would drag `kept` below
 what actually ran.
 
+*Amended again 2026-09-03, from building the rail (M1).* There is a third
+thing the stream does not carry, and it is not a shortfall of the ring: **the
+bench snapshot**. `GET /bench` is the last read-back, and a read-back is a job
+on the worker — which, while a run is on it, is running the run. So for the
+length of a scan the service answers that stale snapshot with the running
+step's implications overlaid, every field of it marked `how: "inferred"`
+(`service/live.py`), and that overlay reaches a client only if the client
+asks. Nothing on the socket carries it. A console that fetched `/bench` at
+boot and at `parked` — which is what M0 did — shows a cold rail through hours
+of a run driving the device: relay on the SourceMeter, bias off, shutter shut.
+
+So the third source is the bench itself, and the rule is **the stream says
+when to ask**: on the frames `live.py` folds (`NodeStarted`, `RunStarted`,
+`StepPhase`, `InstrumentState`, `JVStarted`/`JVFinished`, `NodeDone`), throttled,
+because the shutter moves twice a shot. Not a poll on a timer, and *not* a
+second implementation of the overlay in JavaScript: the service stays the only
+thing that infers anything, which is `ui-rules` §6 — render provenance, never
+re-derive it — applied to the one place it would have been tempting. `/bench`
+touches no instrument and takes no lock (`app.py:307`), so the cost is a
+loopback request per shot phase.
+
 **3 · The charts need one foundation, then six components.**
 
 `docs/design/bace-charts*.js` is not a chart library. Its sixteen elements are
@@ -184,6 +205,7 @@ into the same store the WebSocket feeds.
 | a `bace-jv/2` HDF5 — **to be recorded**, there is none in the repo | the J–V chart | the per-curve voltage, current and density arrays |
 | a captured `Hello` frame — **to be recorded**, it is not in the acceptance set | the bench snapshot: the rail and the chain | `data.bench`, which is `GET /bench` whole: instruments, `inferred`, `chain`, `rig`, `verdicts`, `queue`, `state` |
 | *(added 2026-09-03)* a recorded **pipeline** stream | node identity, and the counters | two `bace` nodes under one `run_id`, each numbering its shots from one, and the loop's `Progress(node_path="rep=1")` beside the leaf's `node_path: ""` |
+| *(added 2026-09-03, M1)* `GET /bench` **taken mid-scan** | the rail's inferred overlay | `inferred: ["relay", "bias", "led", "shutter"]`, the bias LIVE at its two levels and the shutter open — none of which exists in a snapshot at rest |
 
 **Two of the four have to be recorded; the journal cannot stand in for either.**
 (A fifth was added while building M0, for the reason a fixture is ever added:
@@ -330,6 +352,58 @@ Two of those are worth stating as the acceptance:
 The chain strip carries a button per `fix`, calling
 `POST /bench/actions/{name}`.
 
+**Done 2026-09-03.** `ui/lib/rail.js` is the rail and the strip: a pure
+`railModel(state)` — the eight cells of §1, each `{value, sub, level,
+inferred}` — with the DOM beside it, so `ui/tests/rail.test.mjs` holds every
+rule below down against two recorded snapshots and no browser. Both are
+**shell furniture in `app.js`, not the bench tab's**: they are in every view,
+which is the reason they came first, and the bench tab lost its duplicate chain
+card to the strip. The design is `docs/design/BenchRail.dc.html`, whose five
+states are not a mode switch — they are five snapshots, and the model draws
+whichever one the service last answered.
+
+The two acceptances hold:
+
+- **`how: "inferred"` is not a read-back.** The mark rides on the cell's label
+  with a dashed rule under the value — the artboard's own language for a value
+  that is true because something else made it true. Mid-scan four cells carry
+  it and four do not, and the four that do not are the ones a run implies
+  nothing about (the SMU outside a J-V, the V_oc, the power meter, the
+  temperature).
+- **The relay is a circuit, not a level.** Three nodes and the closed side,
+  from the artboard; and *"neutral"* — the device in neither circuit — is said
+  only when the service answered, never as the empty state.
+
+Four things the phase turned up that the paragraph above did not say:
+
+- **A refusal was unreadable, and it is the whole point of the strip.** The
+  service's own handlers answer `{"error": …}` (`app.py:123`) and only
+  FastAPI's answer `{"detail": …}`; M0's `ApiError` read `detail` alone, so
+  *"the 33220A output is ON; the chain fix is made with the LED off"* reached
+  the operator as `POST /bench/actions/set-33220a-pol-inv -> 409`. `error.text`
+  now carries the sentence, and `level`/`refused` come with it.
+- **A refusal that names a remedy needs a button for it.** The chain fixes are
+  made with the output off, so the one warning a cold bench actually shows —
+  `33220A POL NORM` with the LED on — refuses. Without `led-off` the operator
+  is told what to do and given no way to do it. The strip offers the
+  prerequisite the contract names, as its own click: one action per button,
+  never chained.
+- **`fix` on an `ok` check is the action that made it ok.** Offering it again
+  is noise on a strip that is on every screen, so only a check that reads wrong
+  gets a button. Everything else is disabled while a run holds the worker,
+  because every action but `park` answers 409 then.
+- **Park arms first while a run is active.** It aborts the run *and cancels the
+  queue*; that is the right behaviour and the wrong thing to do on a stray
+  click, so the button becomes "abort the run and park?" and does it on the
+  second.
+
+**Proved** on `--sim`: the fix path end to end in a browser — refused, `led-off`,
+`set INV`, chain 3/4 → 4/4, the rail's LED warning gone and the bar's chain
+chip with it; park during a run aborting it and cancelling a queued `jv_dark`;
+and `ui/tests/live.test.mjs` now carries M1's own — the rail reads LIVE,
+inferred, relay on the amplifier while a run holds the worker, and nothing
+inferred outlives it.
+
 ### M2 · The bench cards do work
 
 The generated field and card components from decision 1, the five module cards.
@@ -351,6 +425,10 @@ runnable yet", which is what it is.
 
 `warn` states evidence and never blocks. The fix is the bench action `fix`
 names, which the operator clicks.
+
+The 422 a refused Start answers reaches the card the way M1's refusals reach
+the strip: `error.checks` for the list, `error.text` for the sentence. Both are
+on `ApiError` since M1, and neither is `detail`.
 
 **Proves:** `ui-rules` §8's bar — a dark J–V in **fifteen seconds** by someone
 who has not seen the UI before. This is the first phase whose output an

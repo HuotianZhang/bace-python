@@ -15,7 +15,10 @@
 //     `StepPhase` frames that exist nowhere else;
 //   * **`fixtures/hello_*.json`** is the bench snapshot, which no journal
 //     contains, and **`fixtures/jv_*.json`** the J-V curves at full precision,
-//     which the journal reduces to metrics.
+//     which the journal reduces to metrics;
+//   * **`fixtures/bench_running_*.json`** is `GET /bench` taken *while a run
+//     held the worker*, which is the only place the `inferred` overlay exists:
+//     at rest every instrument on the rail is a read-back.
 //
 // The journals also do *not* exercise the reconnect path — their `seq` runs
 // 0…N with no gap, because that is what a journal is. Gaps and
@@ -38,6 +41,9 @@ export const FIXTURES = [
     url: 'fixtures/stream_pipeline_sim.jsonl' },
   { key: 'hello', kind: 'hello', label: 'sim — the Hello frame, and the bench in it',
     url: 'fixtures/hello_sim.json' },
+  { key: 'bench-running', kind: 'bench',
+    label: 'sim — GET /bench mid-scan: the four instruments the run implies, every one inferred',
+    url: 'fixtures/bench_running_sim.json' },
   { key: 'jv-curves', kind: 'data', label: 'sim — GET /runs/{id}/data for the J-V',
     url: 'fixtures/jv_sim.json' },
   { key: 'transient', kind: 'data',

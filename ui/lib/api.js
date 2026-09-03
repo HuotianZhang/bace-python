@@ -13,6 +13,19 @@ export class ApiError extends Error {
     this.checks = (body && (body.checks || (body.detail && body.detail.checks))) || null;
     /** What FastAPI puts in `detail`, when it is a sentence rather than checks. */
     this.detail = body && body.detail;
+    /**
+     * The service's own sentence, which is written for this screen: *"the
+     * 33220A output is ON; the chain fix is made with the LED off -- led-off
+     * first, set the polarity, then set-led-pulse"*. Its handlers answer
+     * `{"error": …}` (`app.py:123`) and FastAPI's own answer `{"detail": …}`,
+     * so a client that reads only one of the two shows `-> 409` to an
+     * operator instead of the reason and the remedy.
+     */
+    this.text = (body && (body.error || (typeof body.detail === 'string' ? body.detail : null)))
+      || `${request} -> ${status}`;
+    /** `warn` | `crit` on a refusal, and `true` on `refused`: §3's loudness. */
+    this.level = (body && body.level) || null;
+    this.refused = Boolean(body && body.refused);
   }
 }
 
