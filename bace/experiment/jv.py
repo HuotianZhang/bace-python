@@ -65,20 +65,24 @@ class JVConfig:
     """First bias the SourceMeter sources, at the device."""
 
     stop_v: float = 1.2
-    """Last bias. Past V_oc for a light curve, or the interesting half of the
-    sweep is missing; a J-V that stops short of the crossing reports no V_oc
-    at all, because `metrics` interpolates and will not extrapolate."""
+    """Last bias the SourceMeter sources. Past V_oc for a light curve, or the
+    interesting half of the sweep is missing; a J-V that stops short of the
+    crossing reports no V_oc at all, because `metrics` interpolates and will
+    not extrapolate."""
 
     step_v: float = 0.02
-    """Spacing between points. The point count is rounded from the span, and
-    it multiplies the run: every point costs `settle_s` plus the reading."""
+    """Spacing between the SourceMeter's sweep points. The point count is
+    rounded from the span, and it multiplies the run: every point costs
+    `settle_s` plus the reading."""
 
     settle_s: float = 0.05
-    """Delay at each point before the reading. Too short and the curve is a
-    picture of the RC of the cell, not of its steady state."""
+    """How long the SourceMeter holds each bias before it takes the reading.
+    Too short and the curve is a picture of the RC of the cell, not of its
+    steady state."""
 
     both_directions: bool = False
-    """Sweep start->stop and back. Hysteresis is real and worth seeing; it also
+    """Sweep the SourceMeter start->stop and then straight back, giving two
+    curves instead of one. Hysteresis is real and worth seeing; it also
     doubles the run and makes 'the' curve ambiguous, so it is opt-in."""
 
     light_control: LightControl = "manage"
@@ -101,11 +105,14 @@ class JVConfig:
     light scan — a dark-only run."""
 
     pixel_area_cm2: float = 0.0
-    """0 means report current in amps and leave density out. Better than
-    defaulting to 1 cm², which silently mislabels A as A/cm²."""
+    """Illuminated area of the pixel, which is what the SourceMeter's amps are
+    divided by to get a current density. 0 means report current in amps and
+    leave density out — better than defaulting to 1 cm², which silently
+    mislabels A as A/cm²."""
 
     led_settle_s: float = 2.0
-    """After changing the LED level. The original called this 'LED stab. time'
+    """How long the run waits after setting the 33220A to a new LED level,
+    before it sweeps. The original called this 'LED stab. time'
     and gave it its own control, which is a hint that it matters. `manage`
     only: `leave` changed nothing, so there is nothing to settle after."""
 

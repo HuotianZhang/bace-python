@@ -38,12 +38,15 @@ class SourceMeterConfig:
     differ: V_oc on a slow cell settles far more slowly than J_sc."""
 
     current_compliance_a: float = 0.05
-    """Hard limit while sourcing voltage. Sized for the pixel, not the
-    instrument — a 2400 will happily deliver 1 A into a small cell."""
+    """The most current the 2400 will pass while it sources voltage
+    (`:SENS:CURR:PROT:LEV`); it clamps there rather than going higher. Sized
+    for the pixel, not the instrument — a 2400 will happily deliver 1 A into a
+    small cell."""
 
     voltage_compliance_v: float = 2.0
-    """Hard limit while sourcing current. With 0 A sourced this is what stops
-    the output swinging to the rail if a contact opens."""
+    """The most voltage the 2400 will put across the device while it sources
+    current (`:SENS:VOLT:PROT:LEV`). With 0 A sourced — the V_oc reading — this
+    is what stops the output swinging to the rail if a contact opens."""
 
     settle_jsc_ms: float = 500.0
     """How long the 2400 holds 0 V before reading the current, for J_sc.
@@ -58,7 +61,8 @@ class SourceMeterConfig:
     """How long the 2400 holds `v_sat` before reading the current, for J_sat."""
 
     nplc: float = 1.0
-    """Integration time per reading, in **power-line cycles** (`:SENS:*:NPLC`).
+    """How long the 2400 integrates each reading, in **power-line cycles**
+    (`:SENS:*:NPLC`).
     1 NPLC is 20 ms on 50 Hz mains and rejects mains hum by integrating over a
     whole cycle; below 1 the reading gets faster and noisier, above 1 slower
     and quieter. It multiplies the whole sweep: `points x (settle + averaging x

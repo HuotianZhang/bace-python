@@ -616,7 +616,8 @@ def test_field_docs_returns_the_first_sentence():
     from bace.experiment.transient import RunConfig
 
     docs = field_docs(RunConfig)
-    assert docs["n_averages"] == "Hardware averages per trace."
+    assert docs["n_averages"] == (
+        "How many traces the scope averages in hardware before it hands one back.")
     assert docs["t0_int_reference"] == (
         "`record`, `trigger` or `pulse` — what `t0_int_s` is measured from.")
     # Absent, not "": a field with no string under it is missing from the map
@@ -625,7 +626,7 @@ def test_field_docs_returns_the_first_sentence():
     from bace.core.axis import Axis
     assert "start" not in field_docs(Axis)
     full = field_docs(RunConfig, full=True)
-    assert full["n_averages"].startswith("Hardware averages per trace. Noise falls")
+    assert "Noise falls as 1/sqrt(n)" in full["n_averages"]
     assert "**`record`** measures from the first sample." in full["t0_int_reference"]
 
 
@@ -638,11 +639,12 @@ def test_field_docs_works_on_every_config_and_never_raises():
 
     assert field_docs(JVConfig)["led_levels_v"] == (
         "Drive levels for the light scans, at the 33220A output.")
-    assert field_docs(SeriesConfig)["led_low_v"] == "Pulse low level."
+    assert field_docs(SeriesConfig)["led_low_v"] == "The 33220A pulse low level."
     assert field_docs(RigConfig)["sense_resistor_ohm"] == (
         "The resistor between the device and the scope input.")
     assert field_docs(SourceMeterConfig)["current_compliance_a"] == (
-        "Hard limit while sourcing voltage.")
+        "The most current the 2400 will pass while it sources voltage "
+        "(`:SENS:CURR:PROT:LEV`); it clamps there rather than going higher.")
     assert field_docs(RunConfig)
 
     @dataclass
