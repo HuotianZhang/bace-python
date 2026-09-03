@@ -81,9 +81,17 @@ class JVConfig:
     steady state."""
 
     both_directions: bool = False
-    """Sweep the SourceMeter start->stop and then straight back, giving two
-    curves instead of one. Hysteresis is real and worth seeing; it also
-    doubles the run and makes 'the' curve ambiguous, so it is opt-in."""
+    """Sweep the SourceMeter start->stop, then sweep back stop->start as a
+    second, separate sweep rather than one continuous round trip.
+
+    The distinction is the measurement, not pedantry. Each leg is its own
+    `rig.smu.sweep(...)`, and the driver opens with `*RST` and closes by
+    switching the output off, so between the two the device sits at open
+    circuit for as long as the reconfiguration takes. A difference between
+    the legs is therefore hysteresis *plus* whatever the device relaxed to in
+    that gap -- not the continuous-sweep hysteresis the two curves look like.
+    Real and worth seeing either way; it also doubles the run and makes 'the'
+    curve ambiguous, so it is opt-in."""
 
     light_control: LightControl = "manage"
     """`manage` sets the illumination for each curve in the plan — the shutter
