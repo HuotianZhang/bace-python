@@ -165,9 +165,10 @@ def test_every_offline_fixture_is_registered_and_present():
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="no Node on this machine (the lab PC has none)")
 def test_the_console_suite_passes():
-    """`node --test ui/tests/` — the fold, the socket, the numbers, the rail."""
+    """`node --test ui/tests/` — the fold, the socket, the numbers, the rail,
+    and what the shell does per frame rather than what it draws."""
     result = subprocess.run(
         ["node", "--test", "ui/tests/store.test.mjs", "ui/tests/stream.test.mjs",
-         "ui/tests/format.test.mjs", "ui/tests/rail.test.mjs"],
+         "ui/tests/format.test.mjs", "ui/tests/rail.test.mjs", "ui/tests/render.test.mjs"],
         cwd=REPO, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-2000:]

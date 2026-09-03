@@ -16,6 +16,27 @@ import { hasReplayedTraces } from './stream.js';
 const LOG_LIMIT = 800;
 
 /**
+ * How many shots keep their decimated traces, per module node.
+ *
+ * This is `session.RING_TRACES_KEPT` — the service's own number — and adopting
+ * it makes an invariant out of what was already half true. The ring replays
+ * the traces of the last 200 shots and strips the rest (`decimated[…].replay`),
+ * so after any reconnect the console holds exactly those; keeping every trace
+ * that happened to arrive while the socket stayed up made a console's memory
+ * depend on whether it had ever been dropped.
+ *
+ * It also bounds the tab. Measured on `--sim --fast`, a decimated shot costs
+ * ~14.6 kB of heap: 1260 shots is 29 MB and 3780 is 66 MB, and the canonical
+ * 9 T x 5 level tree of `docs/ui-plan.md` M5 is 45 leaves of the same size —
+ * ~830 MB, which is the browser, not a chart.
+ *
+ * Nothing on screen needs them: the live monitor draws the shot that is
+ * arriving, the loop curve comes from the scalars, and the results tab redraws
+ * from `GET /runs/{id}/data` at full precision.
+ */
+const TRACES_KEPT = 200;
+
+/**
  * A run's state as `GET /bench` says it — `session._bench_state`, mirrored so
  * the rail does not read `idle` for the length of a run. The snapshot is
  * fetched once at boot and again when a run parks; between those two the only
@@ -69,6 +90,10 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
   }
 
   function log(frame, level, text) {
+    // Counted as well as kept: the log is appended to and trimmed from the
+    // front, so its length stops changing once it is full and a view that
+    // keyed on the length would freeze at 800 lines.
+    state.logged += 1;
     state.log.push({
       seq: frame.seq, ts: frame.ts, type: frame.type, level,
       run_id: frame.run_id || null, node_path: frame.node_path || '', text,
@@ -159,6 +184,8 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
       if (!entry || !entry.name) return;
       state.modules.byName = { ...state.modules.byName, [entry.name]: entry };
       if (!state.modules.order.includes(entry.name)) state.modules.order.push(entry.name);
+      // `at` is when this catalogue last changed, which is what a view keys on.
+      state.modules.at = Date.now() / 1000;
       notify();
     },
 
@@ -583,10 +610,34 @@ function foldStepDone(record, node, frame, data) {
   // hydrated from `GET /runs/{id}/data`, and the shots the replay did carry
   // are fewer than the shots that ran.
   node.kept = Math.max(node.kept || 0, node.shots.length);
+  forgetOldTraces(node);
   rollUp(record);
   if (shot.verdict && shot.verdict.level === 'warn') {
     record.shotWarnings.push({ index: data.index, loop: data.loop, text: shot.verdict.text, ts: frame.ts });
   }
+}
+
+/**
+ * Drop the arrays of every shot but the last `TRACES_KEPT` of this node.
+ *
+ * `tracesGone` is the store's existing word for *no curve, the loop point
+ * comes from the scalars* — the same state a shot is in when the ring replayed
+ * it without its arrays — so a chart needs no second case for this one. The
+ * shot object is edited in place because `record.shots`, `node.shots` and
+ * `record.shotsByKey` all hold the same object, and replacing it would mean
+ * finding it in three places to say the same thing.
+ *
+ * `tracesFrom` is where the arrays start, so this is O(1) per shot rather than
+ * a walk of the whole run.
+ */
+function forgetOldTraces(node) {
+  const cut = node.shots.length - TRACES_KEPT;
+  if (cut <= 0) return;
+  for (let i = node.tracesFrom || 0; i < cut; i += 1) {
+    const old = node.shots[i];
+    if (old && old.traces) { old.traces = null; old.tracesGone = true; }
+  }
+  node.tracesFrom = cut;
 }
 
 /** One entry per `(code, node_path)`: a re-read replaces the earlier copy. */
@@ -610,7 +661,7 @@ function nodeOf(record, path) {
   const key = path || '';
   const existing = record.nodes[key];
   if (existing) return existing;
-  const created = { node_path: key, shots: [], curves: [], loops: [] };
+  const created = { node_path: key, shots: [], curves: [], loops: [], tracesFrom: 0 };
   record.nodes[key] = created;
   return created;
 }
@@ -671,6 +722,7 @@ export function emptyState() {
     temperature: null,
     notices: [],
     log: [],
+    logged: 0,
     lastFrame: null,
   };
 }

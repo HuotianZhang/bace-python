@@ -42,6 +42,31 @@ export function fill(el, ...children) {
   return append(el, children);
 }
 
+/**
+ * Rebuild `el` only when `key` differs from the key it was last built from.
+ *
+ * The store notifies on every batch of frames, and a `--sim --fast` scan
+ * batches one per animation frame for the length of the run. Every renderer in
+ * the shell is a pure function of the state, so without this the rail, the
+ * chips and the strip are torn down and rebuilt sixty times a second to draw
+ * the characters they already had — measured over one 21 x 60 scan: 99 421
+ * elements built for a rail that changed twice.
+ *
+ * That is not only waste. A rebuilt element is a *different* element: it drops
+ * the operator's text selection mid-copy, and from M2 it would take the focus
+ * and the caret out of a parameter field the moment a frame arrived. So the
+ * rule is the one the models already make possible — **the model is the render
+ * key**: build it (it is cheap and pure), and touch the DOM only where it
+ * differs. Nothing has to remember to invalidate anything, which is the one
+ * thing a hand-maintained dirty flag always gets wrong.
+ */
+export function keyed(el, key, build) {
+  if (el.__key === key) return false;
+  el.__key = key;
+  fill(el, build());
+  return true;
+}
+
 /** A number, in the mono face, with tabular figures — see `docs/ui-rules.md` §2. */
 export function num(text, extra) {
   return h('span.num' + (extra ? '.' + extra : ''), { text: text === null || text === undefined ? '—' : text });

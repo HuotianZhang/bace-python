@@ -24,7 +24,8 @@ repo root for the offline bench at `/ui/replay.html`, which needs
 | `lib/store.js` | the fold: the `/bench` snapshot and the `/events` frames become the state every view subscribes to |
 | `lib/format.js` | the number rules of `docs/ui-rules.md` §2, including the two zeros that are absences |
 | `lib/rail.js` | the pinned rail and the chain strip: `railModel(state)` is a pure function of the store, the DOM is beside it |
-| `lib/dom.js` | `h()`, and nothing else |
+| `lib/watch.js` | when to ask `GET /bench` again — which frames move the bench, and the throttle that collapses a scan's worth of them into one request per 700 ms |
+| `lib/dom.js` | `h()`, and `keyed()`: rebuild an element only when its model differs from the one already on screen |
 | `lib/replay.js`, `replay.html` | the offline bench: fixtures fed into the same store the socket feeds |
 | `views/` | bench · pipeline · results · rig. Stubs, and each says which milestone fills it |
 | `fonts/` | IBM Plex Sans and Mono, Archivo — 24 woff2, 387 KB, lifted out of the Round 3 mockup by `tools/extract_ui_fonts.py`. Nothing is fetched from a network at runtime |
@@ -107,6 +108,40 @@ The rail is kept alive by asking `/bench` again on the frames that move the
 overlay: the snapshot reaches a client only if it asks, and a console that
 asked at boot and at `parked` would draw a cold bench through hours of a scan.
 The service stays the only thing that infers anything.
+
+### What a run costs the console
+
+M1 was proved by reading the screen. It was then **measured** — a headless
+browser on a live `--sim --fast` scan, counting what the shell does per frame —
+and the measurement found the opposite of what the screen showed: the rail M1
+exists to keep honest changed twice in a 10.6 s run and stood still for 10.1 s
+of it, while the shell built 110 078 DOM elements saying nothing new.
+
+Four things came out of it, all of them in the layer M2–M6 will be written on,
+and all of them cheaper now than after the cards and the charts exist:
+
+* **`GET /bench` is not free while the stream is busy.** 5 ms idle, 6 ms during
+  a run with nobody listening, a **median of 3.0 s** during the same run with
+  one subscriber. `app.py`'s pump never yielded — neither `Queue.get` nor
+  `send_text` suspends when it has no reason to — so every HTTP handler waited
+  behind a tight loop of `_dumps` on twenty-kilobyte frames. One
+  `await asyncio.sleep(0)` per frame: 3.0 s → 13 ms, and the scan itself got
+  *faster*.
+* **A replayed frame asks for the bench like any other** (`lib/watch.js`). The
+  old `replay` guard suppressed the refetch for the whole tail of a fast scan,
+  which is exactly when the rail is showing an overlay it can only get by
+  asking. The throttle is what bounds the cost, and always was.
+* **The model is the render key** (`dom.keyed`). A rebuilt element is a
+  different element: it drops the operator's selection mid-copy, and from M2 it
+  would take the caret out of a parameter field on every frame. 110 078
+  elements → 21 829, and the selection survives.
+* **The store keeps the traces the ring would replay**, `RING_TRACES_KEPT` of
+  them per node — the service's own number, so a console that has been dropped
+  and one that has not hold the same thing. A decimated shot is ~14.6 kB, so
+  3780 of them was 61 MB and M5's canonical tree would have been ~830 MB.
+
+Reproduce any of it with a browser and `playwright-core`; the shapes are in
+`ui/tests/render.test.mjs`, which holds both client-side rules down without one.
 
 **M2 is next**: the generated field and card components, the five module cards,
 the `edited` layer through `PUT`, and Start disabled by `invalid` *and* by

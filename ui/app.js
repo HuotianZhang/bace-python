@@ -8,9 +8,10 @@
 import { createApi } from './lib/api.js';
 import { createStore, currentRun } from './lib/store.js';
 import { createStream } from './lib/stream.js';
-import { h, fill } from './lib/dom.js';
+import { h, fill, keyed } from './lib/dom.js';
 import * as fmt from './lib/format.js';
 import { renderRail, renderChainStrip, PREREQUISITE } from './lib/rail.js';
+import { createBenchWatch } from './lib/watch.js';
 
 import bench from './views/bench.js';
 import pipeline from './views/pipeline.js';
@@ -25,7 +26,7 @@ const store = createStore({ schedule: (fn) => requestAnimationFrame(fn) });
 
 const stream = createStream({
   onHello: (frame) => store.applyHello(frame),
-  onFrame: (frame, meta) => { store.applyFrame(frame); if (!meta.replay) afterFrame(frame); },
+  onFrame: (frame) => { store.applyFrame(frame); afterFrame(frame); },
   onStatus: (status) => store.applyConnection(status),
   onSessionChange: ({ from, to }) => {
     // The service restarted. Everything the old session numbered is gone;
@@ -78,7 +79,10 @@ function renderChips(state) {
   const chain = (state.bench && state.bench.chain) || null;
   const bad = chain ? chain.total - chain.ok : 0;
   const named = [sample.sample, sample.material, sample.pixel].filter(Boolean).join(' · ');
-  fill(chipsEl,
+  const model = [bad && chain ? [chain.ok, chain.total, worstChain(chain)] : null, named,
+                 session.mode, session.fast, currentRun(state) ? runLabel(state) : null,
+                 state.queue.length, state.benchState];
+  keyed(chipsEl, JSON.stringify(model), () => [
     // The chain's own summary rides in the bar, so a check that reads wrong is
     // visible from the pipeline and the results tabs too — the strip that
     // fixes it is at the foot of whichever view is open.
@@ -87,7 +91,8 @@ function renderChips(state) {
     h('span.chip', { text: `${session.mode || fmt.ABSENT}${session.fast ? ' · fast' : ''}` }),
     currentRun(state) ? h('span.chip.m', { text: runLabel(state) }) : null,
     state.queue.length ? h('span.chip', { text: `queue ${state.queue.length}` }) : null,
-    h('span', { class: 'chip state ' + (state.benchState || 'idle'), text: state.benchState || 'idle' }));
+    h('span', { class: 'chip state ' + (state.benchState || 'idle'), text: state.benchState || 'idle' }),
+  ]);
 }
 
 function worstChain(chain) {
@@ -205,103 +210,28 @@ const hydrating = new Set();
 let gapsSeen = 0;
 
 /**
- * The frames after which `GET /bench` says something new about the rail.
- *
- * They are the boundaries `service/live.py` folds: the relay at `NodeStarted`,
- * the bias and the LED at `RunStarted`, the arming and the polarity a run read
- * back, the shutter twice per shot at `StepPhase`, the SMU across a J-V, and
- * the module's own unwind at `NodeDone`.
+ * Keep the rail alive for the length of a run: `lib/watch.js` owns the whole
+ * policy — which frames move the bench, the throttle that collapses them, and
+ * why a replayed frame asks like any other.
  */
-const BENCH_MOVERS = new Set([
-  'NodeStarted', 'NodeDone', 'RunStarted', 'RunFinished', 'RunAborted', 'RunFailed',
-  'StepStarted', 'StepPhase', 'InstrumentState', 'JVStarted', 'JVFinished', 'DCMeasured',
-]);
-
-const BENCH_REFETCH_MS = 700;
-let benchFetching = false;
-let benchFetchedAt = 0;
-let benchTimer = null;
-let benchWanted = false;
-let benchWantsModules = false;
-
-/**
- * Keep the rail alive for the length of a run.
- *
- * The snapshot is a read-back and a read-back is a job on the worker — which,
- * while a run is on it, is running the run. So the service overlays what the
- * running step *implies* (`service/live.py`) and marks every field of it
- * `how: "inferred"`. That overlay only reaches a client that asks: nothing on
- * the stream carries the snapshot, and a console that fetched it at boot and
- * at `parked` would show a cold rail — relay on the SourceMeter, bias off,
- * shutter shut — through hours of a scan driving the device.
- *
- * So the *stream* says when to ask and the *service* stays the only thing that
- * infers anything (`ui-rules` §6: render provenance, never re-derive it). The
- * alternative — folding `live.py` a second time in JavaScript — would put the
- * two out of step the first time either changed.
- *
- * `GET /bench` touches no instrument and takes no lock (`app.py:307`), so the
- * cost is a loopback request; the throttle is there because the shutter moves
- * twice a shot and a shot is not long.
- */
-function refetchBench({ modules = false } = {}) {
-  benchWanted = true;
-  benchWantsModules = benchWantsModules || modules;
-  pumpBench();
-}
-
-/**
- * One request at a time, at most one per `BENCH_REFETCH_MS`, and never a
- * dropped ask: a want raised while a request is in flight or the throttle is
- * closed is served when it opens. Dropping them would be fine for the shutter,
- * which moves again in a moment, and wrong for the read-back after `parked` —
- * the one that has no frame behind it to ask again.
- */
-function pumpBench() {
-  if (!benchWanted || benchFetching) return;
-  const wait = BENCH_REFETCH_MS - (Date.now() - benchFetchedAt);
-  if (wait > 0) {
-    if (!benchTimer) benchTimer = setTimeout(() => { benchTimer = null; pumpBench(); }, wait);
-    return;
-  }
-  benchWanted = false;
-  const modules = benchWantsModules;
-  benchWantsModules = false;
-  benchFetching = true;
-  benchFetchedAt = Date.now();
-  // `readBack`: take the instruments, the chain and the verdicts, and leave
-  // the run, the queue and the bench state to the stream — this response and
-  // the next run's `preflight` frame race, and the loser must not be the one
-  // that cannot arrive out of order.
-  api.bench()
-    .then((bench) => store.applyBench(bench, { readBack: true }))
-    .catch(() => {})
-    .finally(() => { benchFetching = false; pumpBench(); });
-  if (modules) api.modules().then(store.applyModules).catch(() => {});
-}
+const watch = createBenchWatch({
+  fetchBench: () => api.bench(),
+  fetchModules: () => api.modules(),
+  onBench: (bench) => store.applyBench(bench, { readBack: true }),
+  onModules: (payload) => store.applyModules(payload),
+});
 
 function afterFrame(frame) {
   // A gap means the ring could not supply what we asked for: whatever is
   // running has a beginning we will never be sent.
-  const { stats, } = stream.state;
+  const { stats } = stream.state;
   if (stats && stats.gaps > gapsSeen) {
     gapsSeen = stats.gaps;
     const state = store.getState();
     const active = state.activeRunId && state.runs[state.activeRunId];
     if (active && !active.axis) hydrate(state.activeRunId, active.node_path);
   }
-  // Live frames only. The boot replay carries every `parked` the ring still
-  // holds, and one read-back per historical run would be hundreds of requests
-  // racing each other on the way in.
-  if (frame.type === 'RunStateChanged' && frame.data && frame.data.state === 'parked') {
-    // The one moment the snapshot is known to have changed for good: the run
-    // is off the worker, the overlay is gone, and what is on the rail now is
-    // the bench the next run will start from. The catalogue moved too — this
-    // run is the modules' `last`.
-    refetchBench({ modules: true });
-    return;
-  }
-  if (BENCH_MOVERS.has(frame.type)) refetchBench();
+  watch.frame(frame);
 }
 
 function runLabel(state) {
@@ -319,7 +249,7 @@ function renderBar(state) {
   const c = { ...(state.connection || {}), ...stream.state };
   const stats = c.stats || {};
   barEl.className = 'stream-bar ' + (c.state || 'idle');
-  fill(barEl,
+  keyed(barEl, JSON.stringify([c.state, c.session, c.lastSeq, c.seq, stats]), () => [
     h('span.dot'),
     h('span', { text: c.state || 'idle' }),
     h('span', { text: `session ${c.session || fmt.ABSENT}` }),
@@ -328,7 +258,8 @@ function renderBar(state) {
     stats.duplicates ? h('span', { text: `${stats.duplicates} deduped` }) : null,
     stats.gaps ? h('span', { text: `${stats.gaps} gaps` }) : null,
     stats.drops ? h('span', { text: `${stats.drops} drops · ${stats.reconnects} reconnects` }) : null,
-    stats.tracesGone ? h('span', { text: `${stats.tracesGone} traces replayed without their arrays` }) : null);
+    stats.tracesGone ? h('span', { text: `${stats.tracesGone} traces replayed without their arrays` }) : null,
+  ]);
 }
 
 store.subscribe((state) => {

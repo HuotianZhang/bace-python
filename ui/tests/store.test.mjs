@@ -412,3 +412,41 @@ test('sigma_Q of zero is an absence, not a value', () => {
   assert.equal(sigmaQ(null), null);
   assert.ok(sigmaQ(4e-11).startsWith('4.00e-11'));
 });
+
+test('the store remembers the traces the ring would replay, and no more', () => {
+  // The service keeps the arrays of the last `RING_TRACES_KEPT` = 200 shots
+  // and strips the rest (`session.py`), so a console that had ever been
+  // dropped held exactly those and one that had not held every shot of the
+  // run. The store now keeps the service's number either way — which bounds
+  // the tab as well as settling the invariant: measured on `--sim --fast`, a
+  // decimated shot is ~14.6 kB of heap, so 3780 of them was 61 MB and the
+  // canonical 9 T x 5 level tree would be forty-five times that.
+  //
+  // No fixture in the repo is 200 shots long, so the shape is a recorded
+  // `StepDone` off the wire, renumbered: the arrays and the `decimated` block
+  // are the service's own.
+  const frames = parseJsonl(fixture('stream_bace_sim.jsonl'));
+  const template = frames.find((f) => f.type === 'StepDone');
+  assert.ok(template.data.light.y.length, 'the template carries its arrays');
+
+  const s = store();
+  s.applyFrames(frames.filter((f) => ['RunQueued', 'NodeStarted', 'RunStarted'].includes(f.type)));
+  const runId = template.run_id;
+  for (let i = 1; i <= 250; i += 1) {
+    s.applyFrame({ ...template, seq: 10000 + i,
+      data: { ...template.data, loop: Math.ceil(i / 25), index: i } });
+  }
+
+  const run = s.getState().runs[runId];
+  assert.equal(run.shots.length, 250, 'every shot is still on the record');
+  const withTraces = run.shots.filter((shot) => shot.traces);
+  assert.equal(withTraces.length, 200, 'and two hundred of them still have their arrays');
+  assert.equal(run.shots[249].traces.light.y.length, template.data.light.y.length,
+    'the newest shot is whole');
+
+  const forgotten = run.shots[0];
+  assert.equal(forgotten.traces, null);
+  assert.equal(forgotten.tracesGone, true, 'which is what a replayed shot says too');
+  assert.equal(typeof forgotten.q, 'number', 'the charge survives: the loop curve is still drawable');
+  assert.ok(forgotten.verdict, 'and so does its verdict');
+});

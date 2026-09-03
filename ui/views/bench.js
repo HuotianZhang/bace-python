@@ -7,7 +7,7 @@
 // screen rather than off a test. The chain is not repeated here: the strip at
 // the foot of the window carries it, with the fix for each check.
 
-import { h, fill } from '../lib/dom.js';
+import { h, fill, keyed } from '../lib/dom.js';
 import * as fmt from '../lib/format.js';
 import { currentRun } from '../lib/store.js';
 
@@ -16,20 +16,26 @@ export default {
   title: 'bench',
 
   mount(container, { store }) {
-    const body = h('div');
+    // One container per card, each rebuilt only when its own key moves
+    // (`dom.keyed`). The store notifies on every batch of frames; the module
+    // table changes twice in a run and the log a dozen times, and rebuilding
+    // all four sixty times a second is how a screen loses the operator's
+    // selection while they are reading a number off it.
+    const cards = [h('div'), h('div'), h('div'), h('div')];
     fill(container,
       h('h1', 'bench'),
       h('p.lede', 'The rail above and the strip below are M1, and they are in every view. '
         + 'M2 generates the five module cards from GET /modules and puts Run on each; M4 '
         + 'turns the running one into the monitor. What follows is the store, as the event '
         + 'layer has folded it.'),
-      body);
+      cards);
 
-    const off = store.subscribe((state) => fill(body,
-      verdictCard(state),
-      modulesCard(state),
-      runCard(state),
-      logCard(state)));
+    const off = store.subscribe((state) => {
+      keyed(cards[0], JSON.stringify(state.verdicts), () => verdictCard(state));
+      keyed(cards[1], String(state.modules.at), () => modulesCard(state));
+      keyed(cards[2], runKey(state), () => runCard(state));
+      keyed(cards[3], String(state.logged), () => logCard(state));
+    });
     return { dispose: off };
   },
 };
@@ -60,6 +66,15 @@ function modulesCard(state) {
         h('td', { text: `${module.params.length} params` }),
         h('td', { text: module.last ? module.last.summary || module.last.state : '' }));
     })));
+}
+
+/** Everything the run card puts on the screen, and nothing else. */
+function runKey(state) {
+  const run = currentRun(state);
+  if (!run) return '';
+  return [run.run_id, run.state, run.phase && run.phase.k, run.phase && run.phase.phase,
+          run.kept, run.requested, run.shots.length, run.curves.length,
+          run.error && run.error.text, run.needsOperator && run.needsOperator.what].join('|');
 }
 
 function runCard(state) {
