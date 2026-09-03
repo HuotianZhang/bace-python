@@ -85,7 +85,9 @@ BACE_SERVICE=http://127.0.0.1:8900 node --test ui/tests/live.test.mjs
 ## What is built, and what is next
 
 M0 is done: the event layer, the fixtures, and four tabs that are honest about
-being stubs. M1 is the pinned rail and the chain strip — they come before the
+being stubs. What building it taught — the rules the review turned up, and
+which later phase each one belongs to — is recorded in `docs/ui-plan.md`,
+under "What M0 taught the phases after it". M1 is the pinned rail and the chain strip — they come before the
 cards because they are in every view, and because they exercise the hardest
 semantics in `/bench` straight away: `how: "inferred"` must be visually
 distinct from a read-back, and the relay gets its own treatment because it is

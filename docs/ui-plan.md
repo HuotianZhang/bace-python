@@ -99,6 +99,38 @@ Rebuild from the new `Hello`'s `data.bench` and let the ring supply the rest. Th
 and a client that blanks the chart instead of redrawing from scalars has a bug
 that only shows up after a reconnect.
 
+*Amended 2026-09-03, from building it (M0).* Three things this decision did not
+say, and the third changes what it claims.
+
+**The identity is the incarnation, not the id.** `session_id` is
+`YYYYMMDD_HHMMSS`, stamped to the whole second, so two processes started inside
+the same second share it — and a cursor kept across that restart is the failure
+this whole section exists to prevent, arriving through the check meant to catch
+it. `data.session.started_at` is the float the session was created at; the pair
+settles it.
+
+**A socket you have replaced is still a socket.** The service has already
+queued frames on it, and they arrive after the swap. Folded, they push the
+cursor above zero and the new socket's `since=0` replay is then discarded as
+duplicates — losing exactly what the reconnect was for. The identity check that
+`onclose` needs, `onmessage` needs too.
+
+**The ring is not the whole run, so the screen is not only a projection of the
+stream.** `RING_SIZE` is 5000 envelopes; one 100 x 51 scan is more than three
+times that in `StepStarted`/`StepDone`/`Progress` alone. So a console opened —
+or reloaded — late in a long run replays a *tail*: no `RunQueued`, no
+`RunStarted`, no `AxisResolved`, and `/bench` carries that run's summary, not
+its shape. `since=0` bounds the cost; it does not promise completeness.
+
+The rule that follows: **the screen is a projection of the event stream, and of
+the run's own record where the ring falls short.** Ask `GET /runs/{id}` and
+`GET /runs/{id}/data` for the current run at boot, and again whenever the
+stream counts a gap — the same truncation arriving a different way. Nothing so
+fetched may move anything backwards: the stream is the newer source for
+whatever it has already said, and a count is a **maximum**, never an
+assignment, or the shots the ring happened to carry would drag `kept` below
+what actually ran.
+
 **3 · The charts need one foundation, then six components.**
 
 `docs/design/bace-charts*.js` is not a chart library. Its sixteen elements are
@@ -151,8 +183,13 @@ into the same store the WebSocket feeds.
 | `service_153722/run20260902_153722.h5` (`schema = bace-run/2`), and the LabVIEW `.dat` beside it in `labview_150640/` | the transient charts | the traces, at full precision |
 | a `bace-jv/2` HDF5 — **to be recorded**, there is none in the repo | the J–V chart | the per-curve voltage, current and density arrays |
 | a captured `Hello` frame — **to be recorded**, it is not in the acceptance set | the bench snapshot: the rail and the chain | `data.bench`, which is `GET /bench` whole: instruments, `inferred`, `chain`, `rig`, `verdicts`, `queue`, `state` |
+| *(added 2026-09-03)* a recorded **pipeline** stream | node identity, and the counters | two `bace` nodes under one `run_id`, each numbering its shots from one, and the loop's `Progress(node_path="rep=1")` beside the leaf's `node_path: ""` |
 
 **Two of the four have to be recorded; the journal cannot stand in for either.**
+(A fifth was added while building M0, for the reason a fixture is ever added:
+a defect needed frames nothing in the set carried. Node identity is invisible
+in every single-node recording, and a frame written by hand would have been an
+assumption about the wire rather than the wire.)
 
 *The bench snapshot.* A journal contains none — grepping the acceptance files
 for `bench`, `chain`, `instruments` and `queue` returns nothing, `Hello` is
@@ -250,6 +287,27 @@ worked on with no service running.
 store, `RunFailed` included; and — against a live `--fast` scan, not the
 fixtures — a client dropped at 1008 reconnects with `since=`, misses no
 numbered frame, and redraws from `decimated.replay`.
+
+**Done 2026-09-03.** `ui/` is the shell, `lib/{api,stream,store,format,dom}.js`
+and `replay.html`; `ui/README.md` says how to run it. All three proofs hold and
+are `ui/tests/live.test.mjs`, against a service the runner starts: the drop
+happened at 1008 with 3860 numbered frames, none missing and none twice, and
+replaying that run from `since=0` returned 1060 of its 1260 shots with the
+arrays gone and the scalars intact.
+
+Three places where the phase differed from the paragraph above, none of them
+consequential and all of them worth saying:
+
+- **the tabs are not empty.** Each renders read-only what the store holds — the
+  chain, the module list, the run, the session log, `rig.toml` — because a fold
+  you can read off the screen is worth more than one you can only read off a
+  test. M1 and M2 replace all of it; none of it decides anything they own.
+- **`ui/vendor/` does not exist.** Nothing third-party is used yet, so there is
+  nothing to vendor. The rule ("vendored, never fetched") stands for when there
+  is.
+- **only the `--sim` half of the fixtures is recorded.** `--tag rig` records the
+  same set on the bench and is still to do; every file says `sim` in its name
+  until then, because a simulated J-V is a plausible-looking curve.
 
 ### M1 · The pinned rail and the chain strip
 
@@ -353,6 +411,45 @@ predates all of it.
 Read-only reference, and `ch-rig` is a static schematic that ports as it
 stands — the one place "reusable as they stand" is true. Drop it in whenever a
 phase runs short.
+
+---
+
+### What M0 taught the phases after it
+
+Twenty-one findings came out of seven rounds of review on the M0 pull request,
+every one of them real, all in the event layer — and several belong to phases
+that have not started. They are here so they are not rediscovered there:
+
+- **M1 (the rail).** `state` on `/bench` is fetched twice — at boot and when a
+  run parks — so between them only the stream knows the bench is busy: fold
+  `RunStateChanged` through the service's own mapping (`session._bench_state`;
+  a terminal state is `stopping` while the worker parks, `parked` is the
+  transition to `idle`). The run being parked **still owns the worker**, so it
+  stays the current run until `parked`. The queue is folded from the frames too,
+  or it only changes when the bench is re-read. And the snapshot's `verdicts`
+  are the *whole* answer, not an addition to the list held: `chain_verdicts()`
+  omits a check that now reads ok, so a warning the operator has just fixed
+  disappears **by being absent**, and a merge can never see that.
+- **M2 (the cards), M4 (the monitor).** `stopping` is said the moment a stop is
+  accepted and the worker's own `preflight`/`running` follow it; they must not
+  displace it (`Session._apply_state` refuses too), or the rail tells the
+  operator their stop lapsed. A `NeedsOperator` that a stop, an abort or a
+  failure ended gets no `OperatorResumed` — nobody answered it — so the prompt
+  dies with the run.
+- **M3 (the charts).** `JVCurveDone.density` is **A/cm²** on the wire; the
+  prefix is computed, not assumed, or every density is understated by a
+  thousand. And a shot arrives without arrays two ways — the ring dropped them
+  (`decimated[…].replay`) or the journal never stored them
+  (`decimated[…].omitted`) — which are the same case on screen: no curve, and
+  the loop point comes from the scalars.
+- **M5 (the pipeline).** A pipeline is one `run_id` over **many nodes**, and
+  each module node numbers its shots from one, so `loop:index` is not an
+  identity: the second `bace` lands on the first's. Everything node-scoped —
+  the axis, the values, the V_oc, the loop charges, `RunFinished` — is kept per
+  node, or whichever node finished last overwrites the rest. And §5's three
+  counters are three *events*: the executor's `Progress(node_path="T=250K")`
+  beside the leaf's `node_path: ""`, which is what `Progress.node_path`'s own
+  docstring says a consumer should read.
 
 ---
 
