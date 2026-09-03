@@ -490,7 +490,11 @@ metadata (not a module param). jv modules take their defaults from `JVConfig`
 (run.toml has no jv table; add an optional `[jv]` table to `config.load_run`
 only if trivial — otherwise defaults + last-used is enough).
 
-`ParamSpec.doc` comes from `params.field_docs` on the dataclass. Groups:
+`ParamSpec.doc` comes from `params.field_docs` on the dataclass — one sentence,
+naming the instrument and what the parameter does to it — and `doc_full` is the
+whole docstring for the field's expandable help (`ui-rules` §1). Both are on the
+wire; `doc_full` is empty when `doc` is the whole of it. Every one of the 69
+distinct parameters carries a `doc` as of 2026-09-03. Groups:
 `axis`, `pinned`, `acquisition`, `processing`, `timing`, `trigger`, `output`,
 `illumination`, `sourcemeter`, `led` — the UI shows the first six fields of the
 bace card and folds "17 more · run.toml"; the service just labels groups.

@@ -62,8 +62,17 @@ class JVConfig:
     """One J–V measurement."""
 
     start_v: float = -0.2
+    """First bias the SourceMeter sources, at the device."""
+
     stop_v: float = 1.2
+    """Last bias. Past V_oc for a light curve, or the interesting half of the
+    sweep is missing; a J-V that stops short of the crossing reports no V_oc
+    at all, because `metrics` interpolates and will not extrapolate."""
+
     step_v: float = 0.02
+    """Spacing between points. The point count is rounded from the span, and
+    it multiplies the run: every point costs `settle_s` plus the reading."""
+
     settle_s: float = 0.05
     """Delay at each point before the reading. Too short and the curve is a
     picture of the RC of the cell, not of its steady state."""
