@@ -92,23 +92,25 @@ export function pointSummary(node) {
 }
 
 /**
- * The loops of a repeat, in order: each shot's Q, the mean so far and the
- * sample deviation so far — the same `ddof = 1` the service uses in
- * `core.process`, and `null` until there are two.
+ * The loops of a repeat, in order: each shot's Q, and the mean and sample
+ * deviation so far — **the service's own**, carried on every `StepDone` as
+ * `q_mean`/`q_std` over every loop that ran, not recomputed here from the
+ * shots this client happens to hold. A long scan outgrows the ring, so a
+ * console that opened late or was dropped holds a *tail* of the shots, and a
+ * mean summed from that tail would be a statistic of the replay rather than
+ * of the run (`ui-rules` §6: render, never re-derive). `q_std` is `0` until
+ * there are two loops, which is *not recorded*, so it reads as `null`.
  */
 export function loopSeries(node) {
   const shots = (node.shots || []).slice().sort((a, b) => (a.loop - b.loop) || (a.index - b.index));
   const out = [];
-  let sum = 0;
-  let sumSq = 0;
   for (const shot of shots) {
     if (!finite(shot.q)) continue;
-    const n = out.length + 1;
-    sum += shot.q;
-    sumSq += shot.q * shot.q;
-    const mean = sum / n;
-    const variance = n > 1 ? (sumSq - n * mean * mean) / (n - 1) : null;
-    out.push({ loop: shot.loop, q: shot.q, mean, sigma: variance !== null && variance > 0 ? Math.sqrt(variance) : null });
+    out.push({
+      loop: shot.loop, q: shot.q,
+      mean: finite(shot.q_mean) ? shot.q_mean : shot.q,
+      sigma: finite(shot.q_std) && shot.q_std !== 0 ? shot.q_std : null,
+    });
   }
   return out;
 }
@@ -411,7 +413,7 @@ function notesFor(counts, loopsDone, node, { repeat, withSigma = 0, points = 0 }
   if (!repeat && points && withSigma < points && loopsDone >= 1) {
     out.push(`σ_Q needs two loops at a point: ${points - withSigma} of ${points} still carry one`);
   }
-  if (repeat) out.push('the band is ± the sample deviation of the loops so far, as core.process computes it');
+  if (repeat) out.push('the mean and the ± σ band are the service\'s own, over every loop that ran — not recomputed from the shots this console holds');
   const gone = (node.shots || []).filter((s) => s.tracesGone).length;
   if (gone) out.push(`${gone} shot${gone === 1 ? '' : 's'} without traces — replayed or journalled; the point comes from the scalars`);
   return out;

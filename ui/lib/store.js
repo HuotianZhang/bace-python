@@ -375,6 +375,8 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
           kind: data.kind, label: data.label, started_at: frame.ts, outcome: null,
         });
         record.node_path = data.node_path;
+        // Whatever segment the previous node was in, this one is not in it.
+        record.phase = null;
         break;
 
       case 'NodeDone': {
@@ -399,6 +401,10 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         });
         const node = nodeOf(record, frame.node_path);
         if (typeof data.n_shots === 'number') node.requested = data.n_shots;
+        // Per node as well: a pipeline's every `RunStarted` overwrites the
+        // run-level copy, and a card showing an earlier node's shot would
+        // otherwise label it with a later node's `trigger_sweep`.
+        node.config = data.config || null;
         rollUp(record);
         break;
       }
@@ -428,7 +434,12 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         // — and clearing the phase on every replayed start starved the
         // indicator for the whole of a `--fast` scan, measured in a browser.
         // The phase carries its own `index`, so it knows which shot it is.
-        if (!record.phase || typeof record.phase.index !== 'number' || data.index >= record.phase.index) {
+        // The index restarts at zero on every module node, so a shot that
+        // looks older may be the next node's first: the phase is kept only
+        // for a start on the *same* node that is behind it.
+        if (!record.phase || typeof record.phase.index !== 'number'
+            || (frame.node_path || '') !== (record.phase.node_path || '')
+            || data.index >= record.phase.index) {
           record.phase = null;
         }
         break;
@@ -437,7 +448,7 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         // Live-only, `seq` null, never journalled or replayed: where inside
         // the shot the run is *now* (`docs/ui-rules.md` §7). Held on its own,
         // so a reconnect that loses it leaves the shot itself untouched.
-        record.phase = { ...data, ts: frame.ts };
+        record.phase = { ...data, node_path: frame.node_path || '', ts: frame.ts };
         break;
 
       case 'StepDone':

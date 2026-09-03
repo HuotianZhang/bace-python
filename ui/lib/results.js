@@ -215,7 +215,7 @@ function baceResult(entry, found, bench) {
   const shot = found && found.node.lastShot;
   if (!shot) return [...diagram, h('p.absent', 'no shot yet — the transient appears with the first one')];
 
-  const config = (found.record.config && found.record.config.run) || {};
+  const config = ((found.node.config || found.record.config || {}).run) || {};
   return [
     shotBlock(shot, found, config),
     chart(transientModel(shot, {

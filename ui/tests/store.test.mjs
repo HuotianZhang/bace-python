@@ -506,4 +506,24 @@ test('a replayed StepStarted from behind does not clear the phase of the shot in
   assert.equal(s.getState().runs[run].phase.phase, 'acquire light', 'an older start leaves it');
   s.applyFrame({ seq: 900, ts: 4, run_id: run, node_path: 'bace', type: 'StepStarted', data: { index: 561, loop: 27, step: 16 } });
   assert.equal(s.getState().runs[run].phase, null, 'the next shot clears it');
+
+  // But the index restarts at zero on every module node: the next node's
+  // first shot is not an older shot of this one, and a new node is never in
+  // the segment the last one was.
+  s.applyFrame({ seq: null, ts: 5, run_id: run, node_path: 'rep=1/bace', type: 'StepPhase', data: { index: 560, phase: 'acquire dark', k: 6, of: 7 } });
+  s.applyFrame({ seq: 901, ts: 6, run_id: run, node_path: 'rep=2/bace', type: 'StepStarted', data: { index: 0, loop: 1, step: 1 } });
+  assert.equal(s.getState().runs[run].phase, null, 'another node\'s start clears it');
+  s.applyFrame({ seq: null, ts: 7, run_id: run, node_path: 'rep=2/bace', type: 'StepPhase', data: { index: 0, phase: 'levels', k: 1, of: 7 } });
+  s.applyFrame({ seq: 902, ts: 8, run_id: run, node_path: 'rep=3', type: 'NodeStarted', data: { node_path: 'rep=3', kind: 'repeat', label: 'rep=3' } });
+  assert.equal(s.getState().runs[run].phase, null, 'and so does a node starting');
+});
+
+test('a pipeline keeps each node\'s acquisition config, not only the last one started', () => {
+  const s = store();
+  replayInto(s, parseJsonl(fixture('stream_tree_sim.jsonl')));
+  const state = s.getState();
+  const run = state.runs[state.order[0]];
+  const leaves = Object.values(run.nodes).filter((n) => n.kind === 'bace');
+  assert.equal(leaves.length, 4);
+  for (const node of leaves) assert.equal(node.config.run.trigger_sweep, 'AUTO', node.node_path);
 });

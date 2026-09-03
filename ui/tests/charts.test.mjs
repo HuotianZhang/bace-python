@@ -556,15 +556,21 @@ test('a repeat that was stopped draws the loops it never ran as not acquired', (
   assert.ok(model.notes.some((n) => /^20 loops requested, 5 completed · stopped$/.test(n)));
 });
 
-test('the running mean and its band use the sample deviation the service uses', () => {
+test('the running mean and its band are the service\'s own, not a statistic of the replayed tail', () => {
+  // A long repeat outgrows the ring: the console holds loops 18–20 and the
+  // service's `q_mean`/`q_std` on each of them cover every loop that ran.
+  // Summed here from three shots they would describe the replay, not the run.
   const series = loopSeries({ shots: [
-    { index: 0, loop: 1, step: 1, q: 1e-10 }, { index: 1, loop: 2, step: 1, q: 3e-10 }, { index: 2, loop: 3, step: 1, q: 2e-10 },
+    { index: 17, loop: 18, step: 1, q: 9e-10, q_mean: 3.0e-10, q_std: 4.0e-11 },
+    { index: 18, loop: 19, step: 1, q: 9e-10, q_mean: 3.3e-10, q_std: 4.2e-11 },
+    { index: 19, loop: 20, step: 1, q: 9e-10, q_mean: 3.6e-10, q_std: 4.4e-11 },
   ] });
-  assert.equal(series[0].sigma, null, 'one loop: no σ');
-  assert.ok(Math.abs(series[1].mean - 2e-10) < 1e-20);
-  assert.ok(Math.abs(series[1].sigma - Math.sqrt(2) * 1e-10) < 1e-20, 'ddof = 1');
-  assert.ok(Math.abs(series[2].mean - 2e-10) < 1e-20);
-  assert.ok(Math.abs(series[2].sigma - 1e-10) < 1e-20);
+  assert.deepEqual(series.map((s) => s.loop), [18, 19, 20]);
+  assert.equal(series[2].mean, 3.6e-10, 'the mean over twenty loops, not over three');
+  assert.equal(series[2].sigma, 4.4e-11);
+  // And one loop's `q_std = 0` is not recorded.
+  const first = loopSeries({ shots: [{ index: 0, loop: 1, step: 1, q: 1e-10, q_mean: 1e-10, q_std: 0 }] });
+  assert.equal(first[0].sigma, null);
 });
 
 test('the charge axis is one power of ten for the whole chart, never a prefix per value', () => {
