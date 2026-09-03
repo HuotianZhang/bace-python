@@ -98,8 +98,13 @@ test('a client dropped at 1008 comes back without missing a numbered frame',
   let posted;
   try {
     posted = await api.startRun('bace', {
+      // `record_length` is pinned, not inherited: the last-used layer carries
+      // whatever the previous run set, and a longer record makes each shot
+      // slow enough for the socket to keep up — which is the one thing this
+      // test needs not to happen.
       axis_name: 'delay_ns', axis_start: 0, axis_stop: 200, axis_step: 10,
-      centre_on_voc: false, vpre: 1.0, vcoll: -2.0, n_loops: 60, store_shots: false,
+      centre_on_voc: false, vpre: 1.0, vcoll: -2.0, n_loops: 60,
+      store_shots: false, record_length: 500, n_averages: 8,
     });
     const run = await settle(store, posted.run_id, 540000);
     const stats = stream.state.stats;
@@ -199,21 +204,39 @@ test('the rail follows a run that is holding the worker', options, async () => {
   const api = createApi({ base });
   const store = createStore({ schedule: () => {} });
   store.applyBench(await api.bench());
+  // Sized and polled so the window cannot be missed rather than probably
+  // will not be: under `--fast` every settle is a no-op, so the original
+  // 2-shot run finished inside the loop's own 100 ms sleep and this test
+  // failed about one run in three. 84 shots of a long record is a few hundred
+  // milliseconds of real simulation, and the loop below does not sleep at
+  // all — a GET on localhost is about a millisecond, so there are hundreds of
+  // looks inside the window.
+  //
+  // Every parameter that decides the size is named, none left to the
+  // last-used layer: what a test runs must not depend on what ran before it.
+  // The first version of this left `record_length` out, picked up the value
+  // an earlier test had used, and made *the drop test* stop dropping.
   const posted = await api.startRun('bace', {
-    axis_name: 'delay_ns', axis_start: 0, axis_stop: 100, axis_step: 100,
-    centre_on_voc: false, vpre: 1.0, vcoll: -2.0, n_loops: 2, store_shots: false,
-    record_length: 500,
+    axis_name: 'delay_ns', axis_start: 0, axis_stop: 100, axis_step: 5,
+    centre_on_voc: false, vpre: 1.0, vcoll: -2.0, n_loops: 4, store_shots: false,
+    record_length: 2000,
   });
 
   const deadline = Date.now() + 120000;
   let live = null;
-  while (Date.now() < deadline && !live) {
+  let parked = false;
+  while (Date.now() < deadline && !live && !parked) {
     const bench = await api.bench();
     store.applyBench(bench, { readBack: true });
     const model = railModel(store.getState());
     const bias = model.find((c) => c.key === 'bias');
     if (bias.value === 'LIVE') live = model;
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Stop looking once the run has let go: a hundred more polls would only
+    // turn a missed window into a two-minute timeout. Off the snapshot, not
+    // off the store — `applyBench(…, {readBack: true})` deliberately leaves
+    // the run, the queue and the bench state to the stream, so the store's
+    // copy would never say.
+    parked = !live && bench.state === 'idle' && Boolean(bench.run);
   }
   assert.ok(live, 'the bias never read LIVE while the run was on the worker');
 

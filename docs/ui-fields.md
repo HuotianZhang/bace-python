@@ -67,7 +67,7 @@ only that row says which. When it reads `unknown ⚠` the run will still go —
 `jv` is refusable by nothing but a missing SourceMeter — and the file will say
 `unknown` too.
 
-## light · 7 parameters → all 7 above, nothing folded
+## light · 7 parameters → all 7 above, nothing folded and nothing hidden
 
 Not on the R3 artboard: it did not exist. The card is the bench's two light
 switches, and it is the answer to "how do I make it dark" that the artboard
@@ -78,10 +78,17 @@ left to a side effect of `jv_dark`.
 | 1 | `shutter` | **segmented**, 3 choices | `open` · `shut` · `leave`. The shutter is the light switch: it decides whether light reaches the sample, whatever the generator is doing |
 | 2 | `led_mode` | **segmented**, 4 choices | `dc` · `pulse` · `off` · `leave`. Prefer the shutter over `off` — a cycled generator loses its thermal steady state and the next module waits for it again (operator instruction, 2026-09-02) |
 | 3 | `led_v` | float, V | the DC level, or the pulse high level — the same number `bace` must pulse at |
-| 4 | `led_low_v` | float, V | `pulse` only; shown when `led_mode == pulse` |
-| 5 | `pulse_frequency_hz` `duty_percent` | float | `pulse` only; shown when `led_mode == pulse` |
+| 4 | `led_low_v` | float, V | `pulse` only — but always shown, see below |
+| 5 | `pulse_frequency_hz` `duty_percent` | float | `pulse` only — but always shown |
 | 6 | `settle_s` | float, s | |
 | — | illumination | **bench read-back** | the same row `jv` carries, and the same function behind it. What the node reports having achieved, not what it asked for |
+
+**This is the one card that hides nothing, and the browser is what said so.**
+The first build hid `led_v` unless `led_mode` was `dc` or `pulse` — correct for
+the *node* form, where what the node does not read it does not read. On the
+bench card it was wrong: the **DC** button sends `led_v` and **Pulse** sends
+all four, so the card was driving the lamp from a number the operator could not
+see. A button that acts on a field is a reason to show the field.
 
 **The card's buttons are bench actions, not a Run.** This is the one card
 whose primary control does not post to `/runs`: a run whose only module is
@@ -118,10 +125,21 @@ it away would break the coupling invariant the whole experiment hangs on.
 Folded: `led · led_low_v` (carried for the rail; `run_jv` drives the LED DC),
 `led_v` when it is neither inherited nor derived, `sourcemeter · 9`.
 
-## bace · 50 parameters → 14 above, 34 folded, 2 not applicable
+## bace · 50 parameters → 15 above, 32 folded, 3 not applicable
 
-The count is the same for every axis choice, because two fields are hidden by
-whichever axis is selected rather than folded.
+The count is the same for every axis choice, because the fields the axis makes
+meaningless are hidden rather than folded. **Hidden and folded are not the same
+statement**, and the split is the rule the code applies:
+
+* **hidden** — the run will not read this value in this configuration. The
+  pinned field that *is* the axis; the V_oc flag the other axis owns; `v_sat`,
+  which only the `measure_dc` branch reads. Showing it offers a knob that does
+  nothing, which is exactly the trap the polarity pair was.
+* **folded** — it applies, it is just not worth a line right now.
+
+`above + folded + hidden` is every parameter the module has, and
+`ui/tests/fields.test.mjs` asserts that sum rather than the three numbers
+alone.
 
 | # | field | render | shown when |
 |---|---|---|---|
@@ -136,8 +154,8 @@ whichever axis is selected rather than folded.
 | 8 | `delay_ns` | float, ns | `axis_name != delay_ns` |
 | 9 | `n_loops` | int | |
 | 10 | `n_averages` | int | |
-| 11 | `invert_polarity` | bool, **accent** | the exception above |
-| 12 | `output_polarity` | enum, **accent** | the exception above |
+| 11 | `invert_polarity` | bool, **accent** | arithmetic on the computed levels, not an instrument setting — see rule 5 |
+| 12 | `output_polarity` + `inverted_output` | **one control**, accent | four-way `auto · NORM · INV · leave`, revealing the boolean only under `auto`, and stating the effective answer |
 
 **`centre_on_voc` and `vpre_on_voc` are one decision, not two.** Exactly one is
 meaningful, and `axis_name` decides which: with the `vpre` axis the whole sweep
@@ -146,12 +164,15 @@ says so); with any other axis the pinned `vpre` is an offset from the V_oc in
 scope. The card shows whichever applies and hides the other. The axis field
 itself is hidden from the pinned row for the same reason — it is the axis.
 
-Folded, by group: `illumination · 5` (`led_low_v` `v_sat` `led_settle_s`
+Folded, by group: `illumination · 4` (`led_low_v` `led_settle_s`
 `led_settle_max_s` `led_settle_tolerance`), `acquisition · 5`
 (`timebase_ns_per_div` `record_length` `read_intensity`
 `acquisition_timeout_s` `store_shots`), `timing · 6`, `trigger · 4`,
 `processing · 4` (`t0_int_s` `t0_int_reference` `offset_correct`
-`dark_reference`), `output · 1` (`inverted_output`), `sourcemeter · 9`.
+`dark_reference`), `sourcemeter · 9`. The `output` group is not in that list
+and has no entry of its own: `inverted_output` is drawn inside the polarity
+control above, so the group empties itself. That is what a computed count
+buys — a typed one would have said `output · 1` for ever.
 
 ## power · 2 above, nothing folded
 
@@ -208,19 +229,21 @@ ceiling and the ceiling must be visible for that to read as deliberate.
 
 This is the one place the table departs from the artboard, and it is a
 consequence of real data rather than a preference. R3 draws one button reading
-`17 more · run.toml`. The `bace` card actually folds **34**, and 34 fields
+`17 more · run.toml`. The `bace` card actually folds **32**, and 32 fields
 behind one disclosure is the "comfortable screen" `ui-rules` §1 warns about.
 
 So the fold is the service's own groups, each its own disclosure with its own
 count, in the order an operator reaches for them on a rig day:
 
 ```
-illumination · 5    acquisition · 5    timing · 6    trigger · 4
-processing · 4      output · 1         sourcemeter · 9
+illumination · 4    acquisition · 5    timing · 6    trigger · 4
+processing · 4      sourcemeter · 9
 ```
 
 Every count is computed from the answer, never typed — the `17` in the mockup
-was already stale when the SMU fields landed, which is the argument.
+was already stale when the SMU fields landed, and the `output · 1` this page
+itself predicted was stale by the time the polarity control was built. Both are
+the argument.
 
 The alternative order is `run.toml`'s own (`axis`, `pinned`, `acquisition`,
 `illumination`, `sourcemeter`), which has the merit that the fold and the file

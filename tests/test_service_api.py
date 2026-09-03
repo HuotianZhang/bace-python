@@ -94,6 +94,14 @@ def wait_until(predicate, timeout_s: float = TIMEOUT) -> None:
         time.sleep(0.01)
 
 
+def _settled(session: Session, quiet_s: float = 0.05) -> bool:
+    """True once `last_seq` has not moved for `quiet_s` -- every frame the
+    last job produced is numbered and published."""
+    seq = session.last_seq
+    time.sleep(quiet_s)
+    return session.last_seq == seq
+
+
 def wait_run(session: Session, run_id: str) -> None:
     assert session.wait_run(run_id, TIMEOUT), f"{run_id} did not end"
 
@@ -202,6 +210,13 @@ def test_bench_read_and_the_chain_fix_by_hand(service):
     r = client.post("/bench/read", params={"wait": "false"})
     assert r.status_code == 202 and set(r.json()) == {"job"}
     wait_until(lambda: session.worker.idle)
+    # `worker.idle` says the job's generator returned, not that every frame it
+    # produced has been numbered -- the last verdicts of a read-back are
+    # published just after. Taking the cursor on `idle` alone let one of them
+    # land *after* it about one run in six, and this test then read a `Verdict`
+    # where it wanted the `BenchAction` first. So the barrier is the sequence
+    # itself: wait until it stops moving.
+    wait_until(lambda: _settled(session))
 
     before = session.last_seq
     r = client.post("/bench/actions/set-33220a-pol-inv")

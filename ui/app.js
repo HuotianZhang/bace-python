@@ -60,7 +60,7 @@ function show() {
   if (mounted && mounted.dispose) mounted.dispose();
   viewEl.scrollTop = 0;
   mountedRoute = name;
-  mounted = BY_ROUTE[name].mount(viewEl, { store, api, stream, fmt });
+  mounted = BY_ROUTE[name].mount(viewEl, { store, api, stream, fmt, notify });
   renderTabs();
 }
 
@@ -106,6 +106,18 @@ let parkArmedTimer = null;
 
 function drawStrip(state) {
   renderChainStrip(stripEl, state, { onFix: fix, onPark: park, status: stripStatus, parkArmed });
+}
+
+/**
+ * What a view says when a call is refused. It goes to the strip, which is at
+ * the foot of every view, because that is already where a refusal appears and
+ * a second place for the same kind of message is a second place to look. The
+ * sentence is the service's own (`error.text`); `checks` is the 422's list,
+ * which a refused Start carries and which the operator needs in full.
+ */
+function notify(text, level = 'warn', checks = null) {
+  stripStatus = { level: level === 'crit' || level === 'bad' ? 'bad' : level, text, checks };
+  drawStrip(store.getState());
 }
 
 /** An armed Park disarms itself: it is a confirmation, not a mode. */

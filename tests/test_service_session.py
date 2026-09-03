@@ -14,6 +14,7 @@ import os
 import pathlib
 import queue
 import time
+import types
 
 import numpy as np
 import pytest
@@ -165,6 +166,54 @@ def test_a_manual_jv_goes_through_the_worker_the_journal_and_the_registry(tmp_pa
         assert snap["read_at"] is not None and snap["chain"]["total"] == 4
         assert snap["session"]["id"] == SID and snap["instruments"]["voc"] == {"value": None}
         assert s.errors == []
+
+
+def test_a_jv_provides_a_voc_only_from_a_curve_read_as_lit(tmp_path):
+    """`JVCurveDone.dark` is three-valued since the `jv`/`light` split, and
+    `None` -- the bench could not say whether light reached the sample -- is
+    falsy. A curve nobody confirmed was lit may be a dark one, whose "V_oc" is
+    the noise crossing; and this source is what a `bace` centres its axis on.
+
+    Found by driving the console in a browser: the rail showed a V_oc `from:
+    jv` after a run, which is right when the curve was read as lit and wrong
+    when it was merely not-known-to-be-dark."""
+    with make_session(tmp_path) as s:
+        # Cold: the shutter is shut, so the curve is read as dark and provides
+        # nothing -- `metrics` does not report a V_oc for a known dark curve.
+        dark, _ = s.submit(tree_for_module("jv", {"step_v": 0.05}))
+        assert s.wait_run(dark, TIMEOUT)
+        assert s.session_voc is None, "a dark curve is not a V_oc source"
+
+        # Lit, by the actions the bench card's light control uses.
+        s.bench_action("set-led-dc", {"level": 1.02})
+        s.bench_action("shutter-open")
+        lit, _ = s.submit(tree_for_module("jv", {"step_v": 0.05}))
+        assert s.wait_run(lit, TIMEOUT)
+        voc = s.session_voc
+        assert voc is not None, "a curve read as lit provides one, at the level read back"
+        assert (voc.how, voc.led_v, voc.run_id) == ("jv", 1.02, lit)
+        assert voc.value == pytest.approx(s.bench.sim.bench.device.voc(1.02), abs=0.02)
+
+
+def test_a_curve_of_unknown_illumination_never_becomes_a_voc_source():
+    """The unknown case, without a bench that can be made blind: the capture
+    keys on `dark is False`, so `None` is refused where `False` is taken."""
+    from bace.experiment.jv import JVCurveDone, JVMetrics
+    from bace.service.executor import _Executor
+
+    captured = []
+    curve = lambda dark: JVCurveDone(  # noqa: E731
+        index=0, label="as found", dark=dark, led_level_v=1.02, direction="forward",
+        voltage=np.array([0.0, 1.0]), current=np.array([-1.0, 1.0]), density=None,
+        metrics=JVMetrics(voc=0.9, jsc=-1.0, p_max=None, v_mpp=None, j_mpp=None,
+                          fill_factor=None))
+    ex = _Executor.__new__(_Executor)
+    ex.providers, ex.on_voc = {}, captured.append
+    step = types.SimpleNamespace(node_path="jv", module="jv")
+    ctx = types.SimpleNamespace(run_id="r")
+    for dark in (True, None, False):
+        ex._capture(curve(dark), step, ctx)
+    assert [v.how for v in captured] == ["jv"], "only the curve read as lit"
 
 
 def test_a_jv_bace_gives_the_session_its_voc_and_a_manual_bace_centres_on_it(tmp_path):
