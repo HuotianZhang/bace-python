@@ -91,15 +91,27 @@ export function createBenchWatch({
     fetching = true;
     fetchedAt = now();
     stats.asked += 1;
+    // An `async` body, not a promise chain, so that a `fetchBench` which
+    // throws *synchronously* is caught like any other failure. A chain built
+    // on the result would never get its `finally` attached, `fetching` would
+    // stay true, and the watch would go silent for the life of the page —
+    // which is the one thing "never a dropped ask" above promises it does not
+    // do. Not reachable through `api.js`, whose calls are `async`; reachable
+    // through anything else that is handed in.
+    //
     // `readBack`: take the instruments, the chain and the verdicts, and leave
     // the run, the queue and the bench state to the stream — this response and
     // the next run's `preflight` frame race, and the loser must not be the one
     // that cannot arrive out of order.
-    Promise.resolve(fetchBench())
-      .then((bench) => onBench(bench))
-      .catch(() => {})
-      .finally(() => { fetching = false; pump(); });
-    if (modules && fetchModules) Promise.resolve(fetchModules()).then(onModules).catch(() => {});
+    (async () => {
+      try { onBench(await fetchBench()); } catch { /* the next frame asks again */ }
+      finally { fetching = false; pump(); }
+    })();
+    if (modules && fetchModules) {
+      (async () => {
+        try { onModules(await fetchModules()); } catch { /* the catalogue keeps what it had */ }
+      })();
+    }
   }
 
   return {

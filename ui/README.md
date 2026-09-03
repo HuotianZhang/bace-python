@@ -137,10 +137,13 @@ and all of them cheaper now than after the cards and the charts exist:
   different element: it drops the operator's selection mid-copy, and from M2 it
   would take the caret out of a parameter field on every frame. 110 078
   elements → 21 829, and the selection survives.
-* **The store keeps the traces the ring would replay**, `RING_TRACES_KEPT` of
-  them per node — the service's own number, so a console that has been dropped
-  and one that has not hold the same thing. A decimated shot is ~14.6 kB, so
-  3780 of them was 61 MB and M5's canonical tree would have been ~830 MB.
+* **The store keeps the traces the ring would replay**: `RING_TRACES_KEPT` of
+  them, in one ring for the store, because `session._traces` is one
+  `deque(maxlen=200)` for the whole session — so a console that has been
+  dropped and one that has not hold the same thing. A decimated shot is
+  ~14.6 kB, so 3780 of them was 61 MB and M5's canonical tree would have been
+  ~830 MB. (Capped per *node*, as this first was, it would still be ~130 MB
+  across that tree's 45 leaves; a review caught it.)
 
 Reproduce any of it with a browser and `playwright-core`; the shapes are in
 `ui/tests/render.test.mjs`, which holds both client-side rules down without one.

@@ -126,3 +126,31 @@ test('a replayed frame asks like any other', () => {
   assert.equal(h.watch.frame({ type: 'NodeStarted', data: {} }), true);
   assert.equal(h.asked.length, 1);
 });
+
+test('a fetch that throws where a promise was expected does not wedge the watch', async () => {
+  // `fetching` is set before the call, so a `fetchBench` that throws
+  // synchronously would leave it set with no `finally` to clear it — and the
+  // watch would go silent for the life of the page, which is the opposite of
+  // the "never a dropped ask" it promises. An `async` body catches it.
+  let thrown = 0;
+  let ok = 0;
+  let clock = 10_000;
+  const timers = [];
+  const watch = createBenchWatch({
+    fetchBench: () => { if (thrown < 1) { thrown += 1; throw new Error('not a promise'); }
+                        ok += 1; return Promise.resolve({}); },
+    onBench: () => {},
+    setTimeoutImpl: (fn, ms) => { timers.push({ fn, at: clock + ms }); return timers.length; },
+    now: () => clock,
+  });
+
+  watch.frame({ type: 'StepPhase', data: {} });
+  assert.equal(thrown, 1, 'the first ask threw');
+  await new Promise((done) => setTimeout(done, 0));
+
+  watch.frame({ type: 'StepPhase', data: {} });
+  clock += 700;
+  for (const t of timers.splice(0)) if (t.at <= clock) t.fn();
+  await new Promise((done) => setTimeout(done, 0));
+  assert.equal(ok, 1, 'and the watch asked again rather than going silent');
+});

@@ -316,12 +316,23 @@ The same principle bounds the store. A decimated shot is ~14.6 kB of heap, so
 a 3780-shot scan held **61 MB** and the canonical 9 T x 5 level tree of M5 —
 forty-five leaves of the same size — would be around 830 MB, which is the tab,
 not a chart. The store now keeps the traces of the last `RING_TRACES_KEPT`
-shots per node, which is *the service's own number*: the ring replays the last
-200 and strips the rest, so a console that had ever been dropped already held
-exactly those and one that had not held everything. Adopting it makes the two
-the same console. Older shots keep every scalar and their verdict and read
-`tracesGone`, which is the word the store already had for a replayed shot — so
-no chart needs a second case. 61 MB became 13.7 MB.
+shots, which is *the service's own number and the service's own scope*:
+`session._traces` is one `deque(maxlen=200)` for the whole session, appended on
+every `StepDone` whatever run or node it belongs to. So the ring replays the
+traces of the last 200 shots anyone took and strips the rest, and a console
+that had ever been dropped already held exactly those while one that had not
+held everything. Mirroring it makes the two the same console. Older shots keep
+every scalar and their verdict and read `tracesGone`, which is the word the
+store already had for a replayed shot — so no chart needs a second case.
+61 MB became 13.7 MB.
+
+*Corrected 2026-09-03, from a review of the change.* The first version of this
+capped **per node**, which is neither what the service does nor a bound: 200
+per leaf across those forty-five leaves is 9000 shots of arrays, ~130 MB. One
+ring of 200 is ~3 MB whatever the tree. The lesson is the one this whole
+section is about — the invariant was stated as "what the ring keeps" and then
+implemented as something else, and only reading the service's own declaration
+settled it.
 
 Neither is a micro-optimisation to do later: both are properties of the layer
 M2–M6 are written *on*, and both get more expensive to retrofit with every
