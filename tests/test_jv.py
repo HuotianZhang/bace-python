@@ -476,10 +476,16 @@ def test_leave_reads_the_dark_it_finds_rather_than_making_one():
 def test_a_bench_that_cannot_say_gets_unknown_and_a_warning_never_dark():
     """`None` is not `False`. A rig with no shutter cannot know whether light
     reaches the sample however confident the generator is, and a curve
-    labelled dark there would be the failure `ui-rules` §9 is about."""
+    labelled dark there would be the failure `ui-rules` §9 is about.
+
+    The generator has to be *on* for this to be the unknown case: an LED that
+    is off is proof of dark on its own, shutter or no shutter, and answering
+    `unknown` there would be its own kind of wrong."""
     sim = make_bench(seed=5)
     rig = Rig(bias=sim.bias, scope=sim.scope, shutter=None,
               config=RigConfig(), smu=sim.smu, led=sim.led)
+    rig.led.set_dc(1.02)
+    rig.led.enable_output(True)
     events = run(rig, _leave())
     curve = [e for e in events if isinstance(e, JVCurveDone)][0]
     assert curve.dark is None and curve.label == "as found unknown"
@@ -520,6 +526,8 @@ def test_an_unknown_curve_has_no_dark_attribute_in_the_file(tmp_path):
     sim = make_bench(seed=6)
     rig = Rig(bias=sim.bias, scope=sim.scope, shutter=None,
               config=RigConfig(), smu=sim.smu, led=sim.led)
+    rig.led.set_dc(1.02)                # on: an LED that is off proves dark
+    rig.led.enable_output(True)
     rec = JVRecorder(str(tmp_path), "20260903_120000", metadata={},
                      rig_config=rig.config.as_dict())
     list(record(run_jv(rig, _leave(), sleep=NO_SLEEP), rec))
@@ -664,3 +672,39 @@ def test_a_dc_level_is_the_offset_not_a_stale_pulse_amplitude():
     curve = [e for e in run(rig, _leave()) if isinstance(e, JVCurveDone)][0]
     assert curve.label == "as found lit" and curve.dark is False
     assert curve.led_level_v is None
+
+
+def test_one_proof_of_dark_is_enough_and_light_needs_all_three():
+    """The shutter *is* the light switch: shut means no light reaches the
+    sample whatever the generator does, and an LED that is off or in OFF mode
+    means there is none to reach it whatever the shutter does. Any one of
+    those, definitively read, settles the question — where claiming *light*
+    still needs all three.
+
+    The all-or-nothing gate this replaced made a supported arrangement
+    useless: `light(shutter="shut")` on a bench with no LED is explicitly
+    allowed, and the `jv` after it came out `unknown`, with the full non-dark
+    metric set, though the closed shutter proved it dark."""
+    sim, rig = build()
+
+    # A shut shutter, and no LED at all to ask about.
+    rig.led = None
+    rig.shutter.shut()
+    got = illumination_state(rig)
+    assert got["lit"] is False, "shut is dark, LED or no LED"
+    curve = [e for e in run(rig, _leave()) if isinstance(e, JVCurveDone)][0]
+    assert curve.dark is True and curve.label == "as found dark"
+    assert curve.metrics.voc is None, "and it gets the dark metrics"
+
+    # An LED that is off, with no shutter to ask about.
+    sim, rig = build()
+    rig.shutter = None
+    rig.led.off()
+    assert illumination_state(rig)["lit"] is False, "off is dark, shutter or no shutter"
+
+    # But claiming *light* still needs all three: LED on, shutter unreadable.
+    sim, rig = build()
+    rig.shutter = None
+    rig.led.set_dc(1.02)
+    rig.led.enable_output(True)
+    assert illumination_state(rig)["lit"] is None
