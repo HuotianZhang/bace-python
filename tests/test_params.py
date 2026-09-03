@@ -375,7 +375,8 @@ def test_as_wire_is_json_serialisable_and_in_spec_order():
     assert lv["value"] == [1.02, 1.06] and lv["default"] == []
     assert lv["source"] == "run.toml" and lv["detail"] == "run.toml [jv]"
     expected_keys = {"name", "value", "source", "detail", "editable", "type", "unit",
-                     "default", "doc", "choices", "group", "nullable", "minimum", "maximum"}
+                     "default", "doc", "doc_full", "choices", "group", "nullable",
+                     "minimum", "maximum"}
     assert all(set(w) == expected_keys for w in back)
     enum = next(w for w in back if w["name"] == "t0_int_reference")
     assert enum["choices"] == ["record", "trigger", "pulse"]
@@ -618,7 +619,11 @@ def test_field_docs_returns_the_first_sentence():
     assert docs["n_averages"] == "Hardware averages per trace."
     assert docs["t0_int_reference"] == (
         "`record`, `trigger` or `pulse` — what `t0_int_s` is measured from.")
-    assert "pulse_width_ns" not in docs                  # undocumented: absent, not ""
+    # Absent, not "": a field with no string under it is missing from the map
+    # rather than mapping to empty. `RunConfig` has none left -- every one of
+    # its fields is documented -- so the case is made on a dataclass that does.
+    from bace.core.axis import Axis
+    assert "start" not in field_docs(Axis)
     full = field_docs(RunConfig, full=True)
     assert full["n_averages"].startswith("Hardware averages per trace. Noise falls")
     assert "**`record`** measures from the first sample." in full["t0_int_reference"]

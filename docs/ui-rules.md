@@ -44,6 +44,22 @@ s4_PTQ10IT4F_pxa_290K_1020mVLED_906mVVOC_offsetcorr_20260807_111521
 `v_pre`, `n_averages`, `centre_on_voc`; a prettier synonym is a second
 vocabulary to learn.
 
+**And never the name alone.** The name is the label, not the explanation.
+Some of these fifty names carry their meaning (`n_loops`, `setpoint_k`);
+plenty carry none (`smu_nplc`, `trigger_sweep`, `duty_percent`, `v_sat`); and
+a few carry the wrong one — `inverted_output` is the 81150A's output polarity,
+`invert_polarity` is arithmetic on the computed levels, and the two sit four
+fields apart. So **every field shows one sentence saying which instrument it
+touches and what it does to it**, and every field can be expanded to the whole
+explanation, including what a wrong value produces. `GET /modules` carries
+both: `doc` is that sentence, `doc_full` the rest. Neither is optional and
+neither is the UI's to write — the engine's dataclass docstrings are the one
+source, so the screen and the code cannot drift apart.
+
+The same rule holds off-screen: a review, a hand-off note or a commit message
+that names a parameter says what it is for. A reader who has to go and look up
+`store_shots` has been handed a decision they cannot make.
+
 ---
 
 ## 2 · Numbers

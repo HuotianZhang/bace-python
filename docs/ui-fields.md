@@ -229,7 +229,7 @@ and the file is edited between them.
 
 ---
 
-## Seven calls this table makes that the artboard did not
+## Eight calls this table makes that the artboard did not
 
 Each is a deliberate departure, listed so it can be reversed in one place.
 
@@ -246,13 +246,36 @@ Each is a deliberate departure, listed so it can be reversed in one place.
 4. **`measure_dc` is above the fold, next to the V_oc row.** With no V_oc in
    scope, R3·1 says *"none · run jv_bace first"* and offers no second route;
    `measure_dc` is the second route.
-5. **`inverted_output` stays folded while `output_polarity` is above.** They
-   are genuinely different knobs — `:OUTP1:POL` versus `:OUTP:POL INV` on the
-   81150A — and the docstring for one says so about the other. Splitting them
-   across the fold is a trap, and the mitigation is that the folded group is
-   labelled `output` and holds nothing else. Raising both is the safer call if
-   the rig ever needs the second one.
+5. **`output_polarity` and `inverted_output` are rendered as one control.**
+   *Corrected 2026-09-03 from an earlier reading of this table, which called
+   them "genuinely different knobs".* They are not two knobs: they are one
+   knob and its fallback. `RunConfig.polarity_instruction()` is
+   `leave → None`, `NORM → False`, `INV → True`, **`auto` → `inverted_output`**
+   — so `inverted_output` is read only when `output_polarity` is `auto`, which
+   is the default, and is dead at any other setting. Two fields where one is
+   silently inert at three of four settings is a trap however they are laid
+   out, so the card shows a single four-way control (`auto · NORM · INV ·
+   leave`) that reveals the boolean underneath only on `auto`, and says what
+   the effective answer is.
+
+   Both are about the **81150A's output polarity** (`:OUTP:POL`), which decides
+   which of the two levels the device *rests* at between pulses: NORM holds it
+   in extraction and pulses to V_pre; INV holds it at V_pre and pulses to
+   V_coll, which is BACE as the physics describes it. Neither has anything to
+   do with `invert_polarity`, four fields away in `processing`, which is
+   arithmetic — it swaps and negates the two computed levels before they are
+   sent. That pair of names is the single worst ambiguity in the catalogue,
+   and it is why rule 8 below exists.
 6. **`store_shots` is folded**, at 163 MB for 51 points × 100 loops. Folded but
    not silent: when it is on, the card header carries a chip, because a
    parameter whose cost is measured in gigabytes should not be invisible.
 7. **The fold is groups**, per the section above.
+8. **No field is shown as a bare name.** Every field carries one sentence
+   saying **which instrument it touches and what it does to it**, and expands
+   to the whole explanation — what it costs, and what a wrong value produces.
+   `GET /modules` now carries both (`doc`, `doc_full`), the engine's dataclass
+   docstrings are the single source, and as of 2026-09-03 all 69 distinct
+   parameters have a `doc` where 14 had none. The rule is `ui-rules` §1, and
+   the reason is on this page: `smu_nplc`, `trigger_sweep`, `duty_percent` and
+   `v_sat` mean nothing to a reader who has not been told, and
+   `inverted_output` means something other than it looks.

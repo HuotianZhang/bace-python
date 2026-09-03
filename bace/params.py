@@ -138,6 +138,20 @@ class ParamSpec:
     default: Any = None
     unit: str = ""
     doc: str = ""
+    """One sentence: **which instrument, and what this does to it.** It is what
+    the console prints under the field, and for most of these fifty parameters
+    it is the only thing standing between the operator and a name that means
+    nothing on its own (`smu_nplc`, `trigger_sweep`, `duty_percent`) or, worse,
+    something else than it looks (`inverted_output` is the 81150A's output
+    polarity; `invert_polarity` is arithmetic on the computed levels)."""
+
+    doc_full: str = ""
+    """The whole explanation, for the field's expandable help: what it does,
+    what it costs, and what a wrong value produces. Empty means `doc` is the
+    whole of it. Kept apart rather than folded into `doc` because the card
+    shows one line per field and `ui-rules` §1 wants the density -- the rest
+    is a click away, not gone."""
+
     choices: tuple = ()
     group: str = ""
     editable: bool = True
@@ -543,6 +557,7 @@ class ParamSet:
                 "unit": spec.unit,
                 "default": _jsonable(spec.default),
                 "doc": spec.doc,
+                "doc_full": spec.doc_full,
                 "choices": list(spec.choices),
                 "group": spec.group,
                 "nullable": spec.nullable,
@@ -613,6 +628,7 @@ def specs_from_dataclass(cls: type, *, group: str = "", exclude: Iterable[str] =
                              "ignoring them")
 
     docs = field_docs(cls)
+    docs_full = field_docs(cls, full=True)
     try:
         hints = get_type_hints(cls)
     except Exception:              # a forward reference the module cannot resolve
@@ -652,6 +668,7 @@ def specs_from_dataclass(cls: type, *, group: str = "", exclude: Iterable[str] =
             nullable = True
         out.append(ParamSpec(name=rename.get(f.name, f.name), type=kind, default=default,
                              unit=units.get(f.name, ""), doc=docs.get(f.name, ""),
+                             doc_full=docs_full.get(f.name, ""),
                              choices=opts, group=group,
                              editable=editable.get(f.name, True), nullable=nullable))
     return out

@@ -46,12 +46,40 @@ class SourceMeterConfig:
     the output swinging to the rail if a contact opens."""
 
     settle_jsc_ms: float = 500.0
+    """How long the 2400 holds 0 V before reading the current, for J_sc.
+    Too short and the number is the cell's RC, not its steady state."""
+
     settle_voc_ms: float = 500.0
+    """How long the 2400 holds 0 A before reading the voltage, for V_oc.
+    The longest of the three on a slow cell -- and the one that matters most,
+    because this V_oc is what a `bace` scan centres its axis on."""
+
     settle_jsat_ms: float = 500.0
+    """How long the 2400 holds `v_sat` before reading the current, for J_sat."""
+
     nplc: float = 1.0
+    """Integration time per reading, in **power-line cycles** (`:SENS:*:NPLC`).
+    1 NPLC is 20 ms on 50 Hz mains and rejects mains hum by integrating over a
+    whole cycle; below 1 the reading gets faster and noisier, above 1 slower
+    and quieter. It multiplies the whole sweep: `points x (settle + averaging x
+    NPLC / 50 Hz)`."""
+
     averaging: int = 1
+    """How many readings the 2400 averages into each point (`:AVER:COUN`, with
+    a repeating filter). 1 switches the filter off. Costs NPLC per extra
+    reading, so it multiplies the sweep time with `nplc`."""
+
     terminals: str = "FRON"          # FRON or REAR
+    """Which set of terminals on the 2400 is live (`:ROUT:TERM`): `FRON` the
+    front panel, `REAR` the back. **A physical fact about how the rig is
+    cabled, not a preference** -- set to the side the sample is actually
+    wired to, or the sweep reads an open circuit."""
+
     four_wire: bool = False
+    """Kelvin sensing (`:SYST:RSEN ON`): the 2400 measures voltage on a
+    separate pair of leads, so the reading excludes the drop down the current
+    leads. Needs four wires to the sample; with only two connected, turning
+    this on reads nothing. Off is the two-wire default this rig uses."""
 
 
 class Keithley2400:
