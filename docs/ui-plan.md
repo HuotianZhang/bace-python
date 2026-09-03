@@ -406,9 +406,25 @@ inferred outlives it.
 
 ### M2 · The bench cards do work
 
-The generated field and card components from decision 1, the five module cards.
-Editing writes the `edited` layer through `PUT`; `null` resets one;
+The generated field and card components from decision 1, the **six** module
+cards — `jv`, `jv_bace`, `bace`, `light`, `power`, `temperature`. Which fields
+sit above the fold on each, and in what order, is `docs/ui-fields.md`, produced
+at the start of this phase against a live `--sim` service as this plan said it
+would be. Editing writes the `edited` layer through `PUT`; `null` resets one;
 `POST …/params/reset` drops the layer.
+
+**Five cards became six during this phase**, and the catalogue changed under
+it: `jv_dark` was doing two jobs and admitting to one, so it split into `jv`
+(sweep only, touching neither shutter nor LED, labelling the curve from a
+read-back) and `light` (the shutter and the LED, as a node). Everything below
+this line that still says `jv_dark` is a record of a phase that was finished
+before the split, and is left as it happened.
+
+`light` is the one card whose primary control is **not** a Run: a run whose
+only module is `light` is `invalid`, because the park that ends every run would
+undo it (`light.undone-by-park`). Its buttons are bench actions — the same ones
+M1's chain strip posts, one action per click. The module stays a node for M5's
+trees, where it goes before the step that needs the light.
 
 Verdicts render three-tier and behave accordingly. **Start is disabled by
 `invalid` and by `crit`** — `pipeline.validate` is `valid = not any(c.level in

@@ -48,18 +48,45 @@ async function settle(store, runId, timeoutMs) {
   throw new Error(`${runId} did not park within ${timeoutMs} ms`);
 }
 
-test('a jv_dark reaches done, with kept and requested back', options, async () => {
+test('a jv reaches done, with kept and requested back', options, async () => {
   const api = createApi({ base });
   const { store, stream } = connect();
   try {
-    const posted = await api.startRun('jv_dark', { start_v: -0.2, stop_v: 1.2, step_v: 0.05 });
+    const posted = await api.startRun('jv', { start_v: -0.2, stop_v: 1.2, step_v: 0.05 });
     const run = await settle(store, posted.run_id, 60000);
     assert.equal(run.state, 'done');
     assert.equal(run.kept, 1);
     assert.equal(run.requested, 1);
-    assert.equal(run.curves.length, 1, 'one dark curve');
+    assert.equal(run.curves.length, 1, 'one curve: jv sets no light, so there is no plan');
     assert.ok(run.folders.length >= 1, 'the run says where it wrote');
+    // `jv` labels the curve from what it read, never from what it assumed.
+    // On a cold `--sim` bench that read is a shut shutter.
+    assert.match(run.curves[0].label, /^as found /);
+    assert.equal(run.curves[0].dark, true);
   } finally {
+    stream.close();
+  }
+});
+
+test('light sets the bench, and the jv after it reads what light did', options, async () => {
+  const api = createApi({ base });
+  const { store, stream } = connect();
+  try {
+    // The manual form is the bench action, not a run: a light-only run is
+    // refused because the park that ends every run would undo it.
+    await assert.rejects(() => api.startRun('light', { shutter: 'open' }),
+                         (err) => /only sets the light/.test(err.text || String(err)));
+    await api.action('set-led-dc', { level: 1.02 });
+    await api.action('shutter-open');
+
+    const posted = await api.startRun('jv', { step_v: 0.05 });
+    const run = await settle(store, posted.run_id, 60000);
+    assert.equal(run.state, 'done');
+    assert.equal(run.curves[0].dark, false, 'read back as lit');
+    assert.equal(run.curves[0].label, 'as found 1.02 V');
+    assert.ok(run.curves[0].metrics.voc > 0, 'a lit curve has a V_oc');
+  } finally {
+    await api.action('shutter-shut');
     stream.close();
   }
 });

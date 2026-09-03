@@ -4,10 +4,18 @@
 from the Round 3 artboard plus what `GET /modules` actually returns, reviewed
 then rather than guessed now."* This is that table.
 
-Produced 2026-09-03 against a live `--sim` service: eight modules, 95
-parameters, read off `GET /modules` rather than off the contract. The artboard
-is R3·1 and R3·2 in `docs/design/BACE Console - Round 3.dc.html`. Where the two
-disagree, the disagreement is named below and not quietly resolved.
+Produced 2026-09-03 against a live `--sim` service, read off `GET /modules`
+rather than off the contract. The artboard is R3·1 and R3·2 in
+`docs/design/BACE Console - Round 3.dc.html`. Where the two disagree, the
+disagreement is named below and not quietly resolved.
+
+**Revised the same day**, after `jv_dark` was split into `jv` (sweep only,
+touching neither shutter nor LED) and `light` (the bench's two light switches,
+as a node). Nine modules, 102 parameters. The split makes the J–V card *smaller*
+and moves what it lost onto a card of its own, which is what the R3 artboard
+could not have anticipated — it drew `jv_dark` with no illumination row at all
+and left the operator no way to make the bench dark except by running the
+module that did it as a side effect.
 
 Nothing here is a component design. It is the data the generated card reads:
 per card, an ordered list of names above the fold, and the group order below
@@ -40,7 +48,7 @@ card is the intent, not an overrun.
 
 ---
 
-## jv_dark · 15 parameters → 6 above, 9 folded
+## jv · 15 parameters → 6 above, 9 folded
 
 | # | field | render | note |
 |---|---|---|---|
@@ -48,10 +56,52 @@ card is the intent, not an overrun.
 | 2 | `settle_s` | float, s | dwell per point — hysteresis lives here |
 | 3 | `both_directions` | bool | |
 | 4 | `pixel_area_cm2` | float, cm² | `0` means the answer is amps, not A/cm² (`ui-rules` §6) |
+| — | illumination | **bench read-back**, not a parameter | `shut`, `1.020 V`, or `unknown ⚠`. This is the whole of `jv`'s relationship with the light: it reads it, labels the curve from the read, and changes nothing. From `/bench`, and it is what the curve's `label` will say |
 
 Folded: `sourcemeter · 9`.
 
+The read-back row is above the fold and near the top, not tucked at the
+bottom, because on this card it is the one thing the operator cannot set and
+must know: the same six parameters produce a dark curve or a light one, and
+only that row says which. When it reads `unknown ⚠` the run will still go —
+`jv` is refusable by nothing but a missing SourceMeter — and the file will say
+`unknown` too.
+
+## light · 7 parameters → all 7 above, nothing folded
+
+Not on the R3 artboard: it did not exist. The card is the bench's two light
+switches, and it is the answer to "how do I make it dark" that the artboard
+left to a side effect of `jv_dark`.
+
+| # | field | render | note |
+|---|---|---|---|
+| 1 | `shutter` | **segmented**, 3 choices | `open` · `shut` · `leave`. The shutter is the light switch: it decides whether light reaches the sample, whatever the generator is doing |
+| 2 | `led_mode` | **segmented**, 4 choices | `dc` · `pulse` · `off` · `leave`. Prefer the shutter over `off` — a cycled generator loses its thermal steady state and the next module waits for it again (operator instruction, 2026-09-02) |
+| 3 | `led_v` | float, V | the DC level, or the pulse high level — the same number `bace` must pulse at |
+| 4 | `led_low_v` | float, V | `pulse` only; shown when `led_mode == pulse` |
+| 5 | `pulse_frequency_hz` `duty_percent` | float | `pulse` only; shown when `led_mode == pulse` |
+| 6 | `settle_s` | float, s | |
+| — | illumination | **bench read-back** | the same row `jv` carries, and the same function behind it. What the node reports having achieved, not what it asked for |
+
+**The card's buttons are bench actions, not a Run.** This is the one card
+whose primary control does not post to `/runs`: a run whose only module is
+`light` is `invalid` (`light.undone-by-park`), because every run ends parked —
+outputs off, shutter shut — so it would set a light and hand it straight back.
+The manual form is `POST /bench/actions/{shutter-open, shutter-shut,
+set-led-dc, set-led-pulse, led-off}`, which do not go through the worker. So
+the card offers **Open · Shut** and **DC · Pulse · Off** as action buttons,
+each one action per click, the way M1's chain strip already does it.
+
+The module still exists as a *node*: in a pipeline it goes before the step
+that needs the light, and there park at the end of the run is exactly where
+the bench should end up. So the same card feeds the pipeline tab's node
+editor (M5) with the same fields and a different verb.
+
 ## jv_bace · 22 parameters → 11 above, 11 folded
+
+Unchanged by the split, and deliberately: `jv_bace` sweeps illumination *as*
+the measurement and is the V_oc source, so the light is its business. Taking
+it away would break the coupling invariant the whole experiment hangs on.
 
 | # | field | render | note |
 |---|---|---|---|
@@ -190,8 +240,8 @@ Each is a deliberate departure, listed so it can be reversed in one place.
    Raising it makes that visible; the alternative is to lift it to the session
    metadata, which is a service change.
 2. **`settle_s` and `both_directions` are on `jv_bace` too.** R3 shows them on
-   `jv_dark` alone; the sweep semantics are identical and two J–V cards that
-   read differently teach the operator that they measure differently.
+   the dark card alone; the sweep semantics are identical and two J–V cards
+   that read differently teach the operator that they measure differently.
 3. **`dark` is above the fold.** It doubles the run.
 4. **`measure_dc` is above the fold, next to the V_oc row.** With no V_oc in
    scope, R3·1 says *"none · run jv_bace first"* and offers no second route;
