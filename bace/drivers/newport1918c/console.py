@@ -111,10 +111,11 @@ class ConsolePowerMeter:
             ) from exc
         except urllib.error.URLError as exc:
             raise PowerMeterError(
-                f"cannot reach the 1918-C console at {self.base_url} — start it "
-                "(Start Console.bat in the power-meter project) or run without an "
-                "intensity reading. Opening the meter directly here would fail "
-                "anyway while the console holds it."
+                f"cannot reach the 1918-C console at {self.base_url}. rig.toml names "
+                "it, so this program will not open the meter itself — only one "
+                "process can hold the USB device. Either start that console, or "
+                "clear [power_meter] console and let the service own the meter "
+                "(the default)."
             ) from exc
         except json.JSONDecodeError as exc:
             raise PowerMeterError(f"console returned non-JSON from {path}") from exc
@@ -196,51 +197,3 @@ def _why(r: Reading) -> str:
         return "reading is overrange"
     return f"meter is in units code {r.units}, not watts ({WATTS})"
 
-
-class DirectPowerMeter:
-    """`PowerMeter` that opens the device itself, via the reference driver.
-
-    Only for when nothing else holds the meter — a bench check with the console
-    closed. It imports the tested driver rather than reimplementing it, so
-    `newport1918c.py` from the power-meter project must be importable.
-    """
-
-    def __init__(self, *, dll: str | None = None, simulate: bool = False,
-                 wavelength_nm: float | None = None):
-        try:
-            from newport1918c import PowerMeter as ReferenceMeter  # type: ignore
-        except ImportError as exc:
-            raise PowerMeterError(
-                "the reference 1918-C driver is not importable. Put "
-                "newport1918c.py (from the power-meter project) on sys.path, or "
-                "use ConsolePowerMeter, which needs nothing installed here."
-            ) from exc
-        self._meter = ReferenceMeter.open(dll=dll, simulate=simulate)
-        if wavelength_nm is not None:
-            self._meter.set_wavelength(wavelength_nm)
-        self.last: Reading | None = None
-
-    def set_wavelength(self, nm: float) -> None:
-        self._meter.set_wavelength(nm)
-
-    def read(self) -> Reading:
-        d = self._meter.read()
-        st = d.get("status") or {}
-        r = Reading(watts=float(d["value"]), saturated=bool(st.get("saturated")),
-                    overrange=bool(st.get("overrange")),
-                    units=st.get("units"), wavelength_nm=None)
-        self.last = r
-        return r
-
-    def read_power(self) -> float:
-        return self.read().watts
-
-    def read_statistics(self, n: int, *, interval_ms: int = 10) -> tuple[float, float]:
-        d = self._meter.capture(int(n), int(interval_ms), fetch=False)
-        if int(d.get("collected", 0)) < int(n):
-            raise PowerMeterError(
-                f"capture collected {d.get('collected')} of {n} samples")
-        return float(d["mean"]), float(d["sdev"])
-
-    def close(self) -> None:
-        self._meter.close()

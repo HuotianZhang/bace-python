@@ -104,8 +104,10 @@ the engine's event generators in HTTP + WebSocket — the bench read-back and it
 explicit by-hand actions, the module catalogue with every parameter's
 provenance, manual runs and the pipeline tree (validate, dry run, execute), the
 two stop verbs, an append-only journal per session, and a temperature node
-that settles through the 331 console when `rig.toml` names it and pauses for
-the operator (`NeedsOperator`) when it does not. Proven on the rig 2026-09-02:
+that settles through the 331 when the bench has one and pauses for the
+operator (`NeedsOperator`) when it does not. **It needs no other program
+running**: the 1918-C and the 331 drivers live in `bace/drivers/`, and this
+process opens both (2026-09-03). Proven on the rig 2026-09-02:
 jv_dark → jv_bace → bace end to end on the lab PC, the bace matching a LabVIEW
 run fifteen minutes apart within the single-shot scatter. `bace/service/README.md`
 says how to run and drive it; `docs/service-contract.md` is what it was built to.

@@ -106,17 +106,40 @@ class RigConfig:
     """33220A driving the LED through a fixed-gain amplifier."""
 
     power_meter_wavelength_nm: float = 530.0
-    power_meter_console: str = "http://127.0.0.1:8918"
-    """The 1918-C console owns the USB device — only one process can. The BACE
-    program asks it over HTTP rather than fighting for the handle."""
+    power_meter_dll: str = ""
+    """`usbdll.dll` for the Newport USB driver. Empty searches the standard
+    install paths and picks the build matching this interpreter's bitness --
+    the package installs both, and taking the first one that exists picks
+    wrong half the time and yields a bare WinError 193."""
+
+    power_meter_console: str = ""
+    """Empty (the default) means **this process opens the 1918-C itself**.
+    Only one process can hold the USB device; on this rig that process is the
+    service. Set this to the meter console's URL only if that program is
+    running and should keep the handle -- then the service asks it over HTTP
+    instead of failing to open a device it cannot have."""
+
+    temperature_address: str = "GPIB0::7::INSTR"
+    """Lake Shore 331. Address 7 is what this instrument answers on; the
+    manual's factory default is 12, so a fresh box would differ."""
+
+    temperature_max_setpoint_k: float = 350.0
+    """The ceiling for this cryostat. A setpoint above it is **refused**, never
+    clamped: quietly giving 350 K for a requested 400 K hides the mistake."""
+
+    temperature_control_loop: int = 1
+    """Which loop to drive: 1 is the heater output, 2 the analog voltage
+    output. A choice, not something to infer -- both loops can be active at
+    once and writing to the wrong one fails silently."""
 
     temperature_console: str = ""
-    """Lake Shore 331 at GPIB0::7::INSTR, owned by its own console on
-    127.0.0.1:8331. Naming the console here attaches it as `Rig.temperature`
-    (`service.rigs.Bench.build_real`), and a temperature loop then settles
-    through it -- setpoint written, the band waited for, the console's own
-    350 K ceiling and heater range left to the console. Empty keeps
-    temperature a number an operator types at each pause."""
+    """Empty (the default) means **this process opens the 331 itself** at
+    `temperature_address`, and a temperature loop settles through it. Set this
+    to the 331 console's URL only if that program is running: it holds the
+    only GPIB session while it does, and a second session from here would
+    interleave with its poller on the bus. Either way the 350 K ceiling, the
+    heater range, the PID and the ramp stay where they are -- read, never
+    driven by a run."""
 
     # -- bench ceilings ---------------------------------------------------
     max_current_compliance_a: float = 0.05

@@ -265,7 +265,7 @@ to change.)
   Never rewritten. (Future failure recovery replays it; this round only writes.)
 - First line: `{"type": "SessionStarted", "data": {"session_id", "mode": "sim"|"rig", "rig_toml", "run_toml", "out", "fingerprint": bench.checks.fingerprint(bace root), "python", "version", "fast", "startup_writes": [...]}}`.
   `startup_writes` lists the instrument writes the assembly made before the
-  worker started (the scope's `default_setup`, the 1918-C console's units and
+  worker started (the scope's `default_setup`, the 1918-C's units and
   wavelength): not a run and not a by-hand action, so this is where they are
   on record.
 - History queries (read this session's file and, newest first, every earlier
@@ -334,11 +334,11 @@ to change.)
    "led":     {"output": …, "polarity": "NORM"|"INV"|"?", "mode": "DC"|"PULSE"|"OFF"|"?", "high_v": 1.020, "low_v": 0.400, "frequency_hz": 500.0, "offset_v": 0.71 (real driver only)},
    "voc":     {"value": 1.0423, "led_v": 1.020, "from": {"run_id": "…", "node_path": "jv_bace", "ts": …, "how": "jv_bace"|"measure_dc"|"typed"}} | {"value": null},
    "power":   {"available": true, "watts": 1.407e-3, "trustworthy": true, "wavelength_nm": 530.0, "monitor": false},
-   "temperature": {"wired": false|true, "kelvin": 294.8|null, "setpoint_k": null, "in_band": null, "source": "console"|"simulated"|"operator"|null,
+   "temperature": {"wired": false|true, "kelvin": 294.8|null, "setpoint_k": null, "in_band": null, "source": "instrument"|"console"|"simulated"|"operator"|null,
                    "read_at": … (of the newest reading), "monitor": false, "reads": 0,
-                   … when wired (a controller attached: the 331 console answering, or the --sim stand-in):
-                   "connected": true|false (the console's own word on the instrument behind it), "ramping": …, "heater_range": 3, "status_text": "ok", "max_setpoint_k": 350.0,
-                   … when a console is named: "console": "http://127.0.0.1:8331", and "reason" when it was named and not attached}
+                   … when wired (a controller attached: this process on the bus, the 331 console answering, or the --sim stand-in):
+                   "connected": true|false (whether the instrument answered the last poll), "ramping": …, "heater_range": 3, "status_text": "ok", "max_setpoint_k": 350.0,
+                   … when a console is named: "console": "http://127.0.0.1:8331", and "reason" when a 331 was expected and not attached}
  },
  "inferred": [] | ["relay", "bias", "led", "shutter"],
  "chain": {"read_at": …, "ok": 3, "total": 4, "items": [
@@ -432,7 +432,7 @@ Actions:
 | `led-off` / `bias-off` / `smu-off` | `disable_output()` | — |
 | `shutter-open` / `shutter-shut` | `shutter.unblock()/shut()` | — |
 | `relay-to-sourcemeter` / `relay-to-amplifier` | reads both sources' outputs back first (`read_output`, refreshing the flags the interlock reads), then `router._move` via the public context managers (enter `router.dc()`/`transient()` and exit immediately, so the interlock runs) | a source is live, or a source did not answer its output query → `crit` Verdict, nothing moved |
-| `read-power` | one `PowerReading` from the console | console silent → `warn` |
+| `read-power` | one `PowerReading` from the meter | meter silent → `warn` |
 
 Unknown action → 404. The service never performs any of these on its own.
 
@@ -476,8 +476,8 @@ what the run will centre on — rather than `default · null` with an empty
 | `jv_bace` | `run_jv(rig, JVConfig(light_control="manage", dark=<dark>, led_levels_v=<levels>))` | all of `jv` + `led_start_v led_stop_v led_step_v` (or inherited `led_v` → one level), `led_settle_s`, `dark: bool = True` (include the dark curve), `led_low_v` (unused by run_jv, carried for the rail). This is the module that *owns* the light: it sweeps illumination as the measurement, and it is the V_oc source |
 | `light` | `rigs.apply_led` / `rigs.apply_shutter` — the same functions the `set-led-*`, `led-off` and `shutter-*` actions call | `shutter` (`open`/`shut`/`leave`), `led_mode` (`dc`/`pulse`/`off`/`leave`), `led_v led_low_v pulse_frequency_hz duty_percent settle_s`. Exists because a bench action is not a pipeline step: without it a tree of `jv` steps could never be dark. `leave` on either half touches nothing, so the shutter can move without cycling a generator that is at its thermal steady state. **A run whose only module is `light` is `invalid`** (`light.undone-by-park`): every run ends parked, so it would hand the bench back unchanged — the manual form is the bench action |
 | `bace` | `run_transient_scan(rig, ScanSpec, RunConfig, voc=…)` inside `router.transient()` with the LED pulsed at `led_v` | `axis_name axis_start axis_stop axis_step centre_on_voc` → Axis; `vpre vcoll delay_ns n_loops` → ScanSpec; `vpre_on_voc: bool = False` (group `pinned`: the pinned `vpre` is an *offset from the V_oc in scope* — the design's inherited "vpre = V_oc + 0.000 V" when `delay_ns` or `vcoll` is the axis, TDCF at V_oc; resolved in `build()` from the same V_oc source `centre_on_voc` uses, under the same coupling check, so the engine still gets an absolute prebias; invalid with the `vpre` axis, where `centre_on_voc` is the flag); every `RunConfig` field verbatim; `store_shots`; `led_v led_low_v` (33220A pulse levels; inherited inside an illumination loop); `voc` (derived from the V_oc source, or edited = typed by hand → warn); `measure_dc: bool = False` (measure V_oc/J_sc/J_sat on the Keithley under the LED first, like the intensity series; `v_sat`); `led_settle_s` (the least wait after DC → pulse), `led_settle_max_s: float = 60.0` s and `led_settle_tolerance: float = 0.02` (group `illumination`: the power meter behind the open shutter is polled every 0.5 s until three readings agree within the tolerance, giving up with a warning at the maximum; see the README's "Light"); `smu_*` as above |
-| `power` | `PowerReading` from the console; `Read` is a worker job, `Monitor` is an observer | `wavelength_nm samples` |
-| `temperature` | `service.temperature.settle`: through the 331 console when `Rig.temperature` holds one (setpoint written, band held for `hold_s`), else `NeedsOperator` + wait; status `partial` | `setpoint_k tolerance_k hold_s timeout_s` |
+| `power` | `PowerReading` from the meter; `Read` is a worker job, `Monitor` is an observer | `wavelength_nm samples` |
+| `temperature` | `service.temperature.settle`: through the 331 when `Rig.temperature` holds a controller (setpoint written, band held for `hold_s`), else `NeedsOperator` + wait; status `partial` | `setpoint_k tolerance_k hold_s timeout_s` |
 | `park` | `Rig.park()` | — |
 | `wait` | sleep | `seconds` |
 | `note` | journal entry only | `text` |
@@ -650,23 +650,34 @@ executor runs; the executor must never re-derive structure.
    The interlock (`Router` refuses while a source is live) is the guard; the
    schedule marks each transition so the UI can draw "relay 2400 → amplifier".
 
-### Temperature (the 331 console, or the pause)
+### Temperature (the 331, or the pause)
 
 One helper, `service.temperature.settle`, serves the temperature loop and the
-`temperature` module; which path it takes is decided by `Rig.temperature`,
-which `Bench.build_real` attaches when `RigConfig.temperature_console` names
-a console that answers (`--sim`: any non-empty name attaches the simulator's
-stand-in; the default `rig.toml` names none). Wiring the 331 changed no
-route, no tree field and no event type (plan, P3: "API 不变").
+`temperature` module; which path it takes is decided by `Rig.temperature`.
 
-**With the console attached** the node settles on its own. The console is
-read first — the first poll, at zero on the poll clock, is the cryostat as
-found and goes out as a `TemperatureRead` like every other; a setpoint is
-written to an instrument that answers, never into a console with nothing
-behind it — then the setpoint is written (`POST /api/setpoint`, once), the
-console is polled every 5 s through `RunContext.sleep` (so `--fast` costs
-polls, not wall time), each usable reading is yielded as
-`TemperatureRead(source="console"|"simulated")`, and the node is done once
+**Who owns the instrument** (changed 2026-09-03). The 331 answers only the
+last query it received, so exactly one owner may exist — but that owner is
+now normally *this process*: `Bench.build_real` opens `[temperature] address`
+itself through `drivers.lakeshore331.controller`, and the one-owner rule is
+kept by a lock (`controller._LOCK`) rather than by a process boundary. Naming
+`[temperature] console` is the escape hatch for a bench where the 331 console
+is running and holds the bus; clearing *both* says there is no cryostat here,
+and then nothing is opened and nothing is reported unavailable. `--sim` is
+unchanged and deliberately does not follow `address`: any non-empty `console`
+attaches the simulator's stand-in, and the default (none) is the
+operator-pause path, because that is the one a UI has to handle well. Wiring
+the 331 changed no route, no tree field and no event type (plan, P3: "API
+不变").
+
+**With a controller attached** the node settles on its own. It is read first
+— the first poll, at zero on the poll clock, is the cryostat as found and
+goes out as a `TemperatureRead` like every other; a setpoint is written to an
+instrument that answers, never into a controller with nothing behind it —
+then the setpoint is written (once), the controller is polled every 5 s
+through `RunContext.sleep` (so `--fast` costs polls, not wall time), each
+usable reading is yielded as
+`TemperatureRead(source="instrument"|"console"|"simulated")`, and the node is
+done once
 the reading has stayed inside `tolerance_k` of the setpoint, with no ramp
 still walking it (RAMPST?), for `hold_s` — the dwell starts when the band is
 entered. Then `Verdict(ok, "temperature.settled", "250 K reached in 27 min,
@@ -689,9 +700,9 @@ same string however the 290 was arrived at. So every `RunMetadata`, every
 |---|---|---|
 | `typed` | `""` | `[sample]` in the recipe, or the console's metadata field. Nobody read an instrument. |
 | `setpoint` | `""` | A temperature loop asked for it and the settle never got one reading. **What was requested, not what was reached.** |
-| `settled` | `console` \| `simulated` | The controller held it inside the band. `simulated` means the stand-in, so a `--sim` file cannot be mistaken for a measured one. |
+| `settled` | `instrument` \| `console` \| `simulated` | The controller held it inside the band. `instrument` is this process on the bus, `console` the 331 console asked over HTTP; `simulated` means the stand-in, so a `--sim` file cannot be mistaken for a measured one. |
 | `operator` | `operator` | A person typed the number at the pause. |
-| `operator` | `console` \| `simulated` | A person ended the pause without typing one; the number is the last reading polled while they decided. |
+| `operator` | `instrument` \| `console` \| `simulated` | A person ended the pause without typing one; the number is the last reading polled while they decided. |
 
 `how` alone is not enough — the last two rows share it — so both are stored
 and both are rendered. A field absent altogether is a file written before
@@ -707,28 +718,49 @@ holds a directory named `290K_1000mVLED_offsetcorr_LabVIEW panel replica -
 combination 4 - shutter only dark_20260902_012223` from 2026-09-01 to say
 why: spaces in a path, and a claim that was overturned the next day and can
 no longer be corrected without renaming the folder.
-Each node is marked in the console's audit log (`POST /api/note`) at the
-setpoint write and at the settle, best effort.
+Each node is marked in the controller's audit trail at the setpoint write
+and at the settle, best effort — the console's own log through `POST
+/api/note` when a console owns the instrument, the session journal when this
+process does (the console kept a separate file because it was the only
+program on the instrument; here the journal is where an operator looks).
 
-The console keeps its own rules, and each failure is named for what it is:
+The 350 K ceiling and the front-panel settings hold whoever owns the bus, and
+each failure is named for what it is:
 
-- a setpoint above its 350 K ceiling (or a body it would not take) is
-  **refused**, never clamped — `Verdict(crit, "temperature.refused", <the
-  console's own sentence>, data={…, "error": <the driver's full text>,
-  "status": 403})` then `NeedsOperator(what="temperature refused", detail={…,
-  "error"})`. A refused setpoint never names the subtree: a resume with no
-  `temperature_k` typed takes the last reading;
-- the heater range, ramp rate and PID are whatever the console holds. A
+- **the heater watchdog** cuts the heater after
+  `Limits.max_consecutive_faults` consecutive faults, and the count resets on
+  the first clean one. A fault is a bad control-sensor status (`RDGST?`) **or
+  a heater fault** (`HTRST?`): an open or shorted load while the sensor reads
+  well would otherwise reset the count forever. Cutting is `RANGE 0`, plus --
+  on a loop-2 cryostat, where `RANGE` does not reach the analog output --
+  `MOUT 0` then `CMODE open loop`, in that order. It is fed from every
+  `read()` (the monitor, the settle) **and from the worker's own sleeps
+  inside a run** (`rigs.Bench._feed_watchdog`, at most every
+  `WATCHDOG_POLL_S`), because the monitor cannot read while a run holds the
+  bus and a fault beginning after a temperature settles must not wait hours
+  to be seen. `DirectTemperatureController.heater_cut` holds the reason once
+  it has fired;
+- a setpoint above the 350 K ceiling (`[temperature] max_setpoint_k`, or the
+  console's own limit when a console owns the bus) is **refused**, never
+  clamped — `Verdict(crit, "temperature.refused", <the controller's own
+  sentence>, data={…, "error": <the driver's full text>, "status": 403})`
+  then `NeedsOperator(what="temperature refused", detail={…, "error"})`. The
+  direct driver raises the same `TemperatureError(refused=True, status=403)`
+  the console's HTTP 403 produced, so this path is one path. A refused
+  setpoint never names the subtree: a resume with no `temperature_k` typed
+  takes the last reading;
+- the heater range, ramp rate and PID are whatever the front panel holds. A
   heater range of 0 while the setpoint is above the reading is said at once
   — `Verdict(warn, "temperature.heater-off", …)`, once per node — and the
   settle goes on toward its timeout, so the operator raises the range on the
-  console instead of finding out half an hour later; nothing is changed from
-  here, and a cool-down with the heater off is not a warning;
+  instrument instead of finding out half an hour later; nothing is changed
+  from here, and a cool-down with the heater off is not a warning;
 - `timeout_s` on the poll clock without reaching the band, three consecutive
-  readings with the console's `connected` false (`reason = "silent"`, before
-  or after the write), or the console itself not answering three polls or
-  the setpoint write (`reason = "unreachable"`: start the console, do not
-  reconsider the setpoint) gives `Verdict(warn, "temperature.timeout", …,
+  readings with `connected` false (`reason = "silent"`, before or after the
+  write), or the bus itself not answering three polls or the setpoint write
+  (`reason = "unreachable"`: fix the instrument or the cable — or start the
+  console, if rig.toml names one — do not reconsider the setpoint) gives
+  `Verdict(warn, "temperature.timeout", …,
   data={…, "reason", "written", "error"})` then
   `NeedsOperator(what="temperature timeout", detail={…, "kelvin",
   "elapsed_s", "reason", "written", "error"})` — the run does not proceed to
@@ -877,21 +909,46 @@ lists every folder written.
 
 ## 8. The observers (`monitors.py`)
 
-`POST /monitors/power {"interval_s": 1.0}` starts a thread that reads
-`ConsolePowerMeter.read()` every interval and emits `PowerReading` (run_id null,
-`node_path=""`); `DELETE /monitors/power` stops it; `GET /monitors` lists.
-It never touches VISA, so it runs during a bace scan (this is R3·2). One
-monitor of each kind at most. If the console stops answering, emit a
-`Verdict(warn, "power.console")` once and keep trying.
+`POST /monitors/power {"interval_s": 1.0}` starts a thread that reads the
+meter every interval and emits `PowerReading` (run_id null, `node_path=""`);
+`DELETE /monitors/power` stops it; `GET /monitors` lists. **The meter is
+never on the bus** — USB when this process owns it, HTTP when the meter's
+console does — so it runs right through a bace scan (this is R3·2),
+serialised against the worker's own reads by `rigs._METER_LOCK`. One monitor
+of each kind at most. If the meter stops answering, emit a `Verdict(warn,
+"power.console")` once and keep trying.
 
-`POST /monitors/temperature {"interval_s": 5.0}` is the same shape for the 331
-console (`RigConfig.temperature_console`; 422 while it is empty — naming it in
-rig.toml is the lab's step): every reading is a `TemperatureRead(source="console")`
-(`"simulated"` under `--sim`, read off the attached controller; the URL when the
-console was silent at start-up) on the stream and in the journal, the `/bench` temperature block follows it
-(`kelvin`, `read_at`, `monitor: true`, `reads`), and a silent console is one
+`POST /monitors/temperature {"interval_s": 5.0}` is the same shape for the
+331; 422 only when the bench has no 331 at all (neither `[temperature]
+address` nor `console`). Every reading is a
+`TemperatureRead(source="instrument"|"console"|"simulated")` on the stream
+and in the journal, the `/bench` temperature block follows it (`kelvin`,
+`read_at`, `monitor: true`, `reads`), and a silent instrument is one
 `Verdict(warn, "temperature.console")`. This is the temperature card's
 "294.8 K · 331 reads" while a scan runs. `DELETE /monitors/temperature` stops it.
+
+**The one exception to "observers never touch the bus."** When this process
+owns the 331's GPIB session its monitor *is* on GPIB0, so it takes
+`RunWorker.bus` -- the lock the worker holds for the whole of a job --
+acquires it **without blocking**, and reads only while holding it. A tick
+that cannot take it is skipped and counted in `skipped` on `GET /monitors`;
+a skip is not a failure. Holding the lock rather than testing `worker.idle`
+is the point: the boolean was true one instant and stale the next, so a
+multi-query read could straddle the start of a job. With a console named the
+331 is HTTP again and no lock is passed.
+
+**What that costs.** A pipeline run holds the bus for its whole length, so
+during a long subtree the temperature monitor emits nothing and the card's
+reading goes stale. `skipped` is how a UI says *why* rather than showing an
+old number as if it were current — **render it**. Readings still arrive from
+the worker where it is safe to take them: while a temperature node settles,
+and while a run is paused for the operator.
+
+The **safety** half of that gap is closed, and separately: the heater
+watchdog rides on reads, so suppressing reads for hours would have suppressed
+it too. The worker feeds it from its own sleeps (§7), which is a fault check
+and not a reading — no `TemperatureRead` is emitted from there, because a
+number taken mid-run is not the cryostat the shot around it was measured at.
 
 ---
 
@@ -911,7 +968,8 @@ py -3 -m bace.service --rig rig.toml --run run.toml      # the lab PC
   `Agilent81150`; `Agilent33220A`; `Keithley2400(config=SourceMeterConfig from run.toml)`;
   shutter and relay through `bench.checks._dio_backend` (direct DELIB or the
   win32bridge helper), the relay wrapped in an adapter exposing `set(channel, value)`
-  for `BiasRouter`; `ConsolePowerMeter` when the console answers). A missing
+  for `BiasRouter`; the 1918-C opened here, or `ConsolePowerMeter` when
+  `[power_meter] console` names one; the 331 likewise). A missing
   instrument is not fatal: the bench snapshot says `unavailable` for it, the
   modules that need it report `needs`, and `bench.instrument` refuses a run on
   it at validate. A missing VISA runtime — `pyvisa` not installed, or installed

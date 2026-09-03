@@ -60,7 +60,7 @@ A missing instrument on the real rig is not fatal: it is printed as
 `unavailable`, `/bench` says so, the modules that need it report `needs`, and
 a run on it is refused at validate with the check `bench.instrument`. The
 three instrument writes the assembly makes (the scope's default setup, the
-1918-C console's units and wavelength) are printed as `startup write` lines
+1918-C's units and wavelength) are printed as `startup write` lines
 and listed in the journal's `SessionStarted` header; nothing else writes to an
 instrument outside a run or a by-hand action. `GET /` lists every route with a
 one-line description; `/docs` is FastAPI's interactive page. Ctrl-C aborts the
@@ -107,7 +107,7 @@ Shapes are in `docs/service-contract.md` (section numbers below).
 | bench | `POST /runs/{id}/stop` | `{"mode": "after_shot" \| "abort"}` (§6, and below) |
 | bench | `GET /runs/{id}/data` | the arrays for the card's charts: `axis`, `values`, `q_mean`, `q_std`, `q_all`, `time_s`, `light`, `dark`, `photo`, `last_shot`; for J-V, `curves`. `?node=` for a pipeline run (§6) |
 | bench | `WS /events`, `GET /events?since=` | every event: `Hello` first, replay from `?since=<seq>`, then live. The HTTP form returns the same ring for a client without a socket. `StepPhase` frames (where inside a shot the run is: `levels`, `light settle`, `acquire light`, …) are live-only, with `seq` null, and never in a replay or the journal (§3, §6) |
-| bench | `POST /monitors/power`, `DELETE /monitors/power`, `POST /monitors/temperature`, `DELETE /monitors/temperature`, `GET /monitors` | the observers: the power monitor reads the 1918-C console, the temperature monitor the 331 console (422 until `[temperature] console` is set in rig.toml), both over HTTP beside a run, never the bus (§8) |
+| bench | `POST /monitors/power`, `DELETE /monitors/power`, `POST /monitors/temperature`, `DELETE /monitors/temperature`, `GET /monitors` | the observers: the power monitor reads the 1918-C (USB or HTTP — never the bus, so it reads through a scan), the temperature monitor the 331 (422 only when the bench has no 331 at all; on GPIB it reads only while holding the worker's bus lock and skips the tick otherwise, so a long run leaves the card stale — `skipped` says why) (§8) |
 | pipeline | `POST /pipelines/validate` | the **Dry run**: the checks, the schedule in order, the counters, the cost, and `folder_pattern` (the run's folder carries a stamp taken at submit, so the Dry run names the pattern rather than a folder that will not exist). Touches nothing (§7) |
 | pipeline | `POST /pipelines` | Start: a fresh read-back when idle, validate, 422 on `invalid`/`crit`, else 202 (§7) |
 | pipeline | `POST /runs/{id}/resume` | answer a `NeedsOperator`: `{"temperature_k", "note"}` (§7, and below) |
@@ -189,35 +189,45 @@ A stopped or aborted run is a normal run: `kept` of `requested` in the record,
 the folder on disk, the counts in `GET /runs/{id}` even when the abort closed
 the generator before it could report them.
 
-## Temperature: the 331 console, or `NeedsOperator`
+## Temperature: the 331, or `NeedsOperator`
 
 A temperature node (a loop iteration, or the `temperature` module) goes one
 of two ways, decided by whether `Rig.temperature` holds a controller
 (`bace/service/temperature.py`, one helper for both):
 
-**`[temperature] console` names the 331 console and it answers at start-up.**
-The node settles on its own: the console is read (the cryostat as found is
-the first `TemperatureRead`), the setpoint is written to it, the console is
-polled every 5 s and every reading goes out as `TemperatureRead`, and once
+**The 331 answered at start-up.** Normally that means this process opened
+`[temperature] address` itself and owns the GPIB session; naming
+`[temperature] console` instead hands ownership to the 331 console and we
+ask it over HTTP. Either way the node settles on its own: the controller is
+read (the cryostat as found is the first `TemperatureRead`), the setpoint is
+written to it, it is polled every 5 s and every reading goes out as
+`TemperatureRead`, and once
 the reading has held inside `tolerance_k` for `hold_s` (no ramp still walking
 the setpoint) the node yields `Verdict(ok, "temperature.settled")` and the
 *last measured* kelvin becomes the subtree's temperature — for a loop
 iteration the nodes under it, for the `temperature` module the nodes after
-it. Every node is marked in the console's own audit log. The console keeps
-its rules: a setpoint above its 350 K ceiling is refused in its words
+it. Every node is marked in the audit trail (the journal here, the console's
+own log when a console owns the instrument). The safety rules hold either
+way: a setpoint above the 350 K ceiling is refused in the driver's words
 (`Verdict(crit, "temperature.refused")`, never clamped), the heater range and
 ramp are whatever it holds (a range of 0 with the setpoint above the reading
 is said once, `Verdict(warn, "temperature.heater-off")`, never changed). A
-`timeout_s` without reaching the band, an instrument silent behind the
-console (`reason = "silent"`), or the console itself not answering
-(`reason = "unreachable"` — start it; a write it did not answer in time is
-read back first, and a setpoint that landed anyway settles with a notice)
-gives `Verdict(warn, "temperature.timeout")` and the pause below with `what =
-"temperature timeout"` — the run never measures at a temperature it did not
-reach; the operator accepts the reading or stops. Under `--sim` any non-empty
-console name attaches a simulated 331 that converges in a few dozen polls.
+`timeout_s` without reaching the band, an instrument that answers nothing
+(`reason = "silent"`), or the bus itself failing (`reason = "unreachable"` —
+check the instrument and the GPIB cable, or start the console if rig.toml
+names one; a write that did not answer in time is read back first, and a
+setpoint that landed anyway settles with a notice) gives `Verdict(warn,
+"temperature.timeout")` and the pause below with `what = "temperature
+timeout"` — the run never measures at a temperature it did not reach; the
+operator accepts the reading or stops.
 
-**No console named, or the named one silent.** A temperature loop still runs
+Under `--sim` there is no instrument to answer, so whether this bench has a
+cryostat is a scenario you choose: any non-empty `[temperature] console`
+attaches a simulated 331 that converges in a few dozen polls, and the default
+(none) is the pause path below. `--sim` deliberately does *not* follow
+`address`, because the pause is the case a console has to handle well.
+
+**No 331 on the bench, or it did not answer.** A temperature loop still runs
 the whole tree; at each temperature the executor yields
 
 ```

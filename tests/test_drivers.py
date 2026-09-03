@@ -336,10 +336,14 @@ def test_a_short_capture_raises_rather_than_averaging_fewer_samples():
 
 
 def test_an_unreachable_console_says_what_to_do():
+    """Naming a console is now a choice, so the message has two fixes, not
+    one: start that program, or stop naming it and let the service open the
+    meter. Before 2026-09-03 it said opening the meter here would fail
+    anyway, which is exactly wrong when the console is not running."""
     from bace.drivers.newport1918c import ConsolePowerMeter, PowerMeterError
     m = ConsolePowerMeter(base_url="http://127.0.0.1:9", timeout_s=0.2)
     assert m.available() is False
-    with pytest.raises(PowerMeterError, match="start it"):
+    with pytest.raises(PowerMeterError, match="clear \\[power_meter\\] console"):
         m.read_power()
 
 

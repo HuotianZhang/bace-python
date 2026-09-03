@@ -664,7 +664,7 @@ def test_the_temperature_check_says_which_path_the_loop_takes():
     assert ok.level == "ok" and ok.node_path == "T=295K"
     assert ok.text.startswith("331 console attached: settles automatically at each of the "
                               "9 temperatures (220-295 K), +/-0.2 K, hold 1 min, timeout 30 min")
-    assert "ceiling and heater range" in ok.text
+    assert "350 K ceiling and the heater range are read, never driven" in ok.text
     assert (ok.data["wired"], ok.data["connected"], ok.data["timeout_s"]) == (True, True, 1800)
     assert v.valid and not any(s.needs_operator for s in v.schedule.steps), (
         "the Dry run says no pause at any temperature")
@@ -674,7 +674,7 @@ def test_the_temperature_check_says_which_path_the_loop_takes():
 
     v = validate(canonical(), bench=with_temperature(wired=True, connected=False), rig=named)
     [w] = v.by_code("temperature.not-wired")
-    assert w.level == "warn" and w.text.startswith("331 console named but silent")
+    assert w.level == "warn" and w.text.startswith("331 console attached but silent")
     assert "instrument is not answering" in w.text and "pauses at each of the 9" in w.text
     assert w.data["connected"] is False and v.schedule.steps[0].needs_operator
 
@@ -1047,9 +1047,10 @@ def test_the_temperature_check_tells_a_console_gone_since_start_from_an_instrume
     v = validate(canonical(), bench=snap, rig=named)
     [w] = v.by_code("temperature.not-wired")
     assert w.level == "warn"
-    assert w.text.startswith("331 console attached at Start and not answering now -- the console "
-                             "at http://127.0.0.1:8331 did not answer the read-back")
-    assert "start the console" in w.text and "instrument is not answering" not in w.text
+    assert w.text.startswith("331 console attached at Start and not answering now -- "
+                             "http://127.0.0.1:8331 did not answer the read-back")
+    assert "instrument is not answering" not in w.text, (
+        "a console that stopped answering is not a console with a silent 331")
     assert w.data["error"].startswith("TemperatureError: cannot reach")
     assert v.schedule.steps[0].needs_operator and v.valid
 

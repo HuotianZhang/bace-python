@@ -68,14 +68,25 @@ address = "GPIB0::15::INSTR"    # Agilent 33220A
 threshold_v = 1.0               # generator voltage at which the LED lights,
                                 # referred back through its fixed amplifier
 
+# The 1918-C. This program opens the USB device itself; the driver lives in
+# bace/drivers/newport1918c/ and nothing else has to be running.
+#
+# Only one process can hold the meter. That is why `console` exists and why it
+# is empty: if the meter's own console (D:/1918cPowerMeter) is started, it
+# takes the handle and this program's open fails with a bare "no Newport device
+# found" that reads like a cable fault. Name the console here and the service
+# asks it over HTTP instead -- the escape hatch, not the normal path.
 [power_meter]
-console = "http://127.0.0.1:8918"   # the 1918-C console owns the USB device —
-                                    # only one process can hold it, so we ask it
-                                    # over HTTP rather than opening it ourselves
+console = ""                    # "http://127.0.0.1:8918" only if that console runs
 wavelength_nm = 530.0           # responsivity is wavelength dependent; a meter
                                 # left at the wrong value returns a plausible
                                 # number that is wrong by tens of percent
 on_beam_splitter = true         # so it can be read during a run
+dll_path = ""                   # empty = pick the usbdll.dll matching this
+                                # interpreter. The Newport driver package
+                                # installs both builds, so taking the first one
+                                # found picks wrong half the time and yields a
+                                # bare WinError 193. Set a path to override.
 
 [dio]
 # Both assignments and both polarities MEASURED on the rig, 2026-09-01, by
@@ -101,17 +112,37 @@ dll_path = ""                   # empty = pick the DELIB build matching this
                                 # delib64.dll in System32; ctypes can only load
                                 # the matching one. Set a path to override.
 
-# Lake Shore 331 at GPIB0::7::INSTR, with its own console on 127.0.0.1:8331.
-# Naming the console here makes every temperature loop settle through it: the
-# service writes the setpoint, polls the console until the reading has held
-# inside the loop's tolerance for hold_s, marks each node in the console's audit
-# log, and pauses for the operator only on a timeout or a refusal. The console
-# keeps its own rules -- the 350 K setpoint ceiling (refused, never clamped) and
-# the heater range, ramp and PID it holds -- and the service asks it for nothing
-# else. Leave `console` empty and temperature stays a number someone types at
-# the pause; a named console that is not running behaves the same way, with the
-# reason on the bench card.
+# Lake Shore 331. This program opens the GPIB session itself; the driver lives
+# in bace/drivers/lakeshore331/ and nothing else has to be running.
+#
+# With the instrument answering, every temperature loop settles through it: the
+# service writes the setpoint, polls until the reading has held inside the
+# loop's tolerance for hold_s, marks each node in the journal, and pauses for
+# the operator only on a timeout or a refusal. With no 331 on the bench,
+# temperature stays a number someone types at the pause, and the reason is on
+# the bench card.
+#
+# The one-owner rule still holds: the 331 answers only the last query it
+# received, so if the 331 console (D:/TemperatureController) is started beside
+# this program, both hold GPIB0::7 and both read the other's replies. Name it
+# in `console` and the service asks it over HTTP instead -- the escape hatch,
+# not the normal path.
+#
+# What a run never drives, either way: the heater range, the PID, the ramp and
+# the loop wiring. Those are set on the front panel and only read back here.
 [temperature]
-console = ""                    # "http://127.0.0.1:8331" to settle through the console
-address = "GPIB0::7::INSTR"     # for reference; this program never opens it -- the
-                                # console owns the GPIB session (one owner rule)
+console = ""                    # "http://127.0.0.1:8331" only if that console runs
+address = "GPIB0::7::INSTR"     # address 7 is what this instrument answers on;
+                                # the manual's factory default is 12, so a
+                                # fresh box would differ. Clear this AND
+                                # `console` to say there is no cryostat on
+                                # this bench: then nothing is opened and the
+                                # card says nothing, rather than reporting a
+                                # missing instrument nobody expected
+max_setpoint_k = 350.0          # REFUSED above this, never clamped: quietly
+                                # giving 350 K for a requested 400 K hides the
+                                # mistake. Set for the current cryostat.
+control_loop = 1                # 1 = heater output, 2 = analog voltage output.
+                                # A choice, not something to infer -- both can
+                                # be active and writing to the wrong one fails
+                                # silently.

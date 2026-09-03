@@ -159,11 +159,14 @@ The results tab is not designed on either side.
 
 **Temperature** — wired since this handover was written (superseded here by
 `docs/service-contract.md` section 7). The Lake Shore 331 is at
-`GPIB0::7::INSTR` with its own console on `127.0.0.1:8331`, and
-`bace/drivers/lakeshore331.py` is an HTTP client to that console, never a
-second GPIB session. `RigConfig.temperature_console` names it (empty in the
-default `rig.toml`); named and answering at Start, a temperature node settles
-through it, otherwise the executor pauses with `NeedsOperator` as before. No
+`GPIB0::7::INSTR`, and **this process opens it** (2026-09-03):
+`bace/drivers/lakeshore331/` holds the instrument code, vendored from the
+331 console project, and `controller.DirectTemperatureController` owns the
+GPIB session. The one-owner rule is kept by a lock, not by a second process.
+`[temperature] console` is the escape hatch for a bench where that console
+*is* running and holds the bus; clearing both it and `address` says there is
+no cryostat here. Answering at Start, a temperature node settles through the
+331; otherwise the executor pauses with `NeedsOperator` as before. No
 endpoint changed. `temperature_k` is a metadata field. Temperature is **not** an `Axis` —
 it settles in minutes, the axis quantities are per-shot and set in nanoseconds.
 It is an outer loop of the pipeline tree beside the LED level.
@@ -178,7 +181,7 @@ It is an outer loop of the pipeline tree beside the LED level.
 | Agilent 81150A | `GPIB0::12::INSTR` | collection field, through a ×4 amplifier |
 | Keithley 2400 | `GPIB0::24::INSTR` | DC side of the relay |
 | Agilent 33220A | `GPIB0::15::INSTR` | LED drive |
-| Lake Shore 331 | `GPIB0::7::INSTR` | through its console on `127.0.0.1:8331` (contract section 7); never opened directly |
+| Lake Shore 331 | `GPIB0::7::INSTR` | opened by this process (contract section 7); `[temperature] console` hands the bus to the 331 console instead |
 | Deditec DIO | module ID 9, channel 0 | module 0 = shutter, module 1 = relay |
 
 **Record geometry**, stable across every session: 4000 points, dt 0.5 ns,
@@ -323,7 +326,8 @@ Each is a decision, not an accident, and each is documented where it lives.
 - **`positive jSC?`** — dead. The label is on every front panel; the string
   appears in no block diagram.
 - **The power meter is on a beam splitter**, so intensity can be read during a
-  run. No bridge needed: it goes through the existing 1918-C console over HTTP.
+  run. No bridge needed — and no 32-bit helper either: only `delib.dll` needs
+  that, and the 1918-C is opened in-process through `bace/drivers/newport1918c/`.
 - **Output polarity.** `:OUTP1:POL INV` was proposed, tested on the rig and
   **rejected** — it moves the transient to 68.5 ns, outside the integration
   window. NORM stands.
@@ -370,8 +374,10 @@ to reach for the same shortcuts.
    both tails at zero (HANDOVER-2026-09-02.md, evening section). A longer
    confirmation against `Q:\Huotian\2026\BACE\20260831\220K` at proper
    n_loops remains worthwhile but is no longer the gate.
-4. **Temperature** — done since (contract section 7): the 331 console is a
+4. **Temperature** — done since (contract section 7): the 331 is a
    `TemperatureController` on the rig, a temperature node settles through it
-   when `RigConfig.temperature_console` names it and it answers, and pauses
-   for the operator otherwise. What is left is the first run against the real
-   console on the rig.
+   when the instrument answers at Start, and pauses for the operator
+   otherwise. Since 2026-09-03 the service opens the instrument itself, so
+   nothing else has to be running. What is left is the first run against the
+   real cryostat on the rig — every path below the driver is exercised only
+   against the vendored simulator so far.

@@ -237,6 +237,15 @@ class RunWorker:
         self._on_state = on_state
         self._queue: collections.deque[Job] = collections.deque()
         self._cv = threading.Condition()
+        self.bus = threading.Lock()
+        """Held for the whole of a job. The bench lock made concrete, for the
+        one caller that needs to ask rather than be the worker: an observer
+        whose instrument is on the bus (`monitors.TemperatureMonitor` when
+        this process owns the 331's GPIB session) tries to take it without
+        blocking and skips its tick when it cannot. Asking `idle` instead
+        raced -- true, then a job starts, then the observer's multi-query read
+        interleaves with the run's own GPIB traffic. Never taken by the
+        observer while blocking: a run holds this for hours."""
         self._thread: threading.Thread | None = None
         self._stopping = False
         self.current: Job | None = None
@@ -371,7 +380,8 @@ class RunWorker:
                 job = self._queue.popleft()
                 self.current = job
             try:
-                self._execute(job)
+                with self.bus:
+                    self._execute(job)
             except BaseException as exc:            # noqa: BLE001 -- the thread outlives any job
                 job.error = _append(job.error, f"worker: {_describe(exc)}")
                 if not job.terminal:

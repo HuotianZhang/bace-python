@@ -526,13 +526,26 @@ def stage_local(report: Report, rig_config) -> None:
                    "C:\\Windows\\System32 — the second is the better fix, "
                    "since it needs no second interpreter and no helper process")
 
-    def power_console(c: Check) -> None:
-        from bace.drivers.newport1918c import ConsolePowerMeter
-        m = ConsolePowerMeter(rig_config.power_meter_console, timeout_s=3.0)
-        if not m.available():
-            c.warn(f"the 1918-C console is not answering at "
-                   f"{rig_config.power_meter_console} — start it, or intensity "
-                   "readings will be skipped")
+    def power_meter(c: Check) -> None:
+        """The meter, opened the way a run will open it.
+
+        With `[power_meter] console` empty (the default) this process opens
+        the USB device, so the check is the real thing and not a proxy for
+        it. The failure worth naming is the console being open beside the
+        service: it holds the handle and the device then reports itself
+        missing, which reads like a cable.
+        """
+        from bace.drivers.newport1918c import PowerMeterError, open_power_meter
+        c.data["through"] = (rig_config.power_meter_console or
+                             "this process (USB)")
+        try:
+            m = open_power_meter(rig_config)
+        except PowerMeterError as exc:
+            c.warn(f"{exc}; intensity readings will be skipped")
+            return
+        except Exception as exc:                            # noqa: BLE001
+            c.warn(f"{type(exc).__name__}: {exc}; intensity readings will be "
+                   "skipped")
             return
         r = m.read()
         c.data["watts"] = r.watts
@@ -543,26 +556,56 @@ def stage_local(report: Report, rig_config) -> None:
         if not r.trustworthy:
             c.warn("the meter reading is not trustworthy (saturated, overrange, "
                    "or not in watts)")
+        if not rig_config.power_meter_console:
+            try:
+                m.close()
+            except Exception:                               # noqa: BLE001
+                pass    # a check must not leave the handle held either way
 
-    def temperature_console(c: Check) -> None:
-        import json
-        import urllib.request
-        url = rig_config.temperature_console or "http://127.0.0.1:8331"
+    def temperature(c: Check) -> None:
+        """The 331, opened the way a run will open it.
+
+        A missing cryostat is not a fault -- most runs on this bench are at
+        room temperature and never ask for one -- so this skips rather than
+        warns. What it does say, when the instrument is there, is the
+        ceiling, because that number is the one a 400 K setpoint will be
+        refused against.
+        """
+        from bace.drivers.lakeshore331 import (TemperatureError,
+                                               open_temperature_controller)
+        through = rig_config.temperature_console or rig_config.temperature_address
+        c.data["through"] = through
         try:
-            with urllib.request.urlopen(url + "/api/state", timeout=3.0) as r:
-                state = json.loads(r.read().decode())
-        except Exception as exc:
-            c.skip(f"331 console not answering at {url} ({type(exc).__name__}) "
-                   "— not needed yet, this is for the next step")
+            t = open_temperature_controller(rig_config)
+        except TemperatureError as exc:
+            c.skip(f"no 331 at {through} ({exc}) — temperature loops pause "
+                   "for a manual set, and a run that asks for no temperature "
+                   "does not need one")
             return
-        for k in ("control_temperature", "temperature", "setpoint", "elapsed_s"):
-            if k in state:
-                c.data[k] = state[k]
-        c.data["keys"] = sorted(state)[:20]
+        except Exception as exc:                            # noqa: BLE001
+            c.skip(f"no 331 at {through} ({type(exc).__name__}: {exc})")
+            return
+        try:
+            r = t.read()
+            c.data["kelvin"] = r.kelvin
+            c.data["setpoint_k"] = r.setpoint_k
+            c.data["ramping"] = r.ramping
+            c.data["heater_range"] = r.heater_range
+            c.data["max_setpoint_k"] = r.max_setpoint_k
+            c.data["connected"] = r.connected
+            if not r.connected:
+                c.warn(f"the 331 at {through} is reachable but not reading "
+                       f"({r.status_text or 'no status'})")
+        finally:
+            if not rig_config.temperature_console:
+                try:
+                    t.close()
+                except Exception:                           # noqa: BLE001
+                    pass    # never leave the GPIB session held by a check
 
     report.run("DELIB (shutter and relay)", "local", delib)
-    report.run("1918-C power meter console", "local", power_console)
-    report.run("Lake Shore 331 console", "local", temperature_console)
+    report.run("1918-C power meter", "local", power_meter)
+    report.run("Lake Shore 331", "local", temperature)
 
 
 def _py_launcher_list() -> str:

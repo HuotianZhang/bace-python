@@ -47,17 +47,21 @@ honoured at every poll, so the abort button is not dead for the length of a
 settle.
 
 **A refusal is not an outage.** The driver tells the two apart
-(`TemperatureError.refused`), and so does this helper: a 403 above the
-ceiling is `temperature.refused` (crit, the console's own sentence); a
-write the console did not answer is read back once -- a slow bus can apply
-a setpoint after the client gave up waiting -- and either settles as if the
+(`TemperatureError.refused`), and so does this helper: a setpoint above the
+ceiling is `temperature.refused` (crit, the controller's own sentence); a
+write that went unanswered is read back once -- a slow bus can apply a
+setpoint after the client gave up waiting -- and either settles as if the
 write had answered (with a notice) or pauses as `temperature.timeout` with
-`reason = "unreachable"`, which tells the operator to start the console, not
-to reconsider the setpoint.
+`reason = "unreachable"`, which tells the operator to fix the connection,
+not to reconsider the setpoint.
 
-Every temperature node is marked in the console's own audit log
-(`POST /api/note`, the hook its README reserves for the measurement program)
-at the setpoint write and at the settle, best effort: a log mark must never
+Both controllers raise the same `TemperatureError`, so this helper does not
+know or care which owns the instrument: `controller.DirectTemperatureController`
+on this process's GPIB session (the default) or `ConsoleTemperatureController`
+over HTTP when the 331 console holds the bus.
+
+Every temperature node is marked in the controller's audit trail at the
+setpoint write and at the settle, best effort: a log mark must never
 stop a run.
 """
 from __future__ import annotations
@@ -114,10 +118,19 @@ def _float_or_none(v: Any) -> float | None:
 
 
 def source_of(controller: Any) -> str:
-    """`console` for the HTTP driver, `simulated` for the stand-in -- the
-    `source` every `TemperatureRead` and verdict carries, so a file written
-    under `--sim` says so."""
-    return "console" if getattr(controller, "base_url", None) else "simulated"
+    """The `source` every `TemperatureRead`, settle verdict and
+    `RunMetadata.temperature_source` carries, so a file written under `--sim`
+    says so.
+
+    Delegates to `rigs.temperature_source` rather than deciding again. This
+    was two functions until 2026-09-03 and they disagreed the moment the
+    direct driver arrived: the bench read-back said `instrument` and the
+    settle path -- the one that writes the *file* -- still tested only
+    `base_url` and fell through to `simulated`, stamping every real 331
+    reading as made up. One classifier, so they cannot drift apart again.
+    """
+    from .rigs import temperature_source
+    return temperature_source(controller)
 
 
 def _note(controller: Any, text: str) -> bool:
@@ -320,11 +333,11 @@ def settle(rig: Rig, ctx: "RunContext", detail: dict, *, node_path: str,
                         p.error = str(exc)
                         break
                     # The write outlived the client's patience and landed
-                    # anyway: the console is slow, not gone.
+                    # anyway: the bus is slow, not gone.
                     yield E.Notice("warning",
-                                   f"{node_path}: the 331 console did not answer the "
-                                   f"setpoint write in time but reports {setpoint:g} K "
-                                   f"in force -- settling ({exc})")
+                                   f"{node_path}: the 331 did not answer the setpoint "
+                                   f"write in time but reports {setpoint:g} K in force "
+                                   f"-- settling ({exc})")
                 written = True
             if reading.heater_range == 0 and setpoint - reading.kelvin > tolerance \
                     and not heater_said:
@@ -335,9 +348,9 @@ def settle(rig: Rig, ctx: "RunContext", detail: dict, *, node_path: str,
                 yield E.Verdict(
                     level="warn", code="temperature.heater-off",
                     text=(f"{setpoint:g} K asked for with the heater range off on the 331 "
-                          f"console (reading {reading.kelvin:.2f} K): the setpoint is written "
-                          "but nothing will drive toward it until the range is raised on the "
-                          "console"),
+                          f"(reading {reading.kelvin:.2f} K): the setpoint is written but "
+                          "nothing will drive toward it until the range is raised on the "
+                          "front panel"),
                     node_path=node_path,
                     data={"setpoint_k": setpoint, "kelvin": float(reading.kelvin),
                           "heater_range": 0, "source": source, "console": console})
@@ -386,9 +399,10 @@ def settle(rig: Rig, ctx: "RunContext", detail: dict, *, node_path: str,
                 + last_text + " -- pausing for the operator")
     elif why == "unreachable":
         n = f"{p.misses} polls{stage}" if p.misses else "the setpoint write"
-        text = (f"{setpoint:g} K: the 331 console did not answer {n}"
+        text = (f"{setpoint:g} K: the 331 did not answer {n}"
                 + (f" ({p.error})" if p.error else "") + last_text
-                + " -- pausing for the operator; start the console, then resume or stop")
+                + " -- pausing for the operator; fix the connection, then resume "
+                  "or stop")
     else:
         text = (f"{setpoint:g} K not reached in {fmt_duration(p.elapsed)}: "
                 + (f"last reading {last_k:.2f} K" if last_k is not None else "no reading")

@@ -54,7 +54,7 @@ def load_rig(path: str | Path = "rig.toml") -> RigConfig:
     e, sc = d.get("electrical", {}), d.get("scope", {})
     smu, led = d.get("sourcemeter", {}), d.get("led", {})
     pm, dio, bias = d.get("power_meter", {}), d.get("dio", {}), d.get("bias", {})
-    timing = d.get("timing", {})
+    timing, t = d.get("timing", {}), d.get("temperature", {})
 
     _check(e, {"sense_resistor_ohm", "pulse_amp", "probe_attenuation",
                "trigger_offset_s", "current_sign"}, "electrical")
@@ -66,6 +66,13 @@ def load_rig(path: str | Path = "rig.toml") -> RigConfig:
 
     _check(smu, {"address", "max_current_compliance_a",
                  "max_voltage_compliance_v"}, "sourcemeter")
+    # Both of these gained keys when the two instruments moved in-process, and
+    # both have a `console` that now means "do NOT open the device here". A
+    # typo in either is a rig that silently has no meter or no cryostat.
+    _check(pm, {"wavelength_nm", "on_beam_splitter", "dll_path", "console"},
+           "power_meter")
+    _check(t, {"address", "max_setpoint_k", "control_loop", "console"},
+           "temperature")
 
     try:
         cfg = RigConfig(
@@ -91,8 +98,14 @@ def load_rig(path: str | Path = "rig.toml") -> RigConfig:
             sourcemeter_address=smu.get("address", RigConfig.sourcemeter_address),
             led_address=led.get("address", RigConfig.led_address),
             power_meter_wavelength_nm=pm.get("wavelength_nm", 530.0),
+            power_meter_dll=pm.get("dll_path", RigConfig.power_meter_dll),
             power_meter_console=pm.get("console", RigConfig.power_meter_console),
-            temperature_console=d.get("temperature", {}).get("console", ""),
+            temperature_address=t.get("address", RigConfig.temperature_address),
+            temperature_max_setpoint_k=t.get("max_setpoint_k",
+                                             RigConfig.temperature_max_setpoint_k),
+            temperature_control_loop=t.get("control_loop",
+                                           RigConfig.temperature_control_loop),
+            temperature_console=t.get("console", RigConfig.temperature_console),
             max_current_compliance_a=smu.get("max_current_compliance_a", 0.05),
             max_voltage_compliance_v=smu.get("max_voltage_compliance_v", 5.0),
         )

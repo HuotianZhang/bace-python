@@ -294,8 +294,14 @@ def test_shot_diagnostics_and_the_snapshot_stub():
     assert stub["power"]["available"] is None
     json.dumps(stub)
     assert b.sleep(0.0) is None and b.fast is True
+    # not `is time.sleep` any more: every non-fast sleep is the worker's own
+    # chance to feed the 331 watchdog, so it goes through `sleeper`'s closure
+    # whether or not anything can interrupt it (`_feed_watchdog`)
     import time
-    assert Bench.build_simulated(RigConfig(), fast=False).sleep is time.sleep
+    slow = Bench.build_simulated(RigConfig(), fast=False)
+    began = time.monotonic()
+    slow.sleep(0.05)
+    assert time.monotonic() - began >= 0.04, "a non-fast sleep really sleeps"
 
 
 # -- the temperature console --------------------------------------------------------
@@ -416,7 +422,9 @@ def test_build_real_hands_the_digitiser_the_rigs_sign_and_records_what_is_missin
     assert b.rig.smu is None and rig.sourcemeter_address in b.unavailable["smu"]
     assert b.rig.router is None and "DELIB" in b.unavailable["relay"]
     assert isinstance(b.rig.shutter, rigs.Unavailable) and "DELIB" in b.unavailable["shutter"]
-    assert b.rig.power is None and "console" in b.unavailable["power"]
+    # nothing named a console, so the bench tried to open the meter itself
+    assert b.rig.power is None and "usbdll.dll not found" in b.unavailable["power"]
+    assert b.rig.temperature is None and "temperature" in b.unavailable
 
     snap = b.read_back()
     inst = snap["instruments"]
@@ -424,7 +432,8 @@ def test_build_real_hands_the_digitiser_the_rigs_sign_and_records_what_is_missin
     assert inst["shutter"] == {"open": None, "how": "cached"}
     assert inst["power"]["available"] is False
     assert inst["bias"]["arm_source"] == "0"          # the fake answers "0": passed through
-    assert set(snap["unavailable"]) == {"smu", "shutter", "relay", "power"}
+    assert set(snap["unavailable"]) == {"smu", "shutter", "relay", "power",
+                                        "temperature"}
     assert snap["rig"]["path"] == "rig.toml" and snap["rig"]["values"]["current_sign"] == 1.0
 
     with pytest.raises(BenchActionRefused, match="no smu"):
@@ -453,19 +462,52 @@ def test_build_real_gives_the_keithley_the_recipes_compliance(monkeypatch):
     b.close()
 
 
-def test_build_real_attaches_the_331_console_when_it_answers_and_says_so_when_it_does_not(
+def test_build_real_opens_the_331_itself_and_uses_a_console_only_when_named(
         monkeypatch):
-    """Named and answering: the driver is `rig.temperature` and a loop settles
-    through it. Named and silent: unavailable with the reason, `rig.temperature`
-    None, the read-back unwired with the console and the reason on it -- the
-    difference between "not integrated" and "go and start it"."""
-    from bace.drivers.lakeshore331 import ConsoleTemperatureController
+    """Who owns the GPIB session, and what the card says when nobody does.
 
-    rig = RigConfig(temperature_console="http://127.0.0.1:8331")
+    Default: this process opens `[temperature] address` and a loop settles
+    through the driver -- the arrangement the rig actually has, since nobody
+    starts the 331 console. Named console: that program owns the bus and the
+    service asks it over HTTP instead. Neither answering: `rig.temperature`
+    is None and the reason is on the card, which is the difference between
+    "no cryostat on this bench" and "go and start something".
+    """
+    from bace.drivers.lakeshore331 import (ConsoleTemperatureController,
+                                           DirectTemperatureController)
+    from bace.drivers.lakeshore331 import controller as ctl
+    from bace.drivers.lakeshore331.transport import SimulatedTransport
+
+    # -- 1. no console named: the service opens the instrument ---------------
+    rig = RigConfig()
     _fake_visa(monkeypatch, rig, with_smu=True)
+    monkeypatch.setattr(ctl, "open_transport",
+                        lambda conn, simulated=False, simulate_loop=1: SimulatedTransport())
+    b = Bench.build_real(rig, SourceMeterConfig(), run_config=RunConfig())
+    assert isinstance(b.rig.temperature, DirectTemperatureController)
+    assert b.rig.temperature.resource == "GPIB0::7::INSTR"
+    assert "temperature" not in b.unavailable
+    assert rigs.temperature_source(b.rig.temperature) == "instrument", (
+        "a reading this process took off the bus is measured, not simulated")
+    # the ceiling travels with the driver, so a 400 K node is refused here
+    assert b.rig.temperature.settings.limits.max_setpoint_k == 350.0
+    assert any("331 GPIB0::7::INSTR" in w for w in b.startup_writes)
+    b.close()
+
+    # -- 2. no console named, no instrument either --------------------------
+    monkeypatch.setattr(ctl, "open_transport", _raises_transport_error)
+    b = Bench.build_real(rig, SourceMeterConfig(), run_config=RunConfig())
+    assert b.rig.temperature is None
+    assert "temperature loops pause for a manual set" in b.unavailable["temperature"]
+    assert b.snapshot_stub()["temperature"]["wired"] is False
+    b.close()
+
+    # -- 3. a console named and answering: it owns the bus, we ask it -------
+    console = RigConfig(temperature_console="http://127.0.0.1:8331")
+    _fake_visa(monkeypatch, console, with_smu=True)
     monkeypatch.setattr(ConsoleTemperatureController, "probe",
                         lambda self: {"connected": True, "max_setpoint_k": 350.0})
-    b = Bench.build_real(rig, SourceMeterConfig(), run_config=RunConfig())
+    b = Bench.build_real(console, SourceMeterConfig(), run_config=RunConfig())
     assert isinstance(b.rig.temperature, ConsoleTemperatureController)
     assert b.rig.temperature.base_url == "http://127.0.0.1:8331"
     assert (b.rig.temperature.timeout_s, b.rig.temperature.write_timeout_s) == (3.0, 10.0)
@@ -475,35 +517,36 @@ def test_build_real_attaches_the_331_console_when_it_answers_and_says_so_when_it
         "source": "console", "connected": None}, "attached, not read back yet"
     b.close()
 
+    # -- 4. a console named and silent --------------------------------------
     monkeypatch.setattr(ConsoleTemperatureController, "probe", lambda self: None)
-    b = Bench.build_real(rig, SourceMeterConfig(), run_config=RunConfig())
-    assert b.rig.temperature is None
-    assert b.unavailable["temperature"].startswith("the 331 console is not answering at http://127.0.0.1:8331")
-    assert "Start 331 Console.bat" in b.unavailable["temperature"]
-    t = b.read_back()["instruments"]["temperature"]
-    assert t["wired"] is False and t["kelvin"] is None and t["console"] == "http://127.0.0.1:8331"
-    assert t["reason"] == b.unavailable["temperature"]
-    assert b.snapshot_stub()["temperature"]["wired"] is False
-    b.close()
-
-    # the console up before its first successful poll (`{"connected": false}`,
-    # no ceiling yet): the program is running, so "start it" would be wrong
-    monkeypatch.setattr(ConsoleTemperatureController, "probe", lambda self: {"connected": False})
-    b = Bench.build_real(rig, SourceMeterConfig(), run_config=RunConfig())
+    b = Bench.build_real(console, SourceMeterConfig(), run_config=RunConfig())
     assert b.rig.temperature is None
     assert b.unavailable["temperature"].startswith(
-        "the 331 console at http://127.0.0.1:8331 is up but has not read its instrument yet")
-    assert "Start 331 Console.bat" not in b.unavailable["temperature"]
+        "the 331 console is not answering at http://127.0.0.1:8331")
+    assert "clear [temperature] console" in b.unavailable["temperature"], (
+        "the fix is now to stop naming it, not to go and start it")
+    t = b.read_back()["instruments"]["temperature"]
+    assert t["wired"] is False and t["kelvin"] is None
+    assert t["console"] == "http://127.0.0.1:8331"
+    assert t["reason"] == b.unavailable["temperature"]
     b.close()
 
-    # no console named: nothing tried, nothing unavailable
-    plain = RigConfig()
-    _fake_visa(monkeypatch, plain, with_smu=True)
-    b = Bench.build_real(plain, SourceMeterConfig(), run_config=RunConfig())
-    assert b.rig.temperature is None and "temperature" not in b.unavailable
-    assert "console" not in b.read_back()["instruments"]["temperature"]
+    # -- 5. the console up before its first successful poll ------------------
+    # `{"connected": false}`, no ceiling yet: the program is running, so
+    # telling the operator to start anything would be wrong.
+    monkeypatch.setattr(ConsoleTemperatureController, "probe",
+                        lambda self: {"connected": False})
+    b = Bench.build_real(console, SourceMeterConfig(), run_config=RunConfig())
+    assert b.rig.temperature is None
+    assert b.unavailable["temperature"].startswith(
+        "the 331 console at http://127.0.0.1:8331 is up but has not read its "
+        "instrument yet")
     b.close()
 
+
+def _raises_transport_error(connection, simulated=False, simulate_loop=1):
+    from bace.drivers.lakeshore331.transport import TransportError
+    raise TransportError("could not open GPIB0::7::INSTR: no such resource")
 
 def test_build_real_reads_the_outputs_and_levels_from_the_instruments(monkeypatch):
     """The blocker of 2026-09-02: a generator left ON by the LabVIEW VI was
@@ -566,14 +609,15 @@ def test_build_real_reads_the_outputs_and_levels_from_the_instruments(monkeypatc
 def test_a_bench_with_no_visa_comes_up_with_the_visa_roles_unavailable(monkeypatch):
     """Two ways to have no VISA -- pyvisa not installed, or installed with no
     backend behind it -- and one answer: the service comes up, the four VISA
-    roles say why, and the DIO lines and the consoles are still tried."""
+    roles say why, and the DIO lines, the meter and the 331 are still tried."""
     monkeypatch.setitem(sys.modules, "pyvisa", None)              # ImportError
     monkeypatch.setattr(checks, "_dio_backend",
                         lambda rig_config: (None, "", "no DELIB this interpreter can load"))
     monkeypatch.setattr(ConsolePowerMeter, "available", lambda self: False)
     rig = RigConfig()
     b = Bench.build_real(rig, SourceMeterConfig(), run_config=RunConfig())
-    assert set(b.unavailable) == {"scope", "bias", "led", "smu", "shutter", "relay", "power"}
+    assert set(b.unavailable) == {"scope", "bias", "led", "smu", "shutter", "relay",
+                                  "power", "temperature"}
     for role in ("scope", "bias", "led", "smu"):
         assert "pyvisa is not installed" in b.unavailable[role]
         assert "[rig]" in b.unavailable[role], "the fix is named"

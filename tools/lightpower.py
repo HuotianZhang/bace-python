@@ -22,10 +22,10 @@ but nothing has ever checked that 0.400 V is actually below the LED's turn-on.
 If it is not, the light never stops, and a BACE delay axis measures the delay to
 an event that does not happen.
 
-The 1918-C console must be running (Start Console.bat in the power-meter
-project); only one process can hold the meter over USB, so everything goes
-through its HTTP API on localhost. The console keeps its own live trace while
-this runs.
+The meter is opened by this program (`bace.drivers.newport1918c`), so nothing
+else has to be running. Only one process can hold it over USB, so close the
+meter's own console first if it happens to be open -- or name it in
+`[power_meter] console` and this goes through its HTTP API instead.
 
 This program does not touch the 81150A or the relay. It moves the shutter and
 the 33220A, and puts both back the way it found them.
@@ -106,7 +106,7 @@ def main(argv=None) -> int:
           f"{a.duty:g} %   :OUTP:POL {pol}")
     print(f"  shutter           DIO module {rig_cfg.dio_module_id}, "
           f"module_nr {rig_cfg.shutter_module_nr}")
-    print(f"  power meter       {rig_cfg.power_meter_console}  "
+    print(f"  power meter       {rig_cfg.power_meter_console or '1918-C on USB'}  "
           f"at {rig_cfg.power_meter_wavelength_nm:g} nm")
     plan = ["dark %.0f s" % a.dark_seconds, "light %.0f s" % a.seconds]
     if a.off_level:
@@ -122,19 +122,16 @@ def main(argv=None) -> int:
     import pyvisa
 
     from bace.drivers.agilent33220a import Agilent33220A
-    from bace.drivers.newport1918c import ConsolePowerMeter, PowerMeterError
+    from bace.drivers.newport1918c import PowerMeterError, open_power_meter
     from bace.drivers.shutter import Shutter
 
-    meter = ConsolePowerMeter(rig_cfg.power_meter_console, timeout_s=10.0)
-    if not meter.available():
-        print("\n  the 1918-C console is not answering at "
-              f"{rig_cfg.power_meter_console}.")
-        print("  Start it first: 'Start Console.bat' in the power-meter project.")
-        print("  Only one process can hold the meter over USB, so this program")
-        print("  cannot open it directly while the console is meant to own it.")
+    try:
+        meter = open_power_meter(rig_cfg)
+    except PowerMeterError as exc:
+        print(f"\n  {exc}")
+        print("  Only one process can hold the meter over USB: if the meter's")
+        print("  own console is open, close it and run this again.")
         return 2
-    meter.set_units_watts()
-    meter.set_wavelength(rig_cfg.power_meter_wavelength_nm)
     probe = meter.read()
     print(f"\n  meter reads {probe.watts: .6e} W right now"
           + ("" if probe.trustworthy else "  <-- saturated/overrange already"))

@@ -38,7 +38,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from .protocols import TemperatureReading
+from ..protocols import TemperatureReading
 
 DEFAULT_CONSOLE = "http://127.0.0.1:8331"
 
@@ -141,10 +141,11 @@ class ConsoleTemperatureController:
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(url, data=data, method=method,
                                      headers={"Content-Type": "application/json"})
-        unreachable = (f"cannot reach the 331 console at {self.base_url} -- start it (Start 331 "
-                       "Console.bat in the temperature-controller project) or run with the "
-                       "temperature set by hand. Opening the 331 directly here would put a "
-                       "second session on its GPIB bus while the console holds it.")
+        unreachable = (f"cannot reach the 331 console at {self.base_url}. rig.toml names it, "
+                       "so this program will not open the instrument itself -- two owners on "
+                       "GPIB0::7 read each other's replies. Either start that console, or "
+                       "clear [temperature] console and let the service own the bus "
+                       "(the default).")
         try:
             with urllib.request.urlopen(
                     req, timeout=self.timeout_s if timeout_s is None else timeout_s) as r:

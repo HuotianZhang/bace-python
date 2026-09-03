@@ -254,19 +254,17 @@ def main(argv=None) -> int:
     # one quantity nobody recorded. Absent console = no intensity, not a refusal.
     power = None
     try:
-        from bace.drivers.newport1918c import ConsolePowerMeter
-        candidate = ConsolePowerMeter(rig_cfg.power_meter_console, timeout_s=5.0)
+        from bace.drivers.newport1918c import open_power_meter
+        where = rig_cfg.power_meter_console or "1918-C on USB"
+        candidate = open_power_meter(rig_cfg)
         if candidate.available():
-            candidate.set_units_watts()
-            candidate.set_wavelength(rig_cfg.power_meter_wavelength_nm)
             power = candidate
-            print(f"power meter        {rig_cfg.power_meter_console}  "
+            print(f"power meter        {where}  "
                   f"{power.read_power():.4e} W at "
                   f"{rig_cfg.power_meter_wavelength_nm:g} nm")
         else:
-            print(f"power meter        not answering at "
-                  f"{rig_cfg.power_meter_console} — no intensity will be "
-                  f"recorded (start it with Start Console.bat)")
+            print(f"power meter        not answering at {where} — no "
+                  "intensity will be recorded")
     except Exception as exc:                                    # noqa: BLE001
         print(f"power meter        unusable: {exc}")
 
