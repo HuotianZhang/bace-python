@@ -119,10 +119,18 @@ class JVConfig:
     mislabels A as A/cm²."""
 
     led_settle_s: float = 2.0
-    """How long the run waits after setting the 33220A to a new LED level,
-    before it sweeps. The original called this 'LED stab. time'
-    and gave it its own control, which is a hint that it matters. `manage`
-    only: `leave` changed nothing, so there is nothing to settle after."""
+    """How long the run waits after arranging each curve's illumination -- the
+    33220A's level, the shutter, or both -- before it sweeps.
+
+    Every curve in the plan pays it, the dark one included. That is not an
+    oversight: `_set_illumination` deliberately leaves the LED alone for a dark
+    curve and lets `_set_shutter` make the dark, but a shutter that has just
+    moved is exactly something to settle after. The only case that does not
+    wait is a rig with neither LED nor shutter, where nothing moved at all.
+
+    The original called this 'LED stab. time' and gave it its own control,
+    which is a hint that it matters. `manage` only: `leave` changed nothing, so
+    there is nothing to settle after."""
 
     def __post_init__(self) -> None:
         if self.light_control not in ("manage", "leave"):
