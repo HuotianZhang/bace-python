@@ -535,10 +535,20 @@ def illumination_state(rig: Rig) -> dict:
     else:
         out["unread"].append("LED (none on this bench)")
 
-    # Every one of the three, actually read. `led_output`/`led_mode` are left
-    # None by the branches above whenever they were not, so this is belt as
-    # well as braces -- and it is the assertion the whole module rests on.
-    if not out["unread"] and out["shutter"] and out["led_output"] is not None \
+    # **Dark needs one proof; light needs all three.** A shut shutter means no
+    # light reaches the sample whatever the generator is doing -- the shutter
+    # *is* the light switch -- and an LED that is off or in OFF mode means
+    # there is none to reach it whatever the shutter is doing. Any one of
+    # those, definitively read, settles the question.
+    #
+    # The all-or-nothing gate this replaces made a supported arrangement
+    # useless: `light(shutter="shut")` on a bench with no LED is explicitly
+    # allowed, and the `jv` after it was then recorded `unknown` -- with the
+    # full non-dark metric set -- although the closed shutter proved it dark.
+    if out["shutter"] == "shut" or out["led_output"] is False \
+            or str(out["led_mode"] or "").upper() == "OFF":
+        out["lit"] = False
+    elif not out["unread"] and out["shutter"] and out["led_output"] is not None \
             and out["led_mode"]:
         out["lit"] = bool(out["shutter"] == "open" and out["led_output"]
                           and str(out["led_mode"]).upper() != "OFF")

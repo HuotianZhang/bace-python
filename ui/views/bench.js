@@ -27,6 +27,43 @@ export default {
     /** Which fold groups are open, per card. Kept here so a re-render — and
      *  every edit is one — does not shut a fold the operator just opened. */
     const open = new Map();
+    /**
+     * Renders held back while a click is in flight.
+     *
+     * A text field commits on `change`, which fires during the blur the button
+     * press itself causes. On localhost the `PUT` answers in about a
+     * millisecond, so `store.applyModule` — and then `revalidate` — can redraw
+     * the card *between the mousedown and the mouseup*. The pressed button is
+     * gone by then, the browser has nothing to dispatch `click` on, and the
+     * operator's Run or DC silently does not happen.
+     *
+     * This is the same failure I used as the argument against *disabling* the
+     * buttons, and leaving the normal re-render to do it anyway was no better.
+     * So the card is held still from the press until the click has been
+     * dispatched, and whatever wanted to redraw in between happens after.
+     */
+    let pressing = false;
+    let missed = false;
+    body.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('button')) pressing = true;
+    });
+    // `click` fires after `pointerup`, so release on the later of the two —
+    // and on `pointercancel`, or a drag off the button would freeze the card.
+    for (const kind of ['click', 'pointercancel']) {
+      body.addEventListener(kind, () => {
+        pressing = false;
+        if (missed) { missed = false; render(); }
+      }, true);
+    }
+    body.addEventListener('pointerup', () => {
+      // Nothing landed on a button: no `click` is coming, so release here.
+      setTimeout(() => {
+        if (!pressing) return;
+        pressing = false;
+        if (missed) { missed = false; render(); }
+      }, 0);
+    });
+
     const opened = (name) => {
       if (!open.has(name)) open.set(name, new Set());
       return open.get(name);
@@ -195,6 +232,7 @@ export default {
     };
 
     function render() {
+      if (pressing) { missed = true; return; }
       const state = store.getState();
       const { byName } = state.modules;
       const names = BENCH_CARDS.filter((n) => byName[n]);

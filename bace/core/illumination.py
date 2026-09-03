@@ -71,6 +71,16 @@ class LedDrive:
             )
         if not 0.0 < self.duty_percent < 100.0:
             raise IlluminationError(f"duty cycle {self.duty_percent} % out of range")
+        if self.frequency_hz <= 0.0:
+            # Not a pulse frequency the 33220A accepts, and `period()` is
+            # `1 / frequency_hz`. Refused here rather than at the one caller,
+            # because everything that pulses the LED builds one of these --
+            # the `light` node, the `set-led-pulse` bench action and the
+            # validator alike -- and a `:FREQ 0` the instrument ignores would
+            # leave the generator at its previous timing while the console
+            # reported the pulse as applied.
+            raise IlluminationError(
+                f"pulse frequency {self.frequency_hz} Hz must be above zero")
 
     # -- the two generator states ----------------------------------------
     def dc_settings(self) -> dict[str, float | str]:
