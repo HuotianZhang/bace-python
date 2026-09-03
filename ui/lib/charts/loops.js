@@ -182,7 +182,16 @@ function repeatModel(common, panel, node, counts, options) {
   const where = axis.name
     ? `${axis.name} ${fmt.sig(axis.start, 4)}${unit ? ' ' + unit : ''} = stop`
     : 'start = stop';
-  const total = counts.loopsRequested || Math.max(series.length, 1);
+  // Where the acquired loops end, by **loop number**. A long repeat outgrows
+  // the ring, so `series` can be loops 81–90 of a hundred: measured by its
+  // length the chart would hatch from loop 11 and cross out ten loops it is
+  // drawing. `loopsDone` is the run's own count, which never moves backwards
+  // and is hydrated from `GET /runs/{id}/data`; the last shot held names the
+  // loop it belongs to. The larger of the two is the boundary.
+  const firstLoop = series.length ? series[0].loop : 1;
+  const lastLoop = series.length ? series[series.length - 1].loop : 0;
+  const done = Math.max(lastLoop, counts.loopsDone);
+  const total = counts.loopsRequested || Math.max(done, 1);
   const { rect } = panel;
   const X = scale.linear([0.5, total + 0.5], [rect.x, rect.x + rect.w]);
   const unitQ = chargeUnit(series.map((s) => s.q));
@@ -199,15 +208,15 @@ function repeatModel(common, panel, node, counts, options) {
   const shades = [];
   const marks = [];
   const rules = [];
-  if (counts.ended && counts.loopsRequested && series.length < counts.loopsRequested) {
+  if (counts.ended && counts.loopsRequested && done < counts.loopsRequested) {
     // The loops that never ran, as the space they would have filled.
-    const x0 = X(series.length + 0.5);
+    const x0 = X(done + 0.5);
     shades.push({ x: x0, w: rect.x + rect.w - x0, hatch: true, colour: 'rule', opacity: 1 });
     rules.push({ x1: x0, colour: 'accent', width: 1.5 });
     marks.push({ x: x0 + 6, y: rect.y + 12, colour: 'accent-dark', weight: 500, size: 9.5,
-      text: `loops ${series.length + 1} – ${counts.loopsRequested} not acquired` });
+      text: `loops ${done + 1} – ${counts.loopsRequested} not acquired` });
     marks.push({ x: x0 + 6, y: rect.y + 24, colour: 'accent-dark', size: 8.5,
-      text: `${counts.ended} at loop ${series.length}` });
+      text: `${counts.ended} at loop ${done}` });
   }
   const last = series[series.length - 1];
   const loopTicks = axisTicks(X, { values: loopTickValues(total) });
@@ -250,7 +259,7 @@ function repeatModel(common, panel, node, counts, options) {
       { label: '± σ so far', marker: 'band', colour: 'accent' },
     ],
     readout: readoutRepeat(series, last, counts),
-    notes: notesFor(counts, series.length, node, { repeat: true }),
+    notes: notesFor(counts, done, node, { repeat: true, firstLoop }),
     switch: { repeat: true, text: `zero-width axis · ${where}` },
   };
 }
@@ -403,7 +412,7 @@ function readoutSweep(points, counts, withSigma) {
   return parts.join('  ·  ');
 }
 
-function notesFor(counts, loopsDone, node, { repeat, withSigma = 0, points = 0 }) {
+function notesFor(counts, loopsDone, node, { repeat, withSigma = 0, points = 0, firstLoop = 1 }) {
   const out = [];
   if (counts.loopsRequested) {
     // `ui-rules` §9: "100 loops requested, 20 completed."
@@ -412,6 +421,12 @@ function notesFor(counts, loopsDone, node, { repeat, withSigma = 0, points = 0 }
   }
   if (!repeat && points && withSigma < points && loopsDone >= 1) {
     out.push(`σ_Q needs two loops at a point: ${points - withSigma} of ${points} still carry one`);
+  }
+  if (repeat && firstLoop > 1) {
+    // The chart is a suffix, and says so rather than letting the empty space
+    // before the first dot read as loops that never ran.
+    out.push(`loops 1 – ${firstLoop - 1} ran before this console's view of them: the ring keeps the last shots, `
+      + 'so their Q is not drawn — the mean and σ still cover every loop');
   }
   if (repeat) out.push('the mean and the ± σ band are the service\'s own, over every loop that ran — not recomputed from the shots this console holds');
   const gone = (node.shots || []).filter((s) => s.tracesGone).length;

@@ -426,7 +426,10 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         break;
 
       case 'StepStarted':
-        record.step = data;
+        // With its node path, for the reason the phase carries one: the index
+        // restarts at zero on every module node, so the shot in flight is
+        // only this node's if the frame said so.
+        record.step = { ...data, node_path: frame.node_path || '' };
         // The phase is cleared only by a shot at or after the one it
         // describes. `StepPhase` is live-only and the numbered frames are
         // not: a client catching up after a 1008 drop folds the ring's

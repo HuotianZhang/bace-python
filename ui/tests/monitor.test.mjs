@@ -15,7 +15,7 @@ import { dirname, join } from 'node:path';
 
 import { createStore } from '../lib/store.js';
 import {
-  monitorModel, loopCounters, shotCounter, phaseIndicator, pausePrompt, stopModel, describeSegment,
+  monitorModel, loopCounters, shotCounter, phaseIndicator, pausePrompt, stopModel, describeSegment, scopedTo,
 } from '../lib/monitor.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -241,4 +241,77 @@ test('a 2 T x 2 level tree stays readable start to finish', () => {
   assert.ok(seen.has('T 280 K · 2 of 2 / LED 1.010 V · 1 of 2'));
   assert.ok(seen.has('T 280 K · 2 of 2 / LED 1.020 V · 2 of 2'));
   assert.equal(monitorModel(store.getState()), null, 'parked: gone');
+});
+
+// -- the shot in flight ----------------------------------------------------
+
+test('the counter is the shot being acquired, not the last one that finished', () => {
+  // Between `StepStarted` and `StepDone` the instrument is inside the next
+  // shot: counted from `kept` alone the monitor opens every node with
+  // "shot 0 of 6" and then trails the loop and point beside it by one.
+  const started = foldUntil(TREE, (f) => f.type === 'StepStarted');
+  const first = monitorModel(started.getState());
+  assert.equal(first.shots.kept, 0, 'nothing has completed yet');
+  assert.equal(first.shots.nth, 1, 'and the instrument is inside the first');
+  assert.match(first.shots.text, /^shot 1 of 6 · loop 1 · point 1 of 3$/);
+
+  // Its `StepDone` does not move the number on again.
+  const done = foldUntil(TREE, (f) => f.type === 'StepDone');
+  const after = monitorModel(done.getState());
+  assert.equal(after.shots.kept, 1);
+  assert.equal(after.shots.nth, 1);
+});
+
+test('a StepStarted replayed from behind lends the counter nothing', () => {
+  // After a drop the ring's numbered frames arrive behind the live ones: a
+  // start for shot 300 while the instrument is inside 560 describes a shot
+  // that finished long ago, and its loop and point are the tail of the run.
+  const store = createStore({ schedule: () => {} });
+  const run = 'r1';
+  store.applyFrame({ seq: 1, ts: 1, run_id: run, node_path: 'bace', type: 'RunQueued', data: { kind: 'manual', module: 'bace' } });
+  store.applyFrame({ seq: 2, ts: 2, run_id: run, node_path: 'bace', type: 'NodeStarted', data: { node_path: 'bace', kind: 'bace', label: 'bace' } });
+  store.applyFrame({ seq: 3, ts: 3, run_id: run, node_path: 'bace', type: 'RunStarted', data: { n_shots: 600 } });
+  const record = store.getState().runs[run];
+  const node = record.nodes.bace;
+  node.kept = 560;
+  node.values = [0, 10, 20];
+
+  store.applyFrame({ seq: 4, ts: 4, run_id: run, node_path: 'bace', type: 'StepStarted', data: { index: 300, loop: 100, step: 1 } });
+  const stale = shotCounter(record, node);
+  assert.equal(stale.nth, 560, 'never behind what has completed');
+  assert.equal(stale.text, 'shot 560 of 600', 'and it lends no loop or point');
+
+  store.applyFrame({ seq: 5, ts: 5, run_id: run, node_path: 'bace', type: 'StepStarted', data: { index: 560, loop: 187, step: 2 } });
+  assert.equal(shotCounter(record, node).text, 'shot 561 of 600 · loop 187 · point 2 of 3');
+});
+
+test('the shot in flight is this node\'s, not the one before it', () => {
+  // The index restarts at zero on every module node, so the previous node's
+  // last start is not this node's first.
+  const store = createStore({ schedule: () => {} });
+  const run = 'r1';
+  store.applyFrame({ seq: 1, ts: 1, run_id: run, node_path: 'rep=1/bace', type: 'RunQueued', data: { kind: 'pipeline' } });
+  store.applyFrame({ seq: 2, ts: 2, run_id: run, node_path: 'rep=1/bace', type: 'StepStarted', data: { index: 40, loop: 20, step: 1 } });
+  store.applyFrame({ seq: 3, ts: 3, run_id: run, node_path: 'rep=2/bace', type: 'NodeStarted', data: { node_path: 'rep=2/bace', kind: 'bace', label: 'bace' } });
+  store.applyFrame({ seq: 4, ts: 4, run_id: run, node_path: 'rep=2/bace', type: 'RunStarted', data: { n_shots: 60 } });
+  const record = store.getState().runs[run];
+  assert.equal(shotCounter(record, record.nodes['rep=2/bace']).text, 'shot 0 of 60',
+    'the previous node\'s shot is not this node\'s');
+});
+
+// -- what the shell holds about a run --------------------------------------
+
+test('an armed Abort belongs to the run it was armed for', () => {
+  // `parked` is a frame like any other and a ring gap can swallow it, so a
+  // flag that outlived its run would hand the next one an Abort that fires
+  // on the first click and discards a shot with no confirmation.
+  assert.equal(scopedTo('r1', 'r1'), 'r1');
+  assert.equal(scopedTo('r2', 'r1'), null, 'armed for the run that has gone');
+  assert.equal(scopedTo('r1', null), null);
+  assert.equal(scopedTo(null, 'r1'), null);
+  // The same for the sentence a stop came back with: "after_shot accepted"
+  // over a fresh run would tell the operator their stop is in force.
+  const status = { run_id: 'r1', level: 'ok', text: 'after_shot accepted' };
+  assert.equal(scopedTo('r1', status), status);
+  assert.equal(scopedTo('r2', status), null);
 });

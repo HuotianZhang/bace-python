@@ -541,6 +541,30 @@ test('the error bars reflect the loops that actually ran', () => {
   assert.deepEqual(points.map((p) => p.n), [13, 13, 13]);
 });
 
+test('a stopped repeat whose early loops left the ring hatches from the loop number, not the shot count', () => {
+  // The console holds loops 81–90 of a hundred; `kept` is the run's own count
+  // and does not move backwards. Measured by the series' length the chart
+  // would hatch from loop 11 and cross out ten loops it is drawing.
+  const shots = [];
+  for (let loop = 81; loop <= 90; loop += 1) {
+    shots.push({ index: loop - 1, loop, step: 1, q: 3.6e-10, q_mean: 3.65e-10, q_std: 4e-12, ts: loop });
+  }
+  const model = loopsModel({
+    record: { state: 'stopped', n_loops: 100, aborted: { reason: 'requested', done: 90, total: 100 } },
+    node: { node_path: 'bace', kind: 'bace', axis: { name: 'vpre', start: 1, stop: 1, step: 0 }, values: [1],
+      loops: [], shots, kept: 90, requested: 100, outcome: 'stopped' },
+  });
+  const panel = model.panels[0];
+  assert.ok(panel.marks.some((m) => m.text === 'loops 91 – 100 not acquired'), panel.marks.map((m) => m.text).join(' | '));
+  assert.ok(panel.marks.some((m) => m.text === 'stopped at loop 90'));
+  assert.ok(model.notes.some((n) => /^100 loops requested, 90 completed · stopped$/.test(n)), model.notes.join(' | '));
+  // The hatch begins after the last dot rather than over it.
+  const lastDot = Math.max(...panel.dots.map((d) => Number(d.x)));
+  assert.ok(panel.shades[0].x > lastDot, `hatch at ${panel.shades[0].x}, last point at ${lastDot}`);
+  // And the empty space before the first dot is not silence about it.
+  assert.ok(model.notes.some((n) => /^loops 1 – 80 ran before this console's view of them/.test(n)), model.notes.join(' | '));
+});
+
 test('a repeat that was stopped draws the loops it never ran as not acquired', () => {
   const model = loopsModel({
     record: { state: 'stopped', n_loops: 20, aborted: { reason: 'requested', done: 5, total: 20 } },

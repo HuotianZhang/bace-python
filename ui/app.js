@@ -209,31 +209,37 @@ async function park() {
  * console on its own; a refusal (409: already ended, or not paused) reaches
  * the operator as the service's sentence, on the monitor itself.
  */
-let abortArmed = false;
+let armedRun = null;
 let abortArmedTimer = null;
 let monitorStatus = null;
 
 function drawMonitor(state) {
-  renderMonitor(monitorEl, state, { onStop: stopRun, onAbort: abortRun, onResume: resumeRun, abortArmed, status: monitorStatus });
+  renderMonitor(monitorEl, state, { onStop: stopRun, onAbort: abortRun, onResume: resumeRun, armedRun, status: monitorStatus });
 }
 
-function armAbort(on) {
-  abortArmed = on;
+/**
+ * Arm the Abort for one run, by id. Not a boolean: `parked` is a frame like
+ * any other and a ring gap can swallow it, and a flag that outlived its run
+ * would hand the next one an Abort that fires on the first click
+ * (`monitor.scopedTo` is what refuses it).
+ */
+function armAbort(runId) {
+  armedRun = runId;
   clearTimeout(abortArmedTimer);
-  abortArmedTimer = on ? setTimeout(() => { abortArmed = false; drawMonitor(store.getState()); }, 6000) : null;
+  abortArmedTimer = runId ? setTimeout(() => { armedRun = null; drawMonitor(store.getState()); }, 6000) : null;
   drawMonitor(store.getState());
 }
 
 async function stopRun(runId, mode) {
-  monitorStatus = { level: '', text: `${mode} …` };
+  monitorStatus = { run_id: runId, level: '', text: `${mode} …` };
   drawMonitor(store.getState());
   try {
     const out = await api.stopRun(runId, mode);
     // The stream says `stopping` the moment the stop was accepted; the
     // status here is only the answer, and it clears with the run.
-    monitorStatus = { level: 'ok', text: out.state === 'cancelled' ? 'cancelled' : `${out.mode} accepted` };
+    monitorStatus = { run_id: runId, level: 'ok', text: out.state === 'cancelled' ? 'cancelled' : `${out.mode} accepted` };
   } catch (error) {
-    monitorStatus = { level: 'bad', text: error.text || error.message };
+    monitorStatus = { run_id: runId, level: 'bad', text: error.text || error.message };
   }
   drawMonitor(store.getState());
 }
@@ -244,13 +250,13 @@ async function stopRun(runId, mode) {
  * busy bench, it arms first and performs on the second click.
  */
 async function abortRun(runId) {
-  if (!abortArmed) return armAbort(true);
-  armAbort(false);
+  if (armedRun !== runId) return armAbort(runId);
+  armAbort(null);
   await stopRun(runId, 'abort');
 }
 
 async function resumeRun(runId, detail) {
-  monitorStatus = { level: '', text: 'resume …' };
+  monitorStatus = { run_id: runId, level: '', text: 'resume …' };
   drawMonitor(store.getState());
   const body = {};
   if (detail.temperature_k !== null && detail.temperature_k !== undefined) body.temperature_k = detail.temperature_k;
@@ -260,7 +266,7 @@ async function resumeRun(runId, detail) {
     monitorStatus = null;
   } catch (error) {
     // 409: not paused — the pause was answered already, or ended with the run.
-    monitorStatus = { level: 'bad', text: error.text || error.message };
+    monitorStatus = { run_id: runId, level: 'bad', text: error.text || error.message };
   }
   drawMonitor(store.getState());
 }
@@ -314,7 +320,7 @@ function afterFrame(frame, { replay = false } = {}) {
   }
   if (frame.type === 'RunStateChanged' && frame.data && frame.data.state === 'parked') {
     monitorStatus = null;
-    abortArmed = false;
+    armedRun = null;
   }
   // A gap means the ring could not supply what we asked for: whatever is
   // running has a beginning we will never be sent.

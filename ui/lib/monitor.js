@@ -80,7 +80,23 @@ export function loopCounters(record, path) {
   return out;
 }
 
-/** `shot 4 of 24 · loop 2 · point 1`, for the leaf the run is at. */
+/**
+ * `shot 4 of 24 · loop 2 · point 1`, for the leaf the run is at — **the shot
+ * being acquired**, not the last one that finished.
+ *
+ * `kept` counts `StepDone`s; between a `StepStarted` and its `StepDone` the
+ * instrument is inside the next one, which is a second on the rig and the
+ * whole of the first acquisition. Counted from `kept` alone the monitor
+ * opened every node with `shot 0 of 630` and then trailed the loop, point and
+ * segment beside it by one for the rest of the run.
+ *
+ * The in-flight shot is trusted only when it is this node's — the index
+ * restarts at zero on every module node — and only when it is not *behind*
+ * what has completed: a `StepStarted` replayed out of the ring after a drop
+ * describes a shot that finished long ago, and its loop and point would be
+ * the tail of the run rather than its head. `kept` never moves backwards, so
+ * it is the floor.
+ */
 export function shotCounter(record, node) {
   // A loop node has no shots of its own: while a temperature settles the
   // run is *at* `T=250K`, and a counter reading `shot 0` there would be the
@@ -89,13 +105,34 @@ export function shotCounter(record, node) {
   const isJv = node.kind === 'jv' || node.kind === 'jv_bace';
   const kept = typeof node.kept === 'number' ? node.kept : (isJv ? node.curves.length : node.shots.length);
   const requested = typeof node.requested === 'number' ? node.requested : null;
-  const parts = [`${isJv ? 'curve' : 'shot'} ${kept}${requested !== null ? ' of ' + requested : ''}`];
-  const step = record.step;
-  if (!isJv && step && !node.outcome) {
+  const started = record.step;
+  const step = !isJv && !node.outcome && started
+    && (started.node_path || '') === (node.node_path || '')
+    && typeof started.index === 'number' && started.index + 1 >= kept
+    ? started : null;
+  const nth = step ? Math.max(kept, step.index + 1) : kept;
+  const parts = [`${isJv ? 'curve' : 'shot'} ${nth}${requested !== null ? ' of ' + requested : ''}`];
+  if (step) {
     parts.push(`loop ${step.loop}`);
     if (node.values && node.values.length > 1) parts.push(`point ${step.step} of ${node.values.length}`);
   }
-  return { kind: 'shots', kept, requested, text: parts.join(' · ') };
+  return { kind: 'shots', kept, nth, requested, text: parts.join(' · ') };
+}
+
+/**
+ * The shell's own state *about one run* — an armed Abort, the answer a stop
+ * came back with — belongs to that run and to no other.
+ *
+ * Both outlive the run they describe unless something ends them, and the
+ * frame that would (`parked`) is a frame like any other: a reconnect whose
+ * ring gap swallowed it leaves the next run rendered with an Abort already
+ * armed, so its first click discards a shot with no confirmation at all. The
+ * owner is carried with the value and compared here rather than cleared on a
+ * frame that may never arrive.
+ */
+export function scopedTo(runId, held) {
+  if (!held || !runId) return null;
+  return (typeof held === 'string' ? held : held.run_id) === runId ? held : null;
 }
 
 /** `5 · acquire light`, or nothing: `StepPhase` is live-only and belongs to the shot in flight. */
@@ -250,7 +287,7 @@ function lastShotLine(node) {
  * 250.1 does not rebuild the field under their caret — the reading goes in
  * the half that may rebuild.
  */
-export function renderMonitor(el, state, { onStop, onAbort, onResume, abortArmed = false, status = null } = {}) {
+export function renderMonitor(el, state, { onStop, onAbort, onResume, armedRun = null, status = null } = {}) {
   const model = monitorModel(state);
   if (!model) {
     el.hidden = true;
@@ -267,6 +304,9 @@ export function renderMonitor(el, state, { onStop, onAbort, onResume, abortArmed
   const live = el.querySelector('.mon-live');
   const actions = el.querySelector('.mon-actions');
   const promptEl = el.querySelector('.mon-prompt');
+  // Both belong to a run, and this may not be the run they were held for.
+  const abortArmed = Boolean(scopedTo(model.run_id, armedRun));
+  const answer = scopedTo(model.run_id, status);
   // The counters move with every shot; the buttons do not. Keyed together,
   // a `--fast` scan rebuilt the row 4850 times in eight seconds (measured),
   // and a Stop pressed between two shots would land on a button that no
@@ -274,8 +314,8 @@ export function renderMonitor(el, state, { onStop, onAbort, onResume, abortArmed
   keyed(live, JSON.stringify([model.state, model.label, model.loops, model.shots, model.waiting, model.phase,
     model.lastShot, model.eta && Math.round(model.eta.seconds), model.eta && model.eta.finish_at]),
   () => liveRow(model));
-  keyed(actions, JSON.stringify([model.run_id, model.stop, abortArmed, status]),
-    () => actionButtons(model, { onStop, onAbort, abortArmed, status }));
+  keyed(actions, JSON.stringify([model.run_id, model.stop, abortArmed, answer]),
+    () => actionButtons(model, { onStop, onAbort, abortArmed, status: answer }));
   const p = model.prompt;
   keyed(promptEl, p ? `${model.run_id}|${p.node_path}|${p.since}` : '', () => (p ? promptForm(model, p, onResume) : []));
   // The reading moves while the prompt stands; it lives in its own line so
