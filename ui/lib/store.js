@@ -184,7 +184,11 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
           record.module = bench.run.module || record.module;
           record.progress = bench.run.progress || record.progress;
           record.eta = bench.run.eta || record.eta;
-          adoptPending(record, bench.run.pending);
+          // Authoritative: this snapshot is the boot's or a reconnect's
+          // `Hello`, assembled from the record as it stands, and the replay
+          // that follows re-delivers whatever the ring still holds. So a
+          // pause it does not mention is a pause that is not open.
+          adoptPending(record, bench.run.pending, { authoritative: true });
         } else {
           state.activeRunId = null;
         }
@@ -710,9 +714,19 @@ function keepTraces(traced, shot, previous) {
  * the stream is already showing is the newer one, and a resume the stream has
  * carried answers the pause a snapshot taken before it still describes.
  */
-function adoptPending(record, pending) {
-  if (!record || !pending || !pending.what) return;
+function adoptPending(record, pending, { authoritative = false } = {}) {
+  if (!record) return;
   if (record.parked_at || TERMINAL.has(record.state)) return;
+  if (!pending || !pending.what) {
+    // The other half of the same problem: this console was away while
+    // another answered the pause, and the `OperatorResumed` that says so
+    // fell out of the ring. The snapshot reports no pause, and a prompt left
+    // on screen is a Resume form for a run that is measuring again — every
+    // submission a 409. Only an authoritative snapshot clears it; a
+    // read-back's run block is the stream's to say and is not one.
+    if (authoritative) record.needsOperator = null;
+    return;
+  }
   const since = pending.since || 0;
   // Newer than the prompt in hand, or there is no prompt. A console that was
   // away while another client answered one pause and the run opened the next

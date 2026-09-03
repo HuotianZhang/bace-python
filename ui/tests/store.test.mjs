@@ -613,3 +613,33 @@ test('the cost model\'s finish time is kept, for the runs that have no measured 
   other.applyRunRecord({ run_id: 'r2', state: 'running', cost: { finish_at: 1788400111, lower_bound: false } });
   assert.equal(other.getState().runs.r2.finish_at, 1788400111);
 });
+
+test('a snapshot with no pause open answers the prompt this console still holds', () => {
+  // The other half of the hydration problem: away while another console
+  // resumed the run, and the `OperatorResumed` fell out of the ring. A
+  // Resume form left on screen for a run that is measuring again answers
+  // every submission with a 409.
+  const s = store();
+  s.applyFrame({ seq: 1, ts: 1, run_id: 'r1', node_path: '', type: 'RunQueued', data: { kind: 'pipeline' } });
+  s.applyFrame({ seq: 2, ts: 100, run_id: 'r1', node_path: 'T=250K', type: 'NeedsOperator',
+    data: { what: 'temperature', node_path: 'T=250K', detail: { setpoint_k: 250 } } });
+  assert.ok(s.getState().runs.r1.needsOperator);
+
+  // A reconnect's Hello: the run is running and nothing is pending.
+  s.applyHello({ seq: null, ts: 200, type: 'Hello', data: { seq: 42, session: { id: 'x' },
+    bench: { state: 'running', queue: [], instruments: {}, verdicts: [],
+      run: { run_id: 'r1', state: 'running', node_path: 'T=250K/bace' } } } });
+  assert.equal(s.getState().runs.r1.needsOperator, null);
+});
+
+test('a read-back is not authoritative about the pause, because it is not about the run at all', () => {
+  // The run block of a read-back is the stream's to say (`readBack: true`
+  // exists for exactly that), so it neither opens a prompt nor closes one.
+  const s = store();
+  s.applyFrame({ seq: 1, ts: 1, run_id: 'r1', node_path: '', type: 'RunQueued', data: { kind: 'pipeline' } });
+  s.applyFrame({ seq: 2, ts: 100, run_id: 'r1', node_path: 'T=250K', type: 'NeedsOperator',
+    data: { what: 'temperature', node_path: 'T=250K', detail: { setpoint_k: 250 } } });
+  s.applyBench({ state: 'running', queue: [], instruments: {}, verdicts: [],
+    run: { run_id: 'r1', state: 'running' } }, { readBack: true });
+  assert.ok(s.getState().runs.r1.needsOperator, 'still waiting for an answer');
+});

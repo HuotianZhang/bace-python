@@ -404,3 +404,21 @@ test('a run with no measured ETA still shows the one the cost model predicted', 
   state.runs.r1.progress = { done: 1, total: 2, eta_s: 60, ts: 1000 };
   assert.equal(monitorModel(state).eta.from, 'module');
 });
+
+test('a hydrated ETA counts down too, rather than repeating the second it was measured at', () => {
+  // `record.eta` arrives from `/bench` or `GET /runs/{id}` when the ring lost
+  // the loop `Progress` that would have carried it. It has the absolute
+  // `finish_at` beside the seconds it had when it was measured; repeating
+  // those freezes the countdown and keeps it positive past the finish.
+  const base = (lastTs) => ({
+    activeRunId: 'r1', lastFrame: { ts: lastTs }, queue: [], temperature: null,
+    runs: { r1: { run_id: 'r1', kind: 'pipeline', name: 'tree', state: 'running', node_path: 'T=250K/bace',
+      nodes: { 'T=250K/bace': { node_path: 'T=250K/bace', kind: 'bace', shots: [], curves: [], loops: [], kept: 0, requested: 6 } },
+      progressByNode: {}, progress: null, eta: { eta_s: 600, finish_at: 2000, at: 1400, node_path: 'T=250K' },
+      finish_at: null, step: null, phase: null, needsOperator: null, resumes: [], parked_at: null, reason: '' } },
+  });
+  assert.equal(monitorModel(base(1400)).eta.seconds, 600, 'as measured');
+  assert.equal(monitorModel(base(1700)).eta.seconds, 300, 'five minutes later');
+  assert.equal(monitorModel(base(2100)).eta.seconds, 0, 'and never negative past the finish');
+  assert.equal(monitorModel(base(1700)).eta.finish_at, 2000);
+});

@@ -304,8 +304,14 @@ function etaOf(outer, record, nowTs) {
     : record.progress && record.progress.eta_s !== null && record.progress.eta_s !== undefined ? record.progress
       : null;
   if (!source) {
-    if (record.eta && record.eta.eta_s !== undefined) {
-      return { seconds: record.eta.eta_s, finish_at: record.eta.finish_at, from: 'record' };
+    if (record.eta && (record.eta.finish_at || record.eta.eta_s !== undefined)) {
+      // Hydrated from `/bench` or `GET /runs/{id}` when the ring lost the
+      // loop's `Progress`: it carries the absolute `finish_at` beside the
+      // seconds it had *when it was measured*, and repeating those would
+      // freeze the countdown — and keep it positive past the finish.
+      const at = nowTs !== null && nowTs !== undefined ? nowTs : Date.now() / 1000;
+      const finishAt = record.eta.finish_at ?? ((record.eta.at || at) + record.eta.eta_s);
+      return { seconds: Math.max(0, finishAt - at), finish_at: finishAt, from: 'record' };
     }
     // A J-V emits `Progress` with `eta_s: null` deliberately — there is
     // nothing measured to re-derive from until a curve finishes — and
