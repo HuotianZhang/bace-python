@@ -324,10 +324,23 @@ function readbackRow(kind, bench) {
     || !mode || mode === '?')
     ? null
     : Boolean(open && on && String(mode).toUpperCase() !== 'OFF');
+  // In DC the level is the *offset*: `set_dc` writes `:VOLT:OFFS`, and
+  // `/bench` reports it separately from `high_v`, which keeps the previous
+  // pulse amplitude. Rendering `high_v` there would have this row predict one
+  // level while the `jv` that follows records another — and the two are the
+  // same reading, so disagreeing is worse than either being wrong alone.
+  const level = driveLevel(led);
   return {
-    kind: 'illumination', lit, open, mode, level: led.high_v, inferred: isInferred,
-    text: lit === null ? 'unknown' : lit ? levelText(led.high_v) : 'dark',
+    kind: 'illumination', lit, open, mode, level, inferred: isInferred,
+    text: lit === null ? 'unknown' : lit ? levelText(level) : 'dark',
   };
+}
+
+/** The level the LED is actually driven at, by mode. Undefined where unread. */
+export function driveLevel(led) {
+  const dc = String((led || {}).mode || '').toUpperCase() === 'DC';
+  const level = dc ? (led || {}).offset_v : (led || {}).high_v;
+  return level === undefined ? null : level;
 }
 
 function levelText(level) {
