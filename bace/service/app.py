@@ -416,6 +416,7 @@ def create_app(session: Session, *, ui_dir: str | None = None,
             if since is not None:
                 for frame in session.events_since(since):
                     await ws.send_text(_dumps(frame))
+                    await asyncio.sleep(0)                  # see `pump` below
                     last = frame["seq"]
 
             async def pump() -> None:
@@ -439,6 +440,24 @@ def create_app(session: Session, *, ui_dir: str | None = None,
                         await ws.send_text(_dumps(frame))
                     except Exception:                       # noqa: BLE001 -- the socket is gone
                         return
+                    # Yield to the loop, every frame.
+                    #
+                    # Neither `await` above suspends when there is no reason
+                    # to: `Queue.get` takes its fast path while the queue is
+                    # non-empty, and `send_text` returns as soon as the
+                    # transport buffer accepts the bytes. So a pump with a
+                    # backlog -- which is every `--sim --fast` scan, and any
+                    # burst on the rig -- runs `_dumps` on twenty-kilobyte
+                    # frames in a tight loop and never gives the loop back.
+                    # Measured against a 21 x 60 fast scan with one
+                    # subscriber, `GET /bench` went from 6 ms to a median of
+                    # 3.0 s, which is the console's rail going minutes stale
+                    # while it asks as fast as it is allowed to.
+                    #
+                    # `sleep(0)` yields exactly one iteration, so the
+                    # request that has been waiting gets served between two
+                    # frames.
+                    await asyncio.sleep(0)
 
             sender = asyncio.create_task(pump())
             try:
