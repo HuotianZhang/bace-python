@@ -52,7 +52,22 @@ def open_power_meter(rig_config: Any, *, simulate: bool = False):
     # Both paths, in this order: a meter in amps or dBm reads plausibly and
     # wrongly, and the wavelength decides the responsivity that turns the
     # detector current into those watts.
-    meter.set_units_watts()
-    if wavelength is not None:
-        meter.set_wavelength(wavelength)
+    #
+    # Under try/finally because the direct meter already holds the exclusive
+    # USB device by now. `set_wavelength` refuses a value outside the head's
+    # calibrated range, and `Bench.build_real` registers its closer only on
+    # the value this returns -- so a rejected rig.toml wavelength would have
+    # left the meter held, with the service running and reporting it missing.
+    try:
+        meter.set_units_watts()
+        if wavelength is not None:
+            meter.set_wavelength(wavelength)
+    except BaseException:
+        close = getattr(meter, "close", None)
+        if close is not None:
+            try:
+                close()
+            except Exception:                               # noqa: BLE001
+                pass    # the configuration failure is the one to report
+        raise
     return meter

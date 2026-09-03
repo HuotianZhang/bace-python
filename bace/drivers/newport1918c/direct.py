@@ -61,10 +61,20 @@ class DirectPowerMeter:
         console client got it free in each `/api/reading`; here it has to be
         read back and remembered, or a watt reading arrives with no way to
         know which responsivity produced it."""
-        if wavelength_nm is not None:
-            self.set_wavelength(wavelength_nm)
-        else:
-            self._read_wavelength()
+        # Past this point the exclusive USB handle is ours, so anything that
+        # raises has to give it back: a constructor that throws leaves the
+        # caller no object to close it with, and the device would stay held
+        # for the life of the process. `set_wavelength` really does raise --
+        # the driver refuses a value outside the head's calibrated range
+        # rather than extrapolating.
+        try:
+            if wavelength_nm is not None:
+                self.set_wavelength(wavelength_nm)
+            else:
+                self._read_wavelength()
+        except BaseException:
+            self.close()
+            raise
 
     @property
     def source(self) -> str:
