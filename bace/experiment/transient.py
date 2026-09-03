@@ -142,11 +142,17 @@ class RunConfig:
     """The LED's light/dark split within one period, written to the 33220A
     (`FUNC:PULS:DCYC`). At 500 Hz and 50 % the device gets 1 ms of light and
     1 ms of dark per cycle. What that buys is the **on-phase**: the device has
-    to reach its light V_oc before the collection pulse fires, which is why
-    `LedDrive.check_equilibration` refuses an on-phase under 5 tau. There is no
-    duty-cycle dimming to trade against it -- the low level sits below the LED's
-    turn-on threshold, so the diode is fully off rather than dim, and the
-    on-phase intensity is exactly the DC intensity.
+    to reach its light V_oc within it, or the prebias the scan centres on is a
+    transient value. Nothing checks that for you -- `LedDrive.__post_init__`
+    enforces the levels against the LED threshold, the duty range and a
+    positive frequency, and `check_equilibration` would test the 5 tau rule but
+    is called from nowhere, because tau is a property of the device and no
+    parameter carries it. Judging the on-phase against the device is the
+    operator's, not the run's.
+
+    There is no duty-cycle dimming to trade against it -- the low level sits
+    below the LED's turn-on threshold, so the diode is fully off rather than
+    dim, and the on-phase intensity is exactly the DC intensity.
 
     It is *not* what separates the two traces. `run_transient_scan` takes the
     light trace with the shutter open and the dark reference with it shut, at
