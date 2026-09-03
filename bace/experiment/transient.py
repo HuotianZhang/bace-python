@@ -194,8 +194,11 @@ class RunConfig:
     are on the 81150A, before the scope acquires."""
 
     dark_settle_s: float = 0.2
-    """How long the run waits once the 81150A holds the dark levels, before
-    the shutter closes."""
+    """How long the run waits once the 81150A holds the dark levels, before the
+    shutter closes, and only on the `translated` dark reference. Under
+    `dark_reference = "same"` the levels are never rewritten, so there is
+    nothing to settle: the scan goes straight to the shutter and a value set
+    here simply does not happen."""
 
     dark_reference: str = "translated"
     """Which levels the 81150A holds for the dark trace: `"translated"` |

@@ -359,8 +359,10 @@ PINNED_DOCS: dict[str, str] = {
             "axis; an offset from V_oc when vpre_on_voc is set.",
     "vcoll": "Collection bias at the device, sourced by the 81150A through the same "
              "gain division, when it is not the swept axis.",
-    "delay_ns": "How long the 81150A waits after the LED falling edge before it fires "
-                "the collection pulse (`:PULS:DEL1`).",
+    "delay_ns": "The wait from the LED falling edge to the collection pulse, as the "
+                "axis programs it. The 81150A is given `delay_ns + trigger_offset_s` "
+                "as `:PULS:DEL1` -- the rig's sync-to-field latency, measured as 0 on "
+                "this bench, so the two agree here and need not on another.",
     "n_loops": "How many times the axis is swept; the statistics tighten with each.",
 }
 
