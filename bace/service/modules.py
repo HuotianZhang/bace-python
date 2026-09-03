@@ -549,17 +549,19 @@ def _light_specs() -> list[ParamSpec]:
                       "dark half-cycle is dark. `pulse` only."),
         ParamSpec("pulse_frequency_hz", "float", 500.0, unit="Hz", group="timing",
                   minimum=0.0,
-                  doc="The rate the 33220A chops the LED at; the value reaches no "
-                      "other instrument (`pulse` only -- the node itself still moves "
-                      "the shutter). 500 Hz is what the rig was found at "
-                      "(2026-08-31), and a `bace` after this must pulse at the same "
-                      "rate -- it is armed by this generator's Sync."),
+                  doc="The rate the 33220A chops the LED at, and the only "
+                      "instrument this value reaches (`pulse` only -- the node "
+                      "itself still moves the shutter). 500 Hz is what the rig was "
+                      "found at (2026-08-31). It holds only until something else "
+                      "sets it: a `bace` writes its own frequency to both "
+                      "generators, so this does not constrain the scan after it."),
         ParamSpec("duty_percent", "float", 50.0, unit="%", group="timing",
                   minimum=0.0, maximum=100.0,
-                  doc="The 33220A's light/dark split within one period, so 50 % gives "
-                      "the device equal light and dark halves (`pulse` only). Only "
-                      "sensible near 50 %: a `bace` takes its two traces either side "
-                      "of that boundary."),
+                  doc="The 33220A's light/dark split within one period, so at 500 Hz "
+                      "and 50 % the device gets 1 ms of light then 1 ms of dark "
+                      "(`pulse` only). The on-phase is the part that matters: the "
+                      "device has to reach its light V_oc within it, which is why "
+                      "`LedDrive` refuses an on-phase under 5 tau."),
         ParamSpec("settle_s", "float", 0.0, unit="s", group="timing", minimum=0.0,
                   doc="Wait after the light is set, before the node finishes -- so "
                       "the step that follows starts under a settled lamp. 0 does not "

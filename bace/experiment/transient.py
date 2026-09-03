@@ -141,9 +141,17 @@ class RunConfig:
     duty_percent: float = 50.0
     """The LED's light/dark split within one period, written to the 33220A
     (`FUNC:PULS:DCYC`). At 500 Hz and 50 % the device gets 1 ms of light and
-    1 ms of dark per cycle; the shot is taken across that boundary. Only
-    sensible near 50 % -- the two halves are the light and dark traces the
-    photocurrent is the difference of.
+    1 ms of dark per cycle. What that buys is the **on-phase**: the device has
+    to reach its light V_oc before the collection pulse fires, which is why
+    `LedDrive.check_equilibration` refuses an on-phase under 5 tau. There is no
+    duty-cycle dimming to trade against it -- the low level sits below the LED's
+    turn-on threshold, so the diode is fully off rather than dim, and the
+    on-phase intensity is exactly the DC intensity.
+
+    It is *not* what separates the two traces. `run_transient_scan` takes the
+    light trace with the shutter open and the dark reference with it shut, at
+    the same trigger timing, and the photocurrent is that difference -- the
+    shutter is the light switch, not the duty boundary.
 
     The same number is written to the 81150A too, by `configure_shape`, where
     it does not survive: `set_levels` writes `PULS:WIDT` from `pulse_width_ns`
