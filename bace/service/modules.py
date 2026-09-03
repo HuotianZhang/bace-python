@@ -96,7 +96,6 @@ LED was still drooping: the scan then watched the intensity fall 20.8 to
 17.0 uW over the next 40 s. A slow thermal drift is invisible inside any
 window shorter than itself; ten seconds of flat readings is what the
 operator's own eyes-on-the-meter check amounts to."""
-"""How many consecutive readings must agree before the LED counts as settled."""
 
 MODULE_NAMES: tuple[str, ...] = ("jv", "jv_bace", "bace", "light", "power",
                                  "temperature", "park", "wait", "note")
@@ -488,9 +487,11 @@ def _bace_specs(rig_config: RigConfig) -> list[ParamSpec]:
                       "wait was seen not to be enough (2026-09-02)."),
         ParamSpec("led_settle_tolerance", "float", 0.02, group="illumination",
                   minimum=0.0,
-                  doc="The LED counts as settled when the last three 1918-C power "
-                      "readings, 0.5 s apart, agree within this fraction of their "
-                      "mean."),
+                  doc="How flat the 1918-C must read before the LED counts as "
+                      "settled: the spread over a 10 s window, as a fraction of its "
+                      "mean. Every one of its 20 polls must agree -- a shorter "
+                      "window is blind to the slow thermal droop it exists to "
+                      "catch."),
     ]
     run = _regroup(specs_from_dataclass(RunConfig, choices=RUN_CHOICES, units=RUN_UNITS),
                    RUN_GROUPS, RunConfig)
@@ -548,10 +549,11 @@ def _light_specs() -> list[ParamSpec]:
                       "dark half-cycle is dark. `pulse` only."),
         ParamSpec("pulse_frequency_hz", "float", 500.0, unit="Hz", group="timing",
                   minimum=0.0,
-                  doc="The rate the 33220A chops the LED at (`pulse` only; this "
-                      "node touches no other instrument). 500 Hz is what the rig was "
-                      "found at (2026-08-31), and a `bace` after this must pulse at "
-                      "the same rate -- it is armed by this generator's Sync."),
+                  doc="The rate the 33220A chops the LED at; the value reaches no "
+                      "other instrument (`pulse` only -- the node itself still moves "
+                      "the shutter). 500 Hz is what the rig was found at "
+                      "(2026-08-31), and a `bace` after this must pulse at the same "
+                      "rate -- it is armed by this generator's Sync."),
         ParamSpec("duty_percent", "float", 50.0, unit="%", group="timing",
                   minimum=0.0, maximum=100.0,
                   doc="The 33220A's light/dark split within one period, so 50 % gives "
