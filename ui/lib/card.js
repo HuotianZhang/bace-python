@@ -248,11 +248,17 @@ function vocRow(row, ctx, model) {
   },
     h('span.l', 'V_oc'),
     h('span.v',
-      missing
-        ? h('span.need', { text: row.need ? row.need.text : 'none' })
-        : bound
-          ? h('span', { text: fmt.volts(voc.value) }, h('i', { text: voc.detail || 'derived' }))
-          : input(voc, commit, false),
+      bound
+        ? h('span', { text: fmt.volts(voc.value) }, h('i', { text: voc.detail || 'derived' }))
+        // Missing shows the reason **and** the field. The typed V_oc is the
+        // documented last resort ("typed by hand only as a last resort, and
+        // the validator says so"), and it is the *only* route on a bench with
+        // no SourceMeter, where neither `jv_bace` nor `measure_dc` can run —
+        // so a row that offered only the sentence made a supported fallback
+        // unreachable and left a centred `bace` impossible to set up without
+        // editing run.toml by hand.
+        : [input(voc, commit, false),
+          missing && row.need ? h('span.need', { text: row.need.text }) : null],
       h('i.at', '@'),
       input(row.led, (v) => ctx.edit(model.name, { led_v: v }), false),
       h('i', 'V LED')),

@@ -1413,13 +1413,34 @@ class Catalogue:
 
         def run() -> Iterator[E.Event]:
             asked: dict[str, Any] = {}
-            if led_ask != "leave":
+
+            def set_led() -> None:
                 asked.update(apply_led(
                     rig.led, led_ask, level=p["led_v"], low=p["led_low_v"],
                     frequency_hz=p["pulse_frequency_hz"], duty_percent=p["duty_percent"],
                     threshold_v=self.rig_config.led_threshold_v))
-            if shutter_ask != "leave":
+
+            def set_shutter() -> None:
                 asked.update(apply_shutter(rig.shutter, shutter_ask == "open"))
+
+            # **The shutter closes first and opens last.** Both orders are the
+            # same order for the same reason: the sample must not see light
+            # nobody asked it to see. Closing first means the generator writes
+            # that follow happen behind a shut shutter, where the node's whole
+            # point may be to prepare a *dark* measurement -- an exposure
+            # during those writes can change the sample before it is measured.
+            # Opening last means the level is already set when light first
+            # reaches it, rather than the previous node's level arriving for
+            # the moment between the two calls.
+            if shutter_ask == "shut":
+                set_shutter()
+                if led_ask != "leave":
+                    set_led()
+            else:
+                if led_ask != "leave":
+                    set_led()
+                if shutter_ask != "leave":
+                    set_shutter()
             if settle_s > 0:
                 ctx.sleep(settle_s)
             # The read-back is the answer, and it is the same one `jv` labels

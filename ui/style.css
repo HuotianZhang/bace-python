@@ -365,6 +365,8 @@ button.link:hover { color: var(--accent-dark); }
 .pf.range .pts { color: var(--ink); }
 .pf.voc .v { display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
 .pf.voc input.v { max-width: 6em; }
+/* The reason sits beside the field it is about, not instead of it. */
+.pf.voc .need { color: var(--warn); font-size: 11px; }
 
 /* -- the bench read-back: not a parameter, and not from /modules ---------- */
 .pf.rb { border-left: 2px solid var(--rule); background: var(--fill); }

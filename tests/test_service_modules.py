@@ -441,6 +441,38 @@ def test_light_needs_only_the_half_it_is_actually_setting():
     assert codes({"shutter": "leave", "led_mode": "leave"}) == [], "a node that sets nothing needs nothing"
 
 
+def test_light_shuts_the_shutter_before_it_writes_to_the_generator(tmp_path):
+    """The sample must not see light nobody asked it to see. With the shutter
+    left open by the node before, `shutter=shut` + `led_mode=dc` used to set
+    the LED first, so the sample took an exposure across the generator writes
+    — before a preparation whose whole point may be that it is dark.
+
+    The other order is the same rule from the other side: opening last means
+    the level is already set when light first reaches the sample, rather than
+    the previous node's level arriving for the moment between the two calls."""
+    b = bench()
+    cat = catalogue()
+    ctx = make_ctx(tmp_path, node_path="light")
+
+    b.sim.shutter.unblock()
+    order: list[str] = []
+    b.sim.bench.on_event = None
+    real_shut, real_set_dc = b.sim.shutter.shut, b.sim.led.set_dc
+    b.sim.shutter.shut = lambda: (order.append("shutter"), real_shut())[1]
+    b.sim.led.set_dc = lambda v: (order.append("led"), real_set_dc(v))[1]
+    list(cat.build("light", {"shutter": "shut", "led_mode": "dc", "led_v": 1.02},
+                   ctx, b.rig))
+    assert order == ["shutter", "led"], "shut first, then write to the generator"
+
+    # Opening: the level is set before the light can reach the sample.
+    order.clear()
+    real_unblock = b.sim.shutter.unblock
+    b.sim.shutter.unblock = lambda: (order.append("shutter"), real_unblock())[1]
+    list(cat.build("light", {"shutter": "open", "led_mode": "dc", "led_v": 1.04},
+                   ctx, b.rig))
+    assert order == ["led", "shutter"], "set the level, then let it through"
+
+
 def test_light_refuses_before_it_touches_anything(tmp_path):
     b = bench()
     cat = catalogue()
