@@ -71,7 +71,13 @@ async function load(entry, { pace }) {
     // which the store takes as a read-back; `jv_*.json` is an endpoint's
     // answer and not a frame at all — it is shown as what it is.
     if (frames.type === 'Hello') { store.applyHello(frames); renderControls('Hello folded'); }
-    else if (entry.kind === 'bench') {
+    else if (entry.kind === 'modules') {
+      // The catalogue, so the bench tab's cards can be generated with no
+      // service at all — which is the whole point of this page.
+      store.applyModules(frames);
+      renderControls(`${(frames.modules || []).length} modules, `
+        + `${(frames.modules || []).reduce((n, m) => n + m.params.length, 0)} parameters`);
+    } else if (entry.kind === 'bench') {
       // `readBack`, exactly as a mid-run refetch lands: the instruments and
       // the chain, and not the run, the queue or the bench state.
       store.applyBench(frames, { readBack: loaded.length > 0 });

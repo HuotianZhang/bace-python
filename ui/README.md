@@ -24,9 +24,11 @@ repo root for the offline bench at `/ui/replay.html`, which needs
 | `lib/store.js` | the fold: the `/bench` snapshot and the `/events` frames become the state every view subscribes to |
 | `lib/format.js` | the number rules of `docs/ui-rules.md` §2, including the two zeros that are absences |
 | `lib/rail.js` | the pinned rail and the chain strip: `railModel(state)` is a pure function of the store, the DOM is beside it |
+| `lib/fields.js` | which fields sit above the fold on each card and in what order, as data, plus `cardModel` — the pure function one `GET /modules` entry becomes a card's rows through |
+| `lib/card.js` | the generated card and the one field component every parameter goes through: provenance rendered, `doc` under the field and `doc_full` on hover |
 | `lib/dom.js` | `h()`, and nothing else |
 | `lib/replay.js`, `replay.html` | the offline bench: fixtures fed into the same store the socket feeds |
-| `views/` | bench · pipeline · results · rig. Stubs, and each says which milestone fills it |
+| `views/` | bench is M2's six generated cards; pipeline · results · rig are stubs, and each says which milestone fills it |
 | `fonts/` | IBM Plex Sans and Mono, Archivo — 24 woff2, 387 KB, lifted out of the Round 3 mockup by `tools/extract_ui_fonts.py`. Nothing is fetched from a network at runtime |
 | `fixtures/` | see below |
 | `tests/` | `node --test ui/tests/…` — and `tests/test_ui.py` runs them from the Python suite, skipping where there is no Node |

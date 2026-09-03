@@ -573,8 +573,25 @@ class _Executor:
 
     def _capture(self, ev: E.Event, step: Step, ctx: RunContext) -> None:
         """Binding 2, the measuring half: a light curve with a V_oc becomes a
-        source keyed by the drive it was measured at."""
-        if not isinstance(ev, JVCurveDone) or ev.dark:
+        source keyed by the drive it was measured at.
+
+        **`dark is False`, not `not dark`.** Since the `jv`/`light` split
+        `JVCurveDone.dark` is three-valued, and `None` -- the bench could not
+        say whether light reached the sample -- is falsy. A curve nobody
+        confirmed was lit may be a dark curve, whose "V_oc" is the noise
+        crossing `metrics` refuses to call one for a *known* dark curve; and
+        this source is what a `bace` centres its axis on. So an unknown curve
+        provides nothing, and the operator sets the light and runs again.
+
+        A `jv` that *was* read as lit does provide one, and legitimately: the
+        level is the read-back the curve was labelled with, which is the same
+        number the coupling check compares. That is why the capture keys on
+        the event and not on `spec.provides_voc` -- the spec answers the
+        validator's question ("will this node have produced a V_oc by then?"),
+        which `jv` cannot promise before it runs, and this answers the
+        run's ("did one come out?").
+        """
+        if not isinstance(ev, JVCurveDone) or ev.dark is not False:
             return
         if ev.metrics.voc is None or ev.led_level_v is None:
             return
