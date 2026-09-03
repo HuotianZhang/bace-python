@@ -172,21 +172,32 @@ test('the rail follows a run that is holding the worker', options, async () => {
   const api = createApi({ base });
   const store = createStore({ schedule: () => {} });
   store.applyBench(await api.bench());
+  // Long enough to be caught, and asked for often enough to catch it. Under
+  // `--fast` the four shots this used to run held the worker for 83-157 ms
+  // while the poll below slept 100 ms between asks, so whether M1's own proof
+  // passed was a coin toss. Forty-two shots is ~330 ms and 25 ms between asks
+  // is a dozen looks inside it — measured, not guessed.
   const posted = await api.startRun('bace', {
-    axis_name: 'delay_ns', axis_start: 0, axis_stop: 100, axis_step: 100,
+    axis_name: 'delay_ns', axis_start: 0, axis_stop: 200, axis_step: 10,
     centre_on_voc: false, vpre: 1.0, vcoll: -2.0, n_loops: 2, store_shots: false,
     record_length: 500,
   });
 
   const deadline = Date.now() + 120000;
   let live = null;
+  let busy = false;
   while (Date.now() < deadline && !live) {
     const bench = await api.bench();
     store.applyBench(bench, { readBack: true });
     const model = railModel(store.getState());
-    const bias = model.find((c) => c.key === 'bias');
-    if (bias.value === 'LIVE') live = model;
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    if (model.find((c) => c.key === 'bias').value === 'LIVE') { live = model; break; }
+    if (bench.state !== 'idle') busy = true;
+    // The run has been on the worker and is off it again with the bias never
+    // reading LIVE. That is the failure; waiting out the deadline to say so
+    // helps nobody. Tied to having *seen* it busy, so a worker slow to pick
+    // the job up is waited for rather than failed.
+    else if (busy) break;
+    await new Promise((resolve) => setTimeout(resolve, 25));
   }
   assert.ok(live, 'the bias never read LIVE while the run was on the worker');
 
