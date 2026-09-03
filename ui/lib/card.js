@@ -34,7 +34,7 @@ export function moduleCard(entry, ctx, open) {
   const busy = Boolean(ctx.busy);
   const card = h('div.card.mod', { dataset: { module: model.name } });
 
-  const blocked = startBlockers(ctx.verdicts, model);
+  const blocked = startBlockers(ctx.checksFor(model.name), model);
   fill(card,
     header(model, ctx, busy, blocked),
     h('div.cb',
@@ -355,9 +355,13 @@ function fold(model, ctx, open) {
  * `ui-rules` §3 reserves for hardware safety; `invalid` reads as "this tree is
  * not runnable yet", which is what it is.
  */
-function startBlockers(verdicts, model) {
-  return (verdicts || []).filter((v) => (v.level === 'crit' || v.level === 'invalid')
-    && (!v.node_path || v.node_path === model.name || v.node_path.endsWith('/' + model.name)));
+function startBlockers(checks, model) {
+  // `pipeline.validate` is `valid = not any(level in ("invalid", "crit"))`,
+  // and both `session.submit` and the Start re-check refuse on that same
+  // pair — so a button that blocked on only one of them would offer a click
+  // that answers 422. Every check of this module's own one-node tree counts;
+  // there is no other tree in it to filter out.
+  return (checks || []).filter((v) => v.level === 'crit' || v.level === 'invalid');
 }
 
 function blockedNote(blocked) {

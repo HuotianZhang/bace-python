@@ -1090,3 +1090,30 @@ def test_a_run_that_only_sets_the_light_is_refused_because_park_would_undo_it():
                         module("jv")]}
     v = validate(seq)
     assert levels(v, "light.undone-by-park") == ["ok"]
+
+
+def test_a_jv_sweep_has_geometry_too_and_it_is_checked():
+    """Until this, `axis.geometry` skipped every module without an
+    `axis_name`, which is every J-V module — so `step_v = 0` validated clean,
+    was queued, and died at build time with `jv: step_v: step_v must be
+    positive`. The card's own estimate already read "cannot estimate" while
+    the Run button beside it stayed enabled.
+
+    Pre-existing (it applied to `jv_dark` just the same); named here because
+    the split is what made it visible."""
+    ok = validate(module("jv"))
+    assert levels(ok, "axis.geometry") == ["ok"]
+
+    bad = validate(module("jv", step_v=0))
+    assert levels(bad, "axis.geometry") == ["invalid"] and not bad.valid
+    assert "step_v must be positive" in bad.by_code("axis.geometry")[0].text
+
+    # A range of LED levels with no step is the same shape of refusal, and the
+    # one `_jv_levels` makes in the builder.
+    span = validate(module("jv_bace", led_start_v=1.02, led_stop_v=1.06, led_step_v=0))
+    assert levels(span, "axis.geometry") == ["invalid"]
+    assert "led_step_v" in span.by_code("axis.geometry")[0].text
+
+    # One level is not a range: start = stop needs no step.
+    one = validate(module("jv_bace", led_start_v=1.02, led_stop_v=1.02, led_step_v=0))
+    assert levels(one, "axis.geometry") == ["ok"]

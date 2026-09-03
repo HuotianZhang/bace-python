@@ -108,8 +108,14 @@ class LiveState:
                     instrument, field = INSTRUMENT_STATE_KEYS[key]
                     self._set(instrument, **{field: str(value)})
                 elif key == "shutter":
-                    if str(value) != "?":
-                        self._set("shutter", open=(str(value) == "open"))
+                    # `?` is the run saying it asked and got no answer, and
+                    # that is newer than the snapshot Start took. Left in
+                    # place, a stale `open` would be combined with a good LED
+                    # reading into a "lit" the file is recording as unknown.
+                    # `None` renders as an absence on the rail and as unknown
+                    # on the card, which is what it is.
+                    self._set("shutter", open=None if str(value) == "?"
+                              else str(value) == "open")
                     self._jv_light(str(value) == "open")
                 elif key == "led_level_v" and value is not None:
                     self._set("led", high_v=float(value))
@@ -119,6 +125,17 @@ class LiveState:
                     # generator on from parked, or off, is the one thing the
                     # snapshot Start took cannot know.
                     self._set("led", output=bool(value))
+                elif key == "illumination" and str(value) == "unknown":
+                    # The run asked and the bench could not say. Skipping the
+                    # unread `?` above protects a *good* read-back from being
+                    # replaced by "unknown" -- but here the run's own failure
+                    # to read is the newer fact, and leaving Start's stale
+                    # values in place lets the card combine them with the
+                    # current shutter and show "lit" for a curve the file is
+                    # recording as `as found unknown`. The screen disagreeing
+                    # with the file is the one thing the read-back exists to
+                    # prevent, so the unknown is written.
+                    self._set("led", mode="?", output=None)
         elif isinstance(ev, E.StepStarted):
             self._levels = self._pulse_levels(ev.setpoint)
             if self._levels is not None:

@@ -56,6 +56,52 @@ export default {
     let edits = Promise.resolve();
     const settled = () => edits;
 
+    /**
+     * A submission already on the wire. `busy` comes from the store, which
+     * only learns of a run when its `RunQueued` frame arrives — so two clicks
+     * inside that window both pass the check and the service, which queues
+     * every accepted POST, starts *two* experiments. On a rig that is an hour
+     * of the sample's life and a second set of files nobody asked for.
+     *
+     * A plain variable, set before the await and checked synchronously at the
+     * top: no re-render, so it cannot eat the click the way disabling the
+     * button would.
+     */
+    let submitting = false;
+
+    /**
+     * `POST /pipelines/validate` for each card's own one-node tree, by module.
+     *
+     * The bench snapshot's `verdicts` are the *chain* checks and nothing else,
+     * so filtering those told the card nothing about its own values: a `jv`
+     * with `step_v = 0`, or a `bace` with no V_oc in scope, left Run enabled
+     * and `/runs` answered 422. `ui-plan` M2 says Start is disabled by
+     * `invalid` **and** `crit` — this is what makes that true rather than
+     * claimed.
+     *
+     * The node's params are empty on purpose: the edited layer is already in
+     * the catalogue, so an empty-params node validates with exactly the values
+     * a Run would use, and the answer cannot drift from the button beside it.
+     */
+    const checks = new Map();
+
+    function revalidate(names) {
+      return Promise.all(names.map(async (name) => {
+        try {
+          const v = await api.validate({ kind: 'module', module: name, params: {} });
+          checks.set(name, v.checks || []);
+        } catch (err) {
+          // A validator that will not answer must not silently unblock Start:
+          // the checks it would have returned are unknown, not absent.
+          checks.set(name, [{ level: 'invalid', code: 'validate.unreachable',
+            text: err.text || String(err), node_path: name }]);
+        }
+      })).then(render);
+    }
+
+    /** Which cards a bench read-back could have changed the answer for. */
+    let validatedAt = null;
+
     const fail = (err) => {
       // A refusal reaches the operator as its sentence, never as `-> 409`.
       // `error.text` and `error.checks` are on `ApiError` since M1, and
@@ -68,7 +114,11 @@ export default {
       const run = state.runs[state.activeRunId] || null;
       return {
         bench: state.bench,
-        verdicts: state.verdicts || [],
+        // The card's own checks, not the chain's. Empty until the first
+        // answer lands, which is why an edit re-validates inside the same
+        // chain `run` awaits: Run cannot fire on checks older than the value
+        // beside it.
+        checksFor: (name) => checks.get(name) || [],
         // Every action but park answers 409 while a run holds the worker, and
         // a Start would queue behind it — so the cards say so rather than
         // offering buttons that will be refused.
@@ -84,16 +134,21 @@ export default {
               // The response *is* the new card: value, provenance, `needs` and
               // a freshly computed `estimate_text` with the point count in it.
               store.applyModule(await api.setParams(name, params));
+              // Inside the chain, so `run`'s `await settled()` waits for it
+              // too: the button and the checks that gate it move together.
+              await revalidate([name]);
             } catch (err) { fail(err); render(); }
           });
           return edits;
         },
         async run(model, button) {
-          await settled();
+          if (submitting) return;         // the second click of a double-click
+          submitting = true;
           try {
+            await settled();
             const params = button.kind === 'shot' ? { n_loops: 1 } : {};
             await api.startRun(model.name, params);
-          } catch (err) { fail(err); }
+          } catch (err) { fail(err); } finally { submitting = false; }
         },
         async act(model, action) {
           await settled();
@@ -127,6 +182,17 @@ export default {
       }
       const c = ctx();
       fill(body, names.map((name) => moduleCard(byName[name], c, opened(name))));
+
+      // Several of the checks are about the bench rather than the values —
+      // an instrument that went away, the chain, a V_oc that has just been
+      // measured — so a fresh read-back can change the answer without any
+      // edit. Keyed on `read_at` rather than on every frame: a read-back is
+      // a job on the worker and happens rarely, where frames do not.
+      const at = (state.bench && state.bench.read_at) || null;
+      if (at !== validatedAt) {
+        validatedAt = at;
+        revalidate(names);
+      }
     }
 
     const off = store.subscribe(render);
