@@ -179,3 +179,30 @@ test('keyed owns the children, and says so by not restoring what it did not remo
   assert.equal(keyed(el, 'absent+emptied', build), true);
   assert.equal(built, 2);
 });
+
+// -- M3: the chart is keyed apart from the card it sits in ----------------
+
+test('a shot moves the result key and leaves the card\'s own key alone', async () => {
+  // The card's key is `cardModel` plus its checks and its folds; the chart's
+  // is the data behind it. Sharing one key would rebuild six cards' worth of
+  // fields on every shot of a scan, which is the M2 failure with a chart in
+  // front of it: a rebuilt field is a different field, and the caret goes with
+  // the old one.
+  const { resultKey } = await import('../lib/results.js');
+  const entry = { name: 'bace', params: [{ name: 'vpre', value: 1.0 }] };
+  const bench = { chain: { items: [] }, rig: { values: {} } };
+  const shot = (index, ts) => ({ node_path: '', loop: 1, index, ts, tracesGone: false });
+  const record = { run_id: 'r1', module: 'bace', state: 'running', curves: [], shots: [], lastShot: shot(1, 10) };
+
+  const first = resultKey('bace', entry, record, bench);
+  assert.equal(resultKey('bace', entry, record, bench), first, 'nothing new, nothing rebuilt');
+
+  record.lastShot = shot(2, 11);
+  assert.notEqual(resultKey('bace', entry, record, bench), first, 'a shot redraws the chart');
+
+  // And an edit to the form moves it too, because the timing diagram is a
+  // function of the form: that is the whole reason it is on this card.
+  const edited = { name: 'bace', params: [{ name: 'vpre', value: 1.1 }] };
+  assert.notEqual(resultKey('bace', edited, record, bench),
+    resultKey('bace', entry, record, bench));
+});

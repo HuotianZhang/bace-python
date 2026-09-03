@@ -32,17 +32,25 @@ import { cardModel, foldCount } from './fields.js';
 export function moduleCard(entry, ctx, open) {
   const model = cardModel(entry, { bench: ctx.bench });
   const busy = Boolean(ctx.busy);
-  const card = h('div.card.mod', { dataset: { module: model.name } });
+  const wide = Boolean(ctx.hasResult && ctx.hasResult(model.name));
+  const card = h('div.card.mod' + (wide ? '.wide' : ''), { dataset: { module: model.name } });
 
   const blocked = startBlockers(ctx.checksFor(model.name), model);
-  fill(card,
-    header(model, ctx, busy, blocked),
-    h('div.cb',
-      h('div.pr', model.above.map((row) => renderRow(row, model, ctx))),
-      model.readback ? readback(model.readback) : null,
-      needsList(model),
-      fold(model, ctx, open),
-      blocked.length ? blockedNote(blocked) : null));
+  const form = [
+    h('div.pr', model.above.map((row) => renderRow(row, model, ctx))),
+    model.readback ? readback(model.readback) : null,
+    needsList(model),
+    fold(model, ctx, open),
+    blocked.length ? blockedNote(blocked) : null,
+  ];
+  // The result panel is a **slot**, not content: `views/bench.js` fills it and
+  // keys it on the data behind it, so a shot arriving does not rebuild the
+  // card around it. That is the M2 rule with a chart in front of it — a
+  // rebuilt element is a different element, and the operator's caret goes with
+  // the old one (`docs/ui-plan.md` decision 5). Nothing here knows what a
+  // chart is.
+  fill(card, header(model, ctx, busy, blocked),
+    wide ? h('div.cb.split', h('div.col', form), h('div.res')) : h('div.cb', form));
   return card;
 }
 

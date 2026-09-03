@@ -12,9 +12,10 @@
 // posts and re-reads the bench. No value is cached here, because a cached
 // value is a second opinion about a number the service is the authority on.
 
-import { h, fill } from './../lib/dom.js';
+import { h, fill, keyed } from './../lib/dom.js';
 import { moduleCard } from './../lib/card.js';
 import { BENCH_CARDS, cardModel } from './../lib/fields.js';
+import { RESULT_CARDS, resultKey, resultPanel, runFor } from './../lib/results.js';
 
 export default {
   route: 'bench',
@@ -179,6 +180,11 @@ export default {
         // a Start would queue behind it — so the cards say so rather than
         // offering buttons that will be refused.
         busy: Boolean(run && !run.parked_at),
+        // Whether the card is built with a result slot beside its form. Not
+        // *what* goes in it: the slot is filled after the card is built, and
+        // keyed on its own data, so a shot arriving redraws a chart and not a
+        // card (`lib/results.js`).
+        hasResult: (name) => RESULT_CARDS.has(name),
         toggle(name, group) {
           const set = opened(name);
           if (set.has(group)) set.delete(group); else set.add(group);
@@ -298,11 +304,19 @@ export default {
         const open = opened(name);
         const key = cardKey(entry, c, open);
         const was = held.get(name);
-        if (was && was.key === key) continue;
+        if (was && was.key === key) {
+          // The card is unchanged; its result may not be. The two are keyed
+          // apart on purpose — the chart moves with every shot and the form
+          // does not, and rebuilding the form to redraw the chart would take
+          // the operator's caret out of a field between two shots.
+          renderResult(name, entry, was.el, state);
+          continue;
+        }
         const card = moduleCard(entry, c, open);
         if (was && was.el.parentNode === body) body.replaceChild(card, was.el);
         else body.append(card);
         held.set(name, { key, el: card });
+        renderResult(name, entry, card, state);
       }
 
       // Several of the checks are about the bench rather than the values —
@@ -315,6 +329,23 @@ export default {
         validatedAt = at;
         revalidate(names);
       }
+    }
+
+    /**
+     * The result panel beside one card's form: the timing diagram the form
+     * describes, and the transient or the J–V the run produced.
+     *
+     * `keyed` owns the slot's children, and the slot is a fresh empty element
+     * whenever the card around it was rebuilt — so a rebuilt card refills
+     * here rather than losing its chart, and an unchanged card redraws only
+     * when the data behind the chart moved.
+     */
+    function renderResult(name, entry, card, state) {
+      const slot = card.querySelector('.res');
+      if (!slot) return;
+      const record = runFor(state, name);
+      keyed(slot, resultKey(name, entry, record, state.bench),
+        () => resultPanel(name, { entry, record, bench: state.bench }));
     }
 
     const off = store.subscribe(render);

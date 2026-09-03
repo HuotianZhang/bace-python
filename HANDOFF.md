@@ -156,12 +156,16 @@ Design rules that are load-bearing:
 
 ## 3. What is NOT built
 
-**`ui/`** — browser front end. **M0, M1 and M2 are built** (`ui/README.md`,
+**`ui/`** — browser front end. **M0 to M3 are built** (`ui/README.md`,
 `docs/ui-plan.md`): the event layer with its recorded fixtures, the pinned rail
-and the chain strip, and the six generated bench cards with the `edited` layer
-behind them. **M3 is next** — the scale/axis foundation, then the J–V and
-transient charts and the timing diagram — and nothing in the service blocks it
-(`docs/ui-plan.md`, "what blocks what"). M4–M6 are not built. **Explicit
+and the chain strip, the six generated bench cards with the `edited` layer
+behind them, and the charts — the scale/axis foundation, the J–V, the transient
+with its window and running integral, and the timing diagram, which sits on the
+`bace` card because it is a function of the form and shows a wrong polarity or
+an impossible delay *before* the run. Nothing in the service changed for any of
+it. **M4 is next** — the live monitor: `StepPhase` as the shot-segment
+indicator, the per-shot verdict, and Q per loop / Q(axis) with the
+zero-width-axis switch drawn rather than silent. M4–M6 are not built. **Explicit
 instruction from the user, 2026-09-01:**
 
 > *"I do not want the same shape as JV console and the 331 controller. I want a

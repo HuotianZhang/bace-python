@@ -13,6 +13,7 @@
   --grey: #7d7979;
   --rule: #d7d3d3;
   --fill: #eae7e7;
+  --grid: #f2efef;            /* a chart's gridlines: present, never competing */
   --paper: #ffffff;
   --accent: #ec3013;          /* the swept quantity, and the primary button */
   --accent-dark: #ae1800;
@@ -401,3 +402,57 @@ button.link:hover { color: var(--accent-dark); }
 .strip .checks { display: inline-flex; gap: 5px; margin-left: 8px; }
 .strip .ck { font-family: var(--font-num); font-size: 10px; }
 .strip .ck.crit, .strip .ck.invalid { color: var(--alert); }
+
+
+/* -- charts (M3) ----------------------------------------------------------
+   The result panel sits beside the form in the card that produced it, as
+   Round 3 has it: `ch-jvdark` in the jv card, `ch-transient` in the bace card,
+   and the timing diagram in the bace card too, because it is a function of
+   the form beside it rather than of any run. A card with one is twice as wide,
+   which the auto-fill grid gives it for free — but only where there is room
+   for two columns, or a one-column grid would grow an implicit second one. */
+
+.card.mod.wide { grid-column: span 1; }
+@media (min-width: 980px) {
+  .card.mod.wide { grid-column: span 2; }
+  .cb.split {
+    display: grid;
+    grid-template-columns: minmax(260px, 330px) minmax(0, 1fr);
+    gap: 14px;
+    align-items: start;
+  }
+}
+.cb.split > .col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.res { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+.chart { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.chart-svg { width: 100%; }
+.chart-svg .series { vector-effect: non-scaling-stroke; }
+
+.chart-legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--grey); }
+.legend-item { display: inline-flex; align-items: center; gap: 4px; }
+
+/* The readout the crosshair writes into. It holds its height when empty so
+   nothing on the card moves as the pointer enters the plot, and it is a fixed
+   row rather than a floating tooltip so a value can be read while the pointer
+   travels — which is what comparing two points on a transient is. */
+.chart-readout {
+  min-height: 15px;
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--ink);
+}
+.chart-notes { display: flex; flex-direction: column; gap: 2px; }
+.chart-note { font-size: 11px; color: var(--grey); }
+.chart-absent { border: 1px dashed var(--rule); padding: 10px; }
+
+.alerts { display: flex; flex-direction: column; gap: 4px; }
+.alerts .warn1.info { color: var(--grey); }
+.alerts .warn1.alert { color: var(--alert); }
+.alerts .warn1 .code { text-transform: uppercase; letter-spacing: .04em; }
+
+.metrics table.rows { width: 100%; }
+.metrics th { text-align: left; font-weight: 600; font-size: 11px; padding-top: 4px; }
+.metrics td.l { color: var(--grey); font-size: 11px; }
+.metrics td.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 11px; }

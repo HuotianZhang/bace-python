@@ -14,9 +14,14 @@
 
 import { createStore, currentRun } from './lib/store.js';
 import { FIXTURES, loadFixture, replayInto, replayPaced } from './lib/replay.js';
-import { h, fill } from './lib/dom.js';
+import { h, fill, keyed } from './lib/dom.js';
 import * as fmt from './lib/format.js';
 import { renderRail, renderChainStrip } from './lib/rail.js';
+import { chart } from './lib/charts/frame.js';
+import { transientModel } from './lib/charts/transient.js';
+import { jvModel } from './lib/charts/jv.js';
+import { timingModel } from './lib/charts/timing.js';
+import { valuesOf } from './lib/results.js';
 
 const store = createStore({ schedule: (fn) => requestAnimationFrame(fn) });
 const loaded = [];
@@ -24,6 +29,9 @@ let paced = null;
 
 const controls = h('div.card');
 const summary = h('div');
+const charts = h('div.card');
+/** The two endpoint fixtures, which are payloads rather than frames. */
+const payloads = {};
 // The real rail and the real strip, off the same store: M1 is developed and
 // looked at here, with no service and no bench. `bench_running_sim.json` is
 // the mid-scan snapshot, and it is the only fixture that carries an inferred
@@ -40,7 +48,7 @@ app.replaceChildren(
       + 'every run semantic and cannot draw a curve — the payload policy keeps the scalars '
       + 'and drops the traces. The recorded streams carry the traces, decimated as the wire '
       + 'sends them, and the StepPhase frames that are live-only and exist nowhere else.'),
-    controls, summary),
+    controls, charts, summary),
   stripEl);
 
 function renderControls(status) {
@@ -53,7 +61,8 @@ function renderControls(status) {
       h('td', { text: entry.kind }),
       h('td', { text: entry.label }),
       h('td.num', { text: loaded.includes(entry.key) ? 'loaded' : '' })))),
-    h('p', h('button', { onclick: () => { store.reset(); loaded.length = 0; renderControls(''); } }, 'reset store'),
+    h('p', h('button', { onclick: () => { store.reset(); loaded.length = 0; renderControls('');
+renderCharts(); } }, 'reset store'),
       ' ', h('span.absent', { text: status || '' })));
 }
 
@@ -82,6 +91,14 @@ async function load(entry, { pace }) {
       // the chain, and not the run, the queue or the bench state.
       store.applyBench(frames, { readBack: loaded.length > 0 });
       renderControls(`bench applied — ${(frames.inferred || []).length} inferred: ${(frames.inferred || []).join(', ') || 'none'}`);
+    } else if (entry.kind === 'data') {
+      // `GET /runs/{id}/data`: full precision, and the only place the running
+      // integral and the J–V arrays exist offline. The journals cannot draw a
+      // curve at all — the payload policy keeps the scalars and drops the
+      // traces — so M3 develops against these two.
+      payloads[entry.key] = frames;
+      renderCharts();
+      renderControls(`${entry.url} folded as an endpoint payload — ${Object.keys(frames).join(', ')}`);
     } else renderControls(`${entry.url} is an endpoint payload, not frames — ${Object.keys(frames).join(', ')}`);
     loaded.push(entry.key);
     return;
@@ -96,8 +113,61 @@ async function load(entry, { pace }) {
   loaded.push(entry.key);
 }
 
+/**
+ * The M3 charts, off whatever this page has been given.
+ *
+ * The timing diagram needs only the catalogue and the bench — it is a function
+ * of the form, so it draws before anything has run. The transient and the J–V
+ * need arrays, which means an endpoint fixture or a recorded stream; a journal
+ * replay leaves them saying so, which is the honest outcome and the reason the
+ * fixture set has both kinds.
+ */
+function renderCharts() {
+  const state = store.getState();
+  const run = currentRun(state);
+  const entry = state.modules.byName.bace;
+  const shot = (run && run.lastShot) || null;
+  const curves = (run && run.curves.length ? run.curves : (payloads['jv-curves'] || {}).curves) || [];
+  const key = [
+    entry ? JSON.stringify(valuesOf(entry)) : 'no-modules',
+    state.bench ? state.bench.read_at : 'no-bench',
+    shot ? `${shot.node_path}:${shot.loop}:${shot.index}:${shot.ts}` : 'no-shot',
+    payloads.transient ? 'rig-transient' : '-',
+    `curves:${curves.length}`,
+  ].join('|');
+  keyed(charts, key, () => {
+    const rig = (state.bench && state.bench.rig && state.bench.rig.values) || {};
+    const chain = (state.bench && state.bench.chain) || {};
+    const values = entry ? valuesOf(entry) : null;
+    const timing = values ? timingModel(values, { rig, chain }) : null;
+    const source = payloads.transient || shot;
+    return [
+      h('h2', 'charts · M3'),
+      h('p.chart-note', 'the timing diagram is a function of the form and draws with no run at all; '
+        + 'the transient and the J–V need arrays, which a journal does not carry'),
+      timing ? h('h3', 'the shot this form describes') : h('p.absent', 'load the modules fixture for the timing diagram'),
+      timing ? chart(timing) : null,
+      timing && timing.alerts.length
+        ? h('div.alerts', timing.alerts.map((a) => h('div.warn1.' + a.level,
+          h('span.code', { text: a.level }), h('span', { text: a.text }))))
+        : null,
+      h('h3', 'the transient'),
+      source
+        ? chart(transientModel(source, values ? {
+          t0_int_s: values.t0_int_s, t0_int_reference: values.t0_int_reference,
+          pulse_delay_s: (Number(values.delay_ns) || 0) * 1e-9,
+          offset_corrected: values.offset_correct, dark_reference: values.dark_reference,
+        } : {}))
+        : h('p.absent', 'load the rig transient fixture, or replay a recorded stream'),
+      h('h3', 'the J–V'),
+      curves.length ? chart(jvModel(curves)) : h('p.absent', 'load the J-V fixture, or replay the jv stream'),
+    ];
+  });
+}
+
 store.subscribe((state) => {
   renderRail(railEl, state);
+  renderCharts();
   renderChainStrip(stripEl, state, {
     // Offline there is no service to answer, so the strip says what it would
     // have posted rather than pretending to have posted it.
@@ -150,3 +220,4 @@ function detail(key, value) {
 }
 
 renderControls('');
+renderCharts();
