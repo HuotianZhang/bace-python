@@ -112,6 +112,17 @@ SLEEP_SLICE_S = 0.2
 hold is slept in slices of this, so an abort acts within it rather than
 after the whole of a 60 s hold or an 1800 s wait."""
 
+WATCHDOG_POLL_S = 30.0
+"""How often the 331's heater watchdog is fed from inside a run.
+
+The monitor cannot read while a run holds the bus, and the watchdog rides on
+reads -- so a heater fault that begins after a temperature settles, with
+hours of measurement still to go, would go unseen until the run ended. The
+worker feeds it instead, from `sleeper`, where it is already waiting and the
+bus is its own. Two queries every half minute against a cryostat heating an
+unattended sample: a thermal runaway moves in minutes, and a settle between
+shots is 0.3 s, so this almost never lands inside one."""
+
 _METER_LOCK = threading.Lock()
 """Serialises `power_reading` across threads. The monitor reads the meter
 on its own thread beside a run that reads it on the worker, and the
@@ -396,6 +407,7 @@ class Bench:
         shared bench state. None on the real rig."""
         self.fast = fast
         self.fingerprint = fingerprint(_package_root())
+        self._watchdog_at = 0.0
         self._relay_line = relay_line
         self._closers = list(closers)
 
@@ -655,18 +667,38 @@ class Bench:
         """
         if self.fast:
             return _no_sleep
-        if interrupt is None:
-            return time.sleep
 
         def sleep(seconds: float) -> None:
             end = time.monotonic() + float(seconds)
-            while not interrupt():
+            while interrupt is None or not interrupt():
+                self._feed_watchdog()
                 left = end - time.monotonic()
                 if left <= 0:
                     return
                 time.sleep(min(slice_s, left))
 
         return sleep
+
+    def _feed_watchdog(self) -> None:
+        """One watchdog tick, at most every `WATCHDOG_POLL_S`, when this
+        process owns the 331.
+
+        Called from the worker's own sleeps, which is the only place inside a
+        run where reaching for the bus is legal -- the worker holds it, so
+        this is not a second thread on GPIB0. Rate-limited on a bench-wide
+        clock rather than per sleep, so a run of many short settles does not
+        turn into a stream of queries. Never raises: `poll_faults` swallows
+        its own errors, and a watchdog is not a reason to fail a run.
+        """
+        controller = self.rig.temperature
+        poll = getattr(controller, "poll_faults", None)
+        if poll is None or not getattr(controller, "watchdog", False):
+            return                  # console-backed, simulated, or disabled
+        now = time.monotonic()
+        if now - self._watchdog_at < WATCHDOG_POLL_S:
+            return
+        self._watchdog_at = now
+        poll()
 
     def close(self) -> None:
         """Park, then release every resource in reverse order of opening."""

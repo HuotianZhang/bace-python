@@ -720,14 +720,19 @@ program on the instrument; here the journal is where an operator looks).
 The 350 K ceiling and the front-panel settings hold whoever owns the bus, and
 each failure is named for what it is:
 
-- **the heater watchdog** cuts the heater (`RANGE 0`) after
-  `Limits.max_consecutive_faults` consecutive reads whose control-sensor
-  status is not ok, and the count resets on the first good one. It runs on
-  every `read()`, so the monitor and the settle both feed it. This is the
-  console poller's rule, moved in with the instrument: without it a sensor
-  going open-circuit leaves the heater energised for as long as the run
-  lasts. `DirectTemperatureController.heater_cut` holds the reason once it
-  has fired;
+- **the heater watchdog** cuts the heater after
+  `Limits.max_consecutive_faults` consecutive faults, and the count resets on
+  the first clean one. A fault is a bad control-sensor status (`RDGST?`) **or
+  a heater fault** (`HTRST?`): an open or shorted load while the sensor reads
+  well would otherwise reset the count forever. Cutting is `RANGE 0`, plus --
+  on a loop-2 cryostat, where `RANGE` does not reach the analog output --
+  `MOUT 0` then `CMODE open loop`, in that order. It is fed from every
+  `read()` (the monitor, the settle) **and from the worker's own sleeps
+  inside a run** (`rigs.Bench._feed_watchdog`, at most every
+  `WATCHDOG_POLL_S`), because the monitor cannot read while a run holds the
+  bus and a fault beginning after a temperature settles must not wait hours
+  to be seen. `DirectTemperatureController.heater_cut` holds the reason once
+  it has fired;
 - a setpoint above the 350 K ceiling (`[temperature] max_setpoint_k`, or the
   console's own limit when a console owns the bus) is **refused**, never
   clamped — `Verdict(crit, "temperature.refused", <the controller's own
@@ -929,8 +934,13 @@ during a long subtree the temperature monitor emits nothing and the card's
 reading goes stale. `skipped` is how a UI says *why* rather than showing an
 old number as if it were current — **render it**. Readings still arrive from
 the worker where it is safe to take them: while a temperature node settles,
-and while a run is paused for the operator. Sampling at safe points inside a
-run is a change to the measurement path and is not in this round.
+and while a run is paused for the operator.
+
+The **safety** half of that gap is closed, and separately: the heater
+watchdog rides on reads, so suppressing reads for hours would have suppressed
+it too. The worker feeds it from its own sleeps (§7), which is a fault check
+and not a reading — no `TemperatureRead` is emitted from there, because a
+number taken mid-run is not the cryostat the shot around it was measured at.
 
 ---
 
