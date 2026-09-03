@@ -31,8 +31,14 @@ const stream = createStream({
   onSessionChange: ({ from, to }) => {
     // The service restarted. Everything the old session numbered is gone;
     // the new `Hello` rebuilds the bench and the ring supplies the rest.
+    //
+    // The catalogue is not on either, and `store.reset()` has just dropped it
+    // — so without this the bench tab reads "GET /modules has not answered"
+    // until some later run parks and the watch asks for it. Which is correct
+    // and useless: a console with no cards in it, on a bench that is fine.
     console.info(`service session ${from} -> ${to}; rebuilding`);
     store.reset();
+    watch.want({ modules: true });
   },
 });
 

@@ -12,7 +12,7 @@
 // posts and re-reads the bench. No value is cached here, because a cached
 // value is a second opinion about a number the service is the authority on.
 
-import { h, fill, keyed } from './../lib/dom.js';
+import { h, fill } from './../lib/dom.js';
 import { moduleCard } from './../lib/card.js';
 import { BENCH_CARDS, cardModel } from './../lib/fields.js';
 
@@ -275,7 +275,14 @@ export default {
       if (!names.length) {
         held.clear();
         order = '';
-        keyed(body, 'absent', () => h('div.card', h('p.absent', 'GET /modules has not answered')));
+        // Plain `fill`, not `dom.keyed`: `keyed` owns an element's children,
+        // and the loop below manages `body`'s directly. Keyed here, `body`'s
+        // key would stick at this branch's the first time the catalogue was
+        // empty and never be cleared by the populated path — so a `store.reset`
+        // (the service restarting under us) would leave the cards it just
+        // dropped frozen on the screen, saying nothing about it. It is one
+        // cheap element with nothing focusable in it; there is nothing to save.
+        fill(body, h('div.card', h('p.absent', 'GET /modules has not answered')));
         return;
       }
       const c = ctx();

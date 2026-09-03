@@ -154,3 +154,28 @@ test('a fetch that throws where a promise was expected does not wedge the watch'
   await new Promise((done) => setTimeout(done, 0));
   assert.equal(ok, 1, 'and the watch asked again rather than going silent');
 });
+
+test('keyed owns the children, and says so by not restoring what it did not remove', () => {
+  // The constraint, as the failure it caused. `views/bench.js` manages its six
+  // cards one at a time — a rebuild of one must not blur a field in another —
+  // and for one revision it *also* ran its empty-catalogue placeholder through
+  // `keyed` on the same container. The key stuck at the placeholder's from the
+  // first render, the populated path never cleared it, and a `store.reset()`
+  // (the service restarting) then left the cards it had just dropped frozen on
+  // the screen for ever.
+  const el = fake();
+  let built = 0;
+  const build = () => { built += 1; return []; };
+
+  keyed(el, 'absent', build);
+  assert.equal(built, 1);
+
+  el.textContent = '';                       // something else takes the children
+  assert.equal(keyed(el, 'absent', build), false, 'the key still describes what was there');
+  assert.equal(built, 1, 'so nothing is rebuilt, and the container stays as the other thing left it');
+
+  // Which is why a container someone else mutates has to be keyed on
+  // something that moves with that mutation, or not keyed at all.
+  assert.equal(keyed(el, 'absent+emptied', build), true);
+  assert.equal(built, 2);
+});
