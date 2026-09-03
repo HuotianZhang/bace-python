@@ -1175,15 +1175,31 @@ def _c_led_levels(f: _Facts) -> list[Verdict]:
         # `jv_bace.led_v` is nullable: None means "sweep led_start_v to
         # led_stop_v", so only a value is a single level; None falls
         # through to the range below.
+        # A `light` node's levels matter only in the mode that reads them, and
+        # `_build_light` validates exactly that much. Every such node carries a
+        # non-null `led_v` (it has a default), so without this a shutter-only
+        # node was refused for an unused pulse low level sitting above the
+        # threshold — a check about a waveform the node never sends.
+        mode = str(v.get("led_mode", "")).lower() if s.module == "light" else None
+        if mode in ("leave", "off"):
+            continue
         if v.get("led_v") is not None:
             low = float(v.get("led_low_v", 0.4))
             try:
-                LedDrive(level=float(v["led_v"]), low_level=low,
-                         frequency_hz=float(v.get("pulse_frequency_hz", 500.0)),
-                         duty_percent=float(v.get("duty_percent", 50.0)),
-                         threshold_v=thr)
+                if mode == "dc":
+                    # Of `LedDrive`'s four rules only "below the threshold"
+                    # is about DC: the low level, the level-above-low and the
+                    # duty are all properties of the square wave.
+                    LedDrive(level=float(v["led_v"]), low_level=min(low, thr / 2.0),
+                             threshold_v=thr)
+                else:
+                    LedDrive(level=float(v["led_v"]), low_level=low,
+                             frequency_hz=float(v.get("pulse_frequency_hz", 500.0)),
+                             duty_percent=float(v.get("duty_percent", 50.0)),
+                             threshold_v=thr)
                 levels.append(float(v["led_v"]))
-                lows.add(low)
+                if mode != "dc":
+                    lows.add(low)
             except IlluminationError as exc:
                 failures.append((s, f"{s.module}: {exc}",
                                  {"led_v": v["led_v"], "led_low_v": low, "threshold_v": thr}))

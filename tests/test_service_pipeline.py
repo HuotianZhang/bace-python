@@ -1117,3 +1117,32 @@ def test_a_jv_sweep_has_geometry_too_and_it_is_checked():
     # One level is not a range: start = stop needs no step.
     one = validate(module("jv_bace", led_start_v=1.02, led_stop_v=1.02, led_step_v=0))
     assert levels(one, "axis.geometry") == ["ok"]
+
+
+def test_a_light_node_is_checked_only_on_the_levels_its_mode_reads():
+    """Every `light` node carries a non-null `led_v` — it has a default — so
+    `led.levels` treated all of them as an active drive and built the whole
+    `LedDrive` from the low level, the frequency and the duty. A shutter-only
+    node was then refused for an unused pulse low level sitting above the
+    threshold: a check about a waveform the node never sends.
+
+    `_build_light` validates exactly the relationships the chosen mode uses,
+    and this now makes the same test."""
+    bad_low = {"led_v": 1.02, "led_low_v": 1.4}          # above the 1.0 threshold
+
+    # Not driving the LED at all: the levels are inert and not its business.
+    for mode in ("leave", "off"):
+        v = validate(module("light", shutter="open", led_mode=mode, **bad_low))
+        assert levels(v, "led.levels") == ["ok"], mode
+
+    # DC reads the level and nothing else about the square wave.
+    v = validate(module("light", led_mode="dc", **bad_low))
+    assert levels(v, "led.levels") == ["ok"], "the low level is a pulse property"
+    below = validate(module("light", led_mode="dc", led_v=0.5, led_low_v=0.4))
+    assert levels(below, "led.levels") == ["invalid"], "but the threshold still applies"
+    assert "below the LED threshold" in below.by_code("led.levels")[0].text
+
+    # Pulse reads all of them, and is refused as it always was.
+    v = validate(module("light", led_mode="pulse", **bad_low))
+    assert levels(v, "led.levels") == ["invalid"]
+    assert "not below the LED threshold" in v.by_code("led.levels")[0].text
