@@ -114,19 +114,45 @@ four 1000-point lists is about 130 KB, so a ring full of them would be
 `decimated` saying so, exactly as the journal line does."""
 
 SUBSCRIBER_BACKLOG = 1000
-"""Frames a WebSocket subscriber may have unsent before it is dropped. A
-client that cannot keep up with the stream would otherwise hold the
-session's memory hostage; it gets a `Notice` and can replay from `since`.
+"""**Numbered** frames a WebSocket subscriber may have unsent before it is
+dropped. A client that cannot keep up with the stream would otherwise hold
+the session's memory hostage; it gets a `Notice` and can replay from `since`.
 Under `--sim --fast` a thousand-loop scan produces frames faster than any
-socket takes them (a shot is a millisecond, its frame twenty kilobytes), so
-a client watching one *is* dropped and reconnects with `since`; on the rig
-a shot is 0.8 s and the backlog is many minutes of stream."""
+socket takes them, so a client watching one *is* dropped and reconnects with
+`since`; on the rig a shot is 0.8 s and three numbered frames, so this is
+about four minutes of stream.
+
+Numbered only, since 2026-09-03 -- and that is a correction to what this
+number *means*, not to when a client is dropped. Only numbered frames bear on
+either thing it is for: what a dropped client has to replay (`StepPhase`
+never enters the ring, so there is nothing there to catch up on) and what its
+queue costs this process (measured on the wire, a decimated `StepDone` is
+77 KB and a `StepPhase` 193 bytes -- four hundred times less). Counting both
+made the threshold sensitive to how chatty the running module happens to be,
+which is a property of neither.
+
+Measured, it was barely sensitive at all, because `EPHEMERAL_BACKLOG` had
+already done the work: against a sink that never drains, a 21 x 60 scan left
+**1001 numbered frames and 24 ephemeral ones** queued at the moment of the
+drop -- 323 shots, about 25 MB, and this changes none of it. So the honest
+account is that it buys around 2 % of headroom and no memory. It is here so
+the constant states its own bound whatever module is running, and so the two
+thresholds each measure the one thing they are about.
+
+An `asyncio.Queue` counts its numbered frames as they pass (`Backlog`); a
+sink a caller brought is measured whole, which can only over-count."""
 
 EPHEMERAL_BACKLOG = 50
-"""Unsent frames beyond which an ephemeral frame (`StepPhase`) is not even
-queued for a subscriber: it says where inside the shot the run is *now*,
-which is worthless fifty frames late, and seven of them a shot would fill
-the backlog seven times faster than the frames a client needs."""
+"""Unsent frames -- *all* of them, ephemeral included -- beyond which an
+ephemeral frame (`StepPhase`) is not even queued for a subscriber: it says
+where inside the shot the run is *now*, which is worthless fifty frames late.
+
+Whole rather than numbered because this one is about staleness on arrival,
+and every frame queued ahead of it adds to that. It is also, measured, what
+keeps a backlogged queue almost entirely numbered: a subscriber stops being
+sent `StepPhase` once it is fifty frames behind and is not dropped until a
+thousand, so the two dozen in flight when it crossed fifty are all it
+holds."""
 
 DATA_RUNS_KEPT = 20
 """Runs whose full-precision arrays `GET /runs/{id}/data` still serves from
@@ -345,6 +371,52 @@ def _slim_step_done(frame: dict) -> dict:
 
 def _stem(name: str) -> str:
     return _STEM.sub("_", name.strip()).strip("_") or "pipeline"
+
+
+class Backlog(asyncio.Queue):
+    """A subscriber's sink, which also keeps a count of the *numbered* frames
+    in it.
+
+    `SUBSCRIBER_BACKLOG` is a statement about what a dropped client has to
+    replay and about what its queue costs, and only numbered frames bear on
+    either. The count is kept here rather than walked at the fan-out, because
+    the fan-out runs on the event loop's thread, once per frame, per
+    subscriber -- and this session has just been fixed once for doing too much
+    there without yielding.
+
+    `_put` and `_get` are the hooks `asyncio.Queue` itself is extended
+    through -- `LifoQueue` and `PriorityQueue` in the standard library
+    override the same two -- so every path in and out passes through them,
+    `get_nowait` included. The sentinel `None` and the drop `Notice` carry no
+    seq and so count for nothing, which is right: they are what the queue
+    ends with, not a backlog.
+    """
+
+    def _init(self, maxsize: int) -> None:
+        super()._init(maxsize)
+        self.numbered = 0
+
+    def _put(self, item: Any) -> None:
+        if isinstance(item, dict) and item.get("seq") is not None:
+            self.numbered += 1
+        super()._put(item)
+
+    def _get(self) -> Any:
+        item = super()._get()
+        if isinstance(item, dict) and item.get("seq") is not None:
+            self.numbered -= 1
+        return item
+
+
+def backlog_of(sink: Any) -> int:
+    """How far behind a subscriber is, in the frames it would have to replay.
+
+    A sink that does not count them -- a test's list, a plain `Queue`, anything
+    a caller passed to `subscribe` -- is measured whole, which is what this
+    did before `Backlog` existed and can only over-count.
+    """
+    numbered = getattr(sink, "numbered", None)
+    return sink.qsize() if numbered is None else numbered
 
 
 # -- the session --------------------------------------------------------------
@@ -1118,10 +1190,15 @@ class Session:
             return [full.get(f["seq"], f) for f in self._ring if f["seq"] > int(seq)]
 
     def subscribe(self, queue: Any = None) -> Any:
-        """Register a sink with `put_nowait`/`qsize` (an `asyncio.Queue` by
-        default) and return it. A sink more than `SUBSCRIBER_BACKLOG` frames
-        behind is dropped: it gets a `Notice` frame, then `None`."""
-        q = queue if queue is not None else asyncio.Queue()
+        """Register a sink with `put_nowait`/`qsize` (a `Backlog` queue by
+        default) and return it. A sink more than `SUBSCRIBER_BACKLOG`
+        *numbered* frames behind is dropped: it gets a `Notice` frame, then
+        `None`.
+
+        A sink of one's own is welcome and is measured whole, since only
+        `Backlog` knows how to count numbered frames -- which is the old
+        behaviour, and never under-counts."""
+        q = queue if queue is not None else Backlog()
         with self._lock:
             self._subscribers.append(q)
         return q
@@ -1389,10 +1466,12 @@ class Session:
         since = self._seq
         for q in list(self._subscribers):
             try:
+                # Staleness is measured whole and the backlog is measured in
+                # numbered frames; the two constants say why.
                 if ephemeral and q.qsize() > EPHEMERAL_BACKLOG:
                     continue
                 q.put_nowait(frame)
-                behind = q.qsize() > SUBSCRIBER_BACKLOG
+                behind = backlog_of(q) > SUBSCRIBER_BACKLOG
             except Exception:                               # noqa: BLE001 -- a dead sink
                 behind = True
             if behind:
@@ -1510,5 +1589,6 @@ def tree_for_module(module: str, params: Mapping[str, Any] | None = None,
 __all__ = [
     "Session", "RunRecord", "SubmitRefused", "Conflict", "Busy", "NotPaused",
     "UnknownRun", "DataUnavailable", "NodeRequired", "BlockedAtStart", "tree_for_module",
-    "RING_SIZE", "RING_TRACES_KEPT", "SUBSCRIBER_BACKLOG", "DATA_RUNS_KEPT", "BENCH_STATES",
+    "RING_SIZE", "RING_TRACES_KEPT", "SUBSCRIBER_BACKLOG", "EPHEMERAL_BACKLOG",
+    "DATA_RUNS_KEPT", "BENCH_STATES", "Backlog", "backlog_of",
 ]

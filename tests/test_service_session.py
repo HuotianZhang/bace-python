@@ -21,9 +21,10 @@ import pytest
 from bace.experiment.rig import RigConfig
 from bace.params import ParamValue, Source, run_toml_layer
 from bace.service.rigs import BenchActionRefused
-from bace.service.session import (RING_TRACES_KEPT, Busy, Conflict, DataUnavailable,
-                                  NodeRequired, NotPaused, Session, SubmitRefused,
-                                  UnknownRun, tree_for_module)
+from bace.service import session as S
+from bace.service.session import (EPHEMERAL_BACKLOG, RING_TRACES_KEPT, Busy, Conflict,
+                                  DataUnavailable, NodeRequired, NotPaused, Session,
+                                  SubmitRefused, UnknownRun, tree_for_module)
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 RECIPE = REPO / "tests" / "run-quickcheck.toml"
@@ -523,6 +524,54 @@ def test_events_since_replays_and_subscribers_are_fed_or_dropped(tmp_path):
         assert s.subscribers == 2
         s.unsubscribe(lag)
         s.unsubscribe(fresh)
+
+
+def test_the_backlog_a_subscriber_is_dropped_for_is_counted_in_numbered_frames(tmp_path):
+    """`SUBSCRIBER_BACKLOG` is about what a dropped client has to replay and
+    what its queue costs, and only numbered frames bear on either: `StepPhase`
+    never enters the ring, and on the wire it is 193 bytes against a decimated
+    `StepDone`'s 77 KB. Counting both made the threshold sensitive to how
+    chatty the running module happens to be -- a `bace` emits seven `StepPhase`
+    a shot, a J-V none -- which is a property of neither thing it is for.
+    """
+    q = S.Backlog()
+    for seq in range(1, 6):
+        q.put_nowait({"seq": seq, "type": "StepDone"})
+    for _ in range(50):
+        q.put_nowait({"seq": None, "type": "StepPhase"})
+    assert q.qsize() == 55
+    assert S.backlog_of(q) == 5, "fifty StepPhase are nothing to catch up on"
+
+    assert q.get_nowait()["seq"] == 1                     # FIFO, and it decrements
+    assert S.backlog_of(q) == 4
+    assert q.get_nowait()["type"] == "StepDone"           # 2..5 are still ahead
+    assert S.backlog_of(q) == 3 and q.qsize() == 53
+
+    # The two frames a drop ends with carry no seq, so they are not a backlog.
+    q.put_nowait({"seq": None, "type": "Notice", "data": {"since": 5}})
+    q.put_nowait(None)
+    assert S.backlog_of(q) == 3
+
+    # A sink a caller brought does not count, and is measured whole -- which is
+    # what this did before `Backlog` existed, and can only over-count.
+    class Mine:
+        def put_nowait(self, frame): pass
+        def qsize(self): return 5000
+    assert S.backlog_of(Mine()) == 5000
+
+    with make_session(tmp_path) as s:
+        # A subscriber fifty ephemeral frames behind is *not* a subscriber a
+        # thousand frames behind, and the live one is unaffected either way.
+        from bace.experiment import events as E
+        from bace.service.wire import ephemeral_frame
+        live = s.subscribe()
+        assert isinstance(live, S.Backlog), "the default sink counts"
+        for _ in range(EPHEMERAL_BACKLOG + 1):
+            s._fan_out(ephemeral_frame("r", "bace", E.StepPhase(0, "levels", 1, 7)),
+                       ephemeral=True)
+        assert s.subscribers == 1, "ephemeral frames alone never drop anyone"
+        assert S.backlog_of(live) == 0 and live.qsize() > 0
+        s.unsubscribe(live)
 
 
 def test_the_power_monitor_reads_beside_a_run_and_says_so_on_the_snapshot(tmp_path):
