@@ -196,8 +196,22 @@ def test_a_light_node_puts_its_led_read_back_on_the_rail(tmp_path):
                                   "led_output": True}), None)
     over = live.overlay(base)
     assert over["led"]["output"] is True and over["led"]["how"] == "inferred"
-    assert (over["led"]["mode"], over["led"]["high_v"]) == ("DC", 1.02)
+    # In DC the level *is* the offset: `set_dc` writes `:VOLT:OFFS`, and
+    # `fields.driveLevel` reads the field the mode names. Folded into `high_v`
+    # instead, `offset_v` kept the snapshot's stale value and the card showed
+    # the old DC level through the whole of the `jv` that followed -- while
+    # the file recorded the new one.
+    assert (over["led"]["mode"], over["led"]["offset_v"]) == ("DC", 1.02)
+    assert over["led"]["high_v"] == base["led"]["high_v"], "the pulse amplitude is untouched"
     assert over["shutter"] == {"open": True, "how": "inferred"}
+
+    # And a pulse read-back is the amplitude, which is the other field.
+    live.apply(E.InstrumentState({"shutter": "open", "illumination": "light",
+                                  "led_mode": "PULSE", "led_level_v": 2.5,
+                                  "led_output": True}), None)
+    over = live.overlay(base)
+    assert (over["led"]["mode"], over["led"]["high_v"]) == ("PULSE", 2.5)
+    assert over["led"]["offset_v"] == 1.02, "the DC level it was last driven at stands"
 
     # And the other direction: `led_mode=off` has to be able to turn it back.
     live.apply(E.InstrumentState({"shutter": "shut", "illumination": "dark",

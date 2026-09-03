@@ -102,6 +102,9 @@ class LiveState:
             self._set("led", output=True, mode="PULSE", high_v=_float(values.get("led_v")),
                       low_v=_float(values.get("led_low_v")), frequency_hz=frequency)
         elif isinstance(ev, E.InstrumentState):
+            # Read once, up front: which field a level belongs to is the
+            # mode's business, and dict order is not a contract.
+            led_mode = str(ev.values.get("led_mode") or "").upper()
             for key, value in ev.values.items():
                 if key in INSTRUMENT_STATE_KEYS:
                     # `?` is a driver saying it got no answer. Overlaying it
@@ -123,7 +126,19 @@ class LiveState:
                               else str(value) == "open")
                     self._jv_light(str(value) == "open")
                 elif key == "led_level_v" and value is not None:
-                    self._set("led", high_v=float(value))
+                    # `set_dc` writes `:VOLT:OFFS`, `set_pulse` writes
+                    # `:VOLT:HIGH`, and the card reads whichever field the
+                    # mode names (`fields.driveLevel`). Folding a DC level
+                    # into `high_v` left `offset_v` at the Start snapshot's
+                    # value, so a `light` node that moved the lamp to a new
+                    # DC level showed the *old* one for the whole of the `jv`
+                    # that followed -- while the file recorded the new one.
+                    # An unread mode names neither field, and a good number
+                    # in the wrong field is worse than none at all.
+                    if led_mode == "DC":
+                        self._set("led", offset_v=float(value))
+                    elif led_mode == "PULSE":
+                        self._set("led", high_v=float(value))
                 elif key == "led_output" and value is not None:
                     # A read-back, so it replaces the overlay's flag rather
                     # than being inferred: a `light` node that switched the
