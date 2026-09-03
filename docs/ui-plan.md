@@ -606,6 +606,19 @@ Three decisions worth recording, because each departs from something:
   table says, rather than on the rig tab where R3·4 draws it. Confirmed with
   the user, 2026-09-03.
 
+**Then measured**, on the same 21 x 60 `--sim --fast` scan M1 and M2 were held
+to. The first cut redrew every chart on every shot — 130 a second under
+`--fast`, 4043 redraws and 77 282 SVG elements for a plot no eye can follow,
+and it took `GET /bench` with it (median 31 ms, worst 204 ms) because they
+share a main thread. `REDRAW_MS` in `lib/results.js` is the answer, and it is
+`REFETCH_MS` for pixels: 4043 → 184 redraws, 77 282 → 3 543 elements, 42.7 →
+11.0 MB of heap, the worst `GET /bench` 204 → 56 ms, and the longest stale
+stretch back to the rail's own 2.1 s throttle. A shot on the rig takes ~0.8 s,
+so on the bench nothing is throttled; this exists for the simulator. The
+result key splits into a form half and a data half so that the two cadences
+can differ — typing draws at once, shots draw through the throttle — and the
+deferred draw paints the newest shot rather than the one that was pending.
+
 And three faults that the models could not show, found by rendering the thing
 in a browser: a thinned column placed at a *fractional* index collapsed to
 x = 0 wherever the x mapping was a lookup into the sample times; the

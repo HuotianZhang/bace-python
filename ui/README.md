@@ -201,6 +201,47 @@ does them since those are not reported, the lit fraction as `100 - duty` under
 the 33220A's INV, and the 81150A at INV resting the device at V_coll so
 extraction never stops (`docs/README.md`, the overturned table ④).
 
+### What a scan costs the console, with the charts in it
+
+M1 and M2 were each measured in a headless browser on a live `--sim --fast`
+scan rather than read off the screen, and M3 is held to the same bar. Same
+shape as before — one 21 x 60 scan, 1260 shots, about nine seconds — with a
+parameter field focused *after* the run started, so the one card rebuild that
+`busy` causes is not mistaken for the thing being measured:
+
+| | M3, first cut | M3, shipped |
+|---|---|---|
+| chart redraws | 4 043 | **184** |
+| SVG elements built | 77 282 | **3 543** |
+| HTML elements built | 23 818 | **10 275** |
+| JS heap at the end | 42.7 MB | **11.0 MB** |
+| `GET /bench`, median | 31.4 ms | **16.8 ms** |
+| `GET /bench`, worst | 204 ms | **56.4 ms** |
+| longest stretch with the rail unchanged | 2.9 s | **2.1 s** — the rail's own throttle |
+| a caret held in a parameter field | kept | kept |
+| shots folded | 1260 / 1260 | 1260 / 1260 |
+
+The first cut redrew every chart on every shot, which under `--sim --fast` is
+130 redraws a second of a plot no eye can follow — the M1 finding again, at
+chart scale, and it took `GET /bench` with it because they share a main
+thread. The answer is the one the rail already uses: **`REDRAW_MS`, a
+`REFETCH_MS` for pixels** (`lib/results.js`). A shot on the rig takes about
+0.8 s (`journal.shot_time_s`), so on the bench nothing is throttled at all;
+it exists for the simulator.
+
+The two cadences are not the same, and the key says so. `resultKeys` splits
+into a **form** half and a **data** half: anything the operator did — a
+keystroke, a bench read-back — draws at once, because a timing diagram that
+lags half a second behind the typing is not a function of the form; a shot
+draws through the throttle, and the deferred draw paints the *newest* shot
+rather than the one that was pending, because the frames in between are an
+animation nobody asked for.
+
+The card and its charts are keyed **apart**. One key for both would rebuild
+six cards' worth of fields between two shots, which is decision 5's failure
+with a chart in front of it: measured over the scan, 27 card rebuilds against
+184 chart redraws, and the caret survives.
+
 ### What rendering it found
 
 The models are tested in `node`, and three faults were still only visible in a
