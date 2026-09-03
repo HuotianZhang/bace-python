@@ -79,7 +79,7 @@ shape `GET /runs/{id}/data` answers, because a browser cannot open HDF5.
 | `bench_running_sim.json` | `GET /bench` taken **mid-scan**: the four instruments the run implies, every one `how: "inferred"`. Nothing at rest carries a single one |
 | `stream_bace_sim.jsonl`, `stream_jv_sim.jsonl` | the wire: traces decimated with `stride`/`n_full`, and the `StepPhase` frames that are live-only |
 | `stream_pipeline_sim.jsonl` | node identity: two `bace` nodes under one `run_id`, each numbering its own shots from one, and the loop's `Progress` beside the leaf's |
-| `stream_tree_sim.jsonl` | the M4 tree, 2 T x 2 levels x a three-point scan of two loops: both `NeedsOperator`s and the recorder's answers to them, the executor's `Progress` at three scales, and a `TemperatureRead` typed by a person |
+| `stream_tree_sim.jsonl` | the M4 tree, 2 T x 2 levels x a three-point scan of two loops: both `NeedsOperator`s and the recorder's answers to them, the executor's `Progress` at three scales, and a `TemperatureRead` typed by a person. **`--only tree`, and `--sim` only**: the recorder answers this one's pauses itself, with a number nobody read, which on a bench would go into the folder names as a temperature the sample never reached |
 | `stream_stopped_sim.jsonl` | a 20-loop scan stopped `after_shot` at loop 13 — 60 requested, 39 kept: the one `RunAborted`, `stopping`, `stopped`, and a node that ended `stopped` in the set |
 
 Everything with `_sim` in its name came off `--sim`, and says so in its name on

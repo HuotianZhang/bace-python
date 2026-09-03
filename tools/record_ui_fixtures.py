@@ -30,8 +30,18 @@ So this records all of it against whatever service it is pointed at:
 `--tag` names the bench the recording came off (`sim` by default) and is part
 of every file name, because a simulated J-V is a plausible-looking curve and
 must never be mistaken for a measured one. Nothing here writes to the bench
-beyond the two short runs it asks for, and on the rig those are a real J-V and
-a real one-point scan — run it when the sample can take them.
+beyond the short runs it asks for, and on the rig those are real: a J-V, a
+one-point scan, a two-node pipeline, a scan stopped after three shots, and one
+more scan for the mid-run snapshot — run it when the sample can take them.
+
+**The temperature tree is not one of them.** `--only tree` records it and
+nothing else does, and it refuses to run against anything but `--sim`. It
+drives a cryostat to 250 K and 280 K on a 60-second timeout, where a real
+settle is 14 minutes to 2 hours (`docs/ui-rules.md` §5), and it answers the
+`NeedsOperator` that follows *itself*, with the setpoint plus a tenth of a
+kelvin. On a bench that would measure at room temperature and write 250.1 K
+into the folder names and the metadata with `temperature_how = "operator"` —
+a number that looks like somebody read it. Nobody did.
 """
 from __future__ import annotations
 
@@ -64,6 +74,10 @@ def _request(url: str, method: str = "GET", body: dict | None = None) -> dict:
     except urllib.error.URLError as e:
         raise SystemExit(f"{method} {url}: {e.reason}\n"
                          f"start one with:  python3 -m bace.service --sim --fast --port 8900")
+
+
+OPT_IN = frozenset({"tree"})
+"""Steps that never run unless `--only` names them. See `_record_tree`."""
 
 
 def _dump(path: str, obj, *, jsonl: bool = False) -> None:
@@ -108,7 +122,10 @@ async def _run_and_capture(ws_url: str, base: str, body: dict,
     is answered with `POST /runs/{id}/resume` carrying a typed
     `temperature_k` a tenth of a kelvin off the setpoint and a note — so the
     recording holds the whole pair, the pause and the answer, and the
-    `TemperatureRead(source="operator")` the answer produces.
+    `TemperatureRead(source="operator")` the answer produces. **It is a
+    simulator device**: the number it types is invented, and on a bench that
+    is a temperature nobody read written into the record. Its one caller
+    (`_record_tree`) refuses to run against anything but `--sim`.
     """
     import websockets
 
@@ -238,10 +255,13 @@ def main(argv: list[str] | None = None) -> int:
                     help="also dump the transient's undecimated /runs/{id}/data (megabytes)")
     ap.add_argument("--only", default=None,
                     help="record a subset: a comma-separated list of jv, bace, pipeline, "
-                         "tree, stopped, bench, hello (default: everything)")
+                         "stopped, bench, hello, and tree (default: all but tree)")
     a = ap.parse_args(argv)
     only = set(a.only.split(",")) if a.only else None
-    wanted = lambda step: only is None or step in only  # noqa: E731
+    # `tree` is named or it does not happen. It is the one step that answers
+    # its own operator pause, and a default that drove a real cryostat and
+    # then fabricated the temperature it reached is not a default.
+    wanted = lambda step: (step in only) if only else (step not in OPT_IN)  # noqa: E731
 
     base = a.url.rstrip("/")
     ws_url = base.replace("http://", "ws://").replace("https://", "wss://") + "/events"
@@ -279,7 +299,7 @@ def main(argv: list[str] | None = None) -> int:
     #      with a `NeedsOperator`, an `OperatorResumed`, a loop `Progress` at
     #      three scales and a `TemperatureRead` typed by a person.
     if wanted("tree"):
-        _record_tree(a, base, ws_url, tag)
+        _record_tree(a, base, ws_url, tag, who["mode"])
 
     # 3c · a scan stopped after its third shot. `docs/ui-rules.md` §9: a
     #      truncated run is normal, not exceptional — the archive declares 100
@@ -372,7 +392,7 @@ def _record_pipeline(a, base: str, ws_url: str, tag: str) -> None:
     _dump(os.path.join(a.out, f"stream_pipeline_{tag}.jsonl"), pipe_frames, jsonl=True)
 
 
-def _record_tree(a, base: str, ws_url: str, tag: str) -> None:
+def _record_tree(a, base: str, ws_url: str, tag: str, mode: str) -> None:
     """The M4 tree: `T [250, 280] x led [1.010, 1.020] x bace`.
 
     Three points by two loops per leaf, so every leaf has a Q(axis) with a
@@ -380,7 +400,24 @@ def _record_tree(a, base: str, ws_url: str, tag: str) -> None:
     `record_length` small for the reason the pipeline fixture's is. `hold_s`
     is one second: `--fast` makes it a no-op, and on a bench it is the dwell
     after the operator's answer, which a fixture has no use for.
+
+    **Simulator only, and named explicitly.** This is the one step that
+    answers its own `NeedsOperator`, and the answer is invented -- the
+    setpoint plus a tenth of a kelvin, typed by nothing. Against a real
+    service it would command the cryostat to 250 K, give up 60 seconds later
+    (a real settle is 14 minutes to 2 hours), answer its own timeout, measure
+    at whatever the sample is actually at, and write 250.1 K into every folder
+    name and `/metadata` group with `temperature_how = "operator"`. The whole
+    point of that field is to say who read the number; here nobody did. So the
+    step refuses rather than trusting `--only` to be typed carefully.
     """
+    if mode != "sim":
+        raise SystemExit(
+            f"the tree fixture is simulator-only and this service is mode {mode!r}.\n"
+            "It answers its own temperature pause with a number nobody read, which on a\n"
+            "bench writes a temperature the sample never reached into the run folders.\n"
+            "Record it against `python -m bace.service --sim --fast`, and record the rest\n"
+            "here with `--only jv,bace,pipeline,stopped,bench,hello`.")
     print("tree, with the pauses answered …")
     tree = {"kind": "loop", "loop": "temperature", "label": "T", "values_k": [250.0, 280.0],
             "tolerance_k": 0.5, "hold_s": 1.0, "timeout_s": 60.0, "children": [

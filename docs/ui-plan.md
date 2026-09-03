@@ -673,7 +673,14 @@ a loop's `Progress` at three scales, or a run that ended any way but `done`
 or `failed`: `stream_tree_sim.jsonl` is the 2 T × 2 level tree itself with
 both `NeedsOperator`s answered by the recorder, and `stream_stopped_sim.jsonl`
 a 20-loop scan stopped `after_shot` at loop 13 — 60 requested, 39 kept.
-`tools/record_ui_fixtures.py --only tree,stopped` records them.
+`tools/record_ui_fixtures.py --only tree,stopped` records them — and the
+tree is **simulator-only, and never in the default set**, which a review
+caught: it answers its own temperature pause with the setpoint plus a tenth
+of a kelvin, so against a real service it would command the cryostat, give up
+sixty seconds later where a real settle is 14 minutes to 2 hours, measure at
+whatever the sample was actually at, and write that invented number into every
+folder name with `temperature_how = "operator"`. The step refuses on any mode
+but `sim` rather than trusting `--only` to be typed carefully.
 
 Two decisions depart from the artboards, and both are recorded here:
 
