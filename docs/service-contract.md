@@ -76,7 +76,11 @@ swallows a failing `led.off()` and skips the settle on a bare-SMU rig;
 `storage/jv.py` is therefore schema **`bace-jv/3`** (`/config/resolved`, a
 per-curve `shutter` attribute, and — since the `jv`/`light` split of
 2026-09-03 — a per-curve `illumination` of `dark`/`light`/`unknown`, with
-`dark` *absent* rather than False on an unknown curve). The transient recorder's `bace-run/2` is
+`dark` *absent* rather than False on an unknown curve). It is **`bace-jv/4`**
+since 2026-09-03, when every J–V current density in this project became
+**mA/cm²**: the `density` dataset keeps its name and its shape and changes its
+meaning by a factor of a thousand, which is precisely the change a reader
+cannot see, so the version says it. The transient recorder's `bace-run/2` is
 unchanged. The review round of 2026-09-02 added one more engine change:
 `run_transient_scan` yields `StepPhase` between the same instrument calls in
 the same order (§3), and nothing about a measurement moved.
@@ -578,7 +582,11 @@ warns that it was ignored rather than letting it vanish from the schedule.
   journal file knows the id.
 - `GET /runs/{id}/data?node=<node_path>` → for `bace`:
   `{"axis": {…}, "values": […], "q_mean": […], "q_std": […], "q_all": [[…]], "time_s": […], "light": [[…]], "dark": [[…]], "photo": [[…]], "last_shot": {"light": […], "dark": […], "photo": […], "cumulative_q": […], "t0_int_record_s": …}, "kept": 12, "requested": 20}`;
-  for `jv_*`: `{"curves": [{label, dark, led_level_v, direction, voltage, current, density, metrics}]}`;
+  for `jv_*`: `{"curves": [{label, dark, led_level_v, direction, voltage, current, density, metrics}]}`
+  — `voltage` in V, `current` in A as the instrument reported it, `density` in
+  **mA/cm²** and `null` when `pixel_area_cm2` is 0 (there is no density without
+  an area; the client shows amps). `metrics.jsc` is in **A**, not a density:
+  it is interpolated from `current`, whatever area the run was given;
   for a pipeline run without `node` → 400 listing the nodes.
   Full precision, no decimation. The `cumulative_q` array is the running
   integral of the last photocurrent from `t0_int` (the LabVIEW "Integrated

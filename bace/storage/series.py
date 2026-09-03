@@ -31,6 +31,7 @@ from datetime import datetime
 
 import numpy as np
 
+from ..experiment.jv import current_density
 from .legacy_dat import EOL, SEP, _write, render_table
 from .naming import RunMetadata
 from .numbers import lv_float
@@ -54,10 +55,18 @@ NAN = float("nan")
 
 
 def _density(current: float | None, area_cm2: float) -> float:
-    """A -> mA/cm². NaN when the area is unknown, never a silent 1 cm²."""
-    if current is None or area_cm2 <= 0:
+    """A -> mA/cm², through the one conversion the J–V curves use
+    (`experiment.jv.current_density`) — this column and those arrays are the
+    same quantity and must not be able to drift apart.
+
+    NaN when the area is unknown, never a silent 1 cm². The absence is spelled
+    differently here only because the file has a column to fill: the curves
+    answer None and leave the density out.
+    """
+    if current is None:
         return NAN
-    return current * 1e3 / area_cm2
+    j = current_density(current, area_cm2)
+    return NAN if j is None else float(j)
 
 
 def render_legacy(points, *, area_cm2: float, intensity_factor: float) -> str:

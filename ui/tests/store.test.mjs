@@ -360,12 +360,14 @@ test('the Hello frame carries the whole bench', () => {
   assert.ok(state.bench.instruments.voc.value > 0, 'the recording was taken after a jv_bace');
 });
 
-test('a current density is A/cm² on the wire, and mA/cm² only after converting', () => {
-  // `JVCurveDone.density` is `current / pixel_area_cm2`, so 0.02 there is
-  // 20.0 mA/cm². Stamping the label on the number as it came would understate
-  // every measured density by a factor of a thousand.
-  assert.equal(density(0.02), '20.0 mA/cm²');
-  assert.equal(density(-1.9e-9), '-1.90 nA/cm²');
+test('a current density is mA/cm² on the wire, and stays mA/cm² on screen', () => {
+  // `JVCurveDone.density` is `current * 1000 / pixel_area_cm2`
+  // (`experiment.jv.current_density`), so the console converts nothing and
+  // never picks a prefix: one J-V curve printed part in mA/cm² and part in
+  // nA/cm² is a column that cannot be read down.
+  assert.equal(density(20.0), '20.0 mA/cm²');
+  assert.equal(density(-1.9e-3), '-0.00190 mA/cm²');
+  assert.equal(density(0), '0 mA/cm²', 'a measured zero is a value, not an absence');
   assert.equal(density(null), '—', 'pixel_area_cm2 = 0 has no density at all');
 });
 

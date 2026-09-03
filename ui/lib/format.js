@@ -48,21 +48,21 @@ export function volts(v, { decimals = 4, unit = true } = {}) {
 }
 
 /**
- * Current density to 3 significant figures. The service hands it in **A/cm²**
- * (`JVCurveDone.density` is `current / pixel_area_cm2`), so the prefix is
- * computed rather than assumed: 0.02 A/cm² is 20.0 mA/cm², and a formatter
- * that stamped "mA/cm²" on the number as it came would understate every
- * measured density by a factor of a thousand.
+ * Current density to 3 significant figures, in **mA/cm²** — the unit the
+ * service sends and the only one J–V is shown in anywhere in this project.
+ * `JVCurveDone.density` is `current × 1000 / pixel_area_cm2`
+ * (`experiment.jv.current_density`), so there is nothing to convert here and,
+ * more to the point, nothing to choose: an SI prefix picked per value printed
+ * one sweep as `20.0 mA/cm²` at one end and `1.90 nA/cm²` at the other, which
+ * is a column no reader can compare down and an axis nobody can label.
  *
  * `pixel_area_cm2 = 0` means there is no density at all — the service sends
  * `null` and the caller reports amps instead, rather than defaulting to 1 cm²
- * and silently mislabelling A as A/cm² (`docs/ui-rules.md` §6).
+ * and silently mislabelling A as mA/cm² (`docs/ui-rules.md` §6).
  */
 export function density(j, { unit = true } = {}) {
   if (j === null || j === undefined || Number.isNaN(j)) return ABSENT;
-  if (j === 0) return '0' + (unit ? ' A/cm²' : '');
-  const [value, prefix] = prefixed(j);
-  return sig(value, 3) + (unit ? ` ${prefix}A/cm²` : '');
+  return sig(j, 3) + (unit ? ' mA/cm²' : '');
 }
 
 /**

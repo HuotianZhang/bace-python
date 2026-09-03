@@ -67,7 +67,7 @@ shape `GET /runs/{id}/data` answers, because a browser cannot open HDF5.
 |---|---|
 | `../acceptance/20260902_service-vs-labview/journals/*.jsonl` | the event and state layer: full lifecycles, the chain verdicts, **two real `RunFailed`**. Not copied in here — the offline page reaches them through the repo root |
 | `transient_20260902_153722.json` | the transient charts, from that day's `bace-run/2` at full precision |
-| `jv_sim.json`, `jv_sim.h5` | the J-V chart. The journal reduces `JVCurveDone` to metrics with no arrays, so this had to be recorded |
+| `jv_sim.json`, `jv_sim.h5` | the J-V chart. The journal reduces `JVCurveDone` to metrics with no arrays, so this had to be recorded. Both curves carry a **density in mA/cm²** — re-recorded 2026-09-03 with `pixel_area_cm2 = 0.04`, because `run.toml` has no `[jv]` table and a J-V left to the recipe reports amps and `density: null`, which left the unit with nothing behind it |
 | `hello_sim.json` | the bench snapshot — the rail and the chain. No journal contains one |
 | `bench_running_sim.json` | `GET /bench` taken **mid-scan**: the four instruments the run implies, every one `how: "inferred"`. Nothing at rest carries a single one |
 | `stream_bace_sim.jsonl`, `stream_jv_sim.jsonl` | the wire: traces decimated with `stride`/`n_full`, and the `StepPhase` frames that are live-only |
