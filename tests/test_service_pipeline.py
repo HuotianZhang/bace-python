@@ -73,15 +73,26 @@ def _smu_specs() -> list[ParamSpec]:
 
 
 def _jv_specs(*, light: bool) -> list[ParamSpec]:
-    exclude = ("led_levels_v",) if light else ("led_levels_v", "dark", "led_settle_s")
+    # `light_control` is the module's identity in the real catalogue, not a
+    # form field (`modules._JV_NOT_A_PARAM`), so the fake does not offer it
+    # either — a fake that accepts a parameter the real one refuses is a test
+    # passing on a tree the service would reject.
+    common = ("led_levels_v", "light_control")
+    exclude = common if light else common + ("dark", "led_settle_s")
     specs = specs_from_dataclass(JVConfig, group="jv", exclude=exclude,
                                  units={"start_v": "V", "stop_v": "V", "step_v": "V",
                                         "settle_s": "s", "led_settle_s": "s"})
     if light:
-        specs += [ParamSpec("led_start_v", "float", 1.020, unit="V", group="led"),
-                  ParamSpec("led_stop_v", "float", 1.020, unit="V", group="led"),
-                  ParamSpec("led_step_v", "float", 0.020, unit="V", group="led"),
-                  ParamSpec("led_low_v", "float", 0.4, unit="V", group="led")]
+        specs += [
+            # Nullable, as the real one is: None means "sweep the range", and a
+            # value means *that* is the level and the range is not read. The
+            # fake was missing it, so no test could reach the branch of
+            # `led.levels` and `axis.geometry` that a typed level takes.
+            ParamSpec("led_v", "float", None, unit="V", group="led", nullable=True),
+            ParamSpec("led_start_v", "float", 1.020, unit="V", group="led"),
+            ParamSpec("led_stop_v", "float", 1.020, unit="V", group="led"),
+            ParamSpec("led_step_v", "float", 0.020, unit="V", group="led"),
+            ParamSpec("led_low_v", "float", 0.4, unit="V", group="led")]
     return specs + _smu_specs()
 
 
@@ -1117,6 +1128,13 @@ def test_a_jv_sweep_has_geometry_too_and_it_is_checked():
     # One level is not a range: start = stop needs no step.
     one = validate(module("jv_bace", led_start_v=1.02, led_stop_v=1.02, led_step_v=0))
     assert levels(one, "axis.geometry") == ["ok"]
+
+    # And a typed or inherited `led_v` *is* the level: `_jv_levels` never looks
+    # at the range there, so checking it refuses a run over numbers nobody
+    # uses — the same mistake this check was written to fix, made by it.
+    typed = validate(module("jv_bace", led_v=1.02, led_start_v=1.02,
+                            led_stop_v=1.06, led_step_v=0))
+    assert levels(typed, "axis.geometry") == ["ok"]
 
 
 def test_a_light_node_is_checked_only_on_the_levels_its_mode_reads():

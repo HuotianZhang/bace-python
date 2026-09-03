@@ -1252,7 +1252,13 @@ def _c_axis_geometry(f: _Facts) -> list[Verdict]:
                     failures.append((s, f"{s.module}: {exc}", sweep))
                     continue
                 levels = {k: v.get(k) for k in ("led_start_v", "led_stop_v", "led_step_v")}
-                if float(v.get("led_step_v", 1.0)) <= 0 and \
+                # Only when the range is what runs. `_jv_levels` takes a
+                # non-null `led_v` -- typed, or inherited from an illumination
+                # loop -- as the single level and never looks at the range, so
+                # checking it there refuses a run over numbers nobody uses.
+                # (The same mistake this check was written to fix, one file
+                # over: validate what the builder reads, and nothing else.)
+                if v.get("led_v") is None and float(v.get("led_step_v", 1.0)) <= 0 and \
                         float(v.get("led_start_v", 0.0)) != float(v.get("led_stop_v", 0.0)):
                     failures.append((s, f"{s.module}: led_step_v: must be positive for a "
                                         "range of levels", levels))

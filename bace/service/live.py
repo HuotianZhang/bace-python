@@ -50,13 +50,18 @@ INSTRUMENT_STATE_KEYS: dict[str, tuple[str, str]] = {
     "led_mode": ("led", "mode"),
 }
 
-LIGHT_UNWOUND: frozenset[str] = frozenset({"bace", "jv_bace"})
-"""Which modules shut the shutter in their own `finally`, and therefore leave
-the bench dark whatever they did in between. `jv` and `light` are not here and
-must not be: `jv` never touches the light (`light_control="leave"`), and
-`light` exists to leave it where it put it. Inferring "shutter shut" at their
-`NodeDone` would tell the operator the lamp is off while it is on -- an
-inference the rail marks as inferred and the operator still reads."""
+LIGHT_UNWOUND: frozenset[str] = frozenset({"bace", "jv_bace", "park"})
+"""Which modules leave the shutter shut, and therefore leave the bench dark
+whatever they did in between: `bace` and `jv_bace` shut it in their own
+`finally`, and `park` shuts it outright (`Rig.park()`).
+
+`jv` and `light` are not here and must not be: `jv` never touches the light
+(`light_control="leave"`), and `light` exists to leave it where it put it.
+Inferring "shutter shut" at their `NodeDone` would tell the operator the lamp
+is off while it is on -- an inference the rail marks as inferred and the
+operator still reads. The mistake runs both ways, which is why `park` is here:
+a `light(shutter=open)` followed by `park` and then something long leaves the
+overlay saying open for the whole of it."""
 
 
 class LiveState:

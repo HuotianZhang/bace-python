@@ -20,6 +20,8 @@ from bace.experiment import events as E
 from bace.experiment.rig import RigConfig
 from bace.params import run_toml_layer
 from bace.service.executor import run_pipeline
+import types
+
 from bace.service.live import LiveState
 from bace.service.modules import Catalogue, RunContext, VocSource
 from bace.service.pipeline import parse_tree, resolve
@@ -230,3 +232,22 @@ def test_an_unreadable_light_reads_as_unknown_not_as_the_snapshots_stale_value()
     # `null`/`?` on any of the three as "cannot tell", the same rule
     # `illumination_state` applies.
     assert over["led"]["how"] == "inferred" and over["shutter"]["how"] == "inferred"
+
+
+def test_park_shuts_the_shutter_and_the_overlay_says_so():
+    """`LIGHT_UNWOUND` names the modules that leave the bench dark. It was
+    written to keep `jv` and `light` *out* — they do not touch the light — and
+    left `park` out with them, though `Rig.park()` shuts the shutter outright.
+    So `light(shutter=open)` then `park` then something long left the overlay
+    saying open for the whole of it. The mistake runs both ways."""
+    from bace.service.live import LIGHT_UNWOUND
+
+    assert "park" in LIGHT_UNWOUND
+    assert not {"jv", "light"} & LIGHT_UNWOUND, "these still must not imply it"
+
+    live = LiveState(RigConfig())
+    base = Bench.build_simulated(RigConfig()).read_back()["instruments"]
+    base = {**base, "shutter": {**base["shutter"], "open": True}}
+    live.step = types.SimpleNamespace(module="park", node_path="park", values=lambda: {})
+    live.apply(E.NodeDone(node_path="park", outcome="ok", detail={}), None)
+    assert live.overlay(base)["shutter"]["open"] is False
