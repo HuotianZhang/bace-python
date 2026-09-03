@@ -217,7 +217,7 @@ def history(tmp_path):
 def test_last_used_params_wants_a_run_that_finished_or_was_stopped(history):
     assert history.last_used_params("bace") == {"n_loops": 20, "n_averages": 20}, (
         "the aborted and failed runs after it do not count")
-    assert history.last_used_params("jv_dark") is None
+    assert history.last_used_params("jv") is None
 
 
 def test_a_stopped_run_counts_and_an_aborted_one_does_not(tmp_path):

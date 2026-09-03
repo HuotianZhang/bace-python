@@ -83,7 +83,7 @@ def voc_at(level: float, value: float = 0.906) -> VocSource:
 # -- the catalogue -------------------------------------------------------------
 def test_the_catalogue_lists_the_contract_modules():
     cat = catalogue()
-    assert cat.names() == ["jv_dark", "jv_bace", "bace", "power", "temperature",
+    assert cat.names() == ["jv", "jv_bace", "bace", "light", "power", "temperature",
                            "park", "wait", "note"]
     bace = cat.spec("bace")
     assert (bace.kind, bace.status, bace.relay) == ("measurement", "built", "transient")
@@ -94,7 +94,11 @@ def test_the_catalogue_lists_the_contract_modules():
                                 "processing", "timing", "trigger", "output", "sourcemeter"}
     jv = cat.spec("jv_bace")
     assert jv.provides_voc and jv.relay == "dc" and "led_start_v" in jv.led_params
-    assert cat.spec("jv_dark").led_params == ()
+    assert cat.spec("jv").led_params == (), "the module that never sets a level"
+    assert cat.spec("light").kind == "utility" and cat.spec("light").relay is None
+    assert cat.param_set("jv").names.count("dark") == 0, \
+        "`jv` has no illumination parameters at all -- that is the module"
+    assert not [n for n in cat.param_set("jv").names if n.startswith("led")]
     assert cat.spec("temperature").status == "partial"
     assert cat.spec("power").kind == "observer"
     assert cat.param_set("park").names == ()
@@ -165,11 +169,11 @@ def test_the_recipes_illumination_level_reaches_jv_bace_and_an_optional_jv_table
     assert ps.get("led_stop_v").value == 1.02 and ps.get("led_low_v").value == 0.4
     assert ps.get("led_v").value is None and ps.get("dark").value is True
     assert ps.get("smu_nplc") == ParamValue(1.0, Source.RUN_TOML, "run.toml [sourcemeter]")
-    assert cat.param_set("jv_dark").get("step_v").source is Source.DEFAULT
+    assert cat.param_set("jv").get("step_v").source is Source.DEFAULT
 
     raw = dict(run_toml_layer(RECIPE))
     raw["jv"] = {"step_v": 0.01, "both_directions": True}
-    ps = catalogue(run_toml=raw).param_set("jv_dark")
+    ps = catalogue(run_toml=raw).param_set("jv")
     assert ps.get("step_v") == ParamValue(0.01, Source.RUN_TOML, "run.toml [jv]")
     assert ps.get("both_directions").value is True
     raw["jv"] = {"stpe_v": 0.01}
@@ -224,7 +228,7 @@ def test_as_wire_reports_what_the_module_needs():
         [{"code": "power", "text": "not answering at :8918"}]
     codes = [n["code"] for n in cat.as_wire("bace", bench=silent, session_voc=voc_at(1.02))["needs"]]
     assert codes == ["power"]
-    assert [n["code"] for n in cat.as_wire("jv_dark", bench=silent)["needs"]] == ["smu"]
+    assert [n["code"] for n in cat.as_wire("jv", bench=silent)["needs"]] == ["smu"]
     assert cat.as_wire("power", bench={"instruments": {"power": {"available": True}}})["needs"] == []
 
 
@@ -244,12 +248,18 @@ def test_estimates_follow_the_cost_model():
     jv = cat.param_set("jv_bace").values()               # dark + one level, 71 points
     assert cat.estimate_s("jv_bace", jv) == pytest.approx(2 * (71 * 0.05 + 71 * 0.05 + 2.0))
     assert cat.estimate_text("jv_bace", jv).startswith("2 curves × 71 pts")
-    assert cat.estimate_s("jv_dark", {}) == pytest.approx(1 * (71 * 0.05 + 71 * 0.05 + 2.0))
+    # `jv` is one curve and no LED settle: it sets no light, so there is
+    # nothing to settle after and no dark-plus-levels plan to count.
+    assert cat.estimate_s("jv", {}) == pytest.approx(71 * 0.05 + 71 * 0.05)
+    assert cat.estimate_text("jv", {"both_directions": True}).startswith("2 curves")
     two = {**jv, "led_start_v": 1.02, "led_stop_v": 1.06, "led_step_v": 0.04,
            "both_directions": True}
     assert cat.estimate_text("jv_bace", two).startswith("6 curves")
-    assert cat.estimate_s("jv_dark", {"step_v": 0.0}) == 0.0
-    assert "cannot estimate" in cat.estimate_text("jv_dark", {"step_v": 0.0})
+    assert cat.estimate_s("jv", {"step_v": 0.0}) == 0.0
+    assert "cannot estimate" in cat.estimate_text("jv", {"step_v": 0.0})
+    assert cat.estimate_text("light", {"shutter": "open", "led_mode": "dc",
+                                       "led_v": 1.02}) == "shutter open · LED DC 1.02 V"
+    assert cat.estimate_text("light", {"shutter": "shut"}) == "shutter shut"
     assert cat.estimate_s("wait", {"seconds": 90}) == 90.0
     assert cat.estimate_s("temperature", {"hold_s": 60}) == 60.0
     assert "—" in cat.estimate_text("temperature", {})
@@ -257,29 +267,34 @@ def test_estimates_follow_the_cost_model():
 
 
 # -- jv ------------------------------------------------------------------------------
-def test_jv_dark_shuts_the_shutter_leaves_the_led_as_it_was_and_writes_the_files(tmp_path):
-    """The LED is lit going in, as a bace before it would leave it, and it
-    is lit coming out: since 2026-09-02 no module switches the generator
-    off, the shutter is the light switch. The curve is dark all the same --
-    the simulated SourceMeter sees the shutter, and its J_sc is nothing."""
+def test_jv_sweeps_under_the_light_it_finds_and_leaves_it_exactly_there(tmp_path):
+    """`jv` is the J-V primitive: it owns the SourceMeter and nothing else.
+
+    The LED is pulsing and the shutter is open going in -- as a `light` step
+    or a `bace` before it would leave them -- and both are in the same state
+    coming out. Under the old `jv_dark` the shutter would have been shut on
+    the way in *and* in the `finally`; here the only thing unwound is the
+    SourceMeter, which is the only thing this run switched on.
+    """
     b = bench()
     sim = b.sim
     sim.led.set_pulse(1.02, 0.4, frequency_hz=500.0)
     sim.led.enable_output(True)
+    sim.shutter.unblock()
     cat = catalogue()
     got: dict = {}
-    ctx = make_ctx(tmp_path, node_path="jv_dark", on_data=lambda path, d: got.update({path: d}))
+    ctx = make_ctx(tmp_path, node_path="jv", on_data=lambda path, d: got.update({path: d}))
     seen, evs = [], []
-    for ev in cat.build("jv_dark", {"step_v": 0.1}, ctx, b.rig):
+    for ev in cat.build("jv", {"step_v": 0.1}, ctx, b.rig):
         if isinstance(ev, JVCurveDone):
             seen.append((sim.bench.led_mode, sim.led.output_enabled,
                          sim.bench.shutter_open, sim.router.position))
-            assert abs(ev.metrics.jsc) < 1e-5, "dark through the shutter"
         evs.append(ev)
-    assert seen == [("PULSE", True, False, "sourcemeter")]
+    assert seen == [("PULSE", True, True, "sourcemeter")], "the light never moved"
     assert isinstance(evs[-1], JVFinished) and sim.bench.shots == 0
-    assert not sim.bench.smu_output and not sim.bench.shutter_open
-    assert sim.led.output_enabled and sim.bench.led_mode == "PULSE", "left exactly as it was"
+    assert not sim.bench.smu_output, "the SourceMeter is unwound: this run turned it on"
+    assert sim.bench.shutter_open, "the shutter is not: this run never touched it"
+    assert sim.led.output_enabled and sim.bench.led_mode == "PULSE"
 
     assert len(ctx.folders) == 1
     folder = ctx.folders[0]
@@ -290,11 +305,71 @@ def test_jv_dark_shuts_the_shutter_leaves_the_led_as_it_was_and_writes_the_files
     assert any(f.startswith("BACE_JV_Parameters_") for f in files)
     assert any(f.startswith("jv") and f.endswith(".h5") for f in files)
 
-    curves = got["jv_dark"]["curves"]
-    assert len(curves) == 1 and curves[0]["dark"] is True and curves[0]["label"] == "dark"
-    assert curves[0]["voltage"].size == 15 and curves[0]["metrics"]["voc"] is None
-    json.dumps(jsonable(got["jv_dark"]))
+    curves = got["jv"]["curves"]
+    assert len(curves) == 1 and curves[0]["dark"] is False
+    assert curves[0]["label"] == "as found 1.02 V", "labelled by the read-back"
+    assert curves[0]["voltage"].size == 15
+    json.dumps(jsonable(got["jv"]))
 
+
+def test_jv_records_a_shut_shutter_as_dark_because_it_read_it_not_because_it_shut_it(tmp_path):
+    b = bench()
+    b.sim.led.set_dc(1.02)
+    b.sim.led.enable_output(True)
+    b.sim.shutter.shut()
+    cat = catalogue()
+    got: dict = {}
+    ctx = make_ctx(tmp_path, node_path="jv", on_data=lambda path, d: got.update({path: d}))
+    evs = [ev for ev in cat.build("jv", {"step_v": 0.1}, ctx, b.rig)]
+    curve = [e for e in evs if isinstance(e, JVCurveDone)][0]
+    assert curve.dark is True and curve.label == "as found dark"
+    assert curve.illumination["shutter"] == "shut" and curve.illumination["lit"] is False
+    assert abs(curve.metrics.jsc) < 1e-5, "dark through the shutter"
+    assert curve.metrics.voc is None, "a curve read as dark gets the dark metrics"
+
+
+# -- light ----------------------------------------------------------------------------
+def test_light_sets_the_shutter_and_the_led_and_reports_what_the_bench_then_read(tmp_path):
+    """The bench's two light switches as a pipeline node, so a `jv` inside a
+    tree can be dark. It goes through the same `apply_led`/`apply_shutter` the
+    `set-led-*` and `shutter-*` bench actions call, so a click and a node
+    cannot drive the LED differently."""
+    b = bench()
+    cat = catalogue()
+    ctx = make_ctx(tmp_path, node_path="light")
+    evs = list(cat.build("light", {"shutter": "open", "led_mode": "dc", "led_v": 1.04},
+                         ctx, b.rig))
+    assert b.sim.bench.shutter_open and b.sim.bench.led_mode == "DC"
+    assert b.sim.bench.led_drive_v == 1.04 and b.sim.led.output_enabled
+    state = [e for e in evs if isinstance(e, E.InstrumentState)][-1]
+    assert state.values["shutter"] == "open" and state.values["illumination"] == "light"
+    assert state.values["led_level_v"] == 1.04
+    notice = [e for e in evs if isinstance(e, E.Notice)][-1]
+    assert "LED DC 1.04 V" in notice.text and "shutter open" in notice.text
+    assert "light reaching the sample" in notice.text
+
+    # And the other way: the shutter alone, the generator left at its thermal
+    # steady state -- the 2026-09-02 operator instruction, as a node.
+    evs = list(cat.build("light", {"shutter": "shut"}, ctx, b.rig))
+    assert not b.sim.bench.shutter_open
+    assert b.sim.bench.led_mode == "DC" and b.sim.led.output_enabled, "generator untouched"
+    assert "dark at the sample" in [e for e in evs if isinstance(e, E.Notice)][-1].text
+
+
+def test_light_refuses_before_it_touches_anything(tmp_path):
+    b = bench()
+    cat = catalogue()
+    ctx = make_ctx(tmp_path, node_path="light")
+    with pytest.raises(ModuleError, match="nothing to do"):
+        cat.build("light", {}, ctx, b.rig)
+    with pytest.raises(ModuleError, match="threshold"):
+        cat.build("light", {"led_mode": "pulse", "led_v": 1.02, "led_low_v": 1.2},
+                  ctx, b.rig)
+    assert b.sim.bench.led_mode != "PULSE", "a refused node touched nothing"
+    bare = Bench.build_simulated(RigConfig(), seed=3)
+    bare.rig.shutter = None
+    with pytest.raises(ModuleError, match="no shutter"):
+        cat.build("light", {"shutter": "open"}, ctx, bare.rig)
 
 def test_jv_bace_measures_one_level_when_led_v_is_inherited_else_the_range(tmp_path):
     b = bench()
@@ -553,12 +628,12 @@ def test_build_refuses_bad_parameters_by_name_and_touches_nothing(tmp_path):
     assert b.sim.bench.shots == 0 and not b.sim.led.output_enabled
     with pytest.raises(KeyError):
         cat.build("nope", {}, ctx, b.rig)
-    with pytest.raises(ModuleError, match="^jv_dark: step_v"):
-        cat.build("jv_dark", {"step_v": 0.0}, ctx, b.rig)
+    with pytest.raises(ModuleError, match="^jv: step_v"):
+        cat.build("jv", {"step_v": 0.0}, ctx, b.rig)
     bare = Bench.build_simulated(RigConfig())
     bare.rig.smu = None
     with pytest.raises(ModuleError, match="needs a SourceMeter"):
-        cat.build("jv_dark", {}, ctx, bare.rig)
+        cat.build("jv", {}, ctx, bare.rig)
     with pytest.raises(ModuleError, match="measure_dc: this bench has no SourceMeter"):
         cat.build("bace", {**ok, "measure_dc": True}, ctx, bare.rig)
 
@@ -579,8 +654,8 @@ def test_the_smu_compliance_reaches_a_driver_that_takes_one(tmp_path):
     b.rig.smu = ConfiguredSMU(b.sim.smu)
     b.sim.router._smu = b.rig.smu
     cat = catalogue()
-    ctx = make_ctx(tmp_path, node_path="jv_dark")
-    list(cat.build("jv_dark", {"step_v": 0.1, "smu_current_compliance_a": 0.02,
+    ctx = make_ctx(tmp_path, node_path="jv")
+    list(cat.build("jv", {"step_v": 0.1, "smu_current_compliance_a": 0.02,
                                "smu_nplc": 0.1}, ctx, b.rig))
     assert (b.rig.smu.config.current_compliance_a, b.rig.smu.config.nplc) == (0.02, 0.1)
 

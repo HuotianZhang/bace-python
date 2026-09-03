@@ -8,15 +8,25 @@ illumination is whatever it is" and "nothing else is contending for the device".
 What it does that the original did not:
 
 * **Dark and light in one run.** The original swept the Keithley under whatever
-  the 33220A happened to be doing. Here `dark` and the LED levels are explicit,
-  the shutter is opened for a light curve and shut for a dark one, and both
-  land in the same file set so the pair is kept together — a dark curve is
-  only useful next to the light curve it belongs to. The shutter is the light
-  switch: the LED generator is left exactly as it is for a dark curve and on
-  the way out (operator instruction, 2026-09-02 -- a generator that is cycled
-  loses its thermal steady state and the next module waits for it again).
-  Only a rig with no shutter still switches the LED off, because that is the
-  only way it can be dark.
+  the 33220A happened to be doing. With `light_control="manage"` the `dark`
+  flag and the LED levels are explicit, the shutter is opened for a light curve
+  and shut for a dark one, and both land in the same file set so the pair is
+  kept together — a dark curve is only useful next to the light curve it
+  belongs to. The shutter is the light switch: the LED generator is left
+  exactly as it is for a dark curve and on the way out (operator instruction,
+  2026-09-02 -- a generator that is cycled loses its thermal steady state and
+  the next module waits for it again). Only a rig with no shutter still
+  switches the LED off, because that is the only way it can be dark.
+* **Or the light left strictly alone.** `light_control="leave"` sweeps under
+  whatever illumination it finds and touches neither shutter nor LED, going in
+  or coming out. That is the original's behaviour made deliberate rather than
+  accidental, and it is what lets the light be set by something else — a
+  `light` step before this one, or the operator's own hand on the bench. The
+  difference from the original is that this one *reads the light back* and
+  records what it found (`illumination_state`), so a curve is never labelled by
+  an assumption. When the bench cannot say, the curve is `unknown` and a
+  warning says so: an unknown curve is worth more than a light one wearing a
+  dark label.
 * **Both sweep directions, optionally.** Forward and reverse curves that differ
   is hysteresis, which for many device chemistries is the most interesting thing
   in the measurement and is invisible if you only ever sweep one way. Off by
@@ -44,6 +54,7 @@ from .events import Event, InstrumentState, Notice, Progress
 from .rig import Rig
 
 Direction = Literal["forward", "reverse"]
+LightControl = Literal["manage", "leave"]
 
 
 @dataclass(frozen=True)
@@ -61,9 +72,20 @@ class JVConfig:
     """Sweep start->stop and back. Hysteresis is real and worth seeing; it also
     doubles the run and makes 'the' curve ambiguous, so it is opt-in."""
 
+    light_control: LightControl = "manage"
+    """`manage` sets the illumination for each curve in the plan — the shutter
+    shut for the dark one, the LED at each level for the light ones — and shuts
+    the shutter on the way out. `leave` touches neither, sweeps once under
+    whatever is there, and reads back what that was.
+
+    There is no third value and no half-way: a run either owns the light or it
+    does not, and the file says which. `dark` and `led_levels_v` belong to
+    `manage` alone; asking for either under `leave` is a contradiction the
+    constructor refuses rather than resolves."""
+
     dark: bool = True
     """Include a dark scan: the shutter shut (the LED output off only on a rig
-    with no shutter)."""
+    with no shutter). `manage` only."""
 
     led_levels_v: tuple[float, ...] = ()
     """Drive levels for the light scans, at the 33220A output. Empty means no
@@ -75,7 +97,18 @@ class JVConfig:
 
     led_settle_s: float = 2.0
     """After changing the LED level. The original called this 'LED stab. time'
-    and gave it its own control, which is a hint that it matters."""
+    and gave it its own control, which is a hint that it matters. `manage`
+    only: `leave` changed nothing, so there is nothing to settle after."""
+
+    def __post_init__(self) -> None:
+        if self.light_control not in ("manage", "leave"):
+            raise ValueError(
+                f"light_control must be 'manage' or 'leave', not {self.light_control!r}")
+        if self.light_control == "leave" and self.led_levels_v:
+            raise ValueError(
+                "light_control='leave' cannot take led_levels_v: asking for a level "
+                "is asking to set the light. Use 'manage', or set the level with a "
+                "light step before this one.")
 
     def points(self) -> np.ndarray:
         if self.step_v <= 0:
@@ -170,8 +203,15 @@ class JVCurveDone(Event):
     """One sweep in one direction at one illumination."""
 
     index: int
-    label: str                   # "dark" or "1.020 V"
-    dark: bool
+    label: str                   # "dark", "1.020 V", "as found dark", "as found unknown"
+    dark: bool | None
+    """True dark, False lit, **None unknown**. None is only ever produced by
+    `light_control="leave"` on a bench that cannot say what the light was
+    doing, and it is not the same as False: False is a read that came back
+    lit, None is no read at all. Everything that consumes this — the metrics,
+    the file, the console — has to keep the two apart, because a light label
+    on a dark curve is the failure `ui-rules` §9 is about."""
+
     led_level_v: float | None
     direction: Direction
     voltage: np.ndarray
@@ -179,6 +219,10 @@ class JVCurveDone(Event):
     density: np.ndarray | None   # A/cm², only if a pixel area was given
     metrics: JVMetrics
     intensity_w: float | None = None
+    illumination: dict | None = None
+    """What the bench said the light was doing, for a `leave` curve:
+    `illumination_state`'s answer, verbatim. None for a `manage` curve, where
+    the run set the light and `dark`/`led_level_v` already say what it set."""
 
 
 @dataclass(frozen=True)
@@ -200,11 +244,16 @@ def run_jv(rig: Rig, config: JVConfig = JVConfig(), *,
     Yields `JVStarted`, then per illumination an `InstrumentState` naming the
     shutter position (when the rig has a shutter) and a `JVCurveDone` per
     sweep, then `JVFinished`.
-    Unwinds the same way the transient run does: the `finally` disables the
-    SourceMeter and shuts the shutter whether the run finished, was aborted,
-    raised, or the consumer simply stopped iterating. The LED is left as it
-    was set -- the shutter is the light switch -- except on a rig with no
-    shutter, where switching it off is the only way to leave the bench dark.
+
+    **Unwind what you turned on.** The `finally` disables the SourceMeter on
+    every exit path -- finished, aborted, raised, or the consumer simply
+    stopped iterating -- because the SourceMeter is a source this run switched
+    on into the device. The light is unwound only under `manage`, which set it:
+    the shutter is shut and the LED left as it was set, except on a rig with no
+    shutter where switching the LED off is the only way to leave the bench
+    dark. Under `leave` the light is exactly as it was found, on the way out as
+    on the way in; a run that did not touch the shutter has no business shutting
+    it, and the operator or the step that set the light still owns it.
     """
     if rig.smu is None:
         raise RuntimeError(
@@ -212,12 +261,18 @@ def run_jv(rig: Rig, config: JVConfig = JVConfig(), *,
             "instrument this experiment requires."
         )
 
-    plan: list[tuple[bool, float | None]] = []
-    if config.dark:
-        plan.append((True, None))
-    plan += [(False, lvl) for lvl in config.led_levels_v]
-    if not plan:
-        raise ValueError("nothing to measure: dark is off and no LED levels given")
+    manage = config.light_control == "manage"
+    # (dark, level) under `manage`; the single (None, None) of `leave` means
+    # "whatever is there", and is resolved by reading rather than by setting.
+    plan: list[tuple[bool | None, float | None]] = []
+    if not manage:
+        plan.append((None, None))
+    else:
+        if config.dark:
+            plan.append((True, None))
+        plan += [(False, lvl) for lvl in config.led_levels_v]
+        if not plan:
+            raise ValueError("nothing to measure: dark is off and no LED levels given")
 
     directions: tuple[Direction, ...] = (
         ("forward", "reverse") if config.both_directions else ("forward",))
@@ -237,33 +292,57 @@ def run_jv(rig: Rig, config: JVConfig = JVConfig(), *,
             for dark, level in plan:
                 if abort is not None and abort():
                     yield Notice("warning", "J-V run aborted before "
-                                            f"{'dark' if dark else f'{level} V'}")
+                                            f"{_planned(manage, dark, level)}")
                     return
-                _set_illumination(rig, dark, level)
-                shutter = _set_shutter(rig, dark)
-                if shutter is not None:
-                    # On the event stream, for a console or recorder to pick
-                    # up: a light curve is only a light curve if light reached
-                    # the sample. `JVRecorder` folds it into /config/resolved
-                    # and onto each curve group (schema bace-jv/2), the way
-                    # the transient recorder does, so the *file* can say.
-                    yield InstrumentState({"shutter": shutter})
-                if rig.led is not None or shutter is not None:
-                    # Only when something moved. A bare SourceMeter rig has
-                    # nothing to settle after, and before 2026-09-02 the
-                    # settle lived inside `_set_illumination`, behind its
-                    # `rig.led is None` return, so such a rig never waited;
-                    # a silent 2 s per curve would be a regression nobody
-                    # reports.
-                    sleep(config.led_settle_s)
-                label = "dark" if dark else f"{level:g} V"
 
+                found: dict | None = None
                 intensity = None
-                if not dark and rig.power is not None:
-                    try:
-                        intensity = rig.power.read_power()
-                    except Exception as exc:            # a meter is not the point
-                        yield Notice("warning", f"intensity not read: {exc}")
+                if manage:
+                    _set_illumination(rig, dark, level)
+                    shutter = _set_shutter(rig, dark)
+                    if shutter is not None:
+                        # On the event stream, for a console or recorder to
+                        # pick up: a light curve is only a light curve if
+                        # light reached the sample. `JVRecorder` folds it into
+                        # /config/resolved and onto each curve group (schema
+                        # bace-jv/3), the way the transient recorder does, so
+                        # the *file* can say.
+                        yield InstrumentState({"shutter": shutter})
+                    if rig.led is not None or shutter is not None:
+                        # Only when something moved. A bare SourceMeter rig
+                        # has nothing to settle after, and before 2026-09-02
+                        # the settle lived inside `_set_illumination`, behind
+                        # its `rig.led is None` return, so such a rig never
+                        # waited; a silent 2 s per curve would be a regression
+                        # nobody reports.
+                        sleep(config.led_settle_s)
+                    label = "dark" if dark else f"{level:g} V"
+                    if not dark and rig.power is not None:
+                        try:
+                            intensity = rig.power.read_power()
+                        except Exception as exc:        # a meter is not the point
+                            yield Notice("warning", f"intensity not read: {exc}")
+                else:
+                    # Nothing is set. The light is read instead, and the read
+                    # is what the curve is labelled and filed by.
+                    found = illumination_state(rig)
+                    dark = None if found["lit"] is None else not found["lit"]
+                    level = found["led_level_v"]
+                    intensity = found["intensity_w"]
+                    label = _found_label(found)
+                    yield InstrumentState({
+                        "shutter": found["shutter"] or "?",
+                        "illumination": ("unknown" if found["lit"] is None
+                                         else "light" if found["lit"] else "dark"),
+                        "led_mode": found["led_mode"] or "?",
+                        "led_level_v": found["led_level_v"],
+                    })
+                    if found["lit"] is None:
+                        yield Notice(
+                            "warning",
+                            "illumination unknown: this bench cannot say whether light "
+                            "reached the sample (" + ", ".join(found["unread"]) + "). "
+                            "The curve is recorded as unknown, not as dark.")
 
                 for direction in directions:
                     v = v_forward if direction == "forward" else v_forward[::-1]
@@ -274,8 +353,16 @@ def run_jv(rig: Rig, config: JVConfig = JVConfig(), *,
                     ev = JVCurveDone(index=index, label=label, dark=dark,
                                      led_level_v=level, direction=direction,
                                      voltage=vm, current=im, density=density,
-                                     metrics=metrics(vm, im, dark=dark),
-                                     intensity_w=intensity)
+                                     # An unknown illumination gets the full
+                                     # set: V_oc and FF are interpolations of
+                                     # the curve either way (`ui-rules` §6),
+                                     # and suppressing them would hide the one
+                                     # evidence the operator has that the light
+                                     # was on -- a V_oc where a dark curve has
+                                     # none. Only a *known* dark curve has them
+                                     # withheld, because there the caller knows.
+                                     metrics=metrics(vm, im, dark=bool(dark)),
+                                     intensity_w=intensity, illumination=found)
                     curves.append(ev)
                     yield ev
                     index += 1
@@ -290,13 +377,106 @@ def run_jv(rig: Rig, config: JVConfig = JVConfig(), *,
             rig.smu.disable_output()
         except Exception:
             pass
-        if rig.shutter is not None:
+        if manage:
+            if rig.shutter is not None:
+                try:
+                    rig.shutter.shut()
+                except Exception:
+                    pass
+            else:
+                _led_off(rig)
+
+
+def _planned(manage: bool, dark: bool | None, level: float | None) -> str:
+    """What the next curve was going to be, for the abort notice."""
+    if not manage:
+        return "the curve"
+    return "dark" if dark else f"{level} V"
+
+
+def illumination_state(rig: Rig) -> dict:
+    """What the light is doing *now*, as far as this bench can tell.
+
+    The question is not "what is the 33220A set to" -- that is the bench card's
+    question and `service.rigs._led_state` answers it for the chain checks --
+    but the narrower one a curve's label depends on: **is light reaching the
+    sample?** Three things have to be true for yes, and each of them is on the
+    driver protocols, so this works on any rig and in the simulator:
+    the shutter open, the LED output enabled, and the LED not in `OFF` mode.
+
+    `lit` is None when any of the three cannot be read, and None is the whole
+    point of this function. A rig with no shutter driver cannot know whether
+    light reaches the sample however confident the generator is; a `False`
+    there would be a dark label on a curve taken in the light. The level is
+    read when the driver offers `read_state()` (the 33220A does) and left None
+    when it does not -- a missing number is not a wrong one.
+    """
+    shutter, led = rig.shutter, rig.led
+    out: dict = {"lit": None, "shutter": None, "led_output": None,
+                 "led_mode": None, "led_level_v": None, "intensity_w": None,
+                 "unread": []}
+
+    if shutter is not None:
+        try:
+            out["shutter"] = "open" if bool(shutter.is_open) else "shut"
+        except Exception as exc:                            # noqa: BLE001
+            out["unread"].append(f"shutter ({type(exc).__name__})")
+    else:
+        out["unread"].append("shutter (none on this bench)")
+
+    if led is not None:
+        state = {}
+        reader = getattr(led, "read_state", None)
+        if callable(reader):
             try:
-                rig.shutter.shut()
-            except Exception:
-                pass
-        else:
-            _led_off(rig)
+                state = dict(reader() or {})
+            except Exception:                               # noqa: BLE001
+                state = {}
+        try:
+            output = state.get("output")
+            out["led_output"] = bool(led.output_enabled) if output is None else bool(output)
+        except Exception as exc:                            # noqa: BLE001
+            out["unread"].append(f"LED output ({type(exc).__name__})")
+        try:
+            out["led_mode"] = str(state.get("mode") or led.mode)
+        except Exception as exc:                            # noqa: BLE001
+            out["unread"].append(f"LED mode ({type(exc).__name__})")
+        level = state.get("high_v")
+        if level is None:
+            # `last_levels` is the spelling the drivers keep -- the simulated
+            # ones and the 33220A both -- and the one `service.rigs._levels`
+            # reads for the bench card. One vocabulary for one fact.
+            levels = getattr(led, "last_levels", None)
+            level = levels[0] if levels else None
+        try:
+            out["led_level_v"] = None if level is None else float(level)
+        except (TypeError, ValueError):
+            out["led_level_v"] = None
+    else:
+        out["unread"].append("LED (none on this bench)")
+
+    if not out["unread"]:
+        out["lit"] = bool(out["shutter"] == "open" and out["led_output"]
+                          and str(out["led_mode"]).upper() != "OFF")
+
+    if rig.power is not None:
+        try:
+            out["intensity_w"] = float(rig.power.read_power())
+        except Exception:                                   # noqa: BLE001
+            pass                # a meter is not the point, here or in the run
+    return out
+
+
+def _found_label(state: dict) -> str:
+    """The curve label for a `leave` curve, from the read-back. Kept free of
+    anything but letters, digits, dots and spaces: `storage.jv` turns it into
+    an HDF5 group name by replacing spaces with underscores."""
+    if state.get("lit") is None:
+        return "as found unknown"
+    if not state["lit"]:
+        return "as found dark"
+    level = state.get("led_level_v")
+    return "as found lit" if level is None else f"as found {level:g} V"
 
 
 def _set_illumination(rig: Rig, dark: bool, level: float | None) -> None:

@@ -76,10 +76,10 @@ def states_of(frames: list[dict]) -> list[str]:
 
 
 # -- a manual run, end to end ---------------------------------------------------------
-def test_a_manual_jv_dark_goes_through_the_worker_the_journal_and_the_registry(tmp_path):
+def test_a_manual_jv_goes_through_the_worker_the_journal_and_the_registry(tmp_path):
     with make_session(tmp_path) as s:
         assert s.session_id == SID and s.last_seq == 0
-        run_id, v = s.submit(tree_for_module("jv_dark", {"step_v": 0.1}), name="dark",
+        run_id, v = s.submit(tree_for_module("jv", {"step_v": 0.1}), name="a J-V",
                              kind="manual")
         assert run_id == f"{SID}-001" and v.valid
         assert s.wait_run(run_id, TIMEOUT)
@@ -89,8 +89,8 @@ def test_a_manual_jv_dark_goes_through_the_worker_the_journal_and_the_registry(t
         assert {f["run_id"] for f in frames} == {run_id}
         assert [f["type"] for f in frames[:3]] == ["RunQueued", "RunStateChanged",
                                                    "RunStateChanged"]
-        assert frames[0]["data"] == {"kind": "manual", "module": "jv_dark", "name": "dark",
-                                     "tree": {"kind": "module", "module": "jv_dark",
+        assert frames[0]["data"] == {"kind": "manual", "module": "jv", "name": "a J-V",
+                                     "tree": {"kind": "module", "module": "jv",
                                               "params": {"step_v": 0.1}},
                                      "params": frames[0]["data"]["params"],
                                      "resolved": frames[0]["data"]["resolved"],
@@ -106,9 +106,9 @@ def test_a_manual_jv_dark_goes_through_the_worker_the_journal_and_the_registry(t
         by_type = {}
         for f in frames:
             by_type.setdefault(f["type"], []).append(f)
-        assert {f["node_path"] for f in by_type["JVCurveDone"]} == {"jv_dark"}
+        assert {f["node_path"] for f in by_type["JVCurveDone"]} == {"jv"}
         assert {f["node_path"] for f in by_type["RunStateChanged"]} == {""}
-        assert {f["node_path"] for f in by_type["NodeStarted"]} == {"jv_dark"}
+        assert {f["node_path"] for f in by_type["NodeStarted"]} == {"jv"}
         assert by_type["Verdict"], "the chain was read at Start and its verdicts attached"
         assert [f["node_path"] for f in by_type["Verdict"]] == [""] * len(by_type["Verdict"])
         assert by_type["JVCurveDone"][0]["data"]["voltage"], "arrays whole on the wire"
@@ -127,13 +127,13 @@ def test_a_manual_jv_dark_goes_through_the_worker_the_journal_and_the_registry(t
 
         rec = s.run_record(run_id)
         assert (rec["state"], rec["parked"], rec["kind"], rec["module"]) == \
-            ("done", True, "manual", "jv_dark")
-        assert rec["node_outcomes"]["jv_dark"]["outcome"] == "ok"
-        assert rec["node_outcomes"]["jv_dark"]["kind"] == "jv_dark"
+            ("done", True, "manual", "jv")
+        assert rec["node_outcomes"]["jv"]["outcome"] == "ok"
+        assert rec["node_outcomes"]["jv"]["kind"] == "jv"
         assert (rec["kept"], rec["requested"]) == (1, 1)
-        assert rec["params_as_executed"]["jv_dark"]["step_v"] == \
+        assert rec["params_as_executed"]["jv"]["step_v"] == \
             {"value": 0.1, "source": "edited", "detail": "pipeline node"}
-        assert rec["params_as_executed"]["jv_dark"]["smu_nplc"]["source"] == "run.toml"
+        assert rec["params_as_executed"]["jv"]["smu_nplc"]["source"] == "run.toml"
         assert rec["chain_at_start"]["total"] == 4 and rec["error"] is None
         assert rec["folder"] is None, "a manual run has no pipeline folder"
         (folder,) = rec["folders"]
@@ -145,19 +145,19 @@ def test_a_manual_jv_dark_goes_through_the_worker_the_journal_and_the_registry(t
         data = s.run_data(run_id)
         assert isinstance(data["curves"][0]["voltage"], np.ndarray)
         assert data["curves"][0]["voltage"].size == 15
-        assert s.run_data(run_id, "jv_dark") is data
+        assert s.run_data(run_id, "jv") is data
 
         (summary,) = s.runs_index()
         assert (summary["run_id"], summary["state"], summary["module"], summary["folder"]) == \
-            (run_id, "done", "jv_dark", folder)
+            (run_id, "done", "jv", folder)
         assert summary["outcome_text"] == "1 curve"
 
-        card = s.module_wire("jv_dark")
-        assert card["last"] == {"run_id": run_id, "state": "done", "node_path": "jv_dark",
+        card = s.module_wire("jv")
+        assert card["last"] == {"run_id": run_id, "state": "done", "node_path": "jv",
                                 "ts": card["last"]["ts"], "summary": "1 curve",
                                 "folder": folder}
         assert s.module_wire("bace")["last"] is None
-        assert s.catalogue.param_set("jv_dark").get("step_v") == \
+        assert s.catalogue.param_set("jv").get("step_v") == \
             ParamValue(0.1, Source.LAST_USED, "previous run"), "the journal feeds last-used"
 
         snap = s.bench_snapshot()
@@ -256,7 +256,7 @@ def test_the_queue_holds_a_second_run_while_the_first_is_paused(tmp_path):
         first, v = s.submit(temperature_pipeline(bace(1, voc=0.9)), name="cool down")
         assert v.valid and s.run_record(first)["kind"] == "pipeline"
         wait_until(lambda: s.run_record(first)["state"] == "paused")
-        second, _ = s.submit(tree_for_module("jv_dark", {"step_v": 0.1}))
+        second, _ = s.submit(tree_for_module("jv", {"step_v": 0.1}))
         rec2 = s.run_record(second)
         assert rec2["state"] == "queued"
         assert rec2["position"] == 0, "nothing queued ahead of it: it starts when the first ends"
@@ -275,8 +275,8 @@ def test_the_queue_holds_a_second_run_while_the_first_is_paused(tmp_path):
             s.resume(second, {})
         with pytest.raises(UnknownRun):
             s.resume("nope", {})
-        assert s.module_wire("jv_dark")["last"] == {
-            "run_id": second, "state": "queued", "node_path": "jv_dark",
+        assert s.module_wire("jv")["last"] == {
+            "run_id": second, "state": "queued", "node_path": "jv",
             "ts": rec2["queued_at"], "summary": None}
 
         assert s.resume(first, {"temperature_k": 250.0, "note": "set by hand"}) == \
@@ -584,7 +584,7 @@ def test_under_an_asyncio_loop_frames_reach_an_awaiting_subscriber(tmp_path):
         try:
             live = s.subscribe()
             assert isinstance(live, asyncio.Queue)
-            run_id, _ = s.submit(tree_for_module("jv_dark", {"step_v": 0.1}))
+            run_id, _ = s.submit(tree_for_module("jv", {"step_v": 0.1}))
             seen = []
             while True:
                 frame = await asyncio.wait_for(live.get(), TIMEOUT)

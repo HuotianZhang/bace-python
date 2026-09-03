@@ -47,7 +47,16 @@ INSTRUMENT_STATE_KEYS: dict[str, tuple[str, str]] = {
     "bias_output_polarity": ("bias", "polarity"),
     "bias_arm_source": ("bias", "arm_source"),
     "bias_arm_slope": ("bias", "arm_slope"),
+    "led_mode": ("led", "mode"),
 }
+
+LIGHT_UNWOUND: frozenset[str] = frozenset({"bace", "jv_bace"})
+"""Which modules shut the shutter in their own `finally`, and therefore leave
+the bench dark whatever they did in between. `jv` and `light` are not here and
+must not be: `jv` never touches the light (`light_control="leave"`), and
+`light` exists to leave it where it put it. Inferring "shutter shut" at their
+`NodeDone` would tell the operator the lamp is off while it is on -- an
+inference the rail marks as inferred and the operator still reads."""
 
 
 class LiveState:
@@ -72,11 +81,12 @@ class LiveState:
                 self._set("relay", position=RELAY_SIDE[step.relay])
         elif isinstance(ev, E.NodeDone):
             if self.step is not None and ev.node_path == self.step.node_path:
-                # The module's own unwind: outputs off, shutter shut
-                # (`_build_bace`/`run_jv` finally blocks); the relay stays,
+                # The module's own unwind: outputs off, and the shutter shut
+                # for the modules that shut it (`_build_bace`/`run_jv`'s
+                # `finally`, under `light_control="manage"`); the relay stays,
                 # and so does the LED -- since 2026-09-02 no module switches
                 # it off, the shutter is the light switch.
-                self._parked()
+                self._parked(light=self.step.module in LIGHT_UNWOUND)
                 self.step = None
                 self.run_config = None
         elif isinstance(ev, E.RunStarted):
@@ -92,8 +102,11 @@ class LiveState:
                     instrument, field = INSTRUMENT_STATE_KEYS[key]
                     self._set(instrument, **{field: str(value)})
                 elif key == "shutter":
-                    self._set("shutter", open=(str(value) == "open"))
+                    if str(value) != "?":
+                        self._set("shutter", open=(str(value) == "open"))
                     self._jv_light(str(value) == "open")
+                elif key == "led_level_v" and value is not None:
+                    self._set("led", high_v=float(value))
         elif isinstance(ev, E.StepStarted):
             self._levels = self._pulse_levels(ev.setpoint)
             if self._levels is not None:
@@ -149,18 +162,24 @@ class LiveState:
     def _set(self, instrument: str, **fields: Any) -> None:
         self.state.setdefault(instrument, {}).update(fields)
 
-    def _parked(self) -> None:
+    def _parked(self, *, light: bool = True) -> None:
         self._set("bias", output=False)
         self._set("smu", output=False)
-        self._set("shutter", open=False)
+        if light:
+            self._set("shutter", open=False)
 
     def _jv_light(self, lit: bool) -> None:
-        """`run_jv` sets the LED to DC before it opens the shutter for a
-        light curve and leaves it alone for a dark one; the shutter's state
-        event is the only one it yields, so it stands for the LED too. A
-        dark curve therefore infers nothing about the LED: it is whatever
-        the last module left, which the overlay already holds."""
-        if self.step is None or self.step.module not in ("jv_bace", "jv_dark"):
+        """`run_jv` under `manage` sets the LED to DC before it opens the
+        shutter for a light curve and leaves it alone for a dark one; the
+        shutter's state event is the only one it yields, so it stands for the
+        LED too. A dark curve therefore infers nothing about the LED: it is
+        whatever the last module left, which the overlay already holds.
+
+        `jv` is excluded because it sets nothing: its shutter event is a
+        *read-back*, and the LED reading that comes with it arrives on the
+        same event under `led_mode`/`led_level_v` rather than being inferred
+        from the shutter."""
+        if self.step is None or self.step.module != "jv_bace":
             return
         if lit:
             values = self.step.values()
