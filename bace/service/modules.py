@@ -101,6 +101,25 @@ operator's own eyes-on-the-meter check amounts to."""
 MODULE_NAMES: tuple[str, ...] = ("jv", "jv_bace", "bace", "light", "power",
                                  "temperature", "park", "wait", "note")
 
+RETIRED: dict[str, str] = {
+    "jv_dark": "split on 2026-09-03 because it did two jobs: it swept the "
+               "SourceMeter *and* made the bench dark. Use a `light` node with "
+               "`shutter = shut` before a `jv`, which is exactly what it did; "
+               "or `jv` on its own to sweep under the light as it is found.",
+}
+"""Module names that existed and no longer do, and what to do instead.
+
+A tree naming one of these is refused — never silently rewritten. `jv_dark`
+maps to *two* nodes, so translating it would change the shape of the tree, its
+node paths and therefore its folder names; and translating it to `jv` alone
+would change what is measured, from "make it dark and sweep" to "sweep under
+whatever is there", which is the failure this split exists to prevent. A saved
+recipe that names one is the operator's to re-author, and this says how.
+
+Kept because a recipe saved through `/pipelines/save` lives on disk and
+outlives the catalogue: without it the answer is `jv_dark: 'jv_dark'`, a
+`KeyError` repr that says nothing about what happened or what to do."""
+
 SAMPLE_KEYS: frozenset[str] = frozenset(
     {"sample", "material", "pixel", "temperature_k", "operator", "comment"})
 """What `[sample]` may carry -- the `RunMetadata` fields `config.load_run`
@@ -735,6 +754,13 @@ class Catalogue:
         try:
             return self._specs[name]
         except KeyError:
+            # A name that used to be a module says so, and says what replaces
+            # it: a recipe saved through `/pipelines/save` is a file on disk
+            # and outlives the catalogue, so this is the message the operator
+            # gets when they open one from before the split.
+            if name in RETIRED:
+                raise KeyError(f"{name} is no longer a module. It was "
+                               f"{RETIRED[name]}") from None
             raise KeyError(name) from None
 
     def base_metadata(self) -> RunMetadata:
@@ -1564,7 +1590,14 @@ class _JVData:
     def handle(self, ev: E.Event) -> None:
         if isinstance(ev, JVCurveDone):
             self.curves.append({
-                "label": ev.label, "dark": bool(ev.dark), "led_level_v": ev.led_level_v,
+                # `dark` is carried, not coerced: `bool(None)` is False, which
+                # would have the data endpoint report a curve nobody could read
+                # as a *known light* one. `illumination` says the same thing
+                # the file's own attribute says (`bace-jv/3`), so a reader of
+                # either does not have to know the tri-state convention.
+                "label": ev.label, "dark": ev.dark, "led_level_v": ev.led_level_v,
+                "illumination": ("unknown" if ev.dark is None
+                                 else "dark" if ev.dark else "light"),
                 "direction": ev.direction, "voltage": np.asarray(ev.voltage, dtype=float),
                 "current": np.asarray(ev.current, dtype=float),
                 "density": None if ev.density is None else np.asarray(ev.density, dtype=float),

@@ -162,7 +162,7 @@ def stage_offline(report: Report, archive: str | None) -> None:
                                                   step_v=0.01),
                                     sleep=lambda s: None)
                   if isinstance(e, JVCurveDone)]
-        light = [x for x in curves if not x.dark][0]
+        light = [x for x in curves if x.dark is False][0]
         c.data["Voc"] = round(light.metrics.voc, 4)
         c.data["FF"] = round(light.metrics.fill_factor, 4)
 
