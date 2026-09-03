@@ -65,6 +65,18 @@ export function density(j, { unit = true } = {}) {
   return sig(value, 3) + (unit ? ` ${prefix}A/cm²` : '');
 }
 
+/**
+ * A current, prefixed where it is natural: `50.0 mA`, `1.20 µA`. The
+ * compliance the rail shows is a ceiling on what a 2400 may push into a small
+ * cell (`docs/ui-rules.md` §6), so it is never rendered in bare amps.
+ */
+export function amps(a) {
+  if (a === null || a === undefined || Number.isNaN(a)) return ABSENT;
+  if (a === 0) return '0 A';
+  const [value, prefix] = prefixed(a);
+  return sig(value, 3) + ' ' + prefix + 'A';
+}
+
 /** Temperature to one decimal. */
 export function kelvin(k, { unit = true } = {}) {
   if (k === null || k === undefined || Number.isNaN(k)) return ABSENT;

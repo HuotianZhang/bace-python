@@ -16,6 +16,7 @@ import { createStore, currentRun } from './lib/store.js';
 import { FIXTURES, loadFixture, replayInto, replayPaced } from './lib/replay.js';
 import { h, fill } from './lib/dom.js';
 import * as fmt from './lib/format.js';
+import { renderRail, renderChainStrip } from './lib/rail.js';
 
 const store = createStore({ schedule: (fn) => requestAnimationFrame(fn) });
 const loaded = [];
@@ -23,16 +24,24 @@ let paced = null;
 
 const controls = h('div.card');
 const summary = h('div');
+// The real rail and the real strip, off the same store: M1 is developed and
+// looked at here, with no service and no bench. `bench_running_sim.json` is
+// the mid-scan snapshot, and it is the only fixture that carries an inferred
+// anything.
+const railEl = h('header.rail');
+const stripEl = h('div.strip');
 const app = document.getElementById('app');
 app.replaceChildren(
-  h('header.rail', h('span.wordmark', 'bace'), h('span.slot',
-    h('span.key', { text: 'mode' }), h('span.value', { text: 'offline replay' }))),
+  h('div.bar', h('span.wordmark', 'bace'), h('span.spacer'),
+    h('span.chips', h('span.chip', { text: 'offline replay' }))),
+  railEl,
   h('main.view', h('h1', 'offline replay'),
     h('p.lede', 'Fixtures fed into the same store the WebSocket feeds. The journals replay '
       + 'every run semantic and cannot draw a curve — the payload policy keeps the scalars '
       + 'and drops the traces. The recorded streams carry the traces, decimated as the wire '
       + 'sends them, and the StepPhase frames that are live-only and exist nowhere else.'),
-    controls, summary));
+    controls, summary),
+  stripEl);
 
 function renderControls(status) {
   fill(controls,
@@ -58,10 +67,16 @@ async function load(entry, { pace }) {
     return renderControls(`${error.message} — serve the repo root for the journals: python3 tools/serve_ui.py`);
   }
   if (!Array.isArray(frames)) {
-    // `hello_*.json` is one frame; `jv_*.json` is an endpoint's answer, not a
-    // frame at all — it is shown as what it is rather than folded.
+    // `hello_*.json` is one frame; `bench_*.json` is a `GET /bench` answer,
+    // which the store takes as a read-back; `jv_*.json` is an endpoint's
+    // answer and not a frame at all — it is shown as what it is.
     if (frames.type === 'Hello') { store.applyHello(frames); renderControls('Hello folded'); }
-    else renderControls(`${entry.url} is an endpoint payload, not frames — ${Object.keys(frames).join(', ')}`);
+    else if (entry.kind === 'bench') {
+      // `readBack`, exactly as a mid-run refetch lands: the instruments and
+      // the chain, and not the run, the queue or the bench state.
+      store.applyBench(frames, { readBack: loaded.length > 0 });
+      renderControls(`bench applied — ${(frames.inferred || []).length} inferred: ${(frames.inferred || []).join(', ') || 'none'}`);
+    } else renderControls(`${entry.url} is an endpoint payload, not frames — ${Object.keys(frames).join(', ')}`);
     loaded.push(entry.key);
     return;
   }
@@ -76,6 +91,13 @@ async function load(entry, { pace }) {
 }
 
 store.subscribe((state) => {
+  renderRail(railEl, state);
+  renderChainStrip(stripEl, state, {
+    // Offline there is no service to answer, so the strip says what it would
+    // have posted rather than pretending to have posted it.
+    onFix: (name) => renderControls(`offline: the strip would POST /bench/actions/${name}`),
+    onPark: () => renderControls('offline: the strip would POST /bench/actions/park'),
+  });
   const run = currentRun(state);
   fill(summary,
     h('div.card',

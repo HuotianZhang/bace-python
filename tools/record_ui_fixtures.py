@@ -15,9 +15,12 @@ beside them — and two do not, because nothing writes them:
   `metrics + label + n_points` with no arrays. The J-V chart would otherwise
   have nothing to draw.
 
-And one shape exists only while a service is running: a **live** `StepDone`,
-its traces decimated with `stride` and `n_full`. The journal drops the traces
-and the HDF5 keeps them undecimated, so neither is that frame.
+And two shapes exist only while a service is running: a **live** `StepDone`,
+its traces decimated with `stride` and `n_full` -- the journal drops the traces
+and the HDF5 keeps them undecimated, so neither is that frame -- and a
+**`/bench` taken mid-scan**, where the four instruments the running step
+implies carry `how: "inferred"`. A snapshot at rest has not one of them, and it
+is the half of the rail the operator looks at for hours.
 
 So this records all of it against whatever service it is pointed at:
 
@@ -134,6 +137,52 @@ async def _run_and_capture(ws_url: str, base: str, body: dict,
     return frames, posted
 
 
+def _bench_running(base: str, *, timeout_s: float = 180.0) -> dict:
+    """`GET /bench` taken while a run is inside its acquisition.
+
+    The rail's hardest rule is that `how: "inferred"` is not a read-back, and
+    nothing recorded at rest carries a single inferred field: the overlay
+    exists only while a run holds the worker (`service/live.py`). A snapshot at
+    rest therefore develops and tests exactly the half of the rail that cannot
+    be got wrong -- relay on the SourceMeter, bias off, shutter shut -- and
+    none of the half the operator looks at for hours.
+
+    So this posts a short scan and reads the snapshot while it is running, at
+    a moment the shutter is open: relay amplifier, bias LIVE, LED pulsing,
+    shutter open, every one of them inferred. Then it waits for the bench to
+    come back to rest, so the recording leaves nothing running.
+    """
+    posted = _request(f"{base}/runs", "POST",
+                      {"module": "bace", "name": "ui-fixture-rail",
+                       "params": {"axis_name": "delay_ns", "axis_start": 0.0,
+                                  "axis_stop": 100.0, "axis_step": 100.0,
+                                  "centre_on_voc": False, "n_loops": 2, "vpre": 1.0,
+                                  "vcoll": -2.0, "store_shots": False,
+                                  "record_length": 500}})
+    run_id = posted["run_id"]
+    wanted = {"relay", "bias", "led", "shutter"}
+    deadline = time.monotonic() + timeout_s
+    snapshot = None
+    while time.monotonic() < deadline:
+        bench = _request(f"{base}/bench")
+        instruments = bench.get("instruments") or {}
+        if (wanted <= set(bench.get("inferred") or [])
+                and (instruments.get("shutter") or {}).get("open")):
+            snapshot = bench
+            break
+        if bench.get("state") == "idle" and (bench.get("run") or {}) == {}:
+            break
+        time.sleep(0.15)
+    if snapshot is None:
+        raise SystemExit(f"{run_id} never showed the four inferred instruments with the "
+                         f"shutter open within {timeout_s} s")
+    while time.monotonic() < deadline:            # leave the bench at rest
+        if _request(f"{base}/bench").get("state") == "idle":
+            break
+        time.sleep(0.2)
+    return snapshot
+
+
 def _folder_h5(record: dict) -> str | None:
     """The HDF5 a finished run wrote, from the folders on its record."""
     folders = record.get("folders") or ([record["folder"]] if record.get("folder") else [])
@@ -228,7 +277,13 @@ def main(argv: list[str] | None = None) -> int:
         timeout_s=a.timeout_s, path="/pipelines"))
     _dump(os.path.join(a.out, f"stream_pipeline_{tag}.jsonl"), pipe_frames, jsonl=True)
 
-    # 4 · the bench snapshot, as the console gets it on connect — recorded
+    # 4 · the bench mid-run: the `inferred` overlay, which exists nowhere at
+    #     rest. Recorded before the read-back below, because it needs a run.
+    print("bench, mid-run …")
+    _dump(os.path.join(a.out, f"bench_running_{tag}.json"),
+          _bench_running(base, timeout_s=a.timeout_s))
+
+    # 5 · the bench snapshot, as the console gets it on connect — recorded
     #     last, so it carries the V_oc the J-V measured and both runs on the
     #     modules' `last`, which is what the rail and the cards develop against.
     _request(f"{base}/bench/read", "POST")
