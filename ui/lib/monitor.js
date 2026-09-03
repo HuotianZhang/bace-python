@@ -234,7 +234,8 @@ function lastShotLine(node) {
   if (!shot) return null;
   const v = shot.verdict || null;
   return {
-    index: shot.index, loop: shot.loop, q: shot.q,
+    // Counted from one on screen, as the shot counter is; `index` is zero-based on the wire.
+    index: shot.index + 1, loop: shot.loop, q: shot.q,
     level: v ? v.level : null,
     text: v ? v.text : null,
   };
@@ -369,15 +370,23 @@ function promptForm(model, p, onResume) {
     h('label.mon-field', h('span', 'temperature_k'), temperature, h('i', 'K')),
     h('label.mon-field', note),
     h('button.btnp', { onclick: submit, title: 'POST /runs/{id}/resume — answers the pause that is open and no other' }, 'Resume'),
-    h('span.mon-fallback', { text: p.fallback }),
   ];
 }
 
+/**
+ * The reading, and what a blank resume binds — together, because the second
+ * follows from the first: once a reading has been polled, a resume with
+ * nothing typed takes it, and a sentence still saying "unconfirmed" would
+ * have the operator submit under the wrong description of what the service
+ * will do.
+ */
 function readingLine(p) {
-  if (!p.reading) return [];
   const r = p.reading;
-  return [h('span', {
-    class: r.in_band === true ? 'ok' : r.in_band === false ? 'warn' : '',
-    text: `reads ${fmt.kelvin(r.kelvin)} · ${r.source}${r.in_band === true ? ' · in band' : r.in_band === false ? ' · out of band' : ''}`,
-  })];
+  return [
+    r ? h('span', {
+      class: r.in_band === true ? 'ok' : r.in_band === false ? 'warn' : '',
+      text: `reads ${fmt.kelvin(r.kelvin)} · ${r.source}${r.in_band === true ? ' · in band' : r.in_band === false ? ' · out of band' : ''}`,
+    }) : null,
+    h('span.mon-fallback', { text: p.fallback }),
+  ];
 }

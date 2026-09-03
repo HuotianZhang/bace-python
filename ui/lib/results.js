@@ -249,8 +249,11 @@ export function shotBlock(shot, found, config) {
   const sigma = fmt.sigmaQ(shot.q_std);
   const nearZero = v && Number.isFinite(shot.q) && Number.isFinite(v.peak_light_a)
     && Math.abs(shot.q) < 1e-13;
+  // `StepDone.index` counts from zero; the operator counts shots from one,
+  // as the monitor's `shot 4 of 24` and the record's `kept` do.
+  const nth = shot.index + 1;
   const rows = [
-    ['Q · shot ' + shot.index, fmt.charge(shot.q)],
+    ['Q · shot ' + nth, fmt.charge(shot.q)],
     [`running mean · point ${shot.step}`, fmt.charge(shot.q_mean)],
     [`σ · point ${shot.step}`, sigma ? `${sigma} C` : 'not recorded'],
   ];
@@ -261,7 +264,7 @@ export function shotBlock(shot, found, config) {
   const trigger = config.trigger_sweep ? String(config.trigger_sweep).toUpperCase() : null;
   return h('div.shot', { class: level },
     h('div.shot-head',
-      h('span.shot-title', { text: `shot ${shot.index} · loop ${shot.loop}${where}` }),
+      h('span.shot-title', { text: `shot ${nth} · loop ${shot.loop}${where}` }),
       shot.clipped ? h('span.tag.bad', { text: 'clipped' }) : null,
       shot.tracesGone ? h('span.tag', { text: 'no traces' }) : null),
     h('table.rows.shot-rows', rows.map(([k, val]) => h('tr', h('td.l', { text: k }), h('td.num', { text: val })))),
