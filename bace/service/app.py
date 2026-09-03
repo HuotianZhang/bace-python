@@ -416,12 +416,34 @@ def create_app(session: Session, *, ui_dir: str | None = None,
             if since is not None:
                 for frame in session.events_since(since):
                     await ws.send_text(_dumps(frame))
+                    await asyncio.sleep(0)                  # see `pump` below
                     last = frame["seq"]
 
             async def pump() -> None:
                 nonlocal last
                 while True:
                     frame = await queue.get()
+                    # Yield to the loop, once for every frame taken off the
+                    # queue and before anything is decided about it.
+                    #
+                    # Neither `await` above suspends when there is no reason
+                    # to: `Queue.get` takes its fast path while the queue is
+                    # non-empty, and `send_text` returns as soon as the
+                    # transport buffer accepts the bytes. So a pump with a
+                    # backlog -- which is every `--sim --fast` scan, and any
+                    # burst on the rig -- runs `_dumps` on twenty-kilobyte
+                    # frames in a tight loop and never gives the loop back.
+                    # Measured against a 21 x 60 fast scan with one
+                    # subscriber, `GET /bench` went from 6 ms to a median of
+                    # 3.0 s, which is the console's rail going minutes stale
+                    # while it asks as fast as it is allowed to.
+                    #
+                    # Here rather than after the send, so the duplicate
+                    # `continue` below yields too: a reconnecting subscriber
+                    # is sent frames while its `Hello` is going out, and every
+                    # one of those is at or below the `since=` replay's `last`
+                    # -- a burst that would spin without ever suspending.
+                    await asyncio.sleep(0)
                     if frame is None:                       # dropped by the session
                         with contextlib.suppress(Exception):
                             await ws.close(code=1008, reason="fell behind; reconnect with since=")

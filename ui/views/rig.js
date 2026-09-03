@@ -2,7 +2,7 @@
 // is true: `ch-rig` in `docs/design/bace-charts-r3.js` is a static schematic
 // that ports unchanged. The plan drops this in whenever a phase runs short.
 
-import { h, fill } from '../lib/dom.js';
+import { h, fill, keyed } from '../lib/dom.js';
 import * as fmt from '../lib/format.js';
 
 export default {
@@ -19,8 +19,10 @@ export default {
 
     const off = store.subscribe((state) => {
       const rig = state.bench && state.bench.rig;
-      if (!rig) return fill(body, h('div.card', h('p.absent', 'no read-back yet')));
-      fill(body, h('div.card',
+      // `rig.toml` does not change while the service runs, and the fingerprint
+      // says so — so this is drawn once and left alone (`dom.keyed`).
+      if (!rig) return keyed(body, 'none', () => h('div.card', h('p.absent', 'no read-back yet')));
+      keyed(body, rig.fingerprint || JSON.stringify(rig.values), () => h('div.card',
         h('h2', `rig.toml · ${rig.fingerprint || ''}`),
         h('table.rows', Object.entries(rig.values || {}).map(([key, value]) => h('tr',
           h('th', { text: key }),

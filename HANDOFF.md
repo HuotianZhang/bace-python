@@ -2,7 +2,9 @@
 
 Converting `BACE_Mehrdad.vi` (LabVIEW, 907 VIs) to Python. The measurement half
 is written, tested and proven on the rig; the service over it is built and
-proven on the simulator. The UI is not started.
+proven on the simulator. The UI is under way — `docs/ui-plan.md` M0 (the event
+layer and its fixtures) and M1 (the pinned rail and the chain strip) are done;
+M2, the generated module cards, is next.
 
 Read `docs/bace-status.html` first — it is the full narrative with the evidence.
 This file is the operational summary.
@@ -143,7 +145,8 @@ Design rules that are load-bearing:
 
 ## 3. What is NOT built
 
-**`ui/`** — browser front end. **Explicit instruction from the user, 2026-09-01:**
+**`ui/`** — browser front end. **M0 and M1 are built** (`ui/README.md`,
+`docs/ui-plan.md`); M2–M6 are not. **Explicit instruction from the user, 2026-09-01:**
 
 > *"I do not want the same shape as JV console and the 331 controller. I want a
 > suitable shape for this measurement itself (the ui should be demonstrated and

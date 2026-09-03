@@ -19,10 +19,11 @@ file takes the better of the two, and says so.
 
 ## Direction
 
-### Four structural decisions
+### Five structural decisions
 
 Everything else follows from these, and each one turns a rule in
-`docs/ui-rules.md` from a discipline into a property of the code.
+`docs/ui-rules.md` from a discipline into a property of the code. (The fifth
+was added 2026-09-03, from measuring the first four running.)
 
 **1 · The forms are generated, not written.**
 
@@ -152,6 +153,35 @@ re-derive it — applied to the one place it would have been tempting. `/bench`
 touches no instrument and takes no lock (`app.py:307`), so the cost is a
 loopback request per shot phase.
 
+*Amended 2026-09-03, from measuring it in a browser.* That last sentence was
+wrong, and wrong in a way that made the rail worse than not asking at all.
+
+**The request is not free while the stream is busy.** `GET /bench` answers in
+5 ms on an idle bench and 6 ms during a run *with nobody listening* — and in a
+**median of 3.0 s** during the same run with one subscriber. The run is not
+what costs it; the fan-out is. `app.py`'s pump did `await queue.get()` and
+`await ws.send_text(...)` in a loop, and neither suspends when it has no reason
+to — `Queue.get` takes its fast path while the queue is non-empty, and
+`send_text` returns as soon as the transport accepts the bytes — so a pump with
+a backlog ran `_dumps` on twenty-kilobyte frames without ever giving the loop
+back, and every HTTP handler waited behind it. One `await asyncio.sleep(0)` per
+frame fixes it: 3.0 s → **13 ms**, and the same scan finished *faster* (a median
+of 14.1 s → 9.8 s over three repeats), because the producer's own callbacks
+were queued behind the pump too.
+
+**A replayed frame has to ask like any other.** The console gated the refetch on
+the stream's `replay` flag, reasoning that one read-back per historical frame
+would be hundreds of requests. The throttle already made that impossible — the
+whole boot replay coalesces into one — and the guard cost the rail exactly the
+frames it exists for: after a 1008 drop the client reconnects, `head` becomes
+the service's newest seq, and *every* frame to the end of a fast scan is at or
+below it. Measured over a 21 x 60 scan, the rail changed **twice** and stood
+still for 10.1 s of a 10.6 s run. The guard is gone; the policy is
+`ui/lib/watch.js`, with its own tests.
+
+Together: the rail now changes 9 times in that run and its worst stale stretch
+is 2.1 s, which is the throttle.
+
 **3 · The charts need one foundation, then six components.**
 
 `docs/design/bace-charts*.js` is not a chart library. Its sixteen elements are
@@ -260,6 +290,69 @@ one monotonic counter, and `StepPhase`, the only unjournalled frame, consumes
 no number. Gaps and `decimated.replay` belong to the *socket*, where a client
 falls behind and is dropped at 1008. Test that against a live `--sim --fast`
 scan, which the service README says will cause it; the journals cannot.
+
+**5 · The model is the render key, and the store keeps what the ring keeps.**
+
+*Added 2026-09-03, from measuring M0 and M1 in a browser.*
+
+The store notifies on every batch of frames, and a `--sim --fast` scan batches
+one per animation frame for the length of the run. With four shell renderers
+and a view all rebuilding themselves on every notify, one 21 x 60 scan built
+**110 078 DOM elements** — for a rail that changed twice, a module table that
+changed twice and a strip that changed once.
+
+That is not only waste, and the waste is not the argument. A rebuilt element is
+a *different* element: it drops the operator's text selection mid-copy (proved
+in a browser — the selection on the SMU cell is gone within 2.5 s of a running
+scan), and from M2 it would take the focus and the caret out of a parameter
+field the moment a frame arrived. Every renderer here is already a pure model
+plus a DOM function, so the rule is the one that shape makes available: **build
+the model, and touch the DOM only where it differs** (`dom.keyed`). Nothing has
+to remember to invalidate anything, which is the one thing a hand-maintained
+dirty flag always gets wrong. 110 078 elements became 21 829, and the selection
+survives.
+
+The same principle bounds the store. A decimated shot is ~14.6 kB of heap, so
+a 3780-shot scan held **61 MB** and the canonical 9 T x 5 level tree of M5 —
+forty-five leaves of the same size — would be around 830 MB, which is the tab,
+not a chart. The store now keeps the traces of the last `RING_TRACES_KEPT`
+shots, which is *the service's own number and the service's own scope*:
+`session._traces` is one `deque(maxlen=200)` for the whole session, appended on
+every `StepDone` whatever run or node it belongs to. So the ring replays the
+traces of the last 200 shots anyone took and strips the rest, and a console
+that had ever been dropped already held exactly those while one that had not
+held everything. Mirroring it makes the two the same console. Older shots keep
+every scalar and their verdict and read `tracesGone`, which is the word the
+store already had for a replayed shot — so no chart needs a second case.
+61 MB became 13.7 MB.
+
+*Corrected 2026-09-03, from a review of the change.* The first version of this
+capped **per node**, which is neither what the service does nor a bound: 200
+per leaf across those forty-five leaves is 9000 shots of arrays, ~130 MB. One
+ring of 200 is ~3 MB whatever the tree. The lesson is the one this whole
+section is about — the invariant was stated as "what the ring keeps" and then
+implemented as something else, and only reading the service's own declaration
+settled it.
+
+Neither is a micro-optimisation to do later: both are properties of the layer
+M2–M6 are written *on*, and both get more expensive to retrofit with every
+card, chart and field added above them.
+
+*And M2 proved that, 2026-09-03.* The cards landed before this decision did,
+rendering on every store notify: all six were rebuilt **737 times each in four
+seconds** of a scan, and the operator's caret went with them — focus a
+parameter field and it is gone within 2.5 s, on an *idle* bench too, because a
+power monitor at 1 Hz is enough to do it. The fix is this decision applied
+where it was written for: `cardModel` is already the pure function an entry
+becomes rows through, so its output is the key. Two details the shell did not
+need: a card is replaced **in place**, because detaching an element blurs
+whatever inside it had the focus and a rebuild of the `bace` card must not take
+the caret out of the `jv` card beside it; and the model must carry no clock, or
+the 700 ms `/bench` refetch above would rebuild every card twice a second and
+the fix would arrive through the fix (`ui/tests/fields.test.mjs` pins that).
+Idle with a monitor ticking: zero rebuilds. Through a scan: six, in the three
+cards whose read-back row actually moved. 435 506 elements became 19 762, and
+the rail’s worst stale stretch went back to the 2.8 s the shell alone gets.
 
 ### What the front end is made of
 
@@ -403,6 +496,32 @@ chip with it; park during a run aborting it and cancelling a queued `jv_dark`;
 and `ui/tests/live.test.mjs` now carries M1's own — the rail reads LIVE,
 inferred, relay on the amplifier while a run holds the worker, and nothing
 inferred outlives it.
+
+**Then measured, 2026-09-03**, which is the part M1 had not done: a headless
+browser on a live `--sim --fast` scan, counting what the shell does per frame
+rather than reading what it draws. It found that the rail M1 exists to keep
+honest was standing still for 91 % of a run, and that the shell was building a
+hundred thousand DOM elements to keep it that way. Decision 2's amendment and
+decision 5 are what came of it; the numbers, before → after on one 21 x 60 scan
+(1260 shots):
+
+| | before | after |
+|---|---|---|
+| rail changes during the run | 2 | 9 |
+| longest stretch with the rail unchanged | 10.1 s | 2.1 s |
+| worst `GET /bench` | 8.1 s | 49 ms |
+| DOM elements built | 110 078 | 21 829 |
+| JS heap at the end | 36.2 MB | 9.8 MB |
+| a selection held on the rail | lost | kept |
+| shots folded | 1260 / 1260 | 1260 / 1260 |
+
+At 3780 shots the same changes are 232 272 → 70 460 elements and
+61.1 → 13.7 MB, and the longest stale stretch 11.0 s → 2.8 s.
+
+One of them is in the service, not the console: `app.py`'s WebSocket pump never
+yielded to the event loop, so every HTTP handler queued behind it. It is
+written up in decision 2's amendment, because that is where the wrong claim
+was.
 
 ### M2 · The bench cards do work
 

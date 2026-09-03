@@ -23,7 +23,7 @@
 // answers; this file decides where they sit and what they look like, and
 // invents no value of its own — an absent reading renders as an absence.
 
-import { h, fill } from './dom.js';
+import { h, fill, keyed } from './dom.js';
 import * as fmt from './format.js';
 
 /** The relay's three nodes, left to right, as `design/BenchRail.dc.html` draws them. */
@@ -347,9 +347,18 @@ function fixLabel(item) {
 
 // -- the DOM ----------------------------------------------------------------
 
-/** The rail, into a container. One cell per value, in the design's order. */
+/**
+ * The rail, into a container. One cell per value, in the design's order.
+ *
+ * The model is the render key (`dom.keyed`): eight small objects, built on
+ * every notify because that is cheap and pure, and put on the screen only when
+ * one of them says something different from what is already there. A rail
+ * rebuilt sixty times a second to draw the same eight values is not just
+ * waste — it is the operator's selection dropped mid-copy.
+ */
 export function renderRail(el, state) {
-  fill(el, railModel(state).map(cellEl));
+  const model = railModel(state);
+  keyed(el, JSON.stringify(model), () => model.map(cellEl));
 }
 
 function cellEl(cell) {
@@ -385,7 +394,11 @@ function relayEl(cell) {
 export function renderChainStrip(el, state, { onFix, onPark, status, parkArmed } = {}) {
   const model = chainModel(state);
   const rig = (state.bench && state.bench.rig && state.bench.rig.values) || {};
-  fill(el,
+  // The model plus the two things the strip holds that the store does not: the
+  // sentence the last action came back with, and whether Park is armed. Both
+  // are part of what is drawn, so both are part of the key.
+  const key = JSON.stringify([model, rig, status, parkArmed]);
+  keyed(el, key, () => [
     h('span.sk', { text: model.total === null ? 'trigger chain' : `trigger chain ${model.ok} / ${model.total}` }),
     model.items.map((item) => h('span', { class: 'st ' + (item.level === 'ok' ? '' : 'bad') },
       h('span', { text: `${item.label} ${item.value}` }),
@@ -422,7 +435,8 @@ export function renderChainStrip(el, state, { onFix, onPark, status, parkArmed }
         ? 'park aborts the run and cancels the queue — the bench is safe now, not after the queue'
         : 'outputs off, shutter shut, router park',
       onclick: () => onPark && onPark(),
-    }, parkArmed ? 'abort the run and park?' : 'Park'));
+    }, parkArmed ? 'abort the run and park?' : 'Park'),
+  ]);
 }
 
 function rigText(rig) {
