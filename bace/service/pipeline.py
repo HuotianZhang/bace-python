@@ -89,7 +89,7 @@ LED_MATCH_V = 1e-9
 are the same illumination."""
 
 CHECKS: tuple[str, ...] = (
-    "tree.shape", "tree.owned-param", "voc.source", "voc.coupling", "led.levels",
+    "tree.shape", "tree.owned-param", "light.undone-by-park", "voc.source", "voc.coupling", "led.levels",
     "axis.geometry", "bench.instrument", "smu.ceiling", "relay.interlock",
     "bench.live-at-start", "voc.typed", "chain.led-polarity", "chain.bias-arm",
     "chain.bias-polarity", "temperature.not-wired", "temperature.inside-illumination",
@@ -1057,6 +1057,34 @@ def _c_owned_param(f: _Facts) -> list[Verdict]:
                "no module inside an illumination loop types an LED parameter")]
 
 
+def _c_light_undone_by_park(f: _Facts) -> list[Verdict]:
+    """A run that only sets the light sets nothing.
+
+    Every run ends parked -- the executor's own `finally` and then the
+    worker's, outputs off and the shutter shut -- so a tree whose only module
+    is `light` hands the bench back exactly as dark as it found it, and the
+    operator watches a run succeed and change nothing. Inside a tree the node
+    is the point: the light it sets holds for the steps after it, and park at
+    the *end* of the run is the right place for the bench to end up.
+
+    The manual form of this is a bench action, which does not go through the
+    worker and is not parked after, so the remedy names the ones that do what
+    the node would have done.
+    """
+    if f.schedule is None:
+        return _skipped("light.undone-by-park")
+    modules = [step.module for step in f.modules]
+    if not modules or set(modules) != {"light"}:
+        return [_v("ok", "light.undone-by-park", "no light-only run")]
+    return [_v("invalid", "light.undone-by-park",
+               "this run only sets the light, and every run ends parked -- outputs "
+               "off, shutter shut -- so it would hand the bench back unchanged. Set "
+               "the light with the bench actions (shutter-open / shutter-shut, "
+               "set-led-dc / set-led-pulse / led-off), which do not go through the "
+               "worker; a light node belongs before the step that needs it.",
+               f.modules[0].node_path)]
+
+
 def _c_voc_source(f: _Facts) -> list[Verdict]:
     if f.schedule is None:
         return _skipped("voc.source")
@@ -1728,6 +1756,7 @@ def _c_chain_stale(f: _Facts) -> list[Verdict]:
 _CHECKS: dict[str, Callable[[_Facts], list[Verdict]]] = {
     "tree.shape": _c_tree_shape,
     "tree.owned-param": _c_owned_param,
+    "light.undone-by-park": _c_light_undone_by_park,
     "voc.source": _c_voc_source,
     "voc.coupling": _c_voc_coupling,
     "led.levels": _c_led_levels,

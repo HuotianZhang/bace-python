@@ -117,6 +117,8 @@ SPECS = {
     "power": ModuleSpec("power", "power", "observer", "built", None, False, None, (), ()),
     "temperature": ModuleSpec("temperature", "temperature", "utility", "partial", None,
                               False, None, (), ()),
+    "light": ModuleSpec("light", "light", "utility", "built", None, False, None,
+                        ("led_v", "led_low_v"), ("illumination", "timing")),
     "park": ModuleSpec("park", "park", "utility", "built", None, False, None, (), ()),
     "wait": ModuleSpec("wait", "wait", "utility", "built", None, False, None, (), ()),
     "note": ModuleSpec("note", "note", "utility", "built", None, False, None, (), ()),
@@ -138,6 +140,15 @@ def _specs_for(name: str) -> list[ParamSpec]:
                 ParamSpec("tolerance_k", "float", 0.2, unit="K"),
                 ParamSpec("hold_s", "float", 60.0, unit="s"),
                 ParamSpec("timeout_s", "float", 1800.0, unit="s")]
+    if name == "light":
+        return [ParamSpec("shutter", "enum", "leave", choices=("open", "shut", "leave")),
+                ParamSpec("led_mode", "enum", "leave",
+                          choices=("dc", "pulse", "off", "leave")),
+                ParamSpec("led_v", "float", 1.0, unit="V"),
+                ParamSpec("led_low_v", "float", 0.4, unit="V"),
+                ParamSpec("pulse_frequency_hz", "float", 500.0, unit="Hz"),
+                ParamSpec("duty_percent", "float", 50.0, unit="%"),
+                ParamSpec("settle_s", "float", 0.0, unit="s")]
     if name == "wait":
         return [ParamSpec("seconds", "float", 1.0, unit="s")]
     if name == "note":
@@ -1060,3 +1071,22 @@ def test_the_temperature_check_tells_a_console_gone_since_start_from_an_instrume
     assert P.temperature_automatic(with_temperature(wired=True, connected=False)) is False
     assert P.temperature_automatic(with_temperature(wired=False)) is False
     assert P.temperature_automatic(None) is None
+
+
+def test_a_run_that_only_sets_the_light_is_refused_because_park_would_undo_it():
+    """Every run ends parked -- the executor's `finally` and then the worker's
+    -- so a light-only run hands the bench back exactly as dark as it found
+    it. The operator would watch a run succeed and change nothing, which is
+    the failure `ui-rules` §9 is about wearing a green tick."""
+    v = validate(module("light", shutter="open", led_mode="dc", led_v=1.02))
+    assert levels(v, "light.undone-by-park") == ["invalid"] and not v.valid
+    c = v.by_code("light.undone-by-park")[0]
+    assert "bench actions" in c.text and "shutter-open" in c.text
+
+    # Inside a tree the node is the point: it sets the light for the steps
+    # after it, and park at the end of the run is where the bench should end.
+    seq = {"kind": "loop", "loop": "repeat", "count": 1,
+           "children": [module("light", shutter="open", led_mode="dc", led_v=1.02),
+                        module("jv")]}
+    v = validate(seq)
+    assert levels(v, "light.undone-by-park") == ["ok"]
