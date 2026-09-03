@@ -171,7 +171,7 @@ class DirectTemperatureController:
                 max_setpoint_k=self.settings.limits.max_setpoint_k)
             self.last = r
             return r
-        self._watch(status)
+        self._watch(self._fault_text(status))
         r = TemperatureReading(
             kelvin=float(kelvin),
             setpoint_k=None if setpoint is None else float(setpoint),
@@ -185,9 +185,47 @@ class DirectTemperatureController:
         return r
 
     # -- the watchdog -----------------------------------------------------
-    def _watch(self, status: Any) -> None:
-        """Cut the heater after `max_consecutive_faults` bad control-sensor
-        readings, and reset the count on the first good one.
+    def _fault_text(self, status: Any) -> str | None:
+        """Anything worth cutting the heater for, or None.
+
+        Both halves, as the vendored `check_faults()` defines them: a bad
+        control-sensor reading (`RDGST?`) **and** a heater fault (`HTRST?`).
+        The console's own watchdog counted only the sensor, which leaves the
+        case this exists to catch -- an open or shorted heater load while the
+        sensor reads perfectly well, so `status.ok` resets the counter on
+        every poll and the drive is never cut. One extra query per read
+        against a fault that would otherwise never be seen.
+        """
+        if not getattr(status, "ok", True):
+            return f"control sensor reports {status}"
+        try:
+            fault = self.device.heater_fault()
+        except (TransportError, p.ProtocolError, ValueError):
+            return None     # a bus that will not answer is the read's problem
+        if fault is not p.HeaterFault.OK:
+            return "heater reports " + fault.name.replace("_", " ").lower()
+        return None
+
+    def poll_faults(self) -> str | None:
+        """One watchdog tick without a full read: two queries, no state.
+
+        For the worker to call at safe points inside a long job
+        (`service.rigs.Bench.sleeper`). The monitor cannot read while a run
+        holds the bus, and the watchdog rides on reads -- so without this a
+        fault that begins after a temperature settles, with the heater on and
+        hours of measurement to go, would go unseen until the run ended.
+        """
+        try:
+            with _LOCK:
+                fault = self.device.check_faults()
+        except Exception:                                   # noqa: BLE001
+            return None     # never raise into a run for want of a poll
+        self._watch(fault)
+        return fault
+
+    def _watch(self, fault: str | None) -> None:
+        """Cut the heater after `max_consecutive_faults` consecutive faults,
+        and reset the count on the first clean one.
 
         This is `ls331/service.py::_check_faults`, which lived in the console's
         poller. The poller did not come with the instrument code, so when the
@@ -197,22 +235,22 @@ class DirectTemperatureController:
         watching. A run only ever writes setpoints, so the heater can stay on
         for hours after the thing measuring it stopped making sense.
 
-        Counted per read, as the console counted per poll -- so it is the
-        monitor and the settle that feed it, both of which call `read()`.
-        `RANGE 0` is the documented off switch and is harmless in any
-        configuration; a failure to send it is swallowed, because a watchdog
-        that raises out of a read would take the read with it.
+        Counted per read, as the console counted per poll -- so the monitor
+        and the settle feed it, and `poll_faults` feeds it from the worker
+        while a run holds the bus. `RANGE 0` is the documented off switch and
+        is harmless in any configuration; a failure to send it is swallowed,
+        because a watchdog that raises out of a read would take the read
+        with it.
         """
         if not self.watchdog:
             return
-        if getattr(status, "ok", True):
+        if fault is None:
             self._faults = 0
             return
         self._faults += 1
         if self._faults < self.settings.limits.max_consecutive_faults:
             return
-        reason = (f"control sensor reported '{status}' on {self._faults} "
-                  "consecutive reads")
+        reason = f"{fault} on {self._faults} consecutive reads"
         self._faults = 0
         try:
             with _LOCK:

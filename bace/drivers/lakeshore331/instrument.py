@@ -284,15 +284,26 @@ class Lakeshore331:
 
         ``RANGE 0`` is the documented off switch and is harmless in any
         configuration.  For a heater driven from the analog output there is no
-        separate documented remote off, so the manual output is also zeroed and
-        the loop dropped to open loop.  VERIFY THIS ON THE BENCH before relying
+        separate documented remote off, so the manual output is zeroed and the
+        loop dropped to open loop.  VERIFY THIS ON THE BENCH before relying
         on it (see README, "Bench checks").
+
+        **Diverges from the console project, 2026-09-03.**  That copy zeroed
+        ``MOUT`` and stopped, which its own docstring already contradicted:
+        ``MOUT`` is the *manual* output and a Loop 2 still in PID mode goes on
+        driving the analog output from its setpoint, so the kill path did not
+        kill anything on a loop-2 cryostat.  ``CMODE`` follows the zero -- in
+        that order, because switching to open loop first would drive whatever
+        stale value ``MOUT`` happened to hold.  This rig is loop 1, so the
+        branch is untested on hardware here.
         """
         log.error("EMERGENCY STOP: %s", reason)
         self._write("RANGE 0", reason="emergency stop: %s" % reason)
         if self.discovery is not None and self.discovery.control_loop == 2:
             self._write("MOUT %d,%s" % (self._loop, p.fmt_number(0.0, 2)),
                         reason="emergency stop: zero manual output")
+            self._write("CMODE %d,%d" % (self._loop, int(p.ControlMode.OPEN_LOOP)),
+                        reason="emergency stop: drop loop to open loop")
 
     def check_faults(self) -> Optional[str]:
         """Return a description of any fault worth cutting the heater for."""

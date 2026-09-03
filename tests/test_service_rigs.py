@@ -294,8 +294,14 @@ def test_shot_diagnostics_and_the_snapshot_stub():
     assert stub["power"]["available"] is None
     json.dumps(stub)
     assert b.sleep(0.0) is None and b.fast is True
+    # not `is time.sleep` any more: every non-fast sleep is the worker's own
+    # chance to feed the 331 watchdog, so it goes through `sleeper`'s closure
+    # whether or not anything can interrupt it (`_feed_watchdog`)
     import time
-    assert Bench.build_simulated(RigConfig(), fast=False).sleep is time.sleep
+    slow = Bench.build_simulated(RigConfig(), fast=False)
+    began = time.monotonic()
+    slow.sleep(0.05)
+    assert time.monotonic() - began >= 0.04, "a non-fast sleep really sleeps"
 
 
 # -- the temperature console --------------------------------------------------------

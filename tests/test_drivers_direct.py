@@ -282,6 +282,97 @@ def test_the_watchdog_cuts_the_heater_after_repeated_sensor_faults(monkeypatch):
         off.close()
 
 
+def test_the_watchdog_counts_heater_faults_and_not_only_the_sensor(monkeypatch):
+    """An open or shorted heater load while the control sensor reads
+    perfectly well: `status.ok` is True on every poll, so a sensor-only
+    watchdog resets its count forever and the drive is never cut. The
+    vendored `check_faults()` was written to look at both -- and was dead
+    code until this counted both too."""
+    t = _direct331(monkeypatch)
+    writes: list[str] = []
+    try:
+        t.device._write = lambda msg, reason="": writes.append(msg)
+        t.device.reading_status = lambda channel="A": p.parse_reading_status("0")
+        t.device.heater_fault = lambda: p.HeaterFault.OPEN_LOAD
+
+        t.read(); t.read()
+        assert writes == []
+        t.read()
+        assert "RANGE 0" in writes
+        assert t.heater_cut and "heater reports open load" in t.heater_cut
+    finally:
+        t.close()
+
+
+def test_the_worker_feeds_the_watchdog_while_a_run_holds_the_bus(monkeypatch):
+    """The gap the bus lock opened. The monitor cannot read while a run holds
+    the bus and the watchdog rides on reads, so a heater fault beginning
+    after a temperature settles -- with hours of measurement left -- would go
+    unseen until the run ended. The worker feeds it from its own sleeps,
+    where it already holds the bus."""
+    import time as _time
+
+    from bace.service.rigs import Bench
+
+    t = _direct331(monkeypatch)
+    try:
+        b = Bench.build_simulated(RigConfig(), fast=False)
+        b.rig.temperature = t
+        polls: list[int] = []
+        monkeypatch.setattr(t, "poll_faults", lambda: polls.append(1))
+
+        sleep = b.sleeper()
+        sleep(0.01)
+        assert polls == [1], "the first sleep of a run feeds it"
+
+        # rate-limited on a bench-wide clock: a run of many short settles is
+        # not a stream of GPIB queries
+        for _ in range(5):
+            sleep(0.01)
+        assert polls == [1]
+
+        # once the interval has elapsed it polls again, exactly once: the
+        # limiter still holds for the rest of that same sleep
+        b._watchdog_at = _time.monotonic() - 1000.0
+        sleep(0.01)
+        assert polls == [1, 1]
+    finally:
+        t.close()
+
+    # a console-backed 331 has no `poll_faults` and the bench must not care
+    b = Bench.build_simulated(RigConfig(), fast=False)
+    b.rig.temperature = ConsoleTemperatureController("http://x:8331")
+    b.sleeper()(0.01)                       # must not raise
+
+
+def test_a_loop_two_emergency_stop_drops_the_loop_to_open_loop(monkeypatch):
+    """`MOUT 2,0` alone kills nothing: the manual output is only used in open
+    loop, so a Loop 2 still in PID goes on driving the analog output from its
+    setpoint. The console project's copy stopped after the zero, which its
+    own docstring already contradicted."""
+    t = _direct331(monkeypatch, control_loop=2)
+    writes: list[str] = []
+    try:
+        t.device._write = lambda msg, reason="": writes.append(msg)
+        t.device.emergency_stop("test")
+        assert writes[0] == "RANGE 0"
+        assert writes[1].startswith("MOUT 2,"), "zero before the mode change"
+        assert writes[2] == "CMODE 2,%d" % int(p.ControlMode.OPEN_LOOP), (
+            "switching to open loop first would drive a stale MOUT")
+    finally:
+        t.close()
+
+    # loop 1 is the current rig: RANGE 0 is the whole kill path
+    one = _direct331(monkeypatch)
+    writes = []
+    try:
+        one.device._write = lambda msg, reason="": writes.append(msg)
+        one.device.emergency_stop("test")
+        assert writes == ["RANGE 0"]
+    finally:
+        one.close()
+
+
 def test_a_watchdog_that_cannot_cut_says_so_instead_of_breaking_the_read(monkeypatch):
     """A watchdog that raised out of `read()` would take the reading with it,
     and the monitor would report a dead instrument rather than a live one
