@@ -38,8 +38,14 @@ def run(rig, spec, cfg=None, **kw):
     # hidden, because `trigger_offset_s = 47e-9` pushed the simulated pulse late
     # by almost exactly the missing latency. Measuring the offset to be zero
     # took the compensation away and exposed it.
+    #
+    # `invert_polarity=True` with the generator at NORM is the pair the rig
+    # validated (`run.toml`): through the inverting amplifier the device then
+    # rests at `v_pre` and is pulsed to `v_coll`. The simulator models that
+    # amplifier and that rest level, so the recipe with neither flag prebiases
+    # the simulated device at `-v_coll` -- exactly as the rig does.
     cfg = cfg or RunConfig(n_averages=200, settle_s=0.0, dark_settle_s=0.0,
-                           t0_int_s=2.71e-7)
+                           t0_int_s=2.71e-7, invert_polarity=True)
     return list(run_transient_scan(rig, spec, cfg, sleep=NO_SLEEP, **kw))
 
 
@@ -89,6 +95,35 @@ def test_the_simulator_reports_in_the_rigs_sign_convention():
     assert q_minus < 0 < q_plus, "extraction reads negative on this bench"
     assert q_minus == pytest.approx(-q_plus, rel=1e-12)
     assert peak_minus == pytest.approx(-peak_plus, rel=1e-12)
+
+
+@pytest.mark.parametrize("led_v", [1.010, 1.020])
+def test_a_lit_shot_recovers_the_photocharge_under_the_validated_recipe(led_v):
+    """The service's own recipe -- `invert_polarity = true` with `:OUTP1:POL
+    NORM`, a pinned `vpre` above V_oc and the LED above its 1.000 V threshold
+    -- through the simulator, and the charge it hands back is the device
+    model's, not a fifth of a coulomb.
+
+    Until 2026-09-03 the simulated bench read the prebias off the generator's
+    *high* level through a non-inverting amplifier whatever the polarity, so
+    this recipe prebiased the device at `-v_coll` = 2 V, 1.1 V above V_oc,
+    where the charge model's +20 e-fold clip let it store 0.18 C and the
+    `photo` trace peaked at 2e6 A. `ui/fixtures/stream_bace_sim.jsonl` never
+    showed it because it was recorded at `led_v = 1.0`, exactly the threshold,
+    where `led_current()` is zero and so is the photocharge."""
+    sim, rig = build(drive=led_v)
+    spec = ScanSpec(axis=Axis("vpre", 1.0, 1.0), vcoll=-2.0, n_loops=2)
+    f = finished(run(rig, spec, cfg=RunConfig(n_averages=200, settle_s=0.0,
+                                                dark_settle_s=0.0, t0_int_s=2.71e-7,
+                                                invert_polarity=True,
+                                                output_polarity="NORM")))
+    expected = sim.bench.device.photocharge(1.0, led_v)
+    assert expected > 0, "the LED must be lit for this to test anything"
+    recovered = abs(float(f.q_mean[0]))
+    assert 0.5 * expected < recovered < 2.0 * expected, (
+        f"recovered {recovered:.3e} C against photocharge {expected:.3e} C")
+    # q / tau_ext: tens of milliamps for a charge a few times q_ref, not megaamps.
+    assert np.abs(f.photo_averaged).max() < 1.0
 
 
 def test_charge_is_insensitive_to_the_collection_field():

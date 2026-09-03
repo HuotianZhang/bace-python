@@ -77,6 +77,7 @@ shape `GET /runs/{id}/data` answers, because a browser cannot open HDF5.
 | `bench_running_sim.json` | `GET /bench` taken **mid-scan**: the four instruments the run implies, every one `how: "inferred"`. Nothing at rest carries a single one |
 | `stream_bace_sim.jsonl`, `stream_jv_sim.jsonl` | the wire: traces decimated with `stride`/`n_full`, and the `StepPhase` frames that are live-only |
 | `stream_pipeline_sim.jsonl` | node identity: two `bace` nodes under one `run_id`, each numbering its own shots from one, and the loop's `Progress` beside the leaf's |
+| `stream_tree_sim.jsonl` | the M4 monitor: an illumination loop at 1.010 and 1.020 V with one `bace` inside, so the loop chart has photocharges of the order of the archive's 3.65e-10 C to draw. `stream_bace_sim.jsonl` is recorded at the recipe's `led_v = 1.0`, exactly the simulated LED's threshold, so its Q is noise about zero. Re-record with `tools/record_ui_fixtures.py --only tree` |
 
 Everything with `_sim` in its name came off `--sim`, and says so in its name on
 purpose: a simulated J-V is a plausible-looking curve, and must never be

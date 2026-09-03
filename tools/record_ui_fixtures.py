@@ -15,6 +15,13 @@ beside them — and two do not, because nothing writes them:
   `metrics + label + n_points` with no arrays. The J-V chart would otherwise
   have nothing to draw.
 
+The M4 monitor develops against a **tree**: an illumination loop over two LED
+levels above the 1.000 V threshold (1.010 and 1.020 V) with one `bace` inside,
+so the loop chart has photocharges of the order of the archive's 3.65e-10 C to
+draw. `stream_bace_sim.jsonl` cannot stand in for it: it is recorded at the
+recipe's `led_v = 1.0`, exactly the threshold, where the simulated LED is dark
+and every Q is noise about zero.
+
 And two shapes exist only while a service is running: a **live** `StepDone`,
 its traces decimated with `stride` and `n_full` -- the journal drops the traces
 and the HDF5 keeps them undecimated, so neither is that frame -- and a
@@ -25,7 +32,14 @@ is the half of the rail the operator looks at for hours.
 So this records all of it against whatever service it is pointed at:
 
     python3 tools/record_ui_fixtures.py                        # --sim, port 8900
+    python3 tools/record_ui_fixtures.py --only tree            # just that fixture
     py -3 tools/record_ui_fixtures.py --tag rig --url http://127.0.0.1:8900
+
+`--only` names which recordings to make (`jv`, `bace`, `pipeline`, `tree`,
+`bench`, `hello`; repeatable), for re-recording one fixture after a change to
+what it carries without disturbing the rest. The J-V is recorded first when
+it is asked for, so `hello` can carry its V_oc; asked for alone, `hello`
+carries whatever the service already holds.
 
 `--tag` names the bench the recording came off (`sim` by default) and is part
 of every file name, because a simulated J-V is a plausible-looking curve and
@@ -77,6 +91,10 @@ def _dump(path: str, obj, *, jsonl: bool = False) -> None:
             fh.write("\n")
     size = os.path.getsize(path)
     print(f"  {os.path.relpath(path, REPO)}  {size/1024:.0f} KB")
+
+
+RECORDINGS: tuple[str, ...] = ("jv", "bace", "pipeline", "tree", "bench", "hello")
+"""What `--only` can name, in the order they are recorded."""
 
 
 # --- one run, with every frame it produced ----------------------------------
@@ -205,7 +223,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--timeout-s", type=float, default=600.0, help="per run")
     ap.add_argument("--with-full-data", action="store_true",
                     help="also dump the transient's undecimated /runs/{id}/data (megabytes)")
+    ap.add_argument("--only", action="append", choices=sorted(RECORDINGS), default=None,
+                    help="record only these (repeatable); default: everything")
     a = ap.parse_args(argv)
+    wanted = set(a.only) if a.only else set(RECORDINGS)
 
     base = a.url.rstrip("/")
     ws_url = base.replace("http://", "ws://").replace("https://", "wss://") + "/events"
@@ -219,6 +240,33 @@ def main(argv: list[str] | None = None) -> int:
           f"mode {who['mode']}{' fast' if who.get('fast') else ''}, tag {tag!r}")
 
     # 1 · a J-V with a light curve and a dark one: the curves, and the HDF5.
+    if "jv" in wanted:
+        _record_jv(a, base, ws_url, tag)
+    if "bace" in wanted:
+        _record_bace(a, base, ws_url, tag)
+    if "pipeline" in wanted:
+        _record_pipeline(a, base, ws_url, tag)
+    if "tree" in wanted:
+        _record_tree(a, base, ws_url, tag)
+    if "bench" in wanted:
+        # 4 · the bench mid-run: the `inferred` overlay, which exists nowhere at
+        #     rest. Recorded before the read-back below, because it needs a run.
+        print("bench, mid-run …")
+        _dump(os.path.join(a.out, f"bench_running_{tag}.json"),
+              _bench_running(base, timeout_s=a.timeout_s))
+    if "hello" in wanted:
+        # 5 · the bench snapshot, as the console gets it on connect — recorded
+        #     last, so it carries the V_oc the J-V measured and both runs on the
+        #     modules' `last`, which is what the rail and the cards develop against.
+        _request(f"{base}/bench/read", "POST")
+        _dump(os.path.join(a.out, f"hello_{tag}.json"), asyncio.run(_hello(ws_url)))
+
+    print("done. `python3 tools/make_ui_fixtures.py` builds the derived ones "
+          "(the acceptance HDF5 as JSON) beside these.")
+    return 0
+
+
+def _record_jv(a, base: str, ws_url: str, tag: str) -> None:
     print("jv_bace …")
     jv_frames, jv_posted = asyncio.run(_run_and_capture(
         ws_url, base,
@@ -247,6 +295,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {os.path.relpath(dest, REPO)}  {os.path.getsize(dest)/1024:.0f} KB  "
               f"(from {h5})")
 
+
+def _record_bace(a, base: str, ws_url: str, tag: str) -> None:
     # 2 · a short transient scan: live StepDone frames, decimated as the wire
     #     sends them, and the StepPhase frames that exist nowhere else.
     print("bace …")
@@ -265,6 +315,8 @@ def main(argv: list[str] | None = None) -> int:
         # it in exactly this endpoint's shape.
         _dump(os.path.join(a.out, f"bace_{tag}.json"), _request(f"{base}/runs/{bace_id}/data"))
 
+
+def _record_pipeline(a, base: str, ws_url: str, tag: str) -> None:
     # 3 · a pipeline: two module nodes under one `run_id`, each numbering its
     #     own shots from one. Nothing else in the fixture set has a `node_path`
     #     that is not the module's own name, and node identity is exactly what
@@ -284,21 +336,27 @@ def main(argv: list[str] | None = None) -> int:
         timeout_s=a.timeout_s, path="/pipelines"))
     _dump(os.path.join(a.out, f"stream_pipeline_{tag}.jsonl"), pipe_frames, jsonl=True)
 
-    # 4 · the bench mid-run: the `inferred` overlay, which exists nowhere at
-    #     rest. Recorded before the read-back below, because it needs a run.
-    print("bench, mid-run …")
-    _dump(os.path.join(a.out, f"bench_running_{tag}.json"),
-          _bench_running(base, timeout_s=a.timeout_s))
 
-    # 5 · the bench snapshot, as the console gets it on connect — recorded
-    #     last, so it carries the V_oc the J-V measured and both runs on the
-    #     modules' `last`, which is what the rail and the cards develop against.
-    _request(f"{base}/bench/read", "POST")
-    _dump(os.path.join(a.out, f"hello_{tag}.json"), asyncio.run(_hello(ws_url)))
-
-    print("done. `python3 tools/make_ui_fixtures.py` builds the derived ones "
-          "(the acceptance HDF5 as JSON) beside these.")
-    return 0
+def _record_tree(a, base: str, ws_url: str, tag: str) -> None:
+    # 3b · the M4 tree: an illumination loop at two drives above the LED's
+    #     1.000 V threshold, one `bace` inside, two loops of a pinned prebias.
+    #     The loop chart draws Q per loop and Q(axis) from this, so the shots
+    #     must carry a photocharge -- which is exactly what the `bace` fixture
+    #     above lacks, recorded at the recipe's `led_v = 1.0` where the
+    #     simulated LED is dark. The module does not type `led_v`: the loop
+    #     owns it (`tree.owned-param`).
+    print("tree …")
+    tree = {"kind": "loop", "loop": "illumination", "levels_v": [1.010, 1.020],
+            "led_low_v": 0.4, "led_settle_s": 0.0, "children": [
+                {"kind": "module", "module": "bace",
+                 "params": {"axis_name": "delay_ns", "axis_start": 0.0, "axis_stop": 100.0,
+                            "axis_step": 100.0, "centre_on_voc": False, "n_loops": 2,
+                            "vpre": 1.0, "vcoll": -2.0, "store_shots": False,
+                            "record_length": 500}}]}
+    tree_frames, _ = asyncio.run(_run_and_capture(
+        ws_url, base, {"tree": tree, "name": "ui-fixture-tree"},
+        timeout_s=a.timeout_s, path="/pipelines"))
+    _dump(os.path.join(a.out, f"stream_tree_{tag}.jsonl"), tree_frames, jsonl=True)
 
 
 if __name__ == "__main__":

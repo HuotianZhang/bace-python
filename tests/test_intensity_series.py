@@ -22,7 +22,10 @@ from bace.storage.naming import RunMetadata
 from bace.storage.series import SeriesRecorder, record
 
 NO_SLEEP = lambda s: None
-RUN = RunConfig(n_averages=32, settle_s=0.0, dark_settle_s=0.0, record_length=400)
+# `invert_polarity=True` with NORM is the pair the rig validated; the simulator
+# models the inverting amplifier, so without it the device rests at `-v_coll`.
+RUN = RunConfig(n_averages=32, settle_s=0.0, dark_settle_s=0.0, record_length=400,
+                invert_polarity=True)
 
 
 class WatchfulRouter:
