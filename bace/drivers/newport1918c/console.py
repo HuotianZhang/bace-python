@@ -111,10 +111,11 @@ class ConsolePowerMeter:
             ) from exc
         except urllib.error.URLError as exc:
             raise PowerMeterError(
-                f"cannot reach the 1918-C console at {self.base_url} — start it "
-                "(Start Console.bat in the power-meter project) or run without an "
-                "intensity reading. Opening the meter directly here would fail "
-                "anyway while the console holds it."
+                f"cannot reach the 1918-C console at {self.base_url}. rig.toml names "
+                "it, so this program will not open the meter itself — only one "
+                "process can hold the USB device. Either start that console, or "
+                "clear [power_meter] console and let the service own the meter "
+                "(the default)."
             ) from exc
         except json.JSONDecodeError as exc:
             raise PowerMeterError(f"console returned non-JSON from {path}") from exc
