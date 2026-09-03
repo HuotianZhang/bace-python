@@ -533,7 +533,12 @@ instruction 2026-09-02; the shutter is the light switch).
 V_oc source resolution for a **manual** run (`build()`): `voc` param typed →
 `how="typed"`, else the source in scope (`ctx.voc` — the session's most recent
 light J-V curve at `led_v`, |Δ| ≤ 1e-9 V), else `measure_dc`, else invalid when
-`centre_on_voc`. In a **pipeline** the resolver (`pipeline._voc`, §7) chooses one
+`centre_on_voc`. An **as-found** `jv` curve qualifies only if its read-back put
+the LED in **DC**: under a pulsing lamp the Keithley integrates across the
+pulse's light and dark phases, so the crossing is a time average and no V_oc —
+the same reason `measure_dc` switches the generator to DC before measuring one.
+The curve is still filed as light; it just provides no source, and the run says
+so on a warning `Notice`. In a **pipeline** the resolver (`pipeline._voc`, §7) chooses one
 first — a jv_bace in scope at this level, then `measure_dc`, then a typed value,
 then the session's — and hands `build()` a schedule where a chosen measurement
 has cleared `voc` and a chosen typed value left `ctx.voc` unset, so the two

@@ -195,6 +195,34 @@ def test_a_jv_provides_a_voc_only_from_a_curve_read_as_lit(tmp_path):
         assert voc.value == pytest.approx(s.bench.sim.bench.device.voc(1.02), abs=0.02)
 
 
+def test_a_jv_under_a_pulsing_lamp_is_lit_and_still_provides_no_voc(tmp_path):
+    """The scenario end to end: `light(led_mode="pulse", shutter="open")` and
+    then a `jv`. The read-back is honest -- lit, at the pulse high level -- and
+    the curve is filed as light. But the Keithley integrates across the
+    pulse's light and dark phases, so its crossing is a time average, and a
+    `bace` centred on that same level would take it as the axis centre with
+    the coupling check finding the two levels in perfect agreement.
+
+    The DC half of the same pair is the control: same level, same module, and
+    it *does* provide a source."""
+    with make_session(tmp_path) as s:
+        s.bench_action("set-led-pulse", {"level": 1.02})
+        s.bench_action("shutter-open")
+        chopped, _ = s.submit(tree_for_module("jv", {"step_v": 0.05}))
+        assert s.wait_run(chopped, TIMEOUT)
+        assert s.session_voc is None, "a chopped lamp is no V_oc source"
+
+        # Re-opened, because every run ends parked and park shuts the
+        # shutter -- the same fact `light.undone-by-park` refuses over.
+        s.bench_action("set-led-dc", {"level": 1.02})
+        s.bench_action("shutter-open")
+        steady, _ = s.submit(tree_for_module("jv", {"step_v": 0.05}))
+        assert s.wait_run(steady, TIMEOUT)
+        voc = s.session_voc
+        assert voc is not None and (voc.how, voc.led_v) == ("jv", 1.02)
+        assert s.errors == []
+
+
 def test_a_curve_of_unknown_illumination_never_becomes_a_voc_source():
     """The unknown case, without a bench that can be made blind: the capture
     keys on `dark is False`, so `None` is refused where `False` is taken."""
@@ -212,8 +240,45 @@ def test_a_curve_of_unknown_illumination_never_becomes_a_voc_source():
     step = types.SimpleNamespace(node_path="jv", module="jv")
     ctx = types.SimpleNamespace(run_id="r")
     for dark in (True, None, False):
-        ex._capture(curve(dark), step, ctx)
+        assert ex._capture(curve(dark), step, ctx) is None
     assert [v.how for v in captured] == ["jv"], "only the curve read as lit"
+
+
+def test_a_curve_found_under_a_chopped_lamp_never_becomes_a_voc_source():
+    """`light(led_mode="pulse", shutter="open")` then `jv`: the read-back is
+    honest -- lit, at the pulse high level -- but the Keithley integrates
+    across the pulse's light and dark phases, so its interpolated crossing is
+    a time average that is nobody's V_oc. `_build_bace` already knows this;
+    it is why `measure_dc` switches the generator to DC before measuring one.
+    Taken as a source, a `bace` centred on the same level would accept it and
+    the coupling check -- which compares *drive levels* -- could not tell.
+
+    Only as-found curves are asked. `illumination` is None on a `manage`
+    curve, where `_set_illumination` set the LED to DC itself.
+    """
+    from bace.experiment.jv import JVCurveDone, JVMetrics
+    from bace.service.executor import _Executor
+
+    captured = []
+    curve = lambda found: JVCurveDone(  # noqa: E731
+        index=0, label="as found 1.020 V", dark=False, led_level_v=1.02,
+        direction="forward", voltage=np.array([0.0, 1.0]),
+        current=np.array([-1.0, 1.0]), density=None,
+        metrics=JVMetrics(voc=0.9, jsc=-1.0, p_max=None, v_mpp=None, j_mpp=None,
+                          fill_factor=None),
+        illumination=found)
+    ex = _Executor.__new__(_Executor)
+    ex.providers, ex.on_voc = {}, captured.append
+    step = types.SimpleNamespace(node_path="jv", module="jv")
+    ctx = types.SimpleNamespace(run_id="r")
+
+    refused = ex._capture(curve({"led_mode": "PULSE"}), step, ctx)
+    assert captured == [], "a chopped lamp gives no source"
+    assert refused is not None and "time average" in refused, "and says so"
+
+    assert ex._capture(curve({"led_mode": "DC"}), step, ctx) is None
+    assert ex._capture(curve(None), step, ctx) is None, "a managed curve is not asked"
+    assert [v.how for v in captured] == ["jv", "jv"]
 
 
 def test_a_jv_bace_gives_the_session_its_voc_and_a_manual_bace_centres_on_it(tmp_path):

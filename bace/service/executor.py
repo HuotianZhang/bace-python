@@ -431,8 +431,10 @@ class _Executor:
             gen = self.catalogue.build(name, values, ctx, self.rig)
             for ev in gen:
                 tally.handle(ev)
-                self._capture(ev, step, ctx)
+                refused = self._capture(ev, step, ctx)
                 yield ev
+                if refused is not None:
+                    yield E.Notice("warning", refused)
         except AbortNow:
             # An abort that arrived while a module waited for the operator
             # (the `temperature` module's hook): not a failure of the node,
@@ -574,7 +576,7 @@ class _Executor:
                 return source
         return None
 
-    def _capture(self, ev: E.Event, step: Step, ctx: RunContext) -> None:
+    def _capture(self, ev: E.Event, step: Step, ctx: RunContext) -> str | None:
         """Binding 2, the measuring half: a light curve with a V_oc becomes a
         source keyed by the drive it was measured at.
 
@@ -593,11 +595,36 @@ class _Executor:
         validator's question ("will this node have produced a V_oc by then?"),
         which `jv` cannot promise before it runs, and this answers the
         run's ("did one come out?").
+
+        **And lit is not enough: an as-found curve must have been found under
+        DC.** `light(led_mode="pulse", shutter="open")` leaves the lamp
+        chopping at 500 Hz, and the read-back reports that honestly -- lit, at
+        the pulse high level. But the Keithley integrates across the pulse's
+        light and dark phases, so the crossing it interpolates is a time
+        average that is nobody's V_oc. `_build_bace` already knows this: it is
+        exactly why `measure_dc` switches the 33220A to DC before it measures
+        one. A `bace` centred on the pulse level would then take that average
+        as its axis centre, and the coupling check -- which compares drive
+        levels, and would find them equal -- cannot tell.
+
+        Only *as-found* curves are asked: `illumination` is None on a `manage`
+        curve, where `_set_illumination` set the LED to DC itself, and on
+        `jv_bace`, whose light is its own business.
         """
         if not isinstance(ev, JVCurveDone) or ev.dark is not False:
             return
         if ev.metrics.voc is None or ev.led_level_v is None:
             return
+        found = ev.illumination
+        if found is not None and str(found.get("led_mode") or "").upper() != "DC":
+            # Said out loud, because nothing else would say it. An unknown
+            # curve is already warned about by `run_jv`; this one is a
+            # perfectly good lit curve, and the only sign that its V_oc was
+            # not taken would be a later `bace` failing to find a source.
+            return ("V_oc not taken from this curve: the LED was in "
+                    f"{found.get('led_mode')}, and a curve measured under a "
+                    "chopped lamp gives a time average, not a V_oc. Set the "
+                    "LED to DC (or use jv_bace / measure_dc) for a source.")
         source = VocSource(value=float(ev.metrics.voc), led_v=float(ev.led_level_v),
                            run_id=ctx.run_id, node_path=step.node_path,
                            how=str(step.module))
