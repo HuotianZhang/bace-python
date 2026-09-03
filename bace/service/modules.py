@@ -914,8 +914,15 @@ class Catalogue:
                                 "text": f"no {' or '.join(blind)} to read · the curve "
                                         "will be recorded as unknown, not as dark"})
         elif name == "light":
-            missing("led", "the LED is not on this bench")
-            missing("shutter", "the shutter is not on this bench")
+            # Only what this node actually sets, the same test `_build_light`
+            # makes: the point of the module is that either half can be left
+            # alone, so a shutter-only node on a bench with no LED is
+            # perfectly runnable and must not be blocked by one.
+            if p["led_mode"] != "leave":
+                missing("led", f"led_mode {p['led_mode']}, and the LED is not on this bench")
+            if p["shutter"] != "leave":
+                missing("shutter", f"shutter {p['shutter']}, and the shutter is not "
+                                   "on this bench")
         elif name == "power":
             if "power" in unavailable:
                 out.append({"code": "power", "text": unavailable["power"]})
@@ -1399,6 +1406,10 @@ class Catalogue:
                                  else "light" if found["lit"] else "dark"),
                 "led_mode": found["led_mode"] or "?",
                 "led_level_v": found["led_level_v"],
+                # The output flag too, or `LiveState` overlays mode and
+                # level onto the *Start* snapshot's stale one and the rail
+                # shows the LED off through an illuminated sweep.
+                "led_output": found["led_output"],
             })
             yield E.Notice("info", "light: " + _light_summary(asked, found))
 

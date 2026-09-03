@@ -175,3 +175,46 @@ def test_the_session_snapshot_says_live_while_a_scan_is_inside_its_acquisition(t
         seqs = [f["seq"] for f in got if f["seq"] is not None]
         assert seqs == sorted(seqs) and len(set(seqs)) == len(seqs), "the numbered frames are intact"
         assert s.errors == []
+
+
+def test_a_light_node_puts_its_led_read_back_on_the_rail(tmp_path):
+    """A `light` node switching the generator on from parked is exactly what
+    the snapshot Start took cannot know: it was taken before the node ran, and
+    while the run holds the worker nothing re-reads the bench. Without the
+    output flag on the event, the overlay set mode and level onto the old
+    `output: False` and the rail showed the LED off through an illuminated
+    `jv` sweep -- and `jv` is the module whose *curve label* comes from that
+    same light."""
+    live = LiveState(RigConfig())
+    base = Bench.build_simulated(RigConfig()).read_back()["instruments"]
+    assert base["led"]["output"] is False, "parked: the generator is off"
+
+    live.apply(E.InstrumentState({"shutter": "open", "illumination": "light",
+                                  "led_mode": "DC", "led_level_v": 1.02,
+                                  "led_output": True}), None)
+    over = live.overlay(base)
+    assert over["led"]["output"] is True and over["led"]["how"] == "inferred"
+    assert (over["led"]["mode"], over["led"]["high_v"]) == ("DC", 1.02)
+    assert over["shutter"] == {"open": True, "how": "inferred"}
+
+    # And the other direction: `led_mode=off` has to be able to turn it back.
+    live.apply(E.InstrumentState({"shutter": "shut", "illumination": "dark",
+                                  "led_mode": "OFF", "led_output": False}), None)
+    assert live.overlay(base)["led"]["output"] is False
+
+
+def test_an_unreadable_light_leaves_the_rail_alone():
+    """`illumination_state` reports `None` for what it could not read, and the
+    event carries those Nones. None is not False: the overlay must not claim
+    the LED is off because nobody could say."""
+    live = LiveState(RigConfig())
+    base = Bench.build_simulated(RigConfig()).read_back()["instruments"]
+    base = {**base, "led": {**base["led"], "output": True}}
+    live.apply(E.InstrumentState({"shutter": "?", "illumination": "unknown",
+                                  "led_mode": "?", "led_level_v": None,
+                                  "led_output": None}), None)
+    over = live.overlay(base)
+    assert over["led"]["output"] is True, "nothing was read, so nothing is claimed"
+    assert over["shutter"] == base["shutter"], "and `?` is not a shutter position"
+    assert over["led"]["mode"] == base["led"]["mode"], (
+        "`?` must not overwrite a real mode with 'unknown' *and* mark it inferred")

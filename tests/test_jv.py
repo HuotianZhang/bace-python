@@ -528,3 +528,64 @@ def test_an_unknown_curve_has_no_dark_attribute_in_the_file(tmp_path):
         group = f["curves"][sorted(f["curves"])[0]]
         assert group.attrs["illumination"] == "unknown"
         assert "dark" not in group.attrs
+
+
+def test_a_driver_that_was_asked_and_would_not_answer_is_unread_not_cached():
+    """`Agilent33220A.read_state()` answers `output: None` when `:OUTP?` goes
+    unanswered and `mode: "?"` when `FUNC:SHAP?` does, while the instance still
+    holds the flags it last set. Reading the cache there turns "the generator
+    did not reply" into a measurement -- and the cache is most likely to be
+    stale exactly when it matters, after somebody used the front panel.
+
+    The `"?"` half is the sharper one: `"?" != "OFF"` is true, so an unread
+    mode used to count *towards* lit."""
+    sim, rig = build()
+    rig.shutter.unblock()
+
+    class Deaf:
+        """Answers read_state, and read_state answers nothing."""
+
+        mode = "DC"                     # the stale cache, saying the LED is on
+        output_enabled = True
+        last_levels = (1.02, None)
+
+        def __init__(self, **state):
+            self._state = {"output": None, "mode": "?", "high_v": 1.02, **state}
+
+        def read_state(self):
+            return dict(self._state)
+
+    rig.led = Deaf()
+    state = illumination_state(rig)
+    assert state["lit"] is None, "no output read-back is not a light reading"
+    assert state["led_output"] is None and state["led_mode"] is None
+    assert any("OUTP?" in u for u in state["unread"])
+    assert any("FUNC:SHAP?" in u for u in state["unread"])
+
+    # Half an answer is still not an answer.
+    rig.led = Deaf(output=True)
+    assert illumination_state(rig)["lit"] is None, "the mode is still unread"
+    rig.led = Deaf(mode="DC")
+    assert illumination_state(rig)["lit"] is None, "the output is still unread"
+
+    # Both read: now it is a reading.
+    rig.led = Deaf(output=True, mode="DC")
+    got = illumination_state(rig)
+    assert got["lit"] is True and got["unread"] == []
+
+    # And the curve follows: unknown, never dark.
+    rig.led = Deaf()
+    curve = [e for e in run(rig, _leave()) if isinstance(e, JVCurveDone)][0]
+    assert curve.dark is None and curve.label == "as found unknown"
+
+
+def test_a_driver_with_no_read_state_still_uses_its_own_flags():
+    """The simulator, and any driver that never claimed to read back: its
+    flags are the only account there is, and using them is not a claim about
+    an instrument someone may have touched."""
+    sim, rig = build()
+    rig.shutter.unblock()
+    rig.led.set_dc(1.02)
+    rig.led.enable_output(True)
+    assert not hasattr(rig.led, "read_state"), "the simulated LED has no read-back"
+    assert illumination_state(rig)["lit"] is True

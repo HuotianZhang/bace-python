@@ -52,8 +52,9 @@ function header(model, ctx, busy, blocked) {
   for (const action of model.actions) {
     buttons.push(h('button.btns', {
       disabled: busy || null,
-      title: busy ? 'a run holds the worker; every action but park answers 409' : `POST /bench/actions/${action.action}`,
-      onclick: () => ctx.act(action),
+      title: busy ? 'a run holds the worker; every action but park answers 409'
+        : `POST /bench/actions/${action.action}`,
+      onclick: () => ctx.act(model, action),
     }, action.label));
   }
   for (const [i, run] of model.run.entries()) {

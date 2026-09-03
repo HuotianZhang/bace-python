@@ -345,6 +345,10 @@ def run_jv(rig: Rig, config: JVConfig = JVConfig(), *,
                                          else "light" if found["lit"] else "dark"),
                         "led_mode": found["led_mode"] or "?",
                         "led_level_v": found["led_level_v"],
+                        # The output flag too, or `LiveState` overlays mode and
+                        # level onto the *Start* snapshot's stale one and the rail
+                        # shows the LED off through an illuminated sweep.
+                        "led_output": found["led_output"],
                     })
                     if found["lit"] is None:
                         yield Notice(
@@ -419,6 +423,15 @@ def illumination_state(rig: Rig) -> dict:
     there would be a dark label on a curve taken in the light. The level is
     read when the driver offers `read_state()` (the 33220A does) and left None
     when it does not -- a missing number is not a wrong one.
+
+    **A driver that was asked and would not answer is unread, not cached.**
+    `Agilent33220A.read_state()` returns `output: None` when `:OUTP?` goes
+    unanswered and `mode: "?"` when `FUNC:SHAP?` does, and the instance still
+    holds the flags it set last. Falling back to those turns "the generator
+    did not reply" into a measurement -- and the cache can be stale exactly
+    when it matters, after somebody used the front panel. The cached flags are
+    used only where there is no `read_state` to ask, which is the simulator and
+    any driver that never claimed to read back.
     """
     shutter, led = rig.shutter, rig.led
     out: dict = {"lit": None, "shutter": None, "led_output": None,
@@ -434,22 +447,44 @@ def illumination_state(rig: Rig) -> dict:
         out["unread"].append("shutter (none on this bench)")
 
     if led is not None:
-        state = {}
+        state, asked = {}, False
         reader = getattr(led, "read_state", None)
         if callable(reader):
+            asked = True
             try:
                 state = dict(reader() or {})
-            except Exception:                               # noqa: BLE001
+            except Exception as exc:                        # noqa: BLE001
+                out["unread"].append(f"LED ({type(exc).__name__})")
                 state = {}
-        try:
-            output = state.get("output")
-            out["led_output"] = bool(led.output_enabled) if output is None else bool(output)
-        except Exception as exc:                            # noqa: BLE001
-            out["unread"].append(f"LED output ({type(exc).__name__})")
-        try:
-            out["led_mode"] = str(state.get("mode") or led.mode)
-        except Exception as exc:                            # noqa: BLE001
-            out["unread"].append(f"LED mode ({type(exc).__name__})")
+
+        if asked:
+            # The driver was asked. `None` and `"?"` are its way of saying it
+            # got no answer, and neither is a reading.
+            output, mode = state.get("output"), state.get("mode")
+            if output is None:
+                out["unread"].append("LED output (:OUTP? unanswered)")
+            else:
+                out["led_output"] = bool(output)
+            if not mode or mode == "?":
+                out["unread"].append("LED mode (FUNC:SHAP? unanswered)")
+            else:
+                out["led_mode"] = str(mode)
+        else:
+            # No read-back to ask for: the driver's own flags are the only
+            # account there is, and they are not a claim about an instrument
+            # that might have been touched by hand.
+            try:
+                out["led_output"] = bool(led.output_enabled)
+            except Exception as exc:                        # noqa: BLE001
+                out["unread"].append(f"LED output ({type(exc).__name__})")
+            try:
+                mode = str(led.mode)
+                if not mode or mode == "?":
+                    out["unread"].append("LED mode (the driver will not say)")
+                else:
+                    out["led_mode"] = mode
+            except Exception as exc:                        # noqa: BLE001
+                out["unread"].append(f"LED mode ({type(exc).__name__})")
         level = state.get("high_v")
         if level is None:
             # `last_levels` is the spelling the drivers keep -- the simulated
@@ -464,7 +499,11 @@ def illumination_state(rig: Rig) -> dict:
     else:
         out["unread"].append("LED (none on this bench)")
 
-    if not out["unread"]:
+    # Every one of the three, actually read. `led_output`/`led_mode` are left
+    # None by the branches above whenever they were not, so this is belt as
+    # well as braces -- and it is the assertion the whole module rests on.
+    if not out["unread"] and out["shutter"] and out["led_output"] is not None \
+            and out["led_mode"]:
         out["lit"] = bool(out["shutter"] == "open" and out["led_output"]
                           and str(out["led_mode"]).upper() != "OFF")
 
