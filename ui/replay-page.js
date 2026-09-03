@@ -21,7 +21,7 @@ import { chart } from './lib/charts/frame.js';
 import { transientModel } from './lib/charts/transient.js';
 import { jvModel } from './lib/charts/jv.js';
 import { timingModel } from './lib/charts/timing.js';
-import { valuesOf } from './lib/results.js';
+import { pulseDelayS, runFor, valuesOf } from './lib/results.js';
 
 const store = createStore({ schedule: (fn) => requestAnimationFrame(fn) });
 const loaded = [];
@@ -126,8 +126,11 @@ function renderCharts() {
   const state = store.getState();
   const run = currentRun(state);
   const entry = state.modules.byName.bace;
-  const shot = (run && run.lastShot) || null;
-  const curves = (run && run.curves.length ? run.curves : (payloads['jv-curves'] || {}).curves) || [];
+  const bace = runFor(state, 'bace');
+  const jvNode = runFor(state, 'jv_bace') || runFor(state, 'jv');
+  const shot = (bace && bace.node.lastShot) || (run && run.lastShot) || null;
+  const curves = (jvNode && jvNode.node.curves.length ? jvNode.node.curves
+    : (payloads['jv-curves'] || {}).curves) || [];
   const key = [
     entry ? JSON.stringify(valuesOf(entry)) : 'no-modules',
     state.bench ? state.bench.read_at : 'no-bench',
@@ -155,7 +158,7 @@ function renderCharts() {
       source
         ? chart(transientModel(source, values ? {
           t0_int_s: values.t0_int_s, t0_int_reference: values.t0_int_reference,
-          pulse_delay_s: (Number(values.delay_ns) || 0) * 1e-9,
+          pulse_delay_s: pulseDelayS(shot, values, rig),
           offset_corrected: values.offset_correct, dark_reference: values.dark_reference,
         } : {}))
         : h('p.absent', 'load the rig transient fixture, or replay a recorded stream'),

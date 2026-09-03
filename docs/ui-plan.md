@@ -619,6 +619,22 @@ result key splits into a form half and a data half so that the two cadences
 can differ — typing draws at once, shots draw through the throttle — and the
 deferred draw paints the newest shot rather than the one that was pending.
 
+**Seven more came out of review.** Four are claims about the instrument: the
+record begins one division *before* the trigger (`:TIM:POS` is four of ten
+divisions — and both recordings' `t0` agree, −200 ns at 200 ns/div); an unread
+LED polarity was drawn as the expected INV rather than left unknown;
+`Math.abs(null)` is a finite 0, so a missing sample became a point on the dark
+sweep's log floor; and a `pulse`-referenced integration window was pinned to
+the form's `delay_ns` instead of the shot's own setpoint, which stands still on
+exactly the axis that moves it. Two are the J–V's colour and identity under
+`both_directions`: the ramp ranked curves rather than illumination levels, so
+one level's two arms became the brightest and the darkest, and they shared a
+series key, so the crosshair drew the reverse arm's value in the forward arm's
+colour. The seventh is M5's, arriving early — the result panel found its run by
+`RunQueued.module`, which is `null` for a pipeline, so a tree's nodes drew
+nothing on the cards that produced them. It is per node now, which is what this
+file's own M5 note asks for.
+
 And three faults that the models could not show, found by rendering the thing
 in a browser: a thinned column placed at a *fractional* index collapsed to
 x = 0 wherever the x mapping was a lookup into the sample times; the

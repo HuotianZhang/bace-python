@@ -242,6 +242,42 @@ six cards' worth of fields between two shots, which is decision 5's failure
 with a chart in front of it: measured over the scan, 27 card rebuilds against
 184 chart redraws, and the caret survives.
 
+### What the review found
+
+Seven defects, all real, and all but one in the claims the charts make about
+the instrument rather than in how they draw:
+
+* **The record does not begin at the trigger.** `configure_timebase` writes
+  `:TIM:RANG` of ten divisions and `:TIM:POS` of *four*, so the record runs
+  from one division before the trigger to nine after it. Drawn from zero,
+  every edge and the whole shaded window sat a division early, and a window in
+  the tenth division was shown inside a record that had already ended. Both
+  recordings agree with the correction: at 200 ns/div the sim trace carries
+  `t0 = −200 ns` and the rig day's `−199.5 ns`.
+* **An unread LED polarity was drawn as INV.** `?` is what a driver answers
+  for a failed query and an absent chain is a bench nobody has read; neither
+  is the expected polarity. It now stays unknown — no light waveform, a
+  `warn`, and the Sync edge's meaning left unstated.
+* **`Math.abs(null)` is 0, and 0 is finite.** A sample the instrument never
+  returned became a point on the log floor with the dark curve drawn through
+  it: a leakage measurement out of an absence.
+* **The integration window was pinned to the form.** With
+  `t0_int_reference = "pulse"` the service recomputes it from each shot's own
+  `:PULS:DEL1`, and `run-bace.toml` sweeps exactly that axis — so the shading
+  stood still while the real window moved with every point. It takes the
+  shot's setpoint now, and `trigger_offset_s` with it.
+* **A pipeline's results never reached the card that produced them.** A
+  pipeline's `RunQueued.module` is `null` and the module names live on the
+  nodes, as `NodeStarted.data.kind` — so the result panel is per *node* now,
+  which is what M0 left on record for M5 anyway: each node numbers its shots
+  from one, and the run-level pointer is whichever node moved last.
+* **The J–V ramp encoded the curve, not the illumination.** Under
+  `both_directions` one level's forward and reverse arms took the brightest
+  and the darkest slot — two illuminations that never existed. And they shared
+  a *key*, so the crosshair built two dots with one identity, updated the
+  first for both, and drew the reverse arm's value in the forward arm's
+  colour.
+
 ### What rendering it found
 
 The models are tested in `node`, and three faults were still only visible in a

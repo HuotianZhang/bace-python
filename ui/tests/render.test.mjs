@@ -191,20 +191,21 @@ test('a shot moves the result key and leaves the card\'s own key alone', async (
   const { resultKey } = await import('../lib/results.js');
   const entry = { name: 'bace', params: [{ name: 'vpre', value: 1.0 }] };
   const bench = { chain: { items: [] }, rig: { values: {} } };
-  const shot = (index, ts) => ({ node_path: '', loop: 1, index, ts, tracesGone: false });
-  const record = { run_id: 'r1', module: 'bace', state: 'running', curves: [], shots: [], lastShot: shot(1, 10) };
+  const shot = (index, ts) => ({ node_path: 'bace', loop: 1, index, ts, tracesGone: false });
+  const node = { node_path: 'bace', kind: 'bace', curves: [], shots: [shot(1, 10)], lastShot: shot(1, 10) };
+  const found = { record: { run_id: 'r1', state: 'running' }, node };
 
-  const first = resultKey('bace', entry, record, bench);
-  assert.equal(resultKey('bace', entry, record, bench), first, 'nothing new, nothing rebuilt');
+  const first = resultKey('bace', entry, found, bench);
+  assert.equal(resultKey('bace', entry, found, bench), first, 'nothing new, nothing rebuilt');
 
-  record.lastShot = shot(2, 11);
-  assert.notEqual(resultKey('bace', entry, record, bench), first, 'a shot redraws the chart');
+  node.lastShot = shot(2, 11);
+  assert.notEqual(resultKey('bace', entry, found, bench), first, 'a shot redraws the chart');
 
   // And an edit to the form moves it too, because the timing diagram is a
   // function of the form: that is the whole reason it is on this card.
   const edited = { name: 'bace', params: [{ name: 'vpre', value: 1.1 }] };
-  assert.notEqual(resultKey('bace', edited, record, bench),
-    resultKey('bace', entry, record, bench));
+  assert.notEqual(resultKey('bace', edited, found, bench),
+    resultKey('bace', entry, found, bench));
 });
 
 test('a shot draws through the throttle; a keystroke does not wait on one', async () => {
@@ -283,17 +284,18 @@ test('the form half and the data half of the result key move apart', async () =>
   const { resultKeys } = await import('../lib/results.js');
   const entry = { name: 'bace', params: [{ name: 'vpre', value: 1.0 }] };
   const bench = { chain: { items: [] }, rig: { values: {} } };
-  const record = { run_id: 'r1', module: 'bace', state: 'running', curves: [], shots: [],
-    lastShot: { node_path: '', loop: 1, index: 1, ts: 10, tracesGone: false } };
+  const node = { node_path: 'bace', kind: 'bace', curves: [], shots: [],
+    lastShot: { node_path: 'bace', loop: 1, index: 1, ts: 10, tracesGone: false } };
+  const found = { record: { run_id: 'r1', state: 'running' }, node };
 
-  const first = resultKeys('bace', entry, record, bench);
-  record.lastShot = { ...record.lastShot, index: 2, ts: 11 };
-  const afterShot = resultKeys('bace', entry, record, bench);
+  const first = resultKeys('bace', entry, found, bench);
+  node.lastShot = { ...node.lastShot, index: 2, ts: 11 };
+  const afterShot = resultKeys('bace', entry, found, bench);
   assert.equal(afterShot.form, first.form, 'a shot says nothing about the form');
   assert.notEqual(afterShot.data, first.data);
 
   const edited = { name: 'bace', params: [{ name: 'vpre', value: 1.1 }] };
-  const afterEdit = resultKeys('bace', edited, record, bench);
+  const afterEdit = resultKeys('bace', edited, found, bench);
   assert.notEqual(afterEdit.form, afterShot.form, 'and an edit redraws at once');
   assert.equal(afterEdit.data, afterShot.data);
 });

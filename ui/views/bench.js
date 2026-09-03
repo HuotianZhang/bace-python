@@ -371,11 +371,11 @@ export default {
         const target = current && current.el.querySelector('.res');
         const fresh = current && now.modules.byName[name];
         if (!target || !fresh) return;
-        const record = runFor(now, name);
-        const k = resultKeys(name, fresh, record, now.bench);
+        const found = runFor(now, name);
+        const k = resultKeys(name, fresh, found, now.bench);
         drawn.set(name, k.form);
         keyed(target, `${k.form}|${k.data}`,
-          () => resultPanel(name, { entry: fresh, record, bench: now.bench }));
+          () => resultPanel(name, { entry: fresh, found, bench: now.bench }));
       };
       // A slot with no key has just been built with the card around it, and an
       // empty result panel for half a second is a card that looks broken.

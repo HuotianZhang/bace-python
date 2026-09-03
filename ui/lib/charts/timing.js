@@ -82,13 +82,19 @@ export function cyclePlan(values = {}, rig = {}, chain = {}) {
   const frequency = Number(values.pulse_frequency_hz) || 0;
   const period = frequency > 0 ? 1 / frequency : 0;
   const duty = Number(values.duty_percent);
-  const ledPolarity = chainValue(chain, 'led_polarity') || 'INV';
-  const inverted = ledPolarity !== 'NORM';
+  // `?` is what a driver answers for a query that failed, and an absent chain
+  // is a bench nobody has read. Neither is INV. Defaulting them to the
+  // expected polarity drew a confident diagram of the *other* half of the
+  // cycle and stated that the Sync edge means light off — a claim about the
+  // instrument from a read-back that never came back.
+  const read = chainValue(chain, 'led_polarity');
+  const ledPolarity = read === 'NORM' || read === 'INV' ? read : null;
+  const inverted = ledPolarity === 'INV';
   // `set_polarity`: inverting flips which half the LED is lit for and leaves
   // the Sync alone, so under INV the lit fraction is the *complement* of the
   // duty written to the instrument, and raising `duty_percent` shortens the
-  // illumination.
-  const litFraction = (inverted ? 100 - duty : duty) / 100;
+  // illumination. With the polarity unread there is no answer to which half.
+  const litFraction = ledPolarity === null ? null : (inverted ? 100 - duty : duty) / 100;
   const bias = biasLevels(values, chain);
   const delayS = (Number(values.delay_ns) || 0) * 1e-9 + (Number(rig.trigger_offset_s) || 0);
   return {
@@ -101,7 +107,7 @@ export function cyclePlan(values = {}, rig = {}, chain = {}) {
     // the 81150A arms on that rising edge. Under INV that instant is the LED
     // going *off* — which is what BACE extracts after.
     syncAt: 0,
-    syncMeans: inverted ? 'light off' : 'light on',
+    syncMeans: ledPolarity === null ? 'unknown — the 33220A has not been read' : inverted ? 'light off' : 'light on',
     lightDelayS: (Number(rig.light_path_delay_ns) || 0) * 1e-9,
     ledHigh: numberOr(values.led_v, null),
     ledLow: numberOr(values.led_low_v, null),
@@ -149,14 +155,29 @@ export function recordPlan(values = {}, rig = {}) {
   const widthS = (Number(values.pulse_width_ns) || 0) * 1e-9;
   const reference = values.t0_int_reference || 'record';
   const t0 = numberOr(values.t0_int_s, null);
-  // From the trigger, which is the only origin this diagram can place before a
-  // run: `record` is measured from the record's first sample, and where the
-  // trigger sits inside the record is a property of the timebase that only a
-  // trace reports (`Trace.t0`, the instrument's `:WAV:XOR?`).
+  // **The record does not begin at the trigger.** `Infiniium.configure_timebase`
+  // writes `:TIM:RANG` of ten divisions and `:TIM:POS` of *four*, which puts
+  // the horizontal reference four divisions after the trigger — so the record
+  // runs from one division before it to nine after. Drawn from zero, every
+  // edge and the whole shaded window sat one division early, and a window
+  // between nine and ten divisions after the trigger was shown as inside a
+  // record that had already ended.
+  //
+  // Both recordings agree: at 200 ns/div the sim trace carries `t0 = −200 ns`
+  // and the rig day's `−199.5 ns`, the instrument's own sample grid apart.
+  const start = -perDiv;
+  const end = perDiv * 9;
   const fromTrigger = t0 === null ? null
     : reference === 'pulse' ? t0 + delayS
-      : reference === 'trigger' ? t0 : null;
-  return { span, points, dt, delayS, widthS, reference, t0, fromTrigger };
+      : reference === 'trigger' ? t0
+        // `record` is measured from the first sample, so it is that sample's
+        // own offset away — nominally one division, and exactly whatever
+        // `Trace.t0` (`:WAV:XOR?`) turns out to be once a shot has run.
+        : t0 + start;
+  return {
+    span, points, dt, delayS, widthS, reference, t0, fromTrigger, start, end,
+    nominal: reference === 'record',
+  };
 }
 
 /**
@@ -182,6 +203,12 @@ export function timingAlerts(values = {}, rig = {}, chain = {}) {
       text: 'output_polarity = leave writes nothing, and the bench has not read one back: '
         + 'which level the device rests at between pulses is unknown until the run reports it' });
   }
+  if (cycle.ledPolarity === null) {
+    out.push({ level: 'warn', key: 'led-polarity-unknown',
+      text: 'the 33220A\'s polarity has not been read back, so which half of the cycle the device '
+        + 'is lit for is unknown — and with it whether the Sync edge the 81150A arms on is light '
+        + 'off (INV, what BACE needs) or light on' });
+  }
   if (cycle.ledPolarity === 'NORM') {
     out.push({ level: 'alert', key: 'led-polarity',
       text: 'the 33220A reads NORM, so the Sync\'s rising edge means light ON and the extraction '
@@ -193,7 +220,8 @@ export function timingAlerts(values = {}, rig = {}, chain = {}) {
       text: `led_low_v ${fmt.volts(cycle.ledLow, { decimals: 3 })} is at or above the LED threshold `
         + `${fmt.volts(cycle.ledThreshold, { decimals: 3 })}: the dark half of the cycle is not dark` });
   }
-  if (Number.isFinite(cycle.duty) && Math.abs(cycle.duty - 0.5) > 1e-9 && cycle.inverted) {
+  if (Number.isFinite(cycle.duty) && Math.abs(cycle.duty - 0.5) > 1e-9 && cycle.inverted
+      && Number.isFinite(cycle.litFraction)) {
     out.push({ level: 'info', key: 'duty',
       text: `duty_percent ${fmt.sig(values.duty_percent, 3)} % under INV lights the device for `
         + `${fmt.sig(cycle.litFraction * 100, 3)} % of the period — raising it shortens the illumination` });
@@ -203,21 +231,24 @@ export function timingAlerts(values = {}, rig = {}, chain = {}) {
       text: `delay_ns ${fmt.sig(values.delay_ns, 4)} with a trigger offset of `
         + `${fmt.sig((rig.trigger_offset_s || 0) * 1e9, 3)} ns asks the generator to fire before its own trigger` });
   }
-  if (record.span > 0 && cycle.widthS > 0 && cycle.delayS + cycle.widthS < record.span) {
+  if (record.span > 0 && cycle.widthS > 0 && cycle.delayS + cycle.widthS < record.end) {
     out.push({ level: 'warn', key: 'width',
-      text: `the collection pulse ends ${fmt.sig((cycle.delayS + cycle.widthS) * 1e9, 4)} ns into a `
-        + `${fmt.sig(record.span * 1e9, 4)} ns record: the device is back at its resting level `
-        + 'while the integration is still running' });
+      text: `the collection pulse ends ${fmt.sig((cycle.delayS + cycle.widthS) * 1e9, 4)} ns after the `
+        + `trigger and the record runs to ${fmt.sig(record.end * 1e9, 4)} ns: the device is back at `
+        + 'its resting level while the integration is still running' });
   }
-  if (record.fromTrigger !== null && record.span > 0 && record.fromTrigger >= record.span) {
+  if (record.fromTrigger !== null && record.span > 0
+      && (record.fromTrigger >= record.end || record.fromTrigger < record.start)) {
     out.push({ level: 'invalid', key: 'window',
-      text: `t0_int is ${fmt.sig(record.fromTrigger * 1e9, 4)} ns from the trigger, past the end of a `
-        + `${fmt.sig(record.span * 1e9, 4)} ns record: the integration window is empty` });
+      text: `t0_int is ${fmt.sig(record.fromTrigger * 1e9, 4)} ns from the trigger, and the record `
+        + `runs ${fmt.sig(record.start * 1e9, 4)} … ${fmt.sig(record.end * 1e9, 4)} ns `
+        + '(`:TIM:POS` is four of its ten divisions): the integration window is empty' });
   }
   if (record.reference === 'record') {
     out.push({ level: 'info', key: 'window-reference',
-      text: 't0_int_reference = record measures from the first sample, and where the trigger sits '
-        + 'inside the record follows the timebase — so this window moves when timebase_ns_per_div does' });
+      text: 't0_int_reference = record measures from the first sample, which sits one division '
+        + 'before the trigger — so this window slides against the signal whenever '
+        + 'timebase_ns_per_div changes. Drawn here at its nominal place; the trace reports its own' });
   }
   if (values.dark_reference === 'same') {
     out.push({ level: 'info', key: 'dark-reference',
@@ -271,7 +302,7 @@ export function timingModel(values = {}, options = {}) {
           .join('  ·  '),
       `levels are at the device · the generator sees them divided by the ×${fmt.sig(rig.pulse_amp || 1, 2)} amplifier`,
       cycle.polaritySource,
-      `33220A POL ${cycle.ledPolarity} · the Sync's rising edge means ${cycle.syncMeans}`,
+      `33220A POL ${cycle.ledPolarity || '?'} · the Sync's rising edge means ${cycle.syncMeans}`,
       ...(cycle.invert
         ? ['invert_polarity swaps and negates both levels before they are written — '
            + 'a sign convention for a device of the opposite architecture, not a switch: '
@@ -367,14 +398,25 @@ function cycleRows(panel, cycle, swept) {
   // Each entry is *at this time the light becomes this*. Under NORM the LED
   // follows the written waveform, so it is lit through the duty phase; under
   // INV it is lit through the complement. Both are shifted by the fibre.
-  const lit = cycle.inverted
-    ? [[cycle.lightDelayS, false], [dutyAt + cycle.lightDelayS, true]]
-    : [[cycle.lightDelayS, true], [dutyAt + cycle.lightDelayS, false]];
-  series.push({ key: 'light', label: 'light at sample', colour: 'ink', width: 1.4, dash: '5 3',
-    d: squareWrapped(X, rows[1], span, lit) });
-  annotate(marks, rows[1], rect,
-    `the same square ${fmt.sig(cycle.lightDelayS * 1e9, 3)} ns later · lit for `
-    + `${fmt.sig(cycle.litFraction * 100, 3)} % of the period under POL ${cycle.ledPolarity}`);
+  //
+  // With the polarity unread there is no waveform to draw: either half would
+  // be a claim, and a diagram is a worse place than most to make one.
+  if (cycle.ledPolarity === null) {
+    marks.push({ x: rect.x + 4, y: (rows[1].high + rows[1].low) / 2 + 3, size: 8.5, colour: 'warn',
+      text: 'which half is lit is unknown until the 33220A\'s polarity is read back' });
+    annotate(marks, rows[1], rect,
+      `the same square ${fmt.sig(cycle.lightDelayS * 1e9, 3)} ns later — the LED amp and the fibre`,
+      { colour: 'warn' });
+  } else {
+    const lit = cycle.inverted
+      ? [[cycle.lightDelayS, false], [dutyAt + cycle.lightDelayS, true]]
+      : [[cycle.lightDelayS, true], [dutyAt + cycle.lightDelayS, false]];
+    series.push({ key: 'light', label: 'light at sample', colour: 'ink', width: 1.4, dash: '5 3',
+      d: squareWrapped(X, rows[1], span, lit) });
+    annotate(marks, rows[1], rect,
+      `the same square ${fmt.sig(cycle.lightDelayS * 1e9, 3)} ns later · lit for `
+      + `${fmt.sig(cycle.litFraction * 100, 3)} % of the period under POL ${cycle.ledPolarity}`);
+  }
 
   // The Sync is not inverted with the waveform: it rises with the written
   // high phase, and that is the edge the 81150A arms on.
@@ -420,13 +462,15 @@ function cycleRows(panel, cycle, swept) {
 /** Panel C: the record the scope keeps, and the window inside it. */
 function recordRows(panel, cycle, record, swept) {
   const rect = panel.rect;
-  const span = record.span || 1;
-  const X = scale.linear([0, span], [rect.x, rect.x + rect.w]);
+  const start = record.start || 0;
+  const end = record.end || (record.span || 1);
+  const clamp = (t) => Math.max(start, Math.min(end, t));
+  const X = scale.linear([start, end], [rect.x, rect.x + rect.w]);
   const rows = rowsOf(rect, ['bias']);
   const row = rows[0];
-  const x0 = X(Math.max(0, Math.min(span, cycle.delayS)));
-  const x1 = X(Math.max(0, Math.min(span, cycle.delayS + cycle.widthS)));
-  const returns = cycle.delayS + cycle.widthS < span;
+  const x0 = X(clamp(cycle.delayS));
+  const x1 = X(clamp(cycle.delayS + cycle.widthS));
+  const returns = cycle.delayS + cycle.widthS < end;
   const series = [{
     key: 'bias', label: 'bias', colour: swept === 'vcoll' || swept === 'vpre' ? 'accent' : 'ink',
     width: swept ? 2 : 1.5,
@@ -442,30 +486,39 @@ function recordRows(panel, cycle, record, swept) {
     + `${cycle.pulsesLabel} ${fmt.volts(cycle.pulsesTo, { decimals: 3 })}`
     + (returns ? '' : ' · the return is after the record ends'),
     { mono: true });
-  if (record.fromTrigger !== null && record.fromTrigger < span) {
-    const wx = X(Math.max(0, record.fromTrigger));
+  // The trigger is inside the record, one division in, and the record is the
+  // only thing on this panel whose zero is not it.
+  rules.push({ x1: X(0), colour: 'grey', width: 1, dash: '3 3' });
+  // A line below the panel's own caption, which starts at the left edge and
+  // reaches past the trigger's tenth of the width.
+  marks.push({ x: X(0) + 4, y: rect.y + 24, colour: 'grey', size: 8.5, halo: true, text: 'trigger' });
+  if (record.fromTrigger !== null && record.fromTrigger >= start && record.fromTrigger < end) {
+    const wx = X(record.fromTrigger);
     shades.push({ x: wx, w: rect.x + rect.w - wx, colour: 'accent', opacity: 0.07 });
     rules.push({ x1: wx, colour: 'accent', width: 1.5 });
     marks.push({ x: wx + 5, y: rect.y + rect.h - 8, mono: true, weight: 600, colour: 'accent', size: 9,
-      text: `t0_int ${fmt.sig(record.fromTrigger * 1e9, 4)} ns from the trigger` });
+      text: `t0_int ${fmt.sig(record.fromTrigger * 1e9, 4)} ns from the trigger`
+        + (record.nominal ? ' · nominal' : '') });
     marks.push({ x: rect.x + rect.w - 5, y: rect.y + rect.h - 8, anchor: 'end', colour: 'accent', size: 8.5,
       text: 'Q = ∫ (light − dark) dt over the shaded part' });
   } else {
-    marks.push({ x: rect.x + 5, y: rect.y + rect.h - 8, colour: 'grey', size: 8.5,
+    marks.push({ x: rect.x + 5, y: rect.y + rect.h - 8, colour: 'alert', size: 8.5,
       text: record.t0 === null
         ? 'no t0_int on this form'
-        : `t0_int ${fmt.sig(record.t0 * 1e9, 4)} ns of record time — where that falls against the `
-          + 'trigger follows the timebase, and only a trace reports it' });
+        : `t0_int ${fmt.sig((record.fromTrigger ?? record.t0) * 1e9, 4)} ns from the trigger is `
+          + 'outside this record — the integration window is empty' });
   }
   return {
     ...panel,
-    label: `C · the record · ${fmt.sig(span * 1e9, 4)} ns · ${record.points} points · dt ${fmt.sig(record.dt * 1e9, 3)} ns`,
-    note: `timebase ${fmt.sig((span / 10) * 1e9, 3)} ns/div · ten divisions`,
+    label: `C · the record · ${fmt.sig((end - start) * 1e9, 4)} ns · ${record.points} points · dt ${fmt.sig(record.dt * 1e9, 3)} ns`,
+    // `:TIM:POS` is four divisions, so the ten-division window sits one
+    // division before the trigger and nine after it.
+    note: `timebase ${fmt.sig(((end - start) / 10) * 1e9, 3)} ns/div · one division before the trigger, nine after`,
     y: { ticks: [] },
     series, shades, rules,
     marks: [...marks, ...rowLabels(rect, rows, ['bias'])],
     x: {
-      ticks: axisTicks(scale.linear([0, span * 1e9], [rect.x, rect.x + rect.w]), { count: 5 }),
+      ticks: axisTicks(scale.linear([start * 1e9, end * 1e9], [rect.x, rect.x + rect.w]), { count: 5 }),
       label: 'ns from the trigger',
     },
   };

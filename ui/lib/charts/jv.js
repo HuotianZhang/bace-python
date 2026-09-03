@@ -90,8 +90,14 @@ export function jvModel(curves, options = {}) {
   const allDark = list.every((c) => c.dark === true);
   const useLog = log === null ? allDark : log;
 
+  // The ramp encodes the **illumination level**, so it is ranked by level and
+  // not by curve. With `both_directions` a level produces two curves, and one
+  // slot each made a single level's forward and reverse arms the brightest and
+  // the darkest of the ramp — two illuminations that never existed. The
+  // reverse arm is already told apart by its dash.
   const light = list.filter((c) => c.dark !== true);
-  const ordered = [...light].sort((a, b) => (a.led_level_v ?? 0) - (b.led_level_v ?? 0));
+  const levels = [...new Set(light.map((c) => c.led_level_v ?? null))]
+    .sort((a, b) => (a ?? 0) - (b ?? 0));
 
   const frame = layout({
     width, height, panels: [{ key: 'jv', weight: 1 }], margin: { left: 58, bottom: 28, top: 18 },
@@ -105,7 +111,7 @@ export function jvModel(curves, options = {}) {
   let Y;
   let clamped = 0;
   if (useLog) {
-    const magnitudes = values.flat().map((v) => Math.abs(v)).filter((v) => Number.isFinite(v));
+    const magnitudes = values.flat().filter((v) => Number.isFinite(v)).map(Math.abs);
     const floor = 10 ** Math.floor(Math.log10(Math.max(1e-12, quantile(magnitudes, 0.02))));
     clamped = magnitudes.filter((v) => v <= floor).length;
     const top = 10 ** Math.ceil(Math.log10(Math.max(floor * 10, ...magnitudes)));
@@ -129,10 +135,16 @@ export function jvModel(curves, options = {}) {
   for (const curve of list) {
     const y = curve[quantity.key];
     if (!Array.isArray(y) || !y.length) continue;
-    const colour = curve.dark === true ? 'ink' : ramp(ordered.indexOf(curve), Math.max(1, ordered.length));
+    const colour = curve.dark === true
+      ? 'ink'
+      : ramp(levels.indexOf(curve.led_level_v ?? null), Math.max(1, levels.length));
     const label = curveLabel(curve);
+    // The **key** is the identity, and forward and reverse at one level share
+    // a label: keyed on that, the renderer built two crosshair dots with the
+    // same `data-series`, `attachCursor`'s `find` updated only the first, and
+    // it carried the reverse arm's value under the forward arm's colour.
     series.push({
-      key: label,
+      key: `${label}·${curve.direction || 'forward'}`,
       label,
       colour,
       width: 1.5,
@@ -141,16 +153,23 @@ export function jvModel(curves, options = {}) {
       // one has just been through. Drawn as one unbroken line the hysteresis
       // reads as noise.
       dash: curve.direction === 'reverse' ? '4 2' : null,
-      d: useLog
-        ? scale.linePath((i) => X(curve.voltage[i]), y.map((v) => Math.abs(v)), (v) => v, Y)
-        : scale.linePath((i) => X(curve.voltage[i]), y, (v) => v, Y),
+      // `Math.abs(null)` is **0**, and 0 is finite: mapped straight, a sample
+      // the instrument never returned became a point sitting on the log
+      // floor with the curve drawn through it — a leakage measurement out of
+      // an absence. `linePath` lifts the pen for anything non-finite, so the
+      // absolute value is taken only where there is a value to take it of.
+      d: scale.linePath((i) => X(curve.voltage[i]), useLog ? y.map(magnitude) : y, (v) => v, Y),
       at: (v) => {
         const i = nearestVoltage(curve.voltage, v);
-        return i < 0 ? null : { y: useLog ? Math.abs(y[i]) : y[i] };
+        if (i < 0 || !Number.isFinite(y[i])) return null;
+        return { y: useLog ? Math.abs(y[i]) : y[i] };
       },
       format: quantity.format,
     });
-    legend.push({ label, colour, width: 1.6, dash: curve.direction === 'reverse' ? '4 2' : null });
+    legend.push({
+      label: curve.direction === 'reverse' ? `${label} · reverse` : label,
+      colour, width: 1.6, dash: curve.direction === 'reverse' ? '4 2' : null,
+    });
     // Direct labels, on four curves or fewer: past that they collide with
     // each other and the legend is the honest place for identity. At the
     // sweep's **start**, where the curves are a whole J_sc apart — at the
@@ -223,6 +242,11 @@ function countOutside(values, [lo, hi]) {
     for (const v of list || []) if (Number.isFinite(v) && (v < lo || v > hi)) n += 1;
   }
   return n;
+}
+
+/** `|v|`, and `null` for anything that was not a number — see the curve's `d`. */
+function magnitude(v) {
+  return Number.isFinite(v) ? Math.abs(v) : null;
 }
 
 function quantile(sorted, q) {

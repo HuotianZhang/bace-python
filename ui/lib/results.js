@@ -23,12 +23,38 @@ import { timingModel } from './charts/timing.js';
 /** Which cards have a result panel at all. */
 export const RESULT_CARDS = new Set(['bace', 'jv', 'jv_bace']);
 
-/** The newest run of this module that has anything to draw. */
+/**
+ * The newest **node** of this module that has anything to draw, and the run it
+ * belongs to.
+ *
+ * By the run's `module` it would find only manual runs: a pipeline's
+ * `RunQueued.module` is `null` and the module names live on the nodes, as
+ * `NodeStarted.data.kind` (`bace`, `jv_bace`; a loop's is `repeat`). So the
+ * canonical 2 x bace tree drew nothing at all on the card that produced it,
+ * which `ui/fixtures/stream_pipeline_sim.jsonl` shows in four shots.
+ *
+ * Per node, not per run, for the reason M0 left on record for M5: a pipeline
+ * is one `run_id` over many nodes, each numbering its shots from one, so the
+ * run-level `lastShot` is whichever node moved last. The card wants *this*
+ * module's newest one.
+ */
 export function runFor(state, name) {
   for (let i = state.order.length - 1; i >= 0; i -= 1) {
     const record = state.runs[state.order[i]];
-    if (!record || record.module !== name) continue;
-    if (record.curves.length || record.shots.length) return record;
+    if (!record) continue;
+    const node = newestNode(record, name);
+    if (node) return { record, node };
+  }
+  return null;
+}
+
+function newestNode(record, name) {
+  // Insertion order is arrival order, so the last match is the newest node.
+  const nodes = Object.values(record.nodes || {});
+  for (let i = nodes.length - 1; i >= 0; i -= 1) {
+    const node = nodes[i];
+    if (node.kind !== name) continue;
+    if ((node.curves && node.curves.length) || (node.shots && node.shots.length)) return node;
   }
   return null;
 }
@@ -51,7 +77,7 @@ export function valuesOf(entry) {
  * feel immediate; shots arrive at 130 a second under `--sim --fast`, which is
  * a hundred redraws nobody can read. See `createChartThrottle`.
  */
-export function resultKeys(name, entry, record, bench) {
+export function resultKeys(name, entry, found, bench) {
   const form = [name];
   if (name === 'bace') {
     form.push(JSON.stringify(valuesOf(entry)));
@@ -60,21 +86,22 @@ export function resultKeys(name, entry, record, bench) {
     form.push(JSON.stringify((bench && bench.rig && bench.rig.values) || null));
   }
   const data = [];
-  if (record) {
-    data.push(record.run_id, record.state || '');
-    const shot = record.lastShot;
+  if (found) {
+    const { record, node } = found;
+    data.push(record.run_id, record.state || '', node.node_path);
+    const shot = node.lastShot;
     if (shot) data.push(`${shot.node_path}:${shot.loop}:${shot.index}:${shot.ts}:${shot.tracesGone ? 'gone' : 'traces'}`);
-    if (record.curves.length) {
-      const last = record.curves[record.curves.length - 1];
-      data.push(`curves:${record.curves.length}:${last.label}:${last.ts}`);
+    if (node.curves && node.curves.length) {
+      const last = node.curves[node.curves.length - 1];
+      data.push(`curves:${node.curves.length}:${last.label}:${last.ts}`);
     }
   }
   return { form: form.join('|'), data: data.join('|') };
 }
 
 /** Both halves as one string — what `dom.keyed` is given. */
-export function resultKey(name, entry, record, bench) {
-  const keys = resultKeys(name, entry, record, bench);
+export function resultKey(name, entry, found, bench) {
+  const keys = resultKeys(name, entry, found, bench);
   return `${keys.form}|${keys.data}`;
 }
 
@@ -154,13 +181,13 @@ export function createChartThrottle({
  * about the run and appears with the first shot. `jv` and `jv_bace` get their
  * curves and the interpolated metrics beside them.
  */
-export function resultPanel(name, { entry, record, bench }) {
-  if (name === 'bace') return baceResult(entry, record, bench);
-  if (name === 'jv' || name === 'jv_bace') return jvResult(record);
+export function resultPanel(name, { entry, found, bench }) {
+  if (name === 'bace') return baceResult(entry, found, bench);
+  if (name === 'jv' || name === 'jv_bace') return jvResult(found);
   return [];
 }
 
-function baceResult(entry, record, bench) {
+function baceResult(entry, found, bench) {
   const values = valuesOf(entry);
   const rig = (bench && bench.rig && bench.rig.values) || {};
   const chain = (bench && bench.chain) || {};
@@ -168,12 +195,12 @@ function baceResult(entry, record, bench) {
   const out = [chart(timing)];
   if (timing.alerts.length) out.push(alertList(timing.alerts));
 
-  const shot = record && record.lastShot;
+  const shot = found && found.node.lastShot;
   if (shot) {
     out.push(chart(transientModel(shot, {
       t0_int_s: values.t0_int_s,
       t0_int_reference: values.t0_int_reference,
-      pulse_delay_s: (Number(values.delay_ns) || 0) * 1e-9,
+      pulse_delay_s: pulseDelayS(shot, values, rig),
       offset_corrected: values.offset_correct,
       dark_reference: values.dark_reference,
     })));
@@ -183,8 +210,27 @@ function baceResult(entry, record, bench) {
   return out;
 }
 
-function jvResult(record) {
-  const curves = (record && record.curves) || [];
+/**
+ * `:PULS:DEL1` for **this shot**, which is what a `pulse`-referenced window
+ * travels with.
+ *
+ * The service recomputes `resolve_t0_int` every step from `levels.delay_s`,
+ * and along a delay axis — `recipes/run-bace.toml` sweeps exactly that — the
+ * form's `delay_ns` is only the value of one point. Taken from the form, the
+ * shaded window and the running integral stood still while the real one moved
+ * with every point. And `trigger_offset_s` belongs to it: `pulse_levels` adds
+ * it before the generator sees the number.
+ */
+export function pulseDelayS(shot, values, rig) {
+  const setpoint = (shot && shot.setpoint) || {};
+  const delayNs = setpoint.delay_ns === undefined || setpoint.delay_ns === null
+    ? values.delay_ns
+    : setpoint.delay_ns;
+  return (Number(delayNs) || 0) * 1e-9 + (Number(rig.trigger_offset_s) || 0);
+}
+
+function jvResult(found) {
+  const curves = (found && found.node.curves) || [];
   if (!curves.length) return [h('p.absent', 'no curves yet — a sweep draws here as each one finishes')];
   const model = jvModel(curves);
   const out = [chart(model)];

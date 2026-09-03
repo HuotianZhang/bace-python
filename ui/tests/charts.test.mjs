@@ -11,7 +11,8 @@ import { dirname, join } from 'node:path';
 import { createStore, currentRun } from '../lib/store.js';
 import { transientModel, traceSet, sampleTime, windowRecordS } from '../lib/charts/transient.js';
 import { jvModel, currentOf, ramp, RAMP } from '../lib/charts/jv.js';
-import { timingModel, shotSegments, cyclePlan, biasLevels, timingAlerts } from '../lib/charts/timing.js';
+import { timingModel, shotSegments, cyclePlan, biasLevels, timingAlerts, recordPlan } from '../lib/charts/timing.js';
+import { runFor } from '../lib/results.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = (name) => JSON.parse(readFileSync(join(here, '../fixtures', name), 'utf8'));
@@ -323,4 +324,147 @@ test('the light at the sample follows the drive, late by the fibre and never bac
   }
   // The two polarities put the lit half on opposite sides of the period.
   assert.notEqual(lightOf(norm).d, lightOf(inv).d);
+});
+
+// -- what the review found ------------------------------------------------
+
+test('the record runs one division before the trigger and nine after it', () => {
+  // `Infiniium.configure_timebase` writes `:TIM:RANG` of ten divisions and
+  // `:TIM:POS` of *four*, so the horizontal reference is four divisions after
+  // the trigger. Drawn from zero, every edge and the whole shaded window sat
+  // one division early. Both recordings agree: at 200 ns/div the sim trace
+  // carries t0 = −200 ns and the rig day's −199.5 ns.
+  const plan = recordPlan({ timebase_ns_per_div: 200, record_length: 5000 }, {});
+  const near = (a, b, why) => assert.ok(Math.abs(a - b) < Math.max(1e-15, Math.abs(b) * 1e-9),
+    `${why}: ${a} vs ${b}`);
+  near(plan.start, -200e-9, 'one division before the trigger');
+  near(plan.end, 1800e-9, 'nine after');
+  near(plan.end - plan.start, plan.span, 'ten divisions in all');
+  const traceT0 = jsonl('stream_bace_sim.jsonl')
+    .find((f) => f.type === 'StepDone').data.light.t0;
+  assert.ok(Math.abs(traceT0 - plan.start) < 1e-12, `the trace itself starts at ${traceT0}`);
+
+  // On the panel that means the trigger is drawn a tenth of the way in, not
+  // at the left edge: one division of the ten.
+  const model = timingModel({ ...RESOLVED, timebase_ns_per_div: 200 }, { rig: RIG, chain: BENCH.chain });
+  const panel = model.panels[2];
+  const trigger = panel.rules.find((r) => r.colour === 'grey');
+  assert.ok(trigger, 'the trigger has its own rule, because the record\'s zero is not it');
+  near((trigger.x1 - panel.rect.x) / panel.rect.w, 0.1, 'one division of the ten');
+});
+
+test('a t0_int in the last division of the record is not called empty', () => {
+  // Nine and a half divisions after the trigger is inside a record that runs
+  // to nine — and was inside a record the diagram thought ran to ten.
+  const late = { ...RESOLVED, timebase_ns_per_div: 200, t0_int_s: 1900e-9, t0_int_reference: 'trigger' };
+  assert.ok(timingAlerts(late, RIG, BENCH.chain).some((a) => a.key === 'window'),
+    '1900 ns is past the record\'s 1800 ns end');
+  const inside = { ...late, t0_int_s: 1700e-9 };
+  assert.ok(!timingAlerts(inside, RIG, BENCH.chain).some((a) => a.key === 'window'));
+  const before = { ...late, t0_int_s: -150e-9 };
+  assert.ok(!timingAlerts(before, RIG, BENCH.chain).some((a) => a.key === 'window'),
+    'and the division before the trigger is in the record too');
+});
+
+test('an unread LED polarity stays unknown, and is warned about rather than assumed', () => {
+  // `?` is what a driver answers for a query that failed, and an absent chain
+  // is a bench nobody has read. Defaulting either to the expected INV drew a
+  // confident diagram of the other half of the cycle.
+  for (const chain of [{ items: [] }, { items: [{ key: 'led_polarity', value: '?' }] }, {}]) {
+    const cycle = cyclePlan(RESOLVED, RIG, chain);
+    assert.equal(cycle.ledPolarity, null);
+    assert.equal(cycle.inverted, false);
+    assert.equal(cycle.litFraction, null, 'which half is lit has no answer');
+    assert.match(cycle.syncMeans, /unknown/);
+    const alerts = timingAlerts(RESOLVED, RIG, chain);
+    assert.equal(alerts.find((a) => a.key === 'led-polarity-unknown').level, 'warn');
+    assert.ok(!alerts.some((a) => a.key === 'duty'), 'and no claim about the lit fraction');
+    const model = timingModel(RESOLVED, { rig: RIG, chain });
+    assert.ok(!model.panels[1].series.some((s) => s.key === 'light'),
+      'no waveform is drawn for the light at the sample');
+  }
+});
+
+test('a null in a dark sweep is a gap, not a point on the log floor', () => {
+  // `Math.abs(null)` is 0, and 0 is finite — mapped straight, a sample the
+  // instrument never returned became a leakage measurement.
+  const dark = JV.curves.find((c) => c.dark === true);
+  const holed = { ...dark, density: dark.density.map((v, i) => (i === 30 ? null : v)) };
+  const model = jvModel([holed]);
+  assert.equal(model.panels[0].y.scale.kind, 'log10');
+  const series = model.panels[0].series[0];
+  assert.equal(series.d.split('M').length - 1, 2, 'the pen lifts over the hole');
+  assert.equal(series.at(holed.voltage[30]), null, 'and the crosshair reads nothing there');
+});
+
+test('the integration window travels with the shot\'s own delay, not the form\'s', async () => {
+  // `t0_int_reference = pulse` recomputes the window from `levels.delay_s`
+  // every step, and `recipes/run-bace.toml` sweeps exactly that axis. Pinned
+  // to the form, the shaded window stood still while the real one moved.
+  const { pulseDelayS } = await import('../lib/results.js');
+  const values = { delay_ns: 90 };
+  const rig = { trigger_offset_s: 5e-9 };
+  const near = (a, b, why) => assert.ok(Math.abs(a - b) < 1e-15, `${why}: ${a} vs ${b}`);
+  near(pulseDelayS(null, values, rig), 95e-9, 'the form, plus the rig offset');
+  near(pulseDelayS({ setpoint: { delay_ns: 200 } }, values, rig), 205e-9,
+    'the shot on screen, not the pinned value');
+  near(pulseDelayS({ setpoint: {} }, values, rig), 95e-9,
+    'a shot on another axis has no delay of its own');
+
+  // The fixture's scan sweeps `delay_ns` 0 … 200, and its last shot is at 200
+  // while the form's pinned value is 0. Drawn from the form the window sat
+  // 200 ns early on that shot, and on every other point of the axis.
+  const shot = liveRun().lastShot;
+  assert.equal(shot.setpoint.delay_ns, 200, 'the shot on screen is not the pinned point');
+  const window = (delay) => transientModel(shot, {
+    t0_int_s: 0, t0_int_reference: 'pulse', pulse_delay_s: delay,
+  }).panels[0].shades[0].x;
+  assert.notEqual(window(pulseDelayS(shot, { delay_ns: 0 }, {})),
+    window(pulseDelayS(null, { delay_ns: 0 }, {})),
+    'the shot\'s own delay shades a different window from the form\'s');
+});
+
+test('both directions of one level share its colour, and not its key', () => {
+  // The ramp encodes illumination, so a level's forward and reverse arms are
+  // one colour — ranked by curve they became the brightest and the darkest,
+  // two illuminations that never existed. Their *keys* must differ, though:
+  // the crosshair finds a dot by `data-series`, and two dots with one key
+  // left the second never shown and the first carrying the wrong value.
+  const light = JV.curves.find((c) => c.dark !== true);
+  const model = jvModel([
+    { ...light, direction: 'forward' },
+    { ...light, direction: 'reverse' },
+  ]);
+  const [forward, reverse] = model.panels[0].series;
+  assert.equal(forward.colour, reverse.colour, 'one level, one colour');
+  assert.notEqual(forward.key, reverse.key, 'and two identities');
+  assert.equal(forward.dash, null);
+  assert.equal(reverse.dash, '4 2', 'the direction is told by the dash');
+  assert.equal(new Set(model.panels[0].series.map((s) => s.key)).size, 2);
+
+  // Two real levels still step along the ramp.
+  const stepped = jvModel([
+    { ...light, led_level_v: 1.0 },
+    { ...light, led_level_v: 1.03 },
+  ]);
+  assert.notEqual(stepped.panels[0].series[0].colour, stepped.panels[0].series[1].colour);
+});
+
+test('a pipeline node draws on the card of the module that ran it', () => {
+  // `RunQueued.module` is null for a pipeline and the module names are the
+  // nodes' `kind`. Found by the run's module, the canonical two-node tree drew
+  // nothing at all on the card that produced it.
+  const store = createStore({ schedule: () => {} });
+  for (const frame of jsonl('stream_pipeline_sim.jsonl')) store.applyFrame(frame);
+  const state = store.getState();
+  assert.equal(state.runs[state.order[0]].module, null, 'the fixture is a pipeline');
+
+  const found = runFor(state, 'bace');
+  assert.ok(found, 'and its bace nodes are still bace');
+  assert.equal(found.node.kind, 'bace');
+  assert.ok(found.node.shots.length, 'with shots to draw');
+  // The newest node, not the run's own `lastShot`: each node numbers its shots
+  // from one, so the run-level pointer is whichever node moved last.
+  assert.equal(found.node.node_path, 'rep=2/bace');
+  assert.equal(runFor(state, 'jv_bace'), null, 'and a module the tree never ran finds nothing');
 });
