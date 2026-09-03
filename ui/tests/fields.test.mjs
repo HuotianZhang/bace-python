@@ -287,3 +287,36 @@ test('the read-back row shows the level the LED is actually driven at', () => {
   assert.equal(unread.readback.text, 'lit');
   assert.equal(driveLevel({ mode: 'DC', high_v: 1.3 }), null);
 });
+
+test('the card model is what the card is keyed on, so it carries no clock', () => {
+  // `views/bench.js` rebuilds a card only when `JSON.stringify(cardModel(...))`
+  // moves, which works only because the model is a function of the *values*
+  // and not of when they were read. `/bench` is re-read every 700 ms for the
+  // length of a run (`lib/watch.js`), so a `read_at` reaching the model would
+  // rebuild all six cards twice a second and take the operator's caret with
+  // them — which is the defect this keying exists to fix, arriving through the
+  // fix. Measured before it: 737 rebuilds per card in four seconds.
+  const bench = JSON.parse(fs.readFileSync(
+    path.join(here, '..', 'fixtures', 'hello_sim.json'), 'utf8')).data.bench;
+  const later = { ...bench, read_at: (bench.read_at || 0) + 42 };
+
+  for (const name of BENCH_CARDS) {
+    if (!byName[name]) continue;
+    assert.equal(JSON.stringify(cardModel(byName[name], { bench })),
+                 JSON.stringify(cardModel(byName[name], { bench: later })),
+                 `${name}: a re-read that changed nothing moved the model`);
+  }
+
+  // And the converse, or the key would be stable for the wrong reason: a
+  // shutter that actually moved has to reach it.
+  const moved = { ...bench,
+    instruments: { ...bench.instruments,
+      shutter: { ...(bench.instruments.shutter || {}), open: !bench.instruments.shutter.open } } };
+  const readers = BENCH_CARDS.filter((n) => byName[n] && cardModel(byName[n], { bench }).readback);
+  assert.ok(readers.length, 'no card reads the bench, so this proves nothing');
+  for (const name of readers) {
+    assert.notEqual(JSON.stringify(cardModel(byName[name], { bench })),
+                    JSON.stringify(cardModel(byName[name], { bench: moved })),
+                    `${name}: the shutter moved and the model did not`);
+  }
+});

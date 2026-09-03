@@ -12,7 +12,7 @@
 // posts and re-reads the bench. No value is cached here, because a cached
 // value is a second opinion about a number the service is the authority on.
 
-import { h, fill } from './../lib/dom.js';
+import { h, fill, keyed } from './../lib/dom.js';
 import { moduleCard } from './../lib/card.js';
 import { BENCH_CARDS, cardModel } from './../lib/fields.js';
 
@@ -231,17 +231,72 @@ export default {
       };
     };
 
+    /**
+     * The cards on screen, by module name, each with the key it was built
+     * from — so a card is rebuilt only when its own model moves.
+     *
+     * `render` is called on every store notify, and a `--sim --fast` scan
+     * notifies once per animation frame for the length of the run. Rebuilding
+     * six cards each time was measured at 435 506 DOM elements over one
+     * 21 x 180 scan, and the cost is not the point: a rebuilt element is a
+     * *different* element, so the operator's caret went with it. Focus a
+     * parameter field, start a scan, and 2.5 s later `document.activeElement`
+     * was `BODY` — and a power monitor ticking at 1 Hz did the same on an idle
+     * bench. `docs/ui-plan.md` decision 5 is what this is.
+     *
+     * Replaced **in place** rather than by refilling `body`: detaching an
+     * element blurs whatever inside it had the focus, so a rebuild of the
+     * `bace` card must not take the caret out of the `jv` card beside it.
+     */
+    const held = new Map();
+    let order = '';
+
+    /**
+     * Everything `moduleCard` draws from, as one string.
+     *
+     * `cardModel` is the pure function an entry becomes rows through, so its
+     * output *is* what ends up on screen — including the read-back row, which
+     * is instrument state and carries no timestamp, so a `/bench` refetch that
+     * changed nothing does not move the key. `busy`, the card's own checks and
+     * which folds are open are the rest of it.
+     *
+     * `ctx`'s callbacks are deliberately not in the key: they close over the
+     * store and the api rather than over any value, and `act` re-derives its
+     * arguments from the store at click time on purpose.
+     */
+    const cardKey = (entry, c, open) => JSON.stringify(
+      [cardModel(entry, { bench: c.bench }), c.busy, c.checksFor(entry.name), [...open].sort()]);
+
     function render() {
       if (pressing) { missed = true; return; }
       const state = store.getState();
       const { byName } = state.modules;
       const names = BENCH_CARDS.filter((n) => byName[n]);
       if (!names.length) {
-        fill(body, h('div.card', h('p.absent', 'GET /modules has not answered')));
+        held.clear();
+        order = '';
+        keyed(body, 'absent', () => h('div.card', h('p.absent', 'GET /modules has not answered')));
         return;
       }
       const c = ctx();
-      fill(body, names.map((name) => moduleCard(byName[name], c, opened(name))));
+      if (names.join(',') !== order) {
+        // The set of cards changed — the first answer from `GET /modules`, or
+        // a module that was not in it before. Start the row again.
+        order = names.join(',');
+        held.clear();
+        fill(body);
+      }
+      for (const name of names) {
+        const entry = byName[name];
+        const open = opened(name);
+        const key = cardKey(entry, c, open);
+        const was = held.get(name);
+        if (was && was.key === key) continue;
+        const card = moduleCard(entry, c, open);
+        if (was && was.el.parentNode === body) body.replaceChild(card, was.el);
+        else body.append(card);
+        held.set(name, { key, el: card });
+      }
 
       // Several of the checks are about the bench rather than the values —
       // an instrument that went away, the chain, a V_oc that has just been
