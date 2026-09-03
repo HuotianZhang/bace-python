@@ -101,7 +101,7 @@ Shapes are in `docs/service-contract.md` (section numbers below).
 | bench | `GET /bench` | the cached read-back, the run in progress, the queue, the chain, the rig values. Touches no instrument (§4) |
 | bench | `POST /bench/read` | a read-back job; 409 while a run is active. Waits by default; `?wait=false` returns the job id (§4) |
 | bench | `POST /bench/actions/{name}` | one explicit action, journaled `by="hand"` with `result.before` (what the read-back held before it, so the log can say `NORM → INV`), followed by a read-back. `park`, `set-33220a-pol-inv/-norm`, `arm-81150a-ext`, `set-led-pulse`, `set-led-dc`, `led-off`, `bias-off`, `smu-off`, `shutter-open/-shut`, `relay-to-sourcemeter/-amplifier`, `read-power`. 409 while a run is active, except `park`, which answers `pending: true` rather than a 504 when the aborted run is inside a long instrument call (§4) |
-| bench | `GET /modules`, `GET /modules/{m}` | the catalogue — `jv_dark`, `jv_bace`, `bace`, `power`, `temperature`, `park`, `wait`, `note` — each parameter with its value and where it came from: `default` → `run.toml` → `last-used` → `edited` → `inherited`/`derived` (§5) |
+| bench | `GET /modules`, `GET /modules/{m}` | the catalogue — `jv`, `jv_bace`, `bace`, `light`, `power`, `temperature`, `park`, `wait`, `note` — each parameter with its value and where it came from: `default` → `run.toml` → `last-used` → `edited` → `inherited`/`derived` (§5) |
 | bench | `PUT /modules/{m}/params`, `POST /modules/{m}/params/reset` | set the `edited` layer (a `null` value resets that parameter); drop the whole layer (§5) |
 | bench | `POST /runs` | run one module now: `{"module", "params", "name"}`. Validated like a pipeline; 422 with the checks, else 202 queued (§6) |
 | bench | `POST /runs/{id}/stop` | `{"mode": "after_shot" \| "abort"}` (§6, and below) |
@@ -317,7 +317,7 @@ source exactly as `centre_on_voc` does.
 
 `curl` is at `C:\Windows\System32\curl.exe`. The bodies below are written for
 a POSIX shell (Git Bash); in `cmd.exe` escape the quotes,
-`-d "{\"module\": \"jv_dark\"}"`, or put the body in a file and pass
+`-d "{\"module\": \"jv\"}"`, or put the body in a file and pass
 `-d @body.json`. In PowerShell call `curl.exe`, since `curl` there is an alias.
 The `httpx` forms need `pip install httpx` (the tests already do).
 
@@ -389,38 +389,55 @@ r = c.post("/bench/actions/set-33220a-pol-inv")
 print(r.status_code, r.json()["result"])
 ```
 
-### 2. Run `jv_dark`, read the result
+### 2. Run `jv`, read the result
 
 ```
 curl -X POST http://127.0.0.1:8900/runs -H "Content-Type: application/json" \
-     -d '{"module": "jv_dark"}'
+     -d '{"module": "jv"}'
     202 {"run_id": "20260902_080637-001", "state": "queued", "position": 0, "checks": [...], "cost": {...}}
 ```
 
 On the stream, in order: `RunQueued`, `RunStateChanged` (`queued`, then
 `preflight`), the chain `Verdict`s from the read-back Start takes,
-`RunStateChanged(running)`, then with `node_path: "jv_dark"`: `NodeStarted`,
+`RunStateChanged(running)`, then with `node_path: "jv"`: `NodeStarted`,
 `JVStarted`, `InstrumentState`, `JVCurveDone` (the curve with its `metrics`:
 `voc`, `jsc`, `fill_factor`, `p_max`, `v_mpp`, `j_mpp` — `voc` is `null` for a
-dark curve), `Progress`, `JVFinished`, `NodeDone(outcome="ok")`; then
+curve read as dark), `Progress`, `JVFinished`, `NodeDone(outcome="ok")`; then
 `RunStateChanged(done)` and `RunStateChanged(parked)`. Then
 
 ```
 curl http://127.0.0.1:8900/runs/20260902_080637-001
-    {"run_id": ..., "state": "done", "kind": "manual", "module": "jv_dark", "kept": 1, "requested": 1,
+    {"run_id": ..., "state": "done", "kind": "manual", "module": "jv", "kept": 1, "requested": 1,
      "folders": ["...\\runs\\290K_20260902_080637"], "node_outcomes": {...}, "params_as_executed": {...},
      "verdicts": [...], "chain_at_start": {...}, "error": null, ...}
 curl http://127.0.0.1:8900/runs/20260902_080637-001/data
-    {"curves": [{"label": "dark", "dark": true, "direction": ..., "led_level_v": ..., "intensity_w": ...,
+    {"curves": [{"label": "as found dark", "dark": true, "direction": ..., "led_level_v": ...,
+                 "intensity_w": ..., "illumination": {"lit": false, "shutter": "shut", ...},
                  "voltage": [...], "current": [...], "density": [...], "metrics": {...}}]}
 ```
+
+`jv` sets no light: it sweeps under whatever it finds and the `label` says
+what it read (`as found dark`, `as found 1.020 V`, or `as found unknown` when
+the bench cannot say). To make it light or dark first, use the bench actions —
+they do not go through the worker, so nothing parks them away:
+
+```
+curl -X POST http://127.0.0.1:8900/bench/actions/set-led-dc \
+     -H "Content-Type: application/json" -d '{"level": 1.02}'
+curl -X POST http://127.0.0.1:8900/bench/actions/shutter-open
+```
+
+Inside a pipeline the same thing is a `light` node before the step that needs
+it (`{"module": "light", "params": {"shutter": "open", "led_mode": "dc",
+"led_v": 1.02}}`); as a run on its own it is refused, because the park that
+ends every run would undo it.
 
 To stop a longer run: `curl -X POST .../runs/<id>/stop -d '{"mode": "after_shot"}'`
 (with the JSON header) answers `{"run_id", "state": "stopping", "mode"}`.
 
 ```python
 import time
-run_id = c.post("/runs", json={"module": "jv_dark"}).json()["run_id"]
+run_id = c.post("/runs", json={"module": "jv"}).json()["run_id"]
 while c.get(f"/runs/{run_id}").json()["state"] not in ("done", "stopped", "aborted", "failed", "blocked"):
     time.sleep(0.5)
 rec = c.get(f"/runs/{run_id}").json()
