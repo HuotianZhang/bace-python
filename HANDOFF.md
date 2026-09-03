@@ -122,6 +122,17 @@ with no VISA backend. `bace/service/README.md` is how to run and drive it.
 与 `light`（快门 + LED 的节点）。`jv_bace` 不变——它把光照当作被扫的轴，
 且是 V_oc 的来源。HDF5 升到 `bace-jv/3`。以下 2026-09-02 的记录里写的
 `jv_dark` 就是现在的 `jv` 加一次关快门。
+同日稍晚：J–V 的电流密度**全项目统一成 mA/cm²**——`JVCurveDone.density`、
+`.dat` 里的 `J/mA cm-2` 与 `Jsc/mA cm-2`、HDF5 的 `density` 数据集
+（`unit = "mA cm-2"`）、以及 console 的显示，都是同一个单位。换算只发生一次，
+就在除以像素面积的地方（`experiment.jv.current_density`）；此前它散落在两个
+demo 和 series 汇总里，而 console 的格式化函数还会按数量级自己挑前缀，同一条
+曲线一头是 `20.0 mA/cm²`、另一头是 `1.90 nA/cm²`。传统 series 汇总的
+`Jsc [mA/cm2]` 本来就是这个单位，现在走同一个函数。HDF5 因此升到
+`bace-jv/4`：数据集的名字和形状都没动、含义差了一千倍，这是读者唯一看不出来
+的那类改动，所以必须由版本号说出来。`pixel_area_cm2 = 0` 仍然是“没有面积、
+也就没有密度”：字段是 `null`，报的是安培。`metrics.jsc` 仍是 **A**——它是从
+电流数组插值出来的，不是密度。
 
 **Proven on the rig 2026-09-02 (evening)**: jv_dark → jv_bace → bace end to
 end on the lab PC, the bace against LabVIEW fifteen minutes apart — Q −1.72e−10
@@ -145,8 +156,13 @@ Design rules that are load-bearing:
 
 ## 3. What is NOT built
 
-**`ui/`** — browser front end. **M0 and M1 are built** (`ui/README.md`,
-`docs/ui-plan.md`); M2–M6 are not. **Explicit instruction from the user, 2026-09-01:**
+**`ui/`** — browser front end. **M0, M1 and M2 are built** (`ui/README.md`,
+`docs/ui-plan.md`): the event layer with its recorded fixtures, the pinned rail
+and the chain strip, and the six generated bench cards with the `edited` layer
+behind them. **M3 is next** — the scale/axis foundation, then the J–V and
+transient charts and the timing diagram — and nothing in the service blocks it
+(`docs/ui-plan.md`, "what blocks what"). M4–M6 are not built. **Explicit
+instruction from the user, 2026-09-01:**
 
 > *"I do not want the same shape as JV console and the 331 controller. I want a
 > suitable shape for this measurement itself (the ui should be demonstrated and

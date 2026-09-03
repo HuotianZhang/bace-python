@@ -6,7 +6,8 @@
 from __future__ import annotations
 
 from bace.drivers.simulated import make_bench
-from bace.experiment.jv import JVConfig, JVCurveDone, JVFinished, run_jv
+from bace.experiment.jv import (JVConfig, JVCurveDone, JVFinished, current_density,
+                                run_jv)
 from bace.experiment.rig import Rig, RigConfig
 
 
@@ -23,7 +24,9 @@ def main() -> int:
     for ev in run_jv(rig, cfg, sleep=lambda s: None):
         if isinstance(ev, JVCurveDone):
             m = ev.metrics
-            j = "" if m.jsc is None else f"{m.jsc / 0.04 * 1e3:13.3f}"
+            # The one conversion, so the header's unit and the number agree.
+            j = ("" if m.jsc is None
+                 else f"{float(current_density(m.jsc, cfg.pixel_area_cm2)):13.3f}")
             voc = "" if m.voc is None else f"{m.voc:9.4f}"
             ff = "" if m.fill_factor is None else f"{m.fill_factor:7.3f}"
             pm = "" if m.p_max is None else f"{m.p_max * 1e3:9.4f}"

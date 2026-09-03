@@ -55,7 +55,8 @@ def curve(index: int = 1, dark: bool = False) -> J.JVCurveDone:
     i = 1e-9 * (np.exp(v / 0.05) - 1) - (0.0 if dark else 2e-4)
     return J.JVCurveDone(index=index, label="dark" if dark else "1.02 V", dark=dark,
                          led_level_v=None if dark else 1.02, direction="forward",
-                         voltage=v, current=i, density=None if dark else i / 0.04,
+                         voltage=v, current=i,
+                         density=J.current_density(i, 0.0 if dark else 0.04),
                          metrics=J.metrics(v, i, dark=dark),
                          intensity_w=None if dark else 2.07e-5)
 

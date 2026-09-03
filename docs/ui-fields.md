@@ -55,7 +55,7 @@ card is the intent, not an overrun.
 | 1 | `start_v` `stop_v` `step_v` | **one range row** | `−0.20 → 1.20 · step 0.02 · 71 pts` |
 | 2 | `settle_s` | float, s | dwell per point — hysteresis lives here |
 | 3 | `both_directions` | bool | |
-| 4 | `pixel_area_cm2` | float, cm² | `0` means the answer is amps, not A/cm² (`ui-rules` §6) |
+| 4 | `pixel_area_cm2` | float, cm² | `0` means the answer is amps, not mA/cm² (`ui-rules` §6) |
 | — | illumination | **bench read-back**, not a parameter | `shut`, `1.020 V`, or `unknown ⚠`. This is the whole of `jv`'s relationship with the light: it reads it, labels the curve from the read, and changes nothing. From `/bench`, and it is what the curve's `label` will say |
 
 Folded: `sourcemeter · 9`.
@@ -257,7 +257,9 @@ and the file is edited between them.
 Each is a deliberate departure, listed so it can be reversed in one place.
 
 1. **`pixel_area_cm2` is above the fold** on both J–V cards. It decides whether
-   the result is A or A/cm², and R3's own result panel prints `mA cm⁻²`. It is
+   the result is A or mA/cm² — R3's own result panel prints `mA cm⁻²`, and
+   since 2026-09-03 that is the unit the service sends, not one the console
+   converts into (`ui-rules` §2). It is
    also **a parameter of two modules, not of the sample** — the edited layer is
    per module, so it is typed twice and can disagree between the cards.
    Raising it makes that visible; the alternative is to lift it to the session

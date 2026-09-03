@@ -426,6 +426,13 @@ curl http://127.0.0.1:8900/runs/20260902_080637-001/data
                  "voltage": [...], "current": [...], "density": [...], "metrics": {...}}]}
 ```
 
+`voltage` is V, `current` is A as the instrument reported it, and `density` is
+**mA/cm²** — the unit J–V is read in everywhere in this project, applied once
+where the pixel area is (`experiment.jv.current_density`) rather than by each
+consumer. With `pixel_area_cm2 = 0` there is no area and so no density at all:
+the field is `null` and the answer is amps. `metrics.jsc` stays in **A**; it is
+interpolated from the current, not from the density.
+
 `jv` sets no light: it sweeps under whatever it finds and the `label` says
 what it read (`as found dark`, `as found 1.020 V`, or `as found unknown` when
 the bench cannot say). To make it light or dark first, use the bench actions —

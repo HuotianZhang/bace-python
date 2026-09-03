@@ -114,9 +114,9 @@ class JVConfig:
 
     pixel_area_cm2: float = 0.0
     """Illuminated area of the pixel, which is what the SourceMeter's amps are
-    divided by to get a current density. 0 means report current in amps and
-    leave density out — better than defaulting to 1 cm², which silently
-    mislabels A as A/cm²."""
+    divided by to get a current density in **mA/cm²** (`current_density`). 0
+    means report current in amps and leave density out — better than defaulting
+    to 1 cm², which silently mislabels A as mA/cm²."""
 
     led_settle_s: float = 2.0
     """How long the run waits after arranging each curve's illumination -- the
@@ -154,6 +154,35 @@ class JVConfig:
         return d
 
 
+# -- current density ------------------------------------------------------
+MA_PER_A = 1e3
+"""Milliamps per amp. The one place the factor is written down."""
+
+
+def current_density(current: np.ndarray | float,
+                    area_cm2: float) -> np.ndarray | None:
+    """The SourceMeter's amps as **mA/cm²** — the unit every J–V number in this
+    project carries, from the wire to the legacy summary to the axis label.
+
+    mA/cm² and not SI A/cm², because that is the unit a J–V curve is read in
+    and it was already the unit of the numbers this project has to agree with:
+    the legacy `LED_Voc_Jsc_BACE Parameters` columns are `Jsc [mA/cm2]`, and
+    the console's own result panel prints `mA cm⁻²`. Held in A/cm² instead, the
+    factor was applied by each consumer that remembered to — two demos, the
+    series summary — and a formatter free to pick an SI prefix per curve
+    rendered one measurement as `20.0 mA/cm²` on one row and `1.90 nA/cm²` on
+    the next. Applying it here, once, where the area is, is what makes the unit
+    a property of the number rather than a convention each reader observes.
+
+    `area_cm2 <= 0` is *no area*, so there is no density at all: the answer is
+    None and the caller reports amps. Defaulting to 1 cm² would mislabel A as
+    mA/cm² — wrong by the area and by a thousand, and plausible either way.
+    """
+    if area_cm2 <= 0:
+        return None
+    return np.asarray(current, dtype=float) * MA_PER_A / area_cm2
+
+
 # -- derived quantities ---------------------------------------------------
 @dataclass(frozen=True)
 class JVMetrics:
@@ -165,7 +194,10 @@ class JVMetrics:
     """
 
     voc: float | None
-    jsc: float | None            # current at 0 V, in A (or A/cm² if area given)
+    jsc: float | None            # current at 0 V, in **A** — always amps, never
+                                 # a density: `metrics` is handed the current
+                                 # array and never the density one, whatever
+                                 # pixel area the run was given
     p_max: float | None
     v_mpp: float | None
     j_mpp: float | None
@@ -248,7 +280,7 @@ class JVCurveDone(Event):
     direction: Direction
     voltage: np.ndarray
     current: np.ndarray          # A, as the instrument reported it
-    density: np.ndarray | None   # A/cm², only if a pixel area was given
+    density: np.ndarray | None   # mA/cm², only if a pixel area was given
     metrics: JVMetrics
     intensity_w: float | None = None
     illumination: dict | None = None
@@ -384,8 +416,7 @@ def run_jv(rig: Rig, config: JVConfig = JVConfig(), *,
                     v = v_forward if direction == "forward" else v_forward[::-1]
                     vm, im = rig.smu.sweep(float(v[0]), float(v[-1]), int(v.size),
                                            settle_s=config.settle_s)
-                    density = (im / config.pixel_area_cm2
-                               if config.pixel_area_cm2 > 0 else None)
+                    density = current_density(im, config.pixel_area_cm2)
                     ev = JVCurveDone(index=index, label=label, dark=dark,
                                      led_level_v=level, direction=direction,
                                      voltage=vm, current=im, density=density,

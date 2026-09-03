@@ -232,7 +232,7 @@ into the same store the WebSocket feeds.
 |---|---|---|
 | `journals/*.jsonl` — 3 files, 58 / 63 / 91 lines | the event and state layer | full `RunQueued → RunStateChanged → NodeStarted → … → RunFinished` lifecycles, the chain `Verdict`s in `20260902_144844.jsonl`, and **two real `RunFailed`** in `20260902_125751.jsonl` |
 | `service_153722/run20260902_153722.h5` (`schema = bace-run/2`), and the LabVIEW `.dat` beside it in `labview_150640/` | the transient charts | the traces, at full precision |
-| a `bace-jv/2` HDF5 — **to be recorded**, there is none in the repo | the J–V chart | the per-curve voltage, current and density arrays |
+| a J–V HDF5 — **recorded in M0** as `ui/fixtures/jv_sim.h5`, with `jv_sim.json` beside it in the shape `GET /runs/{id}/data` answers | the J–V chart | the per-curve voltage, current and density arrays. *Re-recorded 2026-09-03 with `pixel_area_cm2 = 0.04`*: as first recorded both curves carried `density: null`, because `run.toml` has no `[jv]` table and a J–V left to the recipe reports amps — which left the mA/cm² axis M3 draws with nothing behind it |
 | a captured `Hello` frame — **to be recorded**, it is not in the acceptance set | the bench snapshot: the rail and the chain | `data.bench`, which is `GET /bench` whole: instruments, `inferred`, `chain`, `rig`, `verdicts`, `queue`, `state` |
 | *(added 2026-09-03)* a recorded **pipeline** stream | node identity, and the counters | two `bace` nodes under one `run_id`, each numbering its shots from one, and the loop's `Progress(node_path="rep=1")` beside the leaf's `node_path: ""` |
 | *(added 2026-09-03, M1)* `GET /bench` **taken mid-scan** | the rail's inferred overlay | `inferred: ["relay", "bias", "led", "shutter"]`, the bias LIVE at its two levels and the shutter open — none of which exists in a snapshot at rest |
@@ -649,9 +649,15 @@ that have not started. They are here so they are not rediscovered there:
   operator their stop lapsed. A `NeedsOperator` that a stop, an abort or a
   failure ended gets no `OperatorResumed` — nobody answered it — so the prompt
   dies with the run.
-- **M3 (the charts).** `JVCurveDone.density` is **A/cm²** on the wire; the
-  prefix is computed, not assumed, or every density is understated by a
-  thousand. And a shot arrives without arrays two ways — the ring dropped them
+- **M3 (the charts).** `JVCurveDone.density` is **mA/cm²** on the wire.
+  *Corrected 2026-09-03: it was A/cm², and this entry used to say so, with the
+  factor of a thousand the chart had to apply itself.* The factor now belongs
+  to the quantity — it is applied once, where the pixel area is
+  (`experiment.jv.current_density`) — so a chart converts nothing and a
+  formatter picks no prefix, and a client that still does either is out by a
+  thousand in the other direction. `metrics.jsc` is the exception that proves
+  it: still **A**, because it is interpolated from the current array. And a
+  shot arrives without arrays two ways — the ring dropped them
   (`decimated[…].replay`) or the journal never stored them
   (`decimated[…].omitted`) — which are the same case on screen: no curve, and
   the loop point comes from the scalars.

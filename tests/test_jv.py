@@ -149,7 +149,7 @@ def test_both_directions_is_opt_in_and_doubles_the_curves():
 
 # -- current density ------------------------------------------------------
 def test_density_is_omitted_rather_than_defaulted_to_one_square_centimetre():
-    """Defaulting the area silently mislabels A as A/cm²."""
+    """Defaulting the area silently mislabels A as mA/cm²."""
     _, rig = build()
     c = [e for e in run(rig, JVConfig(dark=False, led_levels_v=(1.020,)))
          if isinstance(e, JVCurveDone)][0]
@@ -158,7 +158,33 @@ def test_density_is_omitted_rather_than_defaulted_to_one_square_centimetre():
     c2 = [e for e in run(rig, JVConfig(dark=False, led_levels_v=(1.020,),
                                        pixel_area_cm2=0.04))
           if isinstance(e, JVCurveDone)][0]
-    np.testing.assert_allclose(c2.density, c2.current / 0.04)
+    # mA/cm², not A/cm²: the factor of a thousand belongs to the quantity
+    # here, so no consumer has to remember to apply it (`current_density`).
+    np.testing.assert_allclose(c2.density, c2.current * 1e3 / 0.04)
+
+
+def test_every_place_a_density_is_written_says_mA_per_square_centimetre(tmp_path):
+    """One unit, and each file says which. A density column whose header does
+    not name its unit is the same trap as a renamed HDF5 dataset: readable,
+    plausible, and wrong by a thousand."""
+    import h5py
+    _, rig = build()
+    rec = JVRecorder(str(tmp_path), "20260903_120000", metadata={},
+                     rig_config=rig.config.as_dict())
+    list(record(run_jv(rig, JVConfig(dark=False, led_levels_v=(1.020,),
+                                     pixel_area_cm2=0.04), sleep=NO_SLEEP), rec))
+
+    curves = open([p for p in rec.written if "JV_Data" in p][0], "rb").read().decode()
+    assert "J/mA cm-2" in curves.split("\r\n")[0]
+    params = open([p for p in rec.written if "JV_Parameters" in p][0], "rb").read().decode()
+    assert "Jsc/mA cm-2" in params.split("\r\n")[0]
+
+    with h5py.File([p for p in rec.written if p.endswith(".h5")][0], "r") as f:
+        g = f["curves"][sorted(f["curves"])[0]]
+        assert g["density"].attrs["unit"] == "mA cm-2"
+        # The version is what tells a reader of an older file that its
+        # `density` is A/cm² and means it.
+        assert f.attrs["schema"] == "bace-jv/4"
 
 
 # -- compliance -----------------------------------------------------------
@@ -372,7 +398,7 @@ def test_a_recorded_jv_run_writes_both_flat_files_and_an_hdf5(tmp_path):
     data = open([p for p in rec.written if "JV_Data" in p][0], "rb").read().decode()
     head = data.split("\r\n")[0]
     assert "dark fwd" in head and "1.02 V rev" in head
-    assert "J/A cm-2" in head
+    assert "J/mA cm-2" in head
 
 
 def test_an_interrupted_jv_series_still_writes_what_completed(tmp_path):
@@ -404,7 +430,7 @@ def test_the_file_says_which_curves_were_taken_with_the_shutter_open(tmp_path):
     list(record(run_jv(rig, JVConfig(dark=True, led_levels_v=(1.020,)),
                        sleep=NO_SLEEP), rec))
     with h5py.File([p for p in rec.written if p.endswith(".h5")][0], "r") as f:
-        assert f.attrs["schema"] == "bace-jv/3"
+        assert f.attrs["schema"] == "bace-jv/4"
         assert f["config/resolved"].attrs["led_output_polarity"] == "INV"
         assert f["config/resolved"].attrs["shutter"] == "open"   # the last one
         by_name = {n: f["curves"][n].attrs["shutter"] for n in f["curves"]}
@@ -519,7 +545,7 @@ def test_illumination_state_needs_all_three_to_say_lit():
 
 
 def test_an_unknown_curve_has_no_dark_attribute_in_the_file(tmp_path):
-    """`bace-jv/3`: absent, not False. A reader that asks for `dark` on an
+    """`bace-jv/3` and after: absent, not False. A reader that asks for `dark` on an
     unknown curve gets a KeyError, which is loud; a False would have been a
     dark label on a curve nobody read."""
     import h5py
@@ -532,7 +558,7 @@ def test_an_unknown_curve_has_no_dark_attribute_in_the_file(tmp_path):
                      rig_config=rig.config.as_dict())
     list(record(run_jv(rig, _leave(), sleep=NO_SLEEP), rec))
     with h5py.File([p for p in rec.written if p.endswith(".h5")][0], "r") as f:
-        assert f.attrs["schema"] == "bace-jv/3"
+        assert f.attrs["schema"] == "bace-jv/4"
         group = f["curves"][sorted(f["curves"])[0]]
         assert group.attrs["illumination"] == "unknown"
         assert "dark" not in group.attrs

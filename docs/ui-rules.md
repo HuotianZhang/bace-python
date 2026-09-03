@@ -77,6 +77,12 @@ that names a parameter says what it is for. A reader who has to go and look up
   `J_sc`, `J_sat`, `t_0,int`.
 - SI prefixes where they are natural (mA, ns, mW), scientific notation where
   they are not (charge). Do not force one convention on both.
+- **Current density is mA/cm², always** — never a prefix chosen per value. It
+  is the unit a J–V curve is read in, it is what the service sends
+  (`JVCurveDone.density`, `experiment.jv.current_density`), and it is the one
+  quantity here where a per-value prefix actively destroys the comparison: one
+  sweep printed `20.0 mA/cm²` at one end and `1.90 nA/cm²` at the other is a
+  column nobody can read down and an axis nobody can label.
 
 **Two zeros that are not zero.** Both appear throughout the real archive and
 both must be rendered as absences, never as values:
@@ -181,7 +187,7 @@ it; never re-derive it. Beyond that:
 - **J–V metrics are interpolated, not measured** — `J_sc`, `V_oc`, `V_mpp`,
   `P_mpp`, `FF` all come from the curve. Label them derived.
 - `pixel_area_cm2 = 0` means report amps and leave density out, rather than
-  defaulting to 1 cm² and silently mislabelling A as A/cm².
+  defaulting to 1 cm² and silently mislabelling A as mA/cm².
 - **Which measurement supplied a V_oc, and at what LED level.** A V_oc from a
   different illumination is worse than no V_oc.
 - Bench properties, not per-run choices: `R_sense 5.192 Ω`, amplifier gain ×4,

@@ -6,6 +6,12 @@ diagram (`Voltage`, `Current Density `, `LED Voltage`, `J_SC`, `V_OC`, `FF`).
 Those names are reused and the house format is the same as the BACE files —
 CRLF, tabs, `%10.5e` with an unpadded exponent, a `% ` header.
 
+Every density here is **mA/cm²** (`experiment.jv.current_density`), which is
+what the legacy series summary's `Jsc [mA/cm2]` column already was and what a
+J–V curve is read in. The columns say so in their own names — `J/mA cm-2`,
+`Jsc/mA cm-2` — so a file cannot be read in the wrong unit by someone who never
+saw this docstring.
+
 **Not byte-verified.** The BACE writer is checked against a real archive; this
 one is not, because no J–V output folder has been read. If byte-compatibility
 with the old J–V files matters, one sample pair is enough to pin it — the
@@ -30,7 +36,7 @@ from .numbers import lv_float
 STEM_DATA = "BACE_JV_Data_"
 STEM_PARAMETERS = "BACE_JV_Parameters_"
 
-H_PARAMETERS = ("% LED Voltage/V ", "Voc/V", "Jsc/A", "Jsc/A cm-2", "Pmax/W",
+H_PARAMETERS = ("% LED Voltage/V ", "Voc/V", "Jsc/A", "Jsc/mA cm-2", "Pmax/W",
                 "Vmpp/V", "FF", "direction", "intensity/W")
 
 
@@ -62,7 +68,7 @@ def render_curves(curves) -> str:
         head += [f"V/V ({tag})", f"I/A ({tag})"]
         cols += [np.asarray(c.voltage, dtype=float), np.asarray(c.current, dtype=float)]
         if c.density is not None:
-            head.append(f"J/A cm-2 ({tag})")
+            head.append(f"J/mA cm-2 ({tag})")
             cols.append(np.asarray(c.density, dtype=float))
 
     n = max(col.size for col in cols)
@@ -130,13 +136,20 @@ def write_hdf5(path: str, curves, *, metadata: dict, config: dict,
     loud, where a False would have been a dark label on a curve nobody read.
     Every curve a run *set* the light for still carries `dark`, so files from
     `jv_bace` are `bace-jv/2` in every respect but the version.
+
+    `bace-jv/4` is the unit: every `density` dataset is **mA/cm²**, where
+    `bace-jv/1`--`3` held A/cm². Nothing else moved, and that is exactly why
+    the version had to: the dataset keeps its name and its shape and changes
+    its meaning by a factor of a thousand, which is the one kind of change a
+    reader cannot notice. `unit` on the dataset says `mA cm-2`; a file whose
+    schema is `bace-jv/3` or lower says `A cm-2` and means it.
     """
     import h5py
 
     from .hdf5 import COMPRESSION, _set_attrs
 
     with h5py.File(path, "w") as f:
-        f.attrs["schema"] = "bace-jv/3"
+        f.attrs["schema"] = "bace-jv/4"
         f.attrs["n_curves"] = len(curves)
         _set_attrs(f.create_group("metadata"), metadata)
         cfg = f.create_group("config")
@@ -174,7 +187,7 @@ def write_hdf5(path: str, curves, *, metadata: dict, config: dict,
             if c.density is not None:
                 d = sub.create_dataset("density", data=np.asarray(c.density, float),
                                        **COMPRESSION)
-                d.attrs["unit"] = "A cm-2"
+                d.attrs["unit"] = "mA cm-2"
     return path
 
 

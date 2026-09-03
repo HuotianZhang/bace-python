@@ -10,7 +10,7 @@ beside them — and two do not, because nothing writes them:
   snapshot, the rail and the chain strip. A journal contains none; `Hello` is
   never journalled, and `InstrumentState` says what one step changed rather
   than what the bench is;
-* a **`bace-jv/2` HDF5** and its curves, because the one HDF5 in the repo is a
+* a **J-V HDF5** (`bace-jv/4`) and its curves, because the one HDF5 in the repo is a
   transient run and the journal payload policy reduces `JVCurveDone` to
   `metrics + label + n_points` with no arrays. The J-V chart would otherwise
   have nothing to draw.
@@ -223,8 +223,15 @@ def main(argv: list[str] | None = None) -> int:
     jv_frames, jv_posted = asyncio.run(_run_and_capture(
         ws_url, base,
         {"module": "jv_bace", "name": "ui-fixture-jv",
+         # `pixel_area_cm2` is not in `run.toml`, so a J-V left to the recipe
+         # reports amps and `density: null` -- and the first fixture recorded
+         # here did, which left the console's mA/cm² path with nothing to draw
+         # against. 0.04 cm² is a plausible pixel and it is simulated anyway:
+         # what the fixture is for is the *shape* of a curve that has a
+         # density, in the unit the wire actually carries it in.
          "params": {"start_v": -0.2, "stop_v": 1.2, "step_v": 0.02, "dark": True,
-                    "led_v": 1.020, "both_directions": False}},
+                    "led_v": 1.020, "both_directions": False,
+                    "pixel_area_cm2": 0.04}},
         timeout_s=a.timeout_s))
     jv_id = jv_posted["run_id"]
     _dump(os.path.join(a.out, f"stream_jv_{tag}.jsonl"), jv_frames, jsonl=True)

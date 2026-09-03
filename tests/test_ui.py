@@ -67,6 +67,21 @@ def test_the_jv_fixture_has_the_arrays_the_journal_drops():
         assert curve["metrics"], "the metrics are interpolated, and labelled derived on screen"
     assert any(not curve["dark"] for curve in data["curves"]), "a light curve, for the V_oc"
 
+    # The density is **mA/cm²** on the wire (`experiment.jv.current_density`),
+    # so the console converts nothing and picks no prefix. A fixture recorded
+    # without a pixel area carries `density: null` and proves none of that --
+    # which is what the first recording of this file did, `run.toml` having no
+    # `[jv]` table.
+    lit = [c for c in data["curves"] if not c["dark"]][0]
+    assert lit["density"] is not None, "recorded with pixel_area_cm2 = 0.04"
+    assert len(lit["density"]) == len(lit["current"])
+    area_cm2 = 0.04
+    for j, i in zip(lit["density"][:5], lit["current"][:5]):
+        assert abs(j - i * 1e3 / area_cm2) <= abs(j) * 1e-9, "mA/cm², not A/cm²"
+    # `metrics.jsc` is the exception, and stays amps: it is interpolated from
+    # the current array, whatever area the run was given.
+    assert abs(lit["metrics"]["jsc"]) < 1.0, "jsc is A, not a density"
+
 
 def test_the_recorded_stream_is_the_wire_and_not_the_journal():
     """Decimated traces and `StepPhase` — the shape only a live socket has."""
