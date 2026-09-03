@@ -173,6 +173,7 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
           record.module = bench.run.module || record.module;
           record.progress = bench.run.progress || record.progress;
           record.eta = bench.run.eta || record.eta;
+          adoptPending(record, bench.run.pending);
         } else {
           state.activeRunId = null;
         }
@@ -230,6 +231,7 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
       }
       if (payload.progress && !record.progress) record.progress = payload.progress;
       if (payload.eta && !record.eta) record.eta = payload.eta;
+      adoptPending(record, payload.pending);
       if (payload.error && !record.error) record.error = { text: payload.error, where: '', ts: null };
       record.hydrated = true;
       notify();
@@ -675,6 +677,35 @@ function keepTraces(traced, shot, previous) {
     const old = traced.shift();
     if (old.traces) { old.traces = null; old.tracesGone = true; }
   }
+}
+
+/**
+ * The pause a snapshot says is open, when the stream could not say it.
+ *
+ * A temperature pause is the one thing on this bench that lasts hours — that
+ * is what it is *for* — and the ring is 5000 envelopes, so a console opened
+ * during one, or dropped and reconnected through it, replays a tail with no
+ * `NeedsOperator` in it. The prompt is the only way to answer, so without
+ * this the screen shows a paused run and no way to resume it, and the
+ * experiment is blocked from the console until someone curls the endpoint.
+ * `/bench`'s `run.pending` and `GET /runs/{id}`'s carry it (`session.py`:
+ * `rec.pending`), and both are asked for at boot and after a gap.
+ *
+ * Nothing here moves anything backwards, which is decision 2's rule for
+ * everything fetched: a run that has ended took its pause with it, a prompt
+ * the stream is already showing is the newer one, and a resume the stream has
+ * carried answers the pause a snapshot taken before it still describes.
+ */
+function adoptPending(record, pending) {
+  if (!record || !pending || !pending.what) return;
+  if (record.parked_at || TERMINAL.has(record.state)) return;
+  if (record.needsOperator) return;
+  const since = pending.since || 0;
+  if (record.resumes.some((resume) => (resume.ts || 0) >= since)) return;
+  record.needsOperator = {
+    what: pending.what, node_path: pending.node_path || '',
+    detail: pending.detail || {}, ts: since,
+  };
 }
 
 /** One entry per `(code, node_path)`: a re-read replaces the earlier copy. */

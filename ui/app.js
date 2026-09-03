@@ -255,7 +255,19 @@ async function abortRun(runId) {
   await stopRun(runId, 'abort');
 }
 
+/**
+ * One Resume per pause. A double-clicked button would post twice: the first
+ * answers the pause and the second is refused with 409 and dropped (contract
+ * §2), leaving an error on screen for a run that resumed perfectly well. A
+ * plain variable checked synchronously, not a disabled button — disabling
+ * re-renders, and a re-render between the mousedown and the mouseup eats the
+ * click, which `views/bench.js` found in M2 and guards its Run the same way.
+ */
+let resuming = false;
+
 async function resumeRun(runId, detail) {
+  if (resuming) return;
+  resuming = true;
   monitorStatus = { run_id: runId, level: '', text: 'resume …' };
   drawMonitor(store.getState());
   const body = {};
@@ -267,6 +279,10 @@ async function resumeRun(runId, detail) {
   } catch (error) {
     // 409: not paused — the pause was answered already, or ended with the run.
     monitorStatus = { run_id: runId, level: 'bad', text: error.text || error.message };
+  } finally {
+    // Released whatever happened: a resume the service refused for a reason
+    // the operator can fix is one they have to be able to send again.
+    resuming = false;
   }
   drawMonitor(store.getState());
 }

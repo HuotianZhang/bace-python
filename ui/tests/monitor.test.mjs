@@ -15,7 +15,8 @@ import { dirname, join } from 'node:path';
 
 import { createStore } from '../lib/store.js';
 import {
-  monitorModel, loopCounters, shotCounter, phaseIndicator, pausePrompt, stopModel, describeSegment, scopedTo,
+  monitorModel, loopCounters, shotCounter, phaseIndicator, pausePrompt, stopModel, describeSegment,
+  scopedTo, queuedRuns,
 } from '../lib/monitor.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -314,4 +315,26 @@ test('an armed Abort belongs to the run it was armed for', () => {
   const status = { run_id: 'r1', level: 'ok', text: 'after_shot accepted' };
   assert.equal(scopedTo('r1', status), status);
   assert.equal(scopedTo('r2', status), null);
+});
+
+test('a run waiting for the worker is reachable, so it can be cancelled', () => {
+  // The store keeps `activeRunId` for the run that holds the bench, so the
+  // monitor's own record can never be a queued one: without a row of their
+  // own, the only way to be rid of a queued run is to let it start and then
+  // stop it, which on a rig is an hour of the sample's life.
+  const s = createStore({ schedule: () => {} });
+  s.applyFrame({ seq: 1, ts: 1, run_id: 'r1', node_path: '', type: 'RunQueued', data: { kind: 'manual', module: 'bace' } });
+  s.applyFrame({ seq: 2, ts: 2, run_id: 'r1', node_path: '', type: 'RunStateChanged', data: { state: 'running' } });
+  s.applyFrame({ seq: 3, ts: 3, run_id: 'r2', node_path: '', type: 'RunQueued', data: { kind: 'manual', module: 'jv' } });
+  s.applyFrame({ seq: 4, ts: 4, run_id: 'r2', node_path: '', type: 'RunStateChanged', data: { state: 'queued' } });
+  const state = s.getState();
+  assert.equal(state.activeRunId, 'r1');
+  assert.equal(monitorModel(state).run_id, 'r1', 'the monitor draws the run on the worker');
+  assert.deepEqual(queuedRuns(state), [{ run_id: 'r2', position: 1, label: 'jv' }]);
+
+  // A queue folded from a `/bench` snapshot can name a run this console never
+  // saw queued; the id is the label rather than a blank row.
+  assert.deepEqual(queuedRuns({ queue: ['20260903-009'], runs: {} }),
+    [{ run_id: '20260903-009', position: 1, label: '20260903-009' }]);
+  assert.deepEqual(queuedRuns({ queue: [], runs: {} }), []);
 });

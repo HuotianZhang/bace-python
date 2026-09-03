@@ -511,6 +511,23 @@ button.link:hover { color: var(--accent-dark); }
 .monitor .spacer { flex: 1 1 auto; }
 .monitor button.btns { font-family: var(--font-body); font-weight: 500; font-size: 11px; padding: 3px 8px; }
 .monitor button.armed { background: var(--alert); border-color: var(--alert); color: #fff; }
+/* The queue: runs waiting for the worker, each with the Cancel it needs. */
+.mon-queue {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 4px 12px;
+  border-top: 1px dashed var(--rule);
+  font-family: var(--font-num); font-size: 11px;
+}
+.mon-queue:empty { display: none; }
+.mon-qk {
+  font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase;
+  color: var(--grey);
+}
+.mon-q {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 6px; background: var(--paper); border: 1px solid var(--rule);
+}
+
 .mon-ask { font-weight: 600; color: var(--warn); }
 .mon-lines { display: inline-flex; gap: 10px; flex-wrap: wrap; color: var(--ink); }
 .mon-reading .ok { color: var(--ok); }

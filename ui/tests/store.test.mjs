@@ -527,3 +527,49 @@ test('a pipeline keeps each node\'s acquisition config, not only the last one st
   assert.equal(leaves.length, 4);
   for (const node of leaves) assert.equal(node.config.run.trigger_sweep, 'AUTO', node.node_path);
 });
+
+test('a pause the ring no longer holds comes back from the snapshot', () => {
+  // A temperature pause lasts hours — that is what it is for — and the ring is
+  // 5000 envelopes, so a console opened during one replays a tail with no
+  // `NeedsOperator` in it. Without the snapshot's `pending` the screen shows a
+  // paused run and no way to answer it: the experiment is blocked from the UI.
+  const s = store();
+  const pending = { what: 'temperature', node_path: 'T=250K', since: 100,
+    detail: { setpoint_k: 250, tolerance_k: 0.2, hold_s: 60, index: 4, count: 9 } };
+  s.applyBench({ state: 'paused', queue: [], instruments: {}, verdicts: [],
+    run: { run_id: 'r1', state: 'paused', node_path: 'T=250K', pending } });
+  const run = s.getState().runs.r1;
+  assert.equal(run.needsOperator.what, 'temperature');
+  assert.equal(run.needsOperator.node_path, 'T=250K');
+  assert.equal(run.needsOperator.detail.setpoint_k, 250);
+  assert.equal(run.needsOperator.ts, 100, 'when it opened, so a later resume can answer it');
+
+  // The run record answers with the same field, for the boot that asks it.
+  const other = store();
+  other.applyRunRecord({ run_id: 'r2', state: 'paused', pending });
+  assert.equal(other.getState().runs.r2.needsOperator.what, 'temperature');
+});
+
+test('a pause the stream has already answered does not come back with the snapshot', () => {
+  // Nothing fetched moves anything backwards (decision 2): an HTTP response
+  // and the socket race, and the answer is the newer fact.
+  const s = store();
+  s.applyFrame({ seq: 1, ts: 1, run_id: 'r1', node_path: '', type: 'RunQueued', data: { kind: 'pipeline' } });
+  s.applyFrame({ seq: 2, ts: 90, run_id: 'r1', node_path: 'T=250K', type: 'NeedsOperator',
+    data: { what: 'temperature', node_path: 'T=250K', detail: {} } });
+  s.applyFrame({ seq: 3, ts: 120, run_id: 'r1', node_path: 'T=250K', type: 'OperatorResumed',
+    data: { node_path: 'T=250K', note: 'set by hand', detail: {} } });
+  s.applyBench({ state: 'running', queue: [], instruments: {}, verdicts: [],
+    run: { run_id: 'r1', state: 'running',
+      pending: { what: 'temperature', node_path: 'T=250K', since: 100, detail: {} } } });
+  assert.equal(s.getState().runs.r1.needsOperator, null, 'the snapshot was taken before the resume');
+});
+
+test('a pause does not outlive the run it belonged to', () => {
+  const s = store();
+  s.applyFrame({ seq: 1, ts: 1, run_id: 'r1', node_path: '', type: 'RunStateChanged',
+    data: { state: 'stopped', reason: 'requested' } });
+  s.applyRunRecord({ run_id: 'r1', state: 'stopped',
+    pending: { what: 'temperature', node_path: 'T=250K', since: 5, detail: {} } });
+  assert.equal(s.getState().runs.r1.needsOperator, null, 'nobody is waiting for an answer');
+});

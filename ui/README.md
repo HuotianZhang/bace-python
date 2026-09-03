@@ -188,11 +188,18 @@ scales, never one number:
 
 And the three verbs: `after_shot` (the honest one: the shot in flight completes
 and is kept), `abort` (armed first, like Park — a discarded shot is a shot of
-the sample's life), and `cancel` for a run still queued. A `NeedsOperator`
+the sample's life, and the arming belongs to *that* run), and `cancel`, on a
+row of its own: a queued run never holds the worker, so without one the only
+way to be rid of it is to let it start and then stop it. A `NeedsOperator`
 opens the prompt: what to set the cryostat to, which temperature of how many,
 the reading polled while the person decides when a controller is attached, a
 field for the `temperature_k` it actually reached and a note, and what a resume
-with nothing typed will bind. The prompt is keyed on *which* pause it is, so a
+with nothing typed will bind. **The prompt survives a reload**, which it has
+to: a temperature pause lasts hours and the ring is 5000 envelopes, so a
+console opened during one replays a tail with no `NeedsOperator` in it. The
+snapshot's own `run.pending` is folded instead (`store.adoptPending`), and
+never backwards — a pause the stream has already seen answered does not come
+back with it. The prompt is keyed on *which* pause it is, so a
 reading arriving mid-keystroke does not take the caret; the buttons are keyed
 on the run's state, so a Stop pressed between two shots lands on a button that
 still exists.

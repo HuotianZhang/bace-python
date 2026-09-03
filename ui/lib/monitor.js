@@ -120,6 +120,26 @@ export function shotCounter(record, node) {
 }
 
 /**
+ * The runs waiting for the worker, in order.
+ *
+ * A queued run is never `activeRunId` — the store keeps that for the run that
+ * holds the bench — so the monitor, which draws that run, could never reach
+ * one. `POST /runs/{id}/stop` cancels a run the worker has not picked up
+ * (contract §6), and without this the only way to be rid of one is to wait
+ * for it to start and then stop it, which on a rig is an hour of the sample's
+ * life. The id is the fallback label: a queue folded from a `/bench` snapshot
+ * can name a run whose `RunQueued` this console never saw.
+ */
+export function queuedRuns(state) {
+  return (state.queue || []).map((runId, i) => {
+    const record = state.runs[runId] || null;
+    const named = record && (record.module || record.name
+      || (record.kind === 'pipeline' ? 'pipeline' : record.kind));
+    return { run_id: runId, position: i + 1, label: named || runId };
+  });
+}
+
+/**
  * The shell's own state *about one run* — an armed Abort, the answer a stop
  * came back with — belongs to that run and to no other.
  *
@@ -289,7 +309,8 @@ function lastShotLine(node) {
  */
 export function renderMonitor(el, state, { onStop, onAbort, onResume, armedRun = null, status = null } = {}) {
   const model = monitorModel(state);
-  if (!model) {
+  const queued = queuedRuns(state);
+  if (!model && !queued.length) {
     el.hidden = true;
     // Clear the keys with the content, or a run that ends and starts again
     // with an identical first model would leave the old prompt on screen.
@@ -299,11 +320,23 @@ export function renderMonitor(el, state, { onStop, onAbort, onResume, armedRun =
   el.hidden = false;
   if (!el.__key) {
     el.__key = 'monitor';
-    el.replaceChildren(h('div.mon-row', h('div.mon-live'), h('div.mon-actions')), h('div.mon-prompt'));
+    el.replaceChildren(h('div.mon-row', h('div.mon-live'), h('div.mon-actions')),
+      h('div.mon-prompt'), h('div.mon-queue'));
   }
   const live = el.querySelector('.mon-live');
   const actions = el.querySelector('.mon-actions');
   const promptEl = el.querySelector('.mon-prompt');
+  // The queue outlives the run in front of it: it is drawn whether or not
+  // anything holds the worker, and each entry carries its own Cancel.
+  keyed(el.querySelector('.mon-queue'), JSON.stringify([queued, queueStatus(queued, status)]),
+    () => queueRow(queued, status, onStop));
+  el.querySelector('.mon-row').hidden = !model;
+  if (!model) {
+    keyed(live, '', () => []);
+    keyed(actions, '', () => []);
+    keyed(promptEl, '', () => []);
+    return null;
+  }
   // Both belong to a run, and this may not be the run they were held for.
   const abortArmed = Boolean(scopedTo(model.run_id, armedRun));
   const answer = scopedTo(model.run_id, status);
@@ -380,6 +413,29 @@ function actionButtons(model, { onStop, onAbort, abortArmed, status }) {
     }, abortArmed ? 'abort now?' : 'Abort'));
   }
   return kids;
+}
+
+/** Whichever queued run the last answer belongs to, so it is drawn beside it. */
+function queueStatus(queued, status) {
+  return queued.some((q) => scopedTo(q.run_id, status)) ? status : null;
+}
+
+/** The queue, one line, with the Cancel each entry needs. */
+function queueRow(queued, status, onStop) {
+  if (!queued.length) return [];
+  return [
+    h('span.mon-qk', { text: `queue ${queued.length}` }),
+    queued.map((q) => {
+      const answer = scopedTo(q.run_id, status);
+      return h('span.mon-q',
+        h('span', { title: q.run_id, text: `${q.position} · ${q.label}` }),
+        answer ? h('span', { class: 'mon-status ' + (answer.level || ''), text: answer.text }) : null,
+        h('button.btns', {
+          title: 'POST /runs/{id}/stop — a run the worker has not picked up is cancelled',
+          onclick: () => onStop && onStop(q.run_id, 'after_shot'),
+        }, 'Cancel'));
+    }),
+  ];
 }
 
 /** The seven (or six) segments, the current one lit — R3·2's `5 · acquire light`. */
