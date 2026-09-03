@@ -158,6 +158,50 @@ def test_a_short_capture_is_refused_rather_than_averaged():
         m.close()
 
 
+def test_the_usb_handle_is_given_back_on_every_failed_open(monkeypatch):
+    """The device is exclusive: whoever holds it, holds it. So a failure
+    after `transport.open()` has to close the transport, or the meter stays
+    held by a process that has no object for it -- unavailable to a retry, to
+    the meter's own console, and to anything else until the interpreter
+    exits. A console would be restarted; this service runs for the day.
+
+    Three places can raise after the handle is taken: `identify()` inside
+    `PowerMeter.open`, and the units and wavelength writes that configure it.
+    """
+    closed: list[int] = []
+
+    class Handle(np.SimulatedTransport):
+        def close(self):
+            closed.append(1)
+
+    monkeypatch.setattr(np, "SimulatedTransport", Handle)
+
+    # 1. identification fails
+    monkeypatch.setattr(np.PowerMeter, "identify",
+                        lambda self: (_ for _ in ()).throw(np.MeterError("timeout")))
+    with pytest.raises(np.MeterError):
+        np.PowerMeter.open(simulate=True)
+    assert closed == [1], "the transport was closed before the error escaped"
+
+    # 2. the wavelength is refused, in the adapter's constructor
+    monkeypatch.undo()
+    monkeypatch.setattr(np, "SimulatedTransport", Handle)
+    closed.clear()
+    monkeypatch.setattr(np.PowerMeter, "set_wavelength",
+                        lambda self, nm: (_ for _ in ()).throw(
+                            np.MeterError("400 nm is outside 450-1100 nm")))
+    with pytest.raises(PowerMeterError, match="outside"):
+        DirectPowerMeter(simulate=True, wavelength_nm=400.0)
+    assert closed == [1]
+
+    # 3. the wavelength is refused, in open_power_meter's configuration step
+    closed.clear()
+    with pytest.raises(PowerMeterError, match="outside"):
+        open_power_meter(RigConfig(power_meter_wavelength_nm=400.0), simulate=True)
+    assert closed == [1], (
+        "build_real registers a closer only on what open_power_meter returns")
+
+
 def test_the_meter_open_failure_names_the_console_as_the_likely_thief(monkeypatch):
     """Opening the device while the meter's console holds it fails with a
     bare "no Newport device found", which reads like a cable problem and has

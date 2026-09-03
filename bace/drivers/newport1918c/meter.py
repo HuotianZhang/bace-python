@@ -417,8 +417,23 @@ class PowerMeter:
                     "with --sim." % python_bitness())
             transport = DllTransport(path)
         transport.open()
-        meter = cls(transport)
-        meter.info = meter.identify()
+        # DIVERGES from the console project, 2026-09-03: identification runs
+        # inside try/finally there and did not here. `transport.open()` has
+        # taken the *exclusive* USB handle by this point, so an `identify()`
+        # that times out left the device held by a process that has no object
+        # for it -- unavailable to a retry, to the meter's own console, and to
+        # anything else until the interpreter exits. That mattered little in a
+        # console which would be restarted; the BACE service is long-lived, so
+        # one bad query at start-up would have cost the meter for the session.
+        try:
+            meter = cls(transport)
+            meter.info = meter.identify()
+        except BaseException:
+            try:
+                transport.close()
+            except Exception:                       # noqa: BLE001
+                pass        # the open failure is the one worth reporting
+            raise
         return meter
 
     def close(self) -> None:
