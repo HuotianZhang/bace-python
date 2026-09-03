@@ -73,8 +73,10 @@ curve and shuts it for a dark one (`_set_shutter`) and yields
 `InstrumentState({"shutter": …})` per curve; `_set_illumination` no longer
 swallows a failing `led.off()` and skips the settle on a bare-SMU rig;
 `run_intensity_series` unblocks the shutter around `measure_dc`; and
-`storage/jv.py` is therefore schema **`bace-jv/2`** (`/config/resolved`, a
-per-curve `shutter` attribute). The transient recorder's `bace-run/2` is
+`storage/jv.py` is therefore schema **`bace-jv/3`** (`/config/resolved`, a
+per-curve `shutter` attribute, and — since the `jv`/`light` split of
+2026-09-03 — a per-curve `illumination` of `dark`/`light`/`unknown`, with
+`dark` *absent* rather than False on an unknown curve). The transient recorder's `bace-run/2` is
 unchanged. The review round of 2026-09-02 added one more engine change:
 `run_transient_scan` yields `StepPhase` between the same instrument calls in
 the same order (§3), and nothing about a measurement moved.
@@ -470,8 +472,9 @@ what the run will centre on — rather than `default · null` with an empty
 
 | module | maps to | params (name → where it goes) |
 |---|---|---|
-| `jv_dark` | `run_jv(rig, JVConfig(dark=True, led_levels_v=()))` | `start_v stop_v step_v settle_s both_directions pixel_area_cm2` → JVConfig; `smu_current_compliance_a smu_voltage_compliance_v smu_nplc` → SourceMeterConfig (real rig: `Keithley2400(res, config=…)`; sim: ignored) |
-| `jv_bace` | `run_jv(rig, JVConfig(dark=<dark>, led_levels_v=<levels>))` | all of `jv_dark` + `led_start_v led_stop_v led_step_v` (or inherited `led_v` → one level), `led_settle_s`, `dark: bool = True` (include the dark curve), `led_low_v` (unused by run_jv, carried for the rail) |
+| `jv` | `run_jv(rig, JVConfig(light_control="leave", …))` | `start_v stop_v step_v settle_s both_directions pixel_area_cm2` → JVConfig; `smu_current_compliance_a smu_voltage_compliance_v smu_nplc` → SourceMeterConfig (real rig: `Keithley2400(res, config=…)`; sim: ignored). **No illumination parameters at all** — it sweeps under whatever light it finds, touching neither shutter nor LED on the way in or out, unwinds only the SourceMeter, and labels the curve from a read-back (`experiment.jv.illumination_state`): `as found dark`, `as found 1.020 V`, or `as found unknown` with a warning when the bench cannot say. `JVCurveDone.dark` is `True`/`False`/**`None`**, and None is not False |
+| `jv_bace` | `run_jv(rig, JVConfig(light_control="manage", dark=<dark>, led_levels_v=<levels>))` | all of `jv` + `led_start_v led_stop_v led_step_v` (or inherited `led_v` → one level), `led_settle_s`, `dark: bool = True` (include the dark curve), `led_low_v` (unused by run_jv, carried for the rail). This is the module that *owns* the light: it sweeps illumination as the measurement, and it is the V_oc source |
+| `light` | `rigs.apply_led` / `rigs.apply_shutter` — the same functions the `set-led-*`, `led-off` and `shutter-*` actions call | `shutter` (`open`/`shut`/`leave`), `led_mode` (`dc`/`pulse`/`off`/`leave`), `led_v led_low_v pulse_frequency_hz duty_percent settle_s`. Exists because a bench action is not a pipeline step: without it a tree of `jv` steps could never be dark. `leave` on either half touches nothing, so the shutter can move without cycling a generator that is at its thermal steady state. **A run whose only module is `light` is `invalid`** (`light.undone-by-park`): every run ends parked, so it would hand the bench back unchanged — the manual form is the bench action |
 | `bace` | `run_transient_scan(rig, ScanSpec, RunConfig, voc=…)` inside `router.transient()` with the LED pulsed at `led_v` | `axis_name axis_start axis_stop axis_step centre_on_voc` → Axis; `vpre vcoll delay_ns n_loops` → ScanSpec; `vpre_on_voc: bool = False` (group `pinned`: the pinned `vpre` is an *offset from the V_oc in scope* — the design's inherited "vpre = V_oc + 0.000 V" when `delay_ns` or `vcoll` is the axis, TDCF at V_oc; resolved in `build()` from the same V_oc source `centre_on_voc` uses, under the same coupling check, so the engine still gets an absolute prebias; invalid with the `vpre` axis, where `centre_on_voc` is the flag); every `RunConfig` field verbatim; `store_shots`; `led_v led_low_v` (33220A pulse levels; inherited inside an illumination loop); `voc` (derived from the V_oc source, or edited = typed by hand → warn); `measure_dc: bool = False` (measure V_oc/J_sc/J_sat on the Keithley under the LED first, like the intensity series; `v_sat`); `led_settle_s` (the least wait after DC → pulse), `led_settle_max_s: float = 60.0` s and `led_settle_tolerance: float = 0.02` (group `illumination`: the power meter behind the open shutter is polled every 0.5 s until three readings agree within the tolerance, giving up with a warning at the maximum; see the README's "Light"); `smu_*` as above |
 | `power` | `PowerReading` from the meter; `Read` is a worker job, `Monitor` is an observer | `wavelength_nm samples` |
 | `temperature` | `service.temperature.settle`: through the 331 when `Rig.temperature` holds a controller (setpoint written, band held for `hold_s`), else `NeedsOperator` + wait; status `partial` | `setpoint_k tolerance_k hold_s timeout_s` |
@@ -487,7 +490,11 @@ metadata (not a module param). jv modules take their defaults from `JVConfig`
 (run.toml has no jv table; add an optional `[jv]` table to `config.load_run`
 only if trivial — otherwise defaults + last-used is enough).
 
-`ParamSpec.doc` comes from `params.field_docs` on the dataclass. Groups:
+`ParamSpec.doc` comes from `params.field_docs` on the dataclass — one sentence,
+naming the instrument and what the parameter does to it — and `doc_full` is the
+whole docstring for the field's expandable help (`ui-rules` §1). Both are on the
+wire; `doc_full` is empty when `doc` is the whole of it. Every one of the 69
+distinct parameters carries a `doc` as of 2026-09-03. Groups:
 `axis`, `pinned`, `acquisition`, `processing`, `timing`, `trigger`, `output`,
 `illumination`, `sourcemeter`, `led` — the UI shows the first six fields of the
 bace card and folds "17 more · run.toml"; the service just labels groups.
@@ -526,7 +533,12 @@ instruction 2026-09-02; the shutter is the light switch).
 V_oc source resolution for a **manual** run (`build()`): `voc` param typed →
 `how="typed"`, else the source in scope (`ctx.voc` — the session's most recent
 light J-V curve at `led_v`, |Δ| ≤ 1e-9 V), else `measure_dc`, else invalid when
-`centre_on_voc`. In a **pipeline** the resolver (`pipeline._voc`, §7) chooses one
+`centre_on_voc`. An **as-found** `jv` curve qualifies only if its read-back put
+the LED in **DC**: under a pulsing lamp the Keithley integrates across the
+pulse's light and dark phases, so the crossing is a time average and no V_oc —
+the same reason `measure_dc` switches the generator to DC before measuring one.
+The curve is still filed as light; it just provides no source, and the run says
+so on a warning `Notice`. In a **pipeline** the resolver (`pipeline._voc`, §7) chooses one
 first — a jv_bace in scope at this level, then `measure_dc`, then a typed value,
 then the session's — and hands `build()` a schedule where a chosen measurement
 has cleared `voc` and a chosen typed value left `ctx.voc` unset, so the two
@@ -803,6 +815,7 @@ fixes anything: a `fix` field names a bench action the operator may click.
 |---|---|---|
 | `tree.shape` | invalid | unknown kind/loop/module, loop without children, malformed values |
 | `tree.owned-param` | invalid | a module inside an illumination loop sets `led_v`/`led_*_v` |
+| `light.undone-by-park` | invalid | the run's only module is `light`: every run ends parked, so it would set a light and hand it straight back. Names the bench actions, which do not go through the worker |
 | `voc.source` | invalid | `bace.centre_on_voc` or `bace.vpre_on_voc` with no V_oc source in scope (`data.needed_by` names the flag) |
 | `voc.coupling` | invalid | V_oc source's `led_v` ≠ the bace's `led_v` (`assert_axis_centre`) |
 | `led.levels` | invalid | `LedDrive` refuses (low ≥ threshold, level < threshold, level ≤ low) |
@@ -1010,7 +1023,7 @@ py -3 -m bace.service --rig rig.toml --run run.toml      # the lab PC
 - `tests/test_drivers.py` — the real drivers' `read_state()`/`read_output()` transcripts on a scripted fake IO, and `?`/None when the instrument will not answer; `tests/test_service_rigs.py` — `build_real` reading outputs, levels and the 81150A's polarity off the fakes, a bench with no VISA coming up with the four roles unavailable, the relay move reading both sources first.
 - `tests/test_service_journal.py` — append-only, first line, `last_used_params`, `run_index`, `settle_history`, `shot_time_s`, reading older sessions.
 - `tests/test_service_worker.py` — bench lock (two jobs serialise), events reach subscribers in order with monotonic seq, `after_shot` keeps the shot and yields `RunAborted(requested)`, `abort` closes the generator and the `finally` parks, `resume` wakes a paused generator, a raising generator → `failed` then `parked`, queue FIFO + cancel.
-- `tests/test_service_modules.py` — catalogue params with provenance (defaults → run.toml → last-used → edited → inherited), `build()` produces the right dataclasses (transcript-style assertions on the simulated instruments: LED pulsed at `led_v`, router in `transient()` for bace, shutter shut for jv_dark), manual bace with `centre_on_voc` refuses without a V_oc source and accepts the session's jv_bace at the same level, coupling invariant enforced.
+- `tests/test_service_modules.py` — catalogue params with provenance (defaults → run.toml → last-used → edited → inherited), `build()` produces the right dataclasses (transcript-style assertions on the simulated instruments: LED pulsed at `led_v`, router in `transient()` for bace, the light untouched by `jv`), manual bace with `centre_on_voc` refuses without a V_oc source and accepts the session's jv_bace at the same level, coupling invariant enforced.
 - `tests/test_service_pipeline.py` — node paths; every check in the catalogue triggered by a minimal tree; the canonical tree (9 T × 5 levels × jv_bace+bace) resolves to 90 module steps with the right inherited/derived params; cost with and without settle history; `temperature inside illumination` warns.
 - `tests/test_service_executor.py` — the canonical tree with 2 T × 2 levels on the simulator: V_oc flows from jv_bace into bace at the same level (assert the bace ran centred on that V_oc: `AxisResolved.voc == jv metrics.voc`), relay positions at each boundary, `NeedsOperator` pauses and `resume` continues with `temperature_k` in the folder name, stop after_shot in the middle leaves `kept < requested` and `NodeDone(outcome="stopped")`, abort discards, folders written under one parent.
 - `tests/test_service_api.py` — FastAPI `TestClient` (httpx is installed): `/bench`, actions journaled as by-hand, `/modules` + `PUT` params + reset, `POST /runs` → WS `/events` receives `RunStateChanged` … `RunFinished` … `parked`, `/runs/{id}/data`, `/pipelines/validate` on the canonical tree, `/pipelines` start + stop, 409/422/404 paths, the power monitor.

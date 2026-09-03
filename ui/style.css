@@ -256,3 +256,148 @@ button {
 }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button:disabled { opacity: .45; cursor: not-allowed; }
+
+/* -- the module cards ----------------------------------------------------
+   `docs/ui-plan.md` M2. Density is the requirement (§1): a `bace` card shows
+   fourteen fields above the fold and that is the intent, not an overrun. Every
+   field carries one line saying which instrument it touches; the rest of the
+   explanation is a `title`, revealed on hover and read out by a screen reader,
+   because a comfortable screen is one that is hiding something. */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(430px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+.card.mod { margin: 0; padding: 0; display: flex; flex-direction: column; }
+
+.ch {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--fill);
+}
+.ch .cn { font-family: var(--font-head); font-weight: 600; font-size: 13px; }
+.cs { color: var(--grey); font-size: 11px; }
+.cb { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 8px; }
+
+.tag {
+  font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
+  border: 1px solid var(--rule); padding: 0 4px; color: var(--grey);
+  white-space: nowrap;
+}
+.tag.ok { border-color: var(--ok); color: var(--ok); }
+.tag.bad { border-color: var(--alert); color: var(--alert); }
+.tag.nb { background: var(--fill); }
+.tag.cost { border-color: var(--warn); color: var(--warn); }
+
+/* -- one field ------------------------------------------------------------ */
+.pr { display: flex; flex-direction: column; gap: 1px; }
+.pr.folded { border-top: 1px dashed var(--rule); padding-top: 6px; margin-top: 4px; }
+
+.pf {
+  display: grid;
+  grid-template-columns: 13em 1fr auto;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 4px;
+  border-radius: 2px;
+}
+.pf:hover { background: var(--fill); }
+.pf .l { color: var(--grey); font-size: 12px; overflow-wrap: anywhere; }
+.pf .l i { font-style: normal; color: var(--rule); margin-left: 4px; }
+.pf .v, .pf input.v, .pf select.v {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 12px;
+}
+.pf input.v, .pf select.v {
+  border: 1px solid transparent; background: transparent; color: inherit;
+  padding: 1px 3px; width: 100%; max-width: 15em; font-family: var(--font-num);
+}
+.pf input.v:hover, .pf select.v:hover { border-color: var(--rule); }
+.pf input.v:focus, .pf select.v:focus { border-color: var(--accent); outline: none; background: var(--paper); }
+.pf .v i { font-style: normal; color: var(--grey); margin-left: 6px; font-size: 11px; }
+
+/* A name alone explains nothing (§1): the field that has more to say marks
+   itself, so the operator knows there is something to hover. */
+.pf.has-help .l { border-bottom: 1px dotted var(--rule); cursor: help; }
+
+.pf.ro { color: var(--grey); }
+.pf.ro .v { color: var(--ink); }
+.pf.inh, .pf.der { background: rgba(236, 48, 19, .04); }
+.pf.inh .l::before, .pf.der .l::before { content: '↳ '; color: var(--accent); }
+.pf.acc .l { color: var(--accent-dark); }
+.pf.miss .need { color: var(--warn); }
+
+/* Provenance, rendered and never re-derived (§6) — and weighted by how much
+   it is telling you. `run.toml` is where most values come from, so twenty
+   boxed tags saying so is twenty repetitions of "normal"; it reads as quiet
+   text. A box is kept for the three that are a *statement*: somebody typed
+   this, a loop owns it, a measurement produced it. */
+.src { display: flex; align-items: center; gap: 5px; justify-self: end; }
+.src .tag { text-transform: none; letter-spacing: 0; }
+.src-run\.toml, .src-last-used {
+  border-color: transparent; color: var(--rule); font-size: 10px;
+}
+.pf:hover .src-run\.toml, .pf:hover .src-last-used { color: var(--grey); }
+.src-inherited, .src-derived { border-color: var(--accent); color: var(--accent-dark); }
+.src-edited { border-color: var(--ink); color: var(--ink); }
+button.link {
+  border: 0; background: none; padding: 0; color: var(--grey);
+  font-size: 10px; text-decoration: underline; cursor: pointer;
+}
+button.link:hover { color: var(--accent-dark); }
+
+/* -- the two small choosers ---------------------------------------------- */
+.seg, .bool { display: inline-flex; border: 1px solid var(--rule); }
+.seg .sego, .bool span {
+  padding: 0 7px; font-size: 11px; cursor: pointer; color: var(--grey);
+  font-family: var(--font-num);
+}
+.seg .sego.on, .bool span.on { background: var(--ink); color: #fff; }
+.bool.acc span.on { background: var(--accent-dark); }
+.pf.pol .v { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pf.pol .eff { color: var(--accent-dark); }
+
+/* -- the range row: three parameters and a count that came from the service */
+.pf.range .rng { display: flex; align-items: baseline; gap: 4px; }
+.pf.range input.v { max-width: 5.5em; text-align: right; }
+.pf.range .pts { color: var(--ink); }
+.pf.voc .v { display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
+.pf.voc input.v { max-width: 6em; }
+/* The reason sits beside the field it is about, not instead of it. */
+.pf.voc .need { color: var(--warn); font-size: 11px; }
+
+/* -- the bench read-back: not a parameter, and not from /modules ---------- */
+.pf.rb { border-left: 2px solid var(--rule); background: var(--fill); }
+.pf.rb.lit { border-left-color: var(--warn); }
+.pf.rb.warn { border-left-color: var(--alert); }
+.pf.rb.warn .v { color: var(--alert); }
+.pf.rb.inferred .l { border-bottom: 1px dashed var(--grey); }
+
+/* -- needs, blockers, the fold ------------------------------------------- */
+.warn1 { display: flex; align-items: baseline; gap: 6px; color: var(--warn); font-size: 12px; }
+.warn1.crit, .warn1.invalid { color: var(--alert); }
+.warn1 .code { font-family: var(--font-num); font-size: 11px; color: var(--grey); }
+.blocked { border-top: 1px solid var(--rule); padding-top: 6px; }
+
+.fold { border-top: 1px solid var(--rule); padding-top: 6px; }
+.foldbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.btng {
+  border: 1px solid var(--rule); background: var(--paper); color: var(--grey);
+  font-size: 11px; padding: 1px 6px; cursor: pointer; font-family: var(--font-num);
+}
+.btng:hover { border-color: var(--ink); color: var(--ink); }
+.btng.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+.btnp, .btns {
+  border: 1px solid var(--ink); background: var(--paper); color: var(--ink);
+  font-size: 11px; padding: 2px 9px; cursor: pointer;
+}
+.btnp { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btnp:disabled, .btns:disabled { opacity: .38; cursor: not-allowed; }
+
+/* The 422's own check list, beside the sentence that refused. */
+.strip .checks { display: inline-flex; gap: 5px; margin-left: 8px; }
+.strip .ck { font-family: var(--font-num); font-size: 10px; }
+.strip .ck.crit, .strip .ck.invalid { color: var(--alert); }

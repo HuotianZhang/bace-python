@@ -117,6 +117,12 @@ validates, dry-runs and executes the tree with the three bindings and a
 `abort`; every ending parks the bench. It rewrites no measurement logic and
 imports `pyvisa` only inside `rigs.py`, so `--sim --fast` runs on a machine
 with no VISA backend. `bace/service/README.md` is how to run and drive it.
+**2026-09-03:** `jv_dark` 拆成了 `jv`（只扫 J–V，不碰快门也不碰 LED，
+曲线标签来自读回：`as found dark` / `as found 1.020 V` / `as found unknown`）
+与 `light`（快门 + LED 的节点）。`jv_bace` 不变——它把光照当作被扫的轴，
+且是 V_oc 的来源。HDF5 升到 `bace-jv/3`。以下 2026-09-02 的记录里写的
+`jv_dark` 就是现在的 `jv` 加一次关快门。
+
 **Proven on the rig 2026-09-02 (evening)**: jv_dark → jv_bace → bace end to
 end on the lab PC, the bace against LabVIEW fifteen minutes apart — Q −1.72e−10
 vs −2.24e−10 C at a vpre 2 mV apart, within the single-shot scatter

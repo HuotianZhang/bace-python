@@ -24,10 +24,12 @@ repo root for the offline bench at `/ui/replay.html`, which needs
 | `lib/store.js` | the fold: the `/bench` snapshot and the `/events` frames become the state every view subscribes to |
 | `lib/format.js` | the number rules of `docs/ui-rules.md` §2, including the two zeros that are absences |
 | `lib/rail.js` | the pinned rail and the chain strip: `railModel(state)` is a pure function of the store, the DOM is beside it |
+| `lib/fields.js` | which fields sit above the fold on each card and in what order, as data, plus `cardModel` — the pure function one `GET /modules` entry becomes a card's rows through |
+| `lib/card.js` | the generated card and the one field component every parameter goes through: provenance rendered, `doc` under the field and `doc_full` on hover |
 | `lib/watch.js` | when to ask `GET /bench` again — which frames move the bench, and the throttle that collapses a scan's worth of them into one request per 700 ms |
 | `lib/dom.js` | `h()`, and `keyed()`: rebuild an element only when its model differs from the one already on screen |
 | `lib/replay.js`, `replay.html` | the offline bench: fixtures fed into the same store the socket feeds |
-| `views/` | bench · pipeline · results · rig. Stubs, and each says which milestone fills it |
+| `views/` | bench is M2's six generated cards; pipeline · results · rig are stubs, and each says which milestone fills it |
 | `fonts/` | IBM Plex Sans and Mono, Archivo — 24 woff2, 387 KB, lifted out of the Round 3 mockup by `tools/extract_ui_fonts.py`. Nothing is fetched from a network at runtime |
 | `fixtures/` | see below |
 | `tests/` | `node --test ui/tests/…` — and `tests/test_ui.py` runs them from the Python suite, skipping where there is no Node |
@@ -143,9 +145,14 @@ and all of them cheaper now than after the cards and the charts exist:
 Reproduce any of it with a browser and `playwright-core`; the shapes are in
 `ui/tests/render.test.mjs`, which holds both client-side rules down without one.
 
-**M2 is next**: the generated field and card components, the five module cards,
-the `edited` layer through `PUT`, and Start disabled by `invalid` *and* by
-`crit`. Its bar is `ui-rules` §8 — a dark J-V in fifteen seconds by someone who
-has not seen the UI before.
+**M2 is built**: `lib/fields.js` decides which rows a card has, `lib/card.js`
+draws them, and `views/bench.js` is the loop between them — six generated
+cards, the `edited` layer through `PUT`, and Start disabled by `invalid` *and*
+by `crit`. **M3 is next**: the scale and axis foundation, then the J-V and
+transient charts.
+
+One thing the measurement above still owes M2: `views/bench.js` renders on
+every store notify, so the six cards and every `<input>` in them are rebuilt at
+frame rate. `dom.keyed` is what that is for and the cards do not use it yet.
 
 The phases, and what each one has to prove, are in `docs/ui-plan.md`.

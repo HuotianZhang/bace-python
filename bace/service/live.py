@@ -47,7 +47,21 @@ INSTRUMENT_STATE_KEYS: dict[str, tuple[str, str]] = {
     "bias_output_polarity": ("bias", "polarity"),
     "bias_arm_source": ("bias", "arm_source"),
     "bias_arm_slope": ("bias", "arm_slope"),
+    "led_mode": ("led", "mode"),
 }
+
+LIGHT_UNWOUND: frozenset[str] = frozenset({"bace", "jv_bace", "park"})
+"""Which modules leave the shutter shut, and therefore leave the bench dark
+whatever they did in between: `bace` and `jv_bace` shut it in their own
+`finally`, and `park` shuts it outright (`Rig.park()`).
+
+`jv` and `light` are not here and must not be: `jv` never touches the light
+(`light_control="leave"`), and `light` exists to leave it where it put it.
+Inferring "shutter shut" at their `NodeDone` would tell the operator the lamp
+is off while it is on -- an inference the rail marks as inferred and the
+operator still reads. The mistake runs both ways, which is why `park` is here:
+a `light(shutter=open)` followed by `park` and then something long leaves the
+overlay saying open for the whole of it."""
 
 
 class LiveState:
@@ -72,11 +86,12 @@ class LiveState:
                 self._set("relay", position=RELAY_SIDE[step.relay])
         elif isinstance(ev, E.NodeDone):
             if self.step is not None and ev.node_path == self.step.node_path:
-                # The module's own unwind: outputs off, shutter shut
-                # (`_build_bace`/`run_jv` finally blocks); the relay stays,
+                # The module's own unwind: outputs off, and the shutter shut
+                # for the modules that shut it (`_build_bace`/`run_jv`'s
+                # `finally`, under `light_control="manage"`); the relay stays,
                 # and so does the LED -- since 2026-09-02 no module switches
                 # it off, the shutter is the light switch.
-                self._parked()
+                self._parked(light=self.step.module in LIGHT_UNWOUND)
                 self.step = None
                 self.run_config = None
         elif isinstance(ev, E.RunStarted):
@@ -87,13 +102,60 @@ class LiveState:
             self._set("led", output=True, mode="PULSE", high_v=_float(values.get("led_v")),
                       low_v=_float(values.get("led_low_v")), frequency_hz=frequency)
         elif isinstance(ev, E.InstrumentState):
+            # Read once, up front: which field a level belongs to is the
+            # mode's business, and dict order is not a contract.
+            led_mode = str(ev.values.get("led_mode") or "").upper()
             for key, value in ev.values.items():
                 if key in INSTRUMENT_STATE_KEYS:
+                    # `?` is a driver saying it got no answer. Overlaying it
+                    # would replace a real read-back with "unknown" *and* mark
+                    # it inferred -- worse on both counts than leaving the
+                    # snapshot's own value where it is.
+                    if value is None or str(value) == "?":
+                        continue
                     instrument, field = INSTRUMENT_STATE_KEYS[key]
                     self._set(instrument, **{field: str(value)})
                 elif key == "shutter":
-                    self._set("shutter", open=(str(value) == "open"))
+                    # `?` is the run saying it asked and got no answer, and
+                    # that is newer than the snapshot Start took. Left in
+                    # place, a stale `open` would be combined with a good LED
+                    # reading into a "lit" the file is recording as unknown.
+                    # `None` renders as an absence on the rail and as unknown
+                    # on the card, which is what it is.
+                    self._set("shutter", open=None if str(value) == "?"
+                              else str(value) == "open")
                     self._jv_light(str(value) == "open")
+                elif key == "led_level_v" and value is not None:
+                    # `set_dc` writes `:VOLT:OFFS`, `set_pulse` writes
+                    # `:VOLT:HIGH`, and the card reads whichever field the
+                    # mode names (`fields.driveLevel`). Folding a DC level
+                    # into `high_v` left `offset_v` at the Start snapshot's
+                    # value, so a `light` node that moved the lamp to a new
+                    # DC level showed the *old* one for the whole of the `jv`
+                    # that followed -- while the file recorded the new one.
+                    # An unread mode names neither field, and a good number
+                    # in the wrong field is worse than none at all.
+                    if led_mode == "DC":
+                        self._set("led", offset_v=float(value))
+                    elif led_mode == "PULSE":
+                        self._set("led", high_v=float(value))
+                elif key == "led_output" and value is not None:
+                    # A read-back, so it replaces the overlay's flag rather
+                    # than being inferred: a `light` node that switched the
+                    # generator on from parked, or off, is the one thing the
+                    # snapshot Start took cannot know.
+                    self._set("led", output=bool(value))
+                elif key == "illumination" and str(value) == "unknown":
+                    # The run asked and the bench could not say. Skipping the
+                    # unread `?` above protects a *good* read-back from being
+                    # replaced by "unknown" -- but here the run's own failure
+                    # to read is the newer fact, and leaving Start's stale
+                    # values in place lets the card combine them with the
+                    # current shutter and show "lit" for a curve the file is
+                    # recording as `as found unknown`. The screen disagreeing
+                    # with the file is the one thing the read-back exists to
+                    # prevent, so the unknown is written.
+                    self._set("led", mode="?", output=None)
         elif isinstance(ev, E.StepStarted):
             self._levels = self._pulse_levels(ev.setpoint)
             if self._levels is not None:
@@ -149,18 +211,24 @@ class LiveState:
     def _set(self, instrument: str, **fields: Any) -> None:
         self.state.setdefault(instrument, {}).update(fields)
 
-    def _parked(self) -> None:
+    def _parked(self, *, light: bool = True) -> None:
         self._set("bias", output=False)
         self._set("smu", output=False)
-        self._set("shutter", open=False)
+        if light:
+            self._set("shutter", open=False)
 
     def _jv_light(self, lit: bool) -> None:
-        """`run_jv` sets the LED to DC before it opens the shutter for a
-        light curve and leaves it alone for a dark one; the shutter's state
-        event is the only one it yields, so it stands for the LED too. A
-        dark curve therefore infers nothing about the LED: it is whatever
-        the last module left, which the overlay already holds."""
-        if self.step is None or self.step.module not in ("jv_bace", "jv_dark"):
+        """`run_jv` under `manage` sets the LED to DC before it opens the
+        shutter for a light curve and leaves it alone for a dark one; the
+        shutter's state event is the only one it yields, so it stands for the
+        LED too. A dark curve therefore infers nothing about the LED: it is
+        whatever the last module left, which the overlay already holds.
+
+        `jv` is excluded because it sets nothing: its shutter event is a
+        *read-back*, and the LED reading that comes with it arrives on the
+        same event under `led_mode`/`led_level_v` rather than being inferred
+        from the shutter."""
+        if self.step is None or self.step.module != "jv_bace":
             return
         if lit:
             values = self.step.values()

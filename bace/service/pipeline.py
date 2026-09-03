@@ -54,6 +54,7 @@ from ..core.illumination import IlluminationError, LedDrive, assert_axis_centre
 from ..core.pulses import pulse_levels
 from ..drivers.keithley2400 import SourceMeterConfig
 from ..experiment.events import Verdict
+from ..experiment.jv import JVConfig
 from ..experiment.rig import RigConfig
 from ..experiment.transient import RunConfig
 from ..experiment.wire import to_wire
@@ -89,7 +90,7 @@ LED_MATCH_V = 1e-9
 are the same illumination."""
 
 CHECKS: tuple[str, ...] = (
-    "tree.shape", "tree.owned-param", "voc.source", "voc.coupling", "led.levels",
+    "tree.shape", "tree.owned-param", "light.undone-by-park", "voc.source", "voc.coupling", "led.levels",
     "axis.geometry", "bench.instrument", "smu.ceiling", "relay.interlock",
     "bench.live-at-start", "voc.typed", "chain.led-polarity", "chain.bias-arm",
     "chain.bias-polarity", "temperature.not-wired", "temperature.inside-illumination",
@@ -1057,6 +1058,34 @@ def _c_owned_param(f: _Facts) -> list[Verdict]:
                "no module inside an illumination loop types an LED parameter")]
 
 
+def _c_light_undone_by_park(f: _Facts) -> list[Verdict]:
+    """A run that only sets the light sets nothing.
+
+    Every run ends parked -- the executor's own `finally` and then the
+    worker's, outputs off and the shutter shut -- so a tree whose only module
+    is `light` hands the bench back exactly as dark as it found it, and the
+    operator watches a run succeed and change nothing. Inside a tree the node
+    is the point: the light it sets holds for the steps after it, and park at
+    the *end* of the run is the right place for the bench to end up.
+
+    The manual form of this is a bench action, which does not go through the
+    worker and is not parked after, so the remedy names the ones that do what
+    the node would have done.
+    """
+    if f.schedule is None:
+        return _skipped("light.undone-by-park")
+    modules = [step.module for step in f.modules]
+    if not modules or set(modules) != {"light"}:
+        return [_v("ok", "light.undone-by-park", "no light-only run")]
+    return [_v("invalid", "light.undone-by-park",
+               "this run only sets the light, and every run ends parked -- outputs "
+               "off, shutter shut -- so it would hand the bench back unchanged. Set "
+               "the light with the bench actions (shutter-open / shutter-shut, "
+               "set-led-dc / set-led-pulse / led-off), which do not go through the "
+               "worker; a light node belongs before the step that needs it.",
+               f.modules[0].node_path)]
+
+
 def _c_voc_source(f: _Facts) -> list[Verdict]:
     if f.schedule is None:
         return _skipped("voc.source")
@@ -1146,15 +1175,31 @@ def _c_led_levels(f: _Facts) -> list[Verdict]:
         # `jv_bace.led_v` is nullable: None means "sweep led_start_v to
         # led_stop_v", so only a value is a single level; None falls
         # through to the range below.
+        # A `light` node's levels matter only in the mode that reads them, and
+        # `_build_light` validates exactly that much. Every such node carries a
+        # non-null `led_v` (it has a default), so without this a shutter-only
+        # node was refused for an unused pulse low level sitting above the
+        # threshold — a check about a waveform the node never sends.
+        mode = str(v.get("led_mode", "")).lower() if s.module == "light" else None
+        if mode in ("leave", "off"):
+            continue
         if v.get("led_v") is not None:
             low = float(v.get("led_low_v", 0.4))
             try:
-                LedDrive(level=float(v["led_v"]), low_level=low,
-                         frequency_hz=float(v.get("pulse_frequency_hz", 500.0)),
-                         duty_percent=float(v.get("duty_percent", 50.0)),
-                         threshold_v=thr)
+                if mode == "dc":
+                    # Of `LedDrive`'s four rules only "below the threshold"
+                    # is about DC: the low level, the level-above-low and the
+                    # duty are all properties of the square wave.
+                    LedDrive(level=float(v["led_v"]), low_level=min(low, thr / 2.0),
+                             threshold_v=thr)
+                else:
+                    LedDrive(level=float(v["led_v"]), low_level=low,
+                             frequency_hz=float(v.get("pulse_frequency_hz", 500.0)),
+                             duty_percent=float(v.get("duty_percent", 50.0)),
+                             threshold_v=thr)
                 levels.append(float(v["led_v"]))
-                lows.add(low)
+                if mode != "dc":
+                    lows.add(low)
             except IlluminationError as exc:
                 failures.append((s, f"{s.module}: {exc}",
                                  {"led_v": v["led_v"], "led_low_v": low, "threshold_v": thr}))
@@ -1192,6 +1237,33 @@ def _c_axis_geometry(f: _Facts) -> list[Verdict]:
     for s in f.modules:
         v = s.values()
         if "axis_name" not in v:
+            # A J-V sweep has geometry too, and until now nothing checked it:
+            # `step_v = 0` validated clean, was queued, and died at build time
+            # with `jv: step_v: step_v must be positive`. The estimate already
+            # said "cannot estimate" on the card while the button beside it
+            # stayed enabled. Same construction the builder makes, so the two
+            # cannot come to disagree about what is runnable.
+            if "step_v" in v:
+                sweep = {k: v.get(k) for k in ("start_v", "stop_v", "step_v")}
+                try:
+                    points = JVConfig(start_v=float(v["start_v"]), stop_v=float(v["stop_v"]),
+                                      step_v=float(v["step_v"])).points()
+                except (ValueError, TypeError) as exc:
+                    failures.append((s, f"{s.module}: {exc}", sweep))
+                    continue
+                levels = {k: v.get(k) for k in ("led_start_v", "led_stop_v", "led_step_v")}
+                # Only when the range is what runs. `_jv_levels` takes a
+                # non-null `led_v` -- typed, or inherited from an illumination
+                # loop -- as the single level and never looks at the range, so
+                # checking it there refuses a run over numbers nobody uses.
+                # (The same mistake this check was written to fix, one file
+                # over: validate what the builder reads, and nothing else.)
+                if v.get("led_v") is None and float(v.get("led_step_v", 1.0)) <= 0 and \
+                        float(v.get("led_start_v", 0.0)) != float(v.get("led_stop_v", 0.0)):
+                    failures.append((s, f"{s.module}: led_step_v: must be positive for a "
+                                        "range of levels", levels))
+                    continue
+                described.append(f"{s.module}: {int(points.size)} pts")
             continue
         try:
             axis = _axis_of(v)
@@ -1728,6 +1800,7 @@ def _c_chain_stale(f: _Facts) -> list[Verdict]:
 _CHECKS: dict[str, Callable[[_Facts], list[Verdict]]] = {
     "tree.shape": _c_tree_shape,
     "tree.owned-param": _c_owned_param,
+    "light.undone-by-park": _c_light_undone_by_park,
     "voc.source": _c_voc_source,
     "voc.coupling": _c_voc_coupling,
     "led.levels": _c_led_levels,

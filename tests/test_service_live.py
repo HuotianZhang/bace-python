@@ -20,6 +20,8 @@ from bace.experiment import events as E
 from bace.experiment.rig import RigConfig
 from bace.params import run_toml_layer
 from bace.service.executor import run_pipeline
+import types
+
 from bace.service.live import LiveState
 from bace.service.modules import Catalogue, RunContext, VocSource
 from bace.service.pipeline import parse_tree, resolve
@@ -175,3 +177,91 @@ def test_the_session_snapshot_says_live_while_a_scan_is_inside_its_acquisition(t
         seqs = [f["seq"] for f in got if f["seq"] is not None]
         assert seqs == sorted(seqs) and len(set(seqs)) == len(seqs), "the numbered frames are intact"
         assert s.errors == []
+
+
+def test_a_light_node_puts_its_led_read_back_on_the_rail(tmp_path):
+    """A `light` node switching the generator on from parked is exactly what
+    the snapshot Start took cannot know: it was taken before the node ran, and
+    while the run holds the worker nothing re-reads the bench. Without the
+    output flag on the event, the overlay set mode and level onto the old
+    `output: False` and the rail showed the LED off through an illuminated
+    `jv` sweep -- and `jv` is the module whose *curve label* comes from that
+    same light."""
+    live = LiveState(RigConfig())
+    base = Bench.build_simulated(RigConfig()).read_back()["instruments"]
+    assert base["led"]["output"] is False, "parked: the generator is off"
+
+    live.apply(E.InstrumentState({"shutter": "open", "illumination": "light",
+                                  "led_mode": "DC", "led_level_v": 1.02,
+                                  "led_output": True}), None)
+    over = live.overlay(base)
+    assert over["led"]["output"] is True and over["led"]["how"] == "inferred"
+    # In DC the level *is* the offset: `set_dc` writes `:VOLT:OFFS`, and
+    # `fields.driveLevel` reads the field the mode names. Folded into `high_v`
+    # instead, `offset_v` kept the snapshot's stale value and the card showed
+    # the old DC level through the whole of the `jv` that followed -- while
+    # the file recorded the new one.
+    assert (over["led"]["mode"], over["led"]["offset_v"]) == ("DC", 1.02)
+    assert over["led"]["high_v"] == base["led"]["high_v"], "the pulse amplitude is untouched"
+    assert over["shutter"] == {"open": True, "how": "inferred"}
+
+    # And a pulse read-back is the amplitude, which is the other field.
+    live.apply(E.InstrumentState({"shutter": "open", "illumination": "light",
+                                  "led_mode": "PULSE", "led_level_v": 2.5,
+                                  "led_output": True}), None)
+    over = live.overlay(base)
+    assert (over["led"]["mode"], over["led"]["high_v"]) == ("PULSE", 2.5)
+    assert over["led"]["offset_v"] == 1.02, "the DC level it was last driven at stands"
+
+    # And the other direction: `led_mode=off` has to be able to turn it back.
+    live.apply(E.InstrumentState({"shutter": "shut", "illumination": "dark",
+                                  "led_mode": "OFF", "led_output": False}), None)
+    assert live.overlay(base)["led"]["output"] is False
+
+
+def test_an_unreadable_light_reads_as_unknown_not_as_the_snapshots_stale_value():
+    """The run asked and the bench could not say, and *that is newer* than the
+    snapshot Start took.
+
+    The first attempt at this skipped the unread `?` so a good read-back could
+    not be overwritten with "unknown" — but leaving Start's stale values in
+    place is worse: `ui/lib/fields.js` combines the LED's mode and output with
+    the shutter to decide whether the card says lit or dark, so a stale pair
+    makes the screen claim a definite illumination for a curve the file is
+    recording as `as found unknown`. The screen disagreeing with the file is
+    the one thing this read-back exists to prevent."""
+    live = LiveState(RigConfig())
+    base = Bench.build_simulated(RigConfig()).read_back()["instruments"]
+    base = {**base, "led": {**base["led"], "output": True, "mode": "DC"},
+            "shutter": {**base["shutter"], "open": True}}
+    live.apply(E.InstrumentState({"shutter": "?", "illumination": "unknown",
+                                  "led_mode": "?", "led_level_v": None,
+                                  "led_output": None}), None)
+    over = live.overlay(base)
+    assert over["led"]["output"] is None, "unread, and not the stale True"
+    assert over["led"]["mode"] == "?", "unread, and not the stale DC"
+    assert over["shutter"]["open"] is None, "unread, and not the stale open"
+
+    # Which is exactly what the card needs to say unknown: `fields.js` reads
+    # `null`/`?` on any of the three as "cannot tell", the same rule
+    # `illumination_state` applies.
+    assert over["led"]["how"] == "inferred" and over["shutter"]["how"] == "inferred"
+
+
+def test_park_shuts_the_shutter_and_the_overlay_says_so():
+    """`LIGHT_UNWOUND` names the modules that leave the bench dark. It was
+    written to keep `jv` and `light` *out* — they do not touch the light — and
+    left `park` out with them, though `Rig.park()` shuts the shutter outright.
+    So `light(shutter=open)` then `park` then something long left the overlay
+    saying open for the whole of it. The mistake runs both ways."""
+    from bace.service.live import LIGHT_UNWOUND
+
+    assert "park" in LIGHT_UNWOUND
+    assert not {"jv", "light"} & LIGHT_UNWOUND, "these still must not imply it"
+
+    live = LiveState(RigConfig())
+    base = Bench.build_simulated(RigConfig()).read_back()["instruments"]
+    base = {**base, "shutter": {**base["shutter"], "open": True}}
+    live.step = types.SimpleNamespace(module="park", node_path="park", values=lambda: {})
+    live.apply(E.NodeDone(node_path="park", outcome="ok", detail={}), None)
+    assert live.overlay(base)["shutter"]["open"] is False

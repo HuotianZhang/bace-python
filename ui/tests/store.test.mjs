@@ -28,6 +28,9 @@ test('a rig journal replays into the store, run for run', () => {
   assert.equal(state.order.length, 3);
   const [dark, bace] = [state.runs['20260902_153357-001'], state.runs['20260902_153357-003']];
 
+  // `jv_dark` and not `jv`: this is the recorded journal of the rig day of
+  // 2026-09-02, and that is the module the run was. The split into `jv` +
+  // `light` came the day after; a recording says what happened.
   assert.equal(dark.module, 'jv_dark');
   assert.equal(dark.curves.length, 1);
   assert.equal(dark.kept, 1);

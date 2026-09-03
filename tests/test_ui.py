@@ -7,7 +7,7 @@ Node at all, so the JavaScript tests **skip** there rather than fail, and what
 is left is what Python can assert on its own — that the fixtures exist and are
 the shapes `docs/ui-plan.md` M0 named.
 
-The live proofs (a `jv_dark` reaching `done`, and a client dropped at 1008
+The live proofs (a `jv` reaching `done`, and a client dropped at 1008
 coming back without missing a numbered frame) need a running service and are
 not in this file. They are `ui/tests/live.test.mjs`, run against one:
 
@@ -166,9 +166,15 @@ def test_every_offline_fixture_is_registered_and_present():
 @pytest.mark.skipif(shutil.which("node") is None, reason="no Node on this machine (the lab PC has none)")
 def test_the_console_suite_passes():
     """`node --test ui/tests/` — the fold, the socket, the numbers, the rail,
-    and what the shell does per frame rather than what it draws."""
+    the card rows, and what the shell does per frame rather than what it draws.
+
+    Every suite in `ui/tests/` but `live.test.mjs`, which needs a service. A
+    suite that is written and not listed here does not run in CI or on the lab
+    PC, which is how `fields.test.mjs` sat unrun after M2.
+    """
     result = subprocess.run(
         ["node", "--test", "ui/tests/store.test.mjs", "ui/tests/stream.test.mjs",
-         "ui/tests/format.test.mjs", "ui/tests/rail.test.mjs", "ui/tests/render.test.mjs"],
+         "ui/tests/format.test.mjs", "ui/tests/rail.test.mjs", "ui/tests/fields.test.mjs",
+         "ui/tests/render.test.mjs"],
         cwd=REPO, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-2000:]

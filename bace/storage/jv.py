@@ -35,6 +35,12 @@ H_PARAMETERS = ("% LED Voltage/V ", "Voc/V", "Jsc/A", "Jsc/A cm-2", "Pmax/W",
 
 
 def _label(curve) -> str:
+    """`dark fwd`, `1.02 V rev`, `as found unknown fwd`.
+
+    `curve.dark is None` means the run never set the light and could not read
+    it either, so the curve carries the label `run_jv` built from the
+    read-back; only a curve known to be dark is renamed `dark`.
+    """
     d = "fwd" if curve.direction == "forward" else "rev"
     return f"{'dark' if curve.dark else curve.label} {d}"
 
@@ -115,13 +121,22 @@ def write_hdf5(path: str, curves, *, metadata: dict, config: dict,
     group. A light J-V taken with the shutter shut is a dark J-V wearing a
     light label, and until 2026-09-02 nothing in the file could say which it
     was. Readers of `bace-jv/1` are unaffected: nothing moved.
+
+    `bace-jv/3` adds `illumination` on every curve group -- `dark`, `light` or
+    `unknown` -- for the `jv` module, which sweeps under whatever light it
+    finds and reads that back rather than setting it (`experiment.jv.
+    illumination_state`). On an `unknown` curve the `dark` attribute is
+    **absent**, not False: a reader that asks for it gets a KeyError, which is
+    loud, where a False would have been a dark label on a curve nobody read.
+    Every curve a run *set* the light for still carries `dark`, so files from
+    `jv_bace` are `bace-jv/2` in every respect but the version.
     """
     import h5py
 
     from .hdf5 import COMPRESSION, _set_attrs
 
     with h5py.File(path, "w") as f:
-        f.attrs["schema"] = "bace-jv/2"
+        f.attrs["schema"] = "bace-jv/3"
         f.attrs["n_curves"] = len(curves)
         _set_attrs(f.create_group("metadata"), metadata)
         cfg = f.create_group("config")
@@ -134,8 +149,14 @@ def write_hdf5(path: str, curves, *, metadata: dict, config: dict,
         for i, c in enumerate(curves):
             sub = g.create_group(f"{c.index:02d}_{_label(c).replace(' ', '_')}")
             state = states[i] if i < len(states) else {}
+            dark = getattr(c, "dark", None)
             _set_attrs(sub, {
-                "label": c.label, "dark": bool(c.dark), "direction": c.direction,
+                "label": c.label, "direction": c.direction,
+                "illumination": ("unknown" if dark is None
+                                 else "dark" if dark else "light"),
+                # `dark` only when the run knows. See the schema note above:
+                # absent is the honest answer, False would be a claim.
+                **({} if dark is None else {"dark": bool(dark)}),
                 # "?" is honest: a rig without a shutter, or a run recorded
                 # before the shutter state was on the stream, cannot say.
                 "shutter": state.get("shutter", "?"),

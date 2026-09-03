@@ -48,18 +48,45 @@ async function settle(store, runId, timeoutMs) {
   throw new Error(`${runId} did not park within ${timeoutMs} ms`);
 }
 
-test('a jv_dark reaches done, with kept and requested back', options, async () => {
+test('a jv reaches done, with kept and requested back', options, async () => {
   const api = createApi({ base });
   const { store, stream } = connect();
   try {
-    const posted = await api.startRun('jv_dark', { start_v: -0.2, stop_v: 1.2, step_v: 0.05 });
+    const posted = await api.startRun('jv', { start_v: -0.2, stop_v: 1.2, step_v: 0.05 });
     const run = await settle(store, posted.run_id, 60000);
     assert.equal(run.state, 'done');
     assert.equal(run.kept, 1);
     assert.equal(run.requested, 1);
-    assert.equal(run.curves.length, 1, 'one dark curve');
+    assert.equal(run.curves.length, 1, 'one curve: jv sets no light, so there is no plan');
     assert.ok(run.folders.length >= 1, 'the run says where it wrote');
+    // `jv` labels the curve from what it read, never from what it assumed.
+    // On a cold `--sim` bench that read is a shut shutter.
+    assert.match(run.curves[0].label, /^as found /);
+    assert.equal(run.curves[0].dark, true);
   } finally {
+    stream.close();
+  }
+});
+
+test('light sets the bench, and the jv after it reads what light did', options, async () => {
+  const api = createApi({ base });
+  const { store, stream } = connect();
+  try {
+    // The manual form is the bench action, not a run: a light-only run is
+    // refused because the park that ends every run would undo it.
+    await assert.rejects(() => api.startRun('light', { shutter: 'open' }),
+                         (err) => /only sets the light/.test(err.text || String(err)));
+    await api.action('set-led-dc', { level: 1.02 });
+    await api.action('shutter-open');
+
+    const posted = await api.startRun('jv', { step_v: 0.05 });
+    const run = await settle(store, posted.run_id, 60000);
+    assert.equal(run.state, 'done');
+    assert.equal(run.curves[0].dark, false, 'read back as lit');
+    assert.equal(run.curves[0].label, 'as found 1.02 V');
+    assert.ok(run.curves[0].metrics.voc > 0, 'a lit curve has a V_oc');
+  } finally {
+    await api.action('shutter-shut');
     stream.close();
   }
 });
@@ -71,8 +98,13 @@ test('a client dropped at 1008 comes back without missing a numbered frame',
   let posted;
   try {
     posted = await api.startRun('bace', {
+      // `record_length` is pinned, not inherited: the last-used layer carries
+      // whatever the previous run set, and a longer record makes each shot
+      // slow enough for the socket to keep up — which is the one thing this
+      // test needs not to happen.
       axis_name: 'delay_ns', axis_start: 0, axis_stop: 200, axis_step: 10,
-      centre_on_voc: false, vpre: 1.0, vcoll: -2.0, n_loops: 60, store_shots: false,
+      centre_on_voc: false, vpre: 1.0, vcoll: -2.0, n_loops: 60,
+      store_shots: false, record_length: 500, n_averages: 8,
     });
     const run = await settle(store, posted.run_id, 540000);
     const stats = stream.state.stats;
@@ -172,32 +204,39 @@ test('the rail follows a run that is holding the worker', options, async () => {
   const api = createApi({ base });
   const store = createStore({ schedule: () => {} });
   store.applyBench(await api.bench());
-  // Long enough to be caught, and asked for often enough to catch it. Under
-  // `--fast` the four shots this used to run held the worker for 83-157 ms
-  // while the poll below slept 100 ms between asks, so whether M1's own proof
-  // passed was a coin toss. Forty-two shots is ~330 ms and 25 ms between asks
-  // is a dozen looks inside it — measured, not guessed.
+  // Sized and polled so the window cannot be missed rather than probably
+  // will not be: under `--fast` every settle is a no-op, so the original
+  // 2-shot run finished inside the loop's own 100 ms sleep and this test
+  // failed about one run in three. 84 shots of a long record is a few hundred
+  // milliseconds of real simulation, and the loop below does not sleep at
+  // all — a GET on localhost is about a millisecond, so there are hundreds of
+  // looks inside the window.
+  //
+  // Every parameter that decides the size is named, none left to the
+  // last-used layer: what a test runs must not depend on what ran before it.
+  // The first version of this left `record_length` out, picked up the value
+  // an earlier test had used, and made *the drop test* stop dropping.
   const posted = await api.startRun('bace', {
-    axis_name: 'delay_ns', axis_start: 0, axis_stop: 200, axis_step: 10,
-    centre_on_voc: false, vpre: 1.0, vcoll: -2.0, n_loops: 2, store_shots: false,
-    record_length: 500,
+    axis_name: 'delay_ns', axis_start: 0, axis_stop: 100, axis_step: 5,
+    centre_on_voc: false, vpre: 1.0, vcoll: -2.0, n_loops: 4, store_shots: false,
+    record_length: 2000,
   });
 
   const deadline = Date.now() + 120000;
   let live = null;
-  let busy = false;
-  while (Date.now() < deadline && !live) {
+  let parked = false;
+  while (Date.now() < deadline && !live && !parked) {
     const bench = await api.bench();
     store.applyBench(bench, { readBack: true });
     const model = railModel(store.getState());
-    if (model.find((c) => c.key === 'bias').value === 'LIVE') { live = model; break; }
-    if (bench.state !== 'idle') busy = true;
-    // The run has been on the worker and is off it again with the bias never
-    // reading LIVE. That is the failure; waiting out the deadline to say so
-    // helps nobody. Tied to having *seen* it busy, so a worker slow to pick
-    // the job up is waited for rather than failed.
-    else if (busy) break;
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    const bias = model.find((c) => c.key === 'bias');
+    if (bias.value === 'LIVE') live = model;
+    // Stop looking once the run has let go: a hundred more polls would only
+    // turn a missed window into a two-minute timeout. Off the snapshot, not
+    // off the store — `applyBench(…, {readBack: true})` deliberately leaves
+    // the run, the queue and the bench state to the stream, so the store's
+    // copy would never say.
+    parked = !live && bench.state === 'idle' && Boolean(bench.run);
   }
   assert.ok(live, 'the bias never read LIVE while the run was on the worker');
 

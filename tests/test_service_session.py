@@ -14,6 +14,7 @@ import os
 import pathlib
 import queue
 import time
+import types
 
 import numpy as np
 import pytest
@@ -77,10 +78,10 @@ def states_of(frames: list[dict]) -> list[str]:
 
 
 # -- a manual run, end to end ---------------------------------------------------------
-def test_a_manual_jv_dark_goes_through_the_worker_the_journal_and_the_registry(tmp_path):
+def test_a_manual_jv_goes_through_the_worker_the_journal_and_the_registry(tmp_path):
     with make_session(tmp_path) as s:
         assert s.session_id == SID and s.last_seq == 0
-        run_id, v = s.submit(tree_for_module("jv_dark", {"step_v": 0.1}), name="dark",
+        run_id, v = s.submit(tree_for_module("jv", {"step_v": 0.1}), name="a J-V",
                              kind="manual")
         assert run_id == f"{SID}-001" and v.valid
         assert s.wait_run(run_id, TIMEOUT)
@@ -90,8 +91,8 @@ def test_a_manual_jv_dark_goes_through_the_worker_the_journal_and_the_registry(t
         assert {f["run_id"] for f in frames} == {run_id}
         assert [f["type"] for f in frames[:3]] == ["RunQueued", "RunStateChanged",
                                                    "RunStateChanged"]
-        assert frames[0]["data"] == {"kind": "manual", "module": "jv_dark", "name": "dark",
-                                     "tree": {"kind": "module", "module": "jv_dark",
+        assert frames[0]["data"] == {"kind": "manual", "module": "jv", "name": "a J-V",
+                                     "tree": {"kind": "module", "module": "jv",
                                               "params": {"step_v": 0.1}},
                                      "params": frames[0]["data"]["params"],
                                      "resolved": frames[0]["data"]["resolved"],
@@ -107,9 +108,9 @@ def test_a_manual_jv_dark_goes_through_the_worker_the_journal_and_the_registry(t
         by_type = {}
         for f in frames:
             by_type.setdefault(f["type"], []).append(f)
-        assert {f["node_path"] for f in by_type["JVCurveDone"]} == {"jv_dark"}
+        assert {f["node_path"] for f in by_type["JVCurveDone"]} == {"jv"}
         assert {f["node_path"] for f in by_type["RunStateChanged"]} == {""}
-        assert {f["node_path"] for f in by_type["NodeStarted"]} == {"jv_dark"}
+        assert {f["node_path"] for f in by_type["NodeStarted"]} == {"jv"}
         assert by_type["Verdict"], "the chain was read at Start and its verdicts attached"
         assert [f["node_path"] for f in by_type["Verdict"]] == [""] * len(by_type["Verdict"])
         assert by_type["JVCurveDone"][0]["data"]["voltage"], "arrays whole on the wire"
@@ -128,13 +129,13 @@ def test_a_manual_jv_dark_goes_through_the_worker_the_journal_and_the_registry(t
 
         rec = s.run_record(run_id)
         assert (rec["state"], rec["parked"], rec["kind"], rec["module"]) == \
-            ("done", True, "manual", "jv_dark")
-        assert rec["node_outcomes"]["jv_dark"]["outcome"] == "ok"
-        assert rec["node_outcomes"]["jv_dark"]["kind"] == "jv_dark"
+            ("done", True, "manual", "jv")
+        assert rec["node_outcomes"]["jv"]["outcome"] == "ok"
+        assert rec["node_outcomes"]["jv"]["kind"] == "jv"
         assert (rec["kept"], rec["requested"]) == (1, 1)
-        assert rec["params_as_executed"]["jv_dark"]["step_v"] == \
+        assert rec["params_as_executed"]["jv"]["step_v"] == \
             {"value": 0.1, "source": "edited", "detail": "pipeline node"}
-        assert rec["params_as_executed"]["jv_dark"]["smu_nplc"]["source"] == "run.toml"
+        assert rec["params_as_executed"]["jv"]["smu_nplc"]["source"] == "run.toml"
         assert rec["chain_at_start"]["total"] == 4 and rec["error"] is None
         assert rec["folder"] is None, "a manual run has no pipeline folder"
         (folder,) = rec["folders"]
@@ -146,19 +147,19 @@ def test_a_manual_jv_dark_goes_through_the_worker_the_journal_and_the_registry(t
         data = s.run_data(run_id)
         assert isinstance(data["curves"][0]["voltage"], np.ndarray)
         assert data["curves"][0]["voltage"].size == 15
-        assert s.run_data(run_id, "jv_dark") is data
+        assert s.run_data(run_id, "jv") is data
 
         (summary,) = s.runs_index()
         assert (summary["run_id"], summary["state"], summary["module"], summary["folder"]) == \
-            (run_id, "done", "jv_dark", folder)
+            (run_id, "done", "jv", folder)
         assert summary["outcome_text"] == "1 curve"
 
-        card = s.module_wire("jv_dark")
-        assert card["last"] == {"run_id": run_id, "state": "done", "node_path": "jv_dark",
+        card = s.module_wire("jv")
+        assert card["last"] == {"run_id": run_id, "state": "done", "node_path": "jv",
                                 "ts": card["last"]["ts"], "summary": "1 curve",
                                 "folder": folder}
         assert s.module_wire("bace")["last"] is None
-        assert s.catalogue.param_set("jv_dark").get("step_v") == \
+        assert s.catalogue.param_set("jv").get("step_v") == \
             ParamValue(0.1, Source.LAST_USED, "previous run"), "the journal feeds last-used"
 
         snap = s.bench_snapshot()
@@ -166,6 +167,119 @@ def test_a_manual_jv_dark_goes_through_the_worker_the_journal_and_the_registry(t
         assert snap["read_at"] is not None and snap["chain"]["total"] == 4
         assert snap["session"]["id"] == SID and snap["instruments"]["voc"] == {"value": None}
         assert s.errors == []
+
+
+def test_a_jv_provides_a_voc_only_from_a_curve_read_as_lit(tmp_path):
+    """`JVCurveDone.dark` is three-valued since the `jv`/`light` split, and
+    `None` -- the bench could not say whether light reached the sample -- is
+    falsy. A curve nobody confirmed was lit may be a dark one, whose "V_oc" is
+    the noise crossing; and this source is what a `bace` centres its axis on.
+
+    Found by driving the console in a browser: the rail showed a V_oc `from:
+    jv` after a run, which is right when the curve was read as lit and wrong
+    when it was merely not-known-to-be-dark."""
+    with make_session(tmp_path) as s:
+        # Cold: the shutter is shut, so the curve is read as dark and provides
+        # nothing -- `metrics` does not report a V_oc for a known dark curve.
+        dark, _ = s.submit(tree_for_module("jv", {"step_v": 0.05}))
+        assert s.wait_run(dark, TIMEOUT)
+        assert s.session_voc is None, "a dark curve is not a V_oc source"
+
+        # Lit, by the actions the bench card's light control uses.
+        s.bench_action("set-led-dc", {"level": 1.02})
+        s.bench_action("shutter-open")
+        lit, _ = s.submit(tree_for_module("jv", {"step_v": 0.05}))
+        assert s.wait_run(lit, TIMEOUT)
+        voc = s.session_voc
+        assert voc is not None, "a curve read as lit provides one, at the level read back"
+        assert (voc.how, voc.led_v, voc.run_id) == ("jv", 1.02, lit)
+        assert voc.value == pytest.approx(s.bench.sim.bench.device.voc(1.02), abs=0.02)
+
+
+def test_a_jv_under_a_pulsing_lamp_is_lit_and_still_provides_no_voc(tmp_path):
+    """The scenario end to end: `light(led_mode="pulse", shutter="open")` and
+    then a `jv`. The read-back is honest -- lit, at the pulse high level -- and
+    the curve is filed as light. But the Keithley integrates across the
+    pulse's light and dark phases, so its crossing is a time average, and a
+    `bace` centred on that same level would take it as the axis centre with
+    the coupling check finding the two levels in perfect agreement.
+
+    The DC half of the same pair is the control: same level, same module, and
+    it *does* provide a source."""
+    with make_session(tmp_path) as s:
+        s.bench_action("set-led-pulse", {"level": 1.02})
+        s.bench_action("shutter-open")
+        chopped, _ = s.submit(tree_for_module("jv", {"step_v": 0.05}))
+        assert s.wait_run(chopped, TIMEOUT)
+        assert s.session_voc is None, "a chopped lamp is no V_oc source"
+
+        # Re-opened, because every run ends parked and park shuts the
+        # shutter -- the same fact `light.undone-by-park` refuses over.
+        s.bench_action("set-led-dc", {"level": 1.02})
+        s.bench_action("shutter-open")
+        steady, _ = s.submit(tree_for_module("jv", {"step_v": 0.05}))
+        assert s.wait_run(steady, TIMEOUT)
+        voc = s.session_voc
+        assert voc is not None and (voc.how, voc.led_v) == ("jv", 1.02)
+        assert s.errors == []
+
+
+def test_a_curve_of_unknown_illumination_never_becomes_a_voc_source():
+    """The unknown case, without a bench that can be made blind: the capture
+    keys on `dark is False`, so `None` is refused where `False` is taken."""
+    from bace.experiment.jv import JVCurveDone, JVMetrics
+    from bace.service.executor import _Executor
+
+    captured = []
+    curve = lambda dark: JVCurveDone(  # noqa: E731
+        index=0, label="as found", dark=dark, led_level_v=1.02, direction="forward",
+        voltage=np.array([0.0, 1.0]), current=np.array([-1.0, 1.0]), density=None,
+        metrics=JVMetrics(voc=0.9, jsc=-1.0, p_max=None, v_mpp=None, j_mpp=None,
+                          fill_factor=None))
+    ex = _Executor.__new__(_Executor)
+    ex.providers, ex.on_voc = {}, captured.append
+    step = types.SimpleNamespace(node_path="jv", module="jv")
+    ctx = types.SimpleNamespace(run_id="r")
+    for dark in (True, None, False):
+        assert ex._capture(curve(dark), step, ctx) is None
+    assert [v.how for v in captured] == ["jv"], "only the curve read as lit"
+
+
+def test_a_curve_found_under_a_chopped_lamp_never_becomes_a_voc_source():
+    """`light(led_mode="pulse", shutter="open")` then `jv`: the read-back is
+    honest -- lit, at the pulse high level -- but the Keithley integrates
+    across the pulse's light and dark phases, so its interpolated crossing is
+    a time average that is nobody's V_oc. `_build_bace` already knows this;
+    it is why `measure_dc` switches the generator to DC before measuring one.
+    Taken as a source, a `bace` centred on the same level would accept it and
+    the coupling check -- which compares *drive levels* -- could not tell.
+
+    Only as-found curves are asked. `illumination` is None on a `manage`
+    curve, where `_set_illumination` set the LED to DC itself.
+    """
+    from bace.experiment.jv import JVCurveDone, JVMetrics
+    from bace.service.executor import _Executor
+
+    captured = []
+    curve = lambda found: JVCurveDone(  # noqa: E731
+        index=0, label="as found 1.020 V", dark=False, led_level_v=1.02,
+        direction="forward", voltage=np.array([0.0, 1.0]),
+        current=np.array([-1.0, 1.0]), density=None,
+        metrics=JVMetrics(voc=0.9, jsc=-1.0, p_max=None, v_mpp=None, j_mpp=None,
+                          fill_factor=None),
+        illumination=found)
+    ex = _Executor.__new__(_Executor)
+    ex.providers, ex.on_voc = {}, captured.append
+    step = types.SimpleNamespace(node_path="jv", module="jv")
+    ctx = types.SimpleNamespace(run_id="r")
+
+    refused = ex._capture(curve({"led_mode": "PULSE"}), step, ctx)
+    assert captured == [], "a chopped lamp gives no source"
+    assert refused is not None and "time average" in refused, "and says so"
+
+    assert ex._capture(curve({"led_mode": "DC"}), step, ctx) is None
+    assert ex._capture(curve(None), step, ctx) is None, "a managed curve is not asked"
+    assert [v.how for v in captured] == ["jv", "jv"]
 
 
 def test_a_jv_bace_gives_the_session_its_voc_and_a_manual_bace_centres_on_it(tmp_path):
@@ -257,7 +371,7 @@ def test_the_queue_holds_a_second_run_while_the_first_is_paused(tmp_path):
         first, v = s.submit(temperature_pipeline(bace(1, voc=0.9)), name="cool down")
         assert v.valid and s.run_record(first)["kind"] == "pipeline"
         wait_until(lambda: s.run_record(first)["state"] == "paused")
-        second, _ = s.submit(tree_for_module("jv_dark", {"step_v": 0.1}))
+        second, _ = s.submit(tree_for_module("jv", {"step_v": 0.1}))
         rec2 = s.run_record(second)
         assert rec2["state"] == "queued"
         assert rec2["position"] == 0, "nothing queued ahead of it: it starts when the first ends"
@@ -276,8 +390,8 @@ def test_the_queue_holds_a_second_run_while_the_first_is_paused(tmp_path):
             s.resume(second, {})
         with pytest.raises(UnknownRun):
             s.resume("nope", {})
-        assert s.module_wire("jv_dark")["last"] == {
-            "run_id": second, "state": "queued", "node_path": "jv_dark",
+        assert s.module_wire("jv")["last"] == {
+            "run_id": second, "state": "queued", "node_path": "jv",
             "ts": rec2["queued_at"], "summary": None}
 
         assert s.resume(first, {"temperature_k": 250.0, "note": "set by hand"}) == \
@@ -633,7 +747,7 @@ def test_under_an_asyncio_loop_frames_reach_an_awaiting_subscriber(tmp_path):
         try:
             live = s.subscribe()
             assert isinstance(live, asyncio.Queue)
-            run_id, _ = s.submit(tree_for_module("jv_dark", {"step_v": 0.1}))
+            run_id, _ = s.submit(tree_for_module("jv", {"step_v": 0.1}))
             seen = []
             while True:
                 frame = await asyncio.wait_for(live.get(), TIMEOUT)
@@ -899,7 +1013,7 @@ def test_the_worker_holds_its_bus_lock_for_the_whole_of_a_job(tmp_path):
     mid-acquisition and no test would notice."""
     with make_session(tmp_path) as s:
         assert not s.worker.bus.locked()
-        run_id, _ = s.submit(tree_for_module("jv_dark", {"step_v": 0.2}))
+        run_id, _ = s.submit(tree_for_module("jv", {"step_v": 0.2}))
         wait_until(lambda: s.worker.bus.locked() or
                    s.run_record(run_id)["state"] == "done")
         assert s.wait_run(run_id, TIMEOUT)

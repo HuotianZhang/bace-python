@@ -58,7 +58,7 @@ from ..core.process import ChargeAccumulator, RunningAverage
 from ..core.pulses import pulse_levels
 from ..drivers.keithley2400 import SourceMeterConfig
 from ..experiment import events as E
-from ..experiment.jv import JVConfig, JVCurveDone, run_jv
+from ..experiment.jv import (JVConfig, JVCurveDone, illumination_state, run_jv)
 from ..experiment.rig import Rig, RigConfig
 from ..experiment.transient import RunConfig, resolve_t0_int, run_transient_scan
 from ..params import (ParamError, ParamSet, ParamSpec, Source, field_docs,
@@ -67,7 +67,7 @@ from ..storage import jv as jv_storage
 from ..storage.jv import JVRecorder
 from ..storage.naming import RunMetadata
 from ..storage.recorder import RunRecorder, record
-from .rigs import power_reading
+from .rigs import apply_led, apply_shutter, power_reading
 from .temperature import settle
 
 DEFAULT_SHOT_S = 0.8
@@ -98,8 +98,27 @@ window shorter than itself; ten seconds of flat readings is what the
 operator's own eyes-on-the-meter check amounts to."""
 """How many consecutive readings must agree before the LED counts as settled."""
 
-MODULE_NAMES: tuple[str, ...] = ("jv_dark", "jv_bace", "bace", "power",
+MODULE_NAMES: tuple[str, ...] = ("jv", "jv_bace", "bace", "light", "power",
                                  "temperature", "park", "wait", "note")
+
+RETIRED: dict[str, str] = {
+    "jv_dark": "split on 2026-09-03 because it did two jobs: it swept the "
+               "SourceMeter *and* made the bench dark. Use a `light` node with "
+               "`shutter = shut` before a `jv`, which is exactly what it did; "
+               "or `jv` on its own to sweep under the light as it is found.",
+}
+"""Module names that existed and no longer do, and what to do instead.
+
+A tree naming one of these is refused — never silently rewritten. `jv_dark`
+maps to *two* nodes, so translating it would change the shape of the tree, its
+node paths and therefore its folder names; and translating it to `jv` alone
+would change what is measured, from "make it dark and sweep" to "sweep under
+whatever is there", which is the failure this split exists to prevent. A saved
+recipe that names one is the operator's to re-author, and this says how.
+
+Kept because a recipe saved through `/pipelines/save` lives on disk and
+outlives the catalogue: without it the answer is `jv_dark: 'jv_dark'`, a
+`KeyError` repr that says nothing about what happened or what to do."""
 
 SAMPLE_KEYS: frozenset[str] = frozenset(
     {"sample", "material", "pixel", "temperature_k", "operator", "comment"})
@@ -374,15 +393,24 @@ def _smu_specs() -> list[ParamSpec]:
         choices={"terminals": ("FRON", "REAR")})
 
 
+_JV_NOT_A_PARAM: tuple[str, ...] = ("dark", "led_levels_v", "led_settle_s",
+                                    "light_control")
+"""`JVConfig` fields that are never a form field on either J-V card.
+
+`light_control` is the module's identity, not a choice inside it: `jv` leaves
+the light alone and `jv_bace` manages it, and a form that let either be
+switched would be one module wearing two names. The other three belong to
+`jv_bace`, which declares them itself in `_jv_led_specs`."""
+
+
 def _jv_common_specs() -> list[ParamSpec]:
     sweep = specs_from_dataclass(
         JVConfig, group="axis",
-        exclude=("settle_s", "both_directions", "dark", "led_levels_v",
-                 "pixel_area_cm2", "led_settle_s"),
+        exclude=("settle_s", "both_directions", "pixel_area_cm2") + _JV_NOT_A_PARAM,
         units={"start_v": "V", "stop_v": "V", "step_v": "V"})
     acq = specs_from_dataclass(
         JVConfig, group="acquisition",
-        exclude=("start_v", "stop_v", "step_v", "dark", "led_levels_v", "led_settle_s"),
+        exclude=("start_v", "stop_v", "step_v") + _JV_NOT_A_PARAM,
         units={"settle_s": "s", "pixel_area_cm2": "cm2"})
     return sweep, acq
 
@@ -459,9 +487,63 @@ def _bace_specs(rig_config: RigConfig) -> list[ParamSpec]:
     return axis + pinned + loops + illumination + run + store + _smu_specs()
 
 
-def _jv_dark_specs() -> list[ParamSpec]:
+def _jv_specs() -> list[ParamSpec]:
+    """`jv` has no illumination parameters at all, and that is the module.
+
+    It sweeps under whatever light it finds, touching neither shutter nor
+    LED, and records what it read back. The light is set -- when it is set --
+    by a `light` step before it, or by the operator on the bench card. The
+    absence of `dark`, `led_*` and `led_settle_s` from this list is the whole
+    difference from `jv_bace`.
+    """
     sweep, acq = _jv_common_specs()
     return sweep + acq + _smu_specs()
+
+
+def _light_specs() -> list[ParamSpec]:
+    """The bench's two light switches as one node: the shutter, and the LED.
+
+    Every value is a *request*; the read-back that follows is the answer, and
+    the node reports both. `leave` on either half means "do not touch this
+    one", so a node can move the shutter without disturbing a generator that
+    is already at its thermal steady state -- the operator instruction of
+    2026-09-02, which is why the shutter is the light switch and the
+    generator is not cycled.
+    """
+    return [
+        ParamSpec("shutter", "enum", "leave", group="illumination",
+                  choices=("open", "shut", "leave"),
+                  doc="Open, shut, or leave the shutter where it is. The shutter is "
+                      "the light switch: it is what decides whether light reaches "
+                      "the sample, whatever the generator is doing."),
+        ParamSpec("led_mode", "enum", "leave", group="illumination",
+                  choices=("dc", "pulse", "off", "leave"),
+                  doc="`dc` for a steady level (a J-V under light, a V_oc), `pulse` "
+                      "for the transient's square wave, `off` to disable the output, "
+                      "`leave` to touch nothing. Prefer the shutter over `off`: a "
+                      "generator that is cycled loses its thermal steady state and "
+                      "the next module waits for it all over again."),
+        ParamSpec("led_v", "float", 1.0, unit="V",
+                  group="illumination",
+                  doc="The DC level, or the pulse high level. The same number the "
+                      "V_oc must be measured at and `bace` must pulse at -- the "
+                      "coupling invariant is one level, in one place."),
+        ParamSpec("led_low_v", "float", 0.4, unit="V",
+                  group="illumination",
+                  doc="Pulse low level, below the LED threshold so the dark "
+                      "half-cycle is dark. `pulse` only."),
+        ParamSpec("pulse_frequency_hz", "float", 500.0, unit="Hz", group="timing",
+                  minimum=0.0,
+                  doc="`pulse` only. Both generators were found at 500 Hz on the rig "
+                      "(2026-08-31)."),
+        ParamSpec("duty_percent", "float", 50.0, unit="%", group="timing",
+                  minimum=0.0, maximum=100.0, doc="`pulse` only."),
+        ParamSpec("settle_s", "float", 0.0, unit="s", group="timing", minimum=0.0,
+                  doc="Wait after the light is set, before the node finishes -- so "
+                      "the step that follows starts under a settled lamp. 0 does not "
+                      "wait; the power meter's own agreement check belongs to `bace`, "
+                      "which is the module that needs it."),
+    ]
 
 
 def _jv_bace_specs() -> list[ParamSpec]:
@@ -536,11 +618,17 @@ _TOML: dict[str, list[tuple[str, dict[str, str]]]] = {
                                      "illumination.v_sat": "v_sat"}),
         _SMU_MAP,
     ],
-    "jv_dark": [
+    "jv": [
         _SMU_MAP,
         ("run.toml [jv]", {f"jv.{k}": k for k in ("start_v", "stop_v", "step_v",
                                                   "settle_s", "both_directions",
                                                   "pixel_area_cm2")}),
+    ],
+    "light": [
+        ("run.toml [illumination]", {"illumination.level_v": "led_v",
+                                     "illumination.low_level_v": "led_low_v"}),
+        ("run.toml [acquisition]", {"acquisition.pulse_frequency_hz": "pulse_frequency_hz",
+                                    "acquisition.duty_percent": "duty_percent"}),
     ],
     "jv_bace": [
         _SMU_MAP,
@@ -566,7 +654,7 @@ J-V range nobody chose."""
 _JV_TABLE_KEYS: frozenset[str] = frozenset(
     k.split(".", 1)[1] for k in _TOML["jv_bace"][-1][1])
 """Every key `[jv]` may carry: the jv_bace mapping's, which is a superset of
-jv_dark's."""
+`jv`'s."""
 
 
 # -- the catalogue ---------------------------------------------------------------
@@ -598,7 +686,8 @@ class Catalogue:
                 "to defaults -- a typo here is a J-V range nobody chose.")
 
         self._params: dict[str, tuple[ParamSpec, ...]] = {
-            "jv_dark": tuple(_jv_dark_specs()),
+            "jv": tuple(_jv_specs()),
+            "light": tuple(_light_specs()),
             "jv_bace": tuple(_jv_bace_specs()),
             "bace": tuple(_bace_specs(rig_config)),
             "power": tuple(_power_specs(rig_config)),
@@ -608,8 +697,11 @@ class Catalogue:
             "note": tuple(_note_specs()),
         }
         self._specs: dict[str, ModuleSpec] = {
-            "jv_dark": self._spec("jv_dark", "J-V dark", "measurement", "built", "dc",
-                                  provides_voc=False, needs_voc_param=None, led_params=()),
+            # No `led_params`: this module is the one that does not touch the
+            # light, so there is nothing for the bench's LED actions to take
+            # its levels from.
+            "jv": self._spec("jv", "J-V", "measurement", "built", "dc",
+                             provides_voc=False, needs_voc_param=None, led_params=()),
             "jv_bace": self._spec("jv_bace", "J-V light", "measurement", "built", "dc",
                                   provides_voc=True, needs_voc_param=None,
                                   led_params=("led_v", "led_start_v", "led_stop_v",
@@ -617,6 +709,9 @@ class Catalogue:
             "bace": self._spec("bace", "bace", "measurement", "built", "transient",
                                provides_voc=False, needs_voc_param="centre_on_voc",
                                led_params=("led_v", "led_low_v")),
+            "light": self._spec("light", "light", "utility", "built", None,
+                                provides_voc=False, needs_voc_param=None,
+                                led_params=("led_v", "led_low_v")),
             "power": self._spec("power", "power", "observer", "built", None,
                                 provides_voc=False, needs_voc_param=None, led_params=()),
             # `partial`: works both ways. Settles through the 331 console
@@ -659,6 +754,13 @@ class Catalogue:
         try:
             return self._specs[name]
         except KeyError:
+            # A name that used to be a module says so, and says what replaces
+            # it: a recipe saved through `/pipelines/save` is a file on disk
+            # and outlives the catalogue, so this is the message the operator
+            # gets when they open one from before the split.
+            if name in RETIRED:
+                raise KeyError(f"{name} is no longer a module. It was "
+                               f"{RETIRED[name]}") from None
             raise KeyError(name) from None
 
     def base_metadata(self) -> RunMetadata:
@@ -822,11 +924,31 @@ class Catalogue:
                 missing("relay", "measure_dc needs the relay")
             if p["read_intensity"] and power_silent:
                 out.append({"code": "power", "text": "console silent · intensity will be NaN"})
-        elif name in ("jv_dark", "jv_bace"):
+        elif name in ("jv", "jv_bace"):
             missing("smu", "a J-V scan needs the Keithley")
             if name == "jv_bace":
                 missing("led", "a light curve needs the LED")
                 missing("shutter", "a light curve needs the shutter")
+            else:
+                # Not a `missing`: `jv` runs perfectly well on a bench with
+                # neither, and refusing would make the one module that needs
+                # nothing the fussiest. It is the *label* that suffers, so
+                # the warning says exactly that and nothing more.
+                blind = [r for r in ("shutter", "led") if r in unavailable]
+                if blind:
+                    out.append({"code": "illumination",
+                                "text": f"no {' or '.join(blind)} to read · the curve "
+                                        "will be recorded as unknown, not as dark"})
+        elif name == "light":
+            # Only what this node actually sets, the same test `_build_light`
+            # makes: the point of the module is that either half can be left
+            # alone, so a shutter-only node on a bench with no LED is
+            # perfectly runnable and must not be blocked by one.
+            if p["led_mode"] != "leave":
+                missing("led", f"led_mode {p['led_mode']}, and the LED is not on this bench")
+            if p["shutter"] != "leave":
+                missing("shutter", f"shutter {p['shutter']}, and the shutter is not "
+                                   "on this bench")
         elif name == "power":
             if "power" in unavailable:
                 out.append({"code": "power", "text": unavailable["power"]})
@@ -892,15 +1014,20 @@ class Catalogue:
             tag = "" if source == "journal" else " (default)"
             return total, (f"one shot ≈ {t_shot:.1f} s{tag} · {n_loops} loops × "
                            f"{n_steps} pts ≈ {_duration(total)}")
-        if name in ("jv_dark", "jv_bace"):
+        if name in ("jv", "jv_bace"):
             try:
                 n_points = int(_jv_points(p).size)
                 levels = self._jv_levels(p, None) if name == "jv_bace" else ()
             except (ModuleError, ValueError) as exc:
                 return 0.0, f"cannot estimate: {exc}"
-            dark = True if name == "jv_dark" else bool(p["dark"])
+            # `jv` is one curve per direction: it does not set the light, so
+            # there is no dark-plus-levels plan to count, and no LED settle
+            # because nothing was changed to settle after.
+            dark = bool(p["dark"]) if name == "jv_bace" else True
             n_curves = (int(dark) + len(levels)) * (2 if p["both_directions"] else 1)
             led_settle = float(p.get("led_settle_s", JVConfig().led_settle_s))
+            if name == "jv":
+                n_curves, led_settle = (2 if p["both_directions"] else 1), 0.0
             total = n_curves * (n_points * float(p["settle_s"])
                                 + n_points * JV_POINT_OVERHEAD_S + led_settle)
             return total, f"{n_curves} curves × {n_points} pts ≈ {_duration(total)}"
@@ -912,6 +1039,17 @@ class Catalogue:
             return hold, f"settle — (331 or operator) + hold {_duration(hold)}"
         if name == "wait":
             return float(p["seconds"]), _duration(float(p["seconds"]))
+        if name == "light":
+            asks = []
+            if p["shutter"] != "leave":
+                asks.append(f"shutter {p['shutter']}")
+            if p["led_mode"] == "off":
+                asks.append("LED off")
+            elif p["led_mode"] != "leave":
+                asks.append(f"LED {p['led_mode'].upper()} {float(p['led_v']):g} V")
+            settle = float(p["settle_s"])
+            return settle + 0.2, (" · ".join(asks) or "nothing to set") + (
+                f" + {_duration(settle)}" if settle > 0 else "")
         if name == "park":
             return 1.0, "outputs off, shutter shut"
         return 0.0, "journal entry"
@@ -944,14 +1082,14 @@ class Catalogue:
         return builder(p, ctx, rig)
 
     # jv ---------------------------------------------------------------------
-    def _build_jv_dark(self, p, ctx, rig):
-        return self._build_jv("jv_dark", p, ctx, rig, light=False)
+    def _build_jv(self, p, ctx, rig):
+        return self._build_jv_run("jv", p, ctx, rig, light=False)
 
     def _build_jv_bace(self, p, ctx, rig):
-        return self._build_jv("jv_bace", p, ctx, rig, light=True)
+        return self._build_jv_run("jv_bace", p, ctx, rig, light=True)
 
-    def _build_jv(self, name: str, p: dict, ctx: RunContext, rig: Rig, *,
-                  light: bool) -> Iterator[E.Event]:
+    def _build_jv_run(self, name: str, p: dict, ctx: RunContext, rig: Rig, *,
+                      light: bool) -> Iterator[E.Event]:
         if rig.smu is None:
             raise ModuleError(f"{name}: a J-V scan needs a SourceMeter, and this bench "
                               "has none")
@@ -960,13 +1098,15 @@ class Catalogue:
             raise ModuleError(f"{name}: a light curve needs the LED source, and this "
                               "bench has none")
         smu_cfg = self._smu_config(name, p)
-        # jv_dark is dark by definition; jv_bace always has at least one level
-        # (a range collapses to its start), so "nothing to measure" cannot
-        # arise here and run_jv's own refusal stays the only one.
-        dark = True if not light else bool(p["dark"])
+        # `jv` leaves the light alone, so its `dark` and `led_settle_s` are
+        # never read; jv_bace always has at least one level (a range collapses
+        # to its start), so "nothing to measure" cannot arise there and
+        # run_jv's own refusal stays the only one.
+        dark = bool(p["dark"]) if light else True
         try:
             cfg = JVConfig(start_v=p["start_v"], stop_v=p["stop_v"], step_v=p["step_v"],
                            settle_s=p["settle_s"], both_directions=p["both_directions"],
+                           light_control="manage" if light else "leave",
                            dark=dark, led_levels_v=tuple(levels),
                            pixel_area_cm2=p["pixel_area_cm2"],
                            led_settle_s=float(p.get("led_settle_s", JVConfig().led_settle_s)))
@@ -1237,6 +1377,91 @@ class Catalogue:
 
         return run()
 
+    def _build_light(self, p: dict, ctx: RunContext, rig: Rig) -> Iterator[E.Event]:
+        """Set the shutter and/or the LED, then say what the bench read back.
+
+        Both halves go through `rigs.apply_led` / `rigs.apply_shutter`, which
+        are the same functions the `set-led-*`, `led-off` and `shutter-*`
+        bench actions call: a `light` node in a pipeline and a click on the
+        bench card drive the LED through one implementation, and cannot come
+        to disagree about what `pulse` means.
+
+        Refusals are raised now, before the generator exists, so a node that
+        cannot run has touched nothing: no LED for a mode that needs one, no
+        shutter for a position, and `LedDrive`'s own rules on the levels.
+        """
+        shutter_ask, led_ask = str(p["shutter"]), str(p["led_mode"])
+        if shutter_ask != "leave" and rig.shutter is None:
+            raise ModuleError(f"light: shutter {shutter_ask}, and this bench has no "
+                              "shutter")
+        if led_ask != "leave" and rig.led is None:
+            raise ModuleError(f"light: led_mode {led_ask}, and this bench has no LED "
+                              "source")
+        if shutter_ask == "leave" and led_ask == "leave":
+            raise ModuleError("light: nothing to do -- shutter and led_mode are both "
+                              "'leave'. A step that changes nothing is a step somebody "
+                              "meant to fill in.")
+        try:
+            if led_ask == "pulse":
+                LedDrive(level=float(p["led_v"]), low_level=float(p["led_low_v"]),
+                         frequency_hz=float(p["pulse_frequency_hz"]),
+                         duty_percent=float(p["duty_percent"]),
+                         threshold_v=self.rig_config.led_threshold_v)
+        except IlluminationError as exc:
+            raise ModuleError(f"light: {exc}") from None
+        settle_s = float(p["settle_s"])
+
+        def run() -> Iterator[E.Event]:
+            asked: dict[str, Any] = {}
+
+            def set_led() -> None:
+                asked.update(apply_led(
+                    rig.led, led_ask, level=p["led_v"], low=p["led_low_v"],
+                    frequency_hz=p["pulse_frequency_hz"], duty_percent=p["duty_percent"],
+                    threshold_v=self.rig_config.led_threshold_v))
+
+            def set_shutter() -> None:
+                asked.update(apply_shutter(rig.shutter, shutter_ask == "open"))
+
+            # **The shutter closes first and opens last.** Both orders are the
+            # same order for the same reason: the sample must not see light
+            # nobody asked it to see. Closing first means the generator writes
+            # that follow happen behind a shut shutter, where the node's whole
+            # point may be to prepare a *dark* measurement -- an exposure
+            # during those writes can change the sample before it is measured.
+            # Opening last means the level is already set when light first
+            # reaches it, rather than the previous node's level arriving for
+            # the moment between the two calls.
+            if shutter_ask == "shut":
+                set_shutter()
+                if led_ask != "leave":
+                    set_led()
+            else:
+                if led_ask != "leave":
+                    set_led()
+                if shutter_ask != "leave":
+                    set_shutter()
+            if settle_s > 0:
+                ctx.sleep(settle_s)
+            # The read-back is the answer, and it is the same one `jv` labels
+            # its curve from -- so what this node says it did and what the
+            # next node records having found are one function's opinion.
+            found = illumination_state(rig)
+            yield E.InstrumentState({
+                "shutter": found["shutter"] or "?",
+                "illumination": ("unknown" if found["lit"] is None
+                                 else "light" if found["lit"] else "dark"),
+                "led_mode": found["led_mode"] or "?",
+                "led_level_v": found["led_level_v"],
+                # The output flag too, or `LiveState` overlays mode and
+                # level onto the *Start* snapshot's stale one and the rail
+                # shows the LED off through an illuminated sweep.
+                "led_output": found["led_output"],
+            })
+            yield E.Notice("info", "light: " + _light_summary(asked, found))
+
+        return run()
+
     def _build_park(self, p: dict, ctx: RunContext, rig: Rig) -> Iterator[E.Event]:
         def run() -> Iterator[E.Event]:
             rig.park()
@@ -1260,6 +1485,26 @@ class Catalogue:
             yield E.Notice("info", text)
 
         return run()
+
+
+def _light_summary(asked: dict, found: dict) -> str:
+    """What the node did, and what the bench then read. Both, always: the
+    request is what the operator asked for and the read-back is what the
+    instruments say, and `ui-rules` §6 wants the second rendered, never the
+    first dressed up as it."""
+    parts = []
+    if "mode" in asked:
+        level = asked.get("level_v", asked.get("high_v"))
+        parts.append(f"LED {asked['mode']}"
+                     + ("" if level is None else f" {float(level):g} V"))
+    if "open" in asked:
+        parts.append("shutter " + ("open" if asked["open"] else "shut"))
+    lit = found.get("lit")
+    read = ("light reaching the sample" if lit else
+            "dark at the sample" if lit is not None else
+            "cannot tell whether light reaches the sample: "
+            + ", ".join(found.get("unread") or ["no reason given"]))
+    return (" · ".join(parts) or "nothing set") + f" → {read}"
 
 
 # -- the data endpoint's arrays ------------------------------------------
@@ -1366,7 +1611,14 @@ class _JVData:
     def handle(self, ev: E.Event) -> None:
         if isinstance(ev, JVCurveDone):
             self.curves.append({
-                "label": ev.label, "dark": bool(ev.dark), "led_level_v": ev.led_level_v,
+                # `dark` is carried, not coerced: `bool(None)` is False, which
+                # would have the data endpoint report a curve nobody could read
+                # as a *known light* one. `illumination` says the same thing
+                # the file's own attribute says (`bace-jv/3`), so a reader of
+                # either does not have to know the tri-state convention.
+                "label": ev.label, "dark": ev.dark, "led_level_v": ev.led_level_v,
+                "illumination": ("unknown" if ev.dark is None
+                                 else "dark" if ev.dark else "light"),
                 "direction": ev.direction, "voltage": np.asarray(ev.voltage, dtype=float),
                 "current": np.asarray(ev.current, dtype=float),
                 "density": None if ev.density is None else np.asarray(ev.density, dtype=float),

@@ -122,12 +122,22 @@ class RunConfig:
     """
 
     pulse_width_ns: float = 5000.0
+    """How long the 81150A holds the collection level before returning -- the
+    width of the extraction pulse itself. It has to outlast the extraction:
+    a pulse shorter than the charge takes to come out cuts the transient off
+    mid-integration and under-reports Q. 5 us against a transient that is over
+    in a few hundred ns."""
+
     pulse_frequency_hz: float = 500.0
     """Both generators were found at 500 Hz on the rig (2026-08-31), not the
     1 kHz assumed from the recovered code. The 81150A is armed by the 33220A
     sync, so the two must match; 500 Hz gives a 2 ms period and a 1 ms
     on-phase."""
     duty_percent: float = 50.0
+    """The 81150A's on/off split within one period. At 500 Hz and 50 % the
+    device gets 1 ms of light and 1 ms of dark per cycle; the shot is taken
+    across that boundary. Only sensible near 50 % -- the two halves are the
+    light and dark traces the photocurrent is the difference of."""
 
     offset_correct: bool = True
     """Subtract the mean of the last 10 % of the photocurrent record."""
@@ -201,7 +211,17 @@ class RunConfig:
     """
 
     read_intensity: bool = True
+    """Read the 1918-C power meter once per shot and store the number beside
+    the charge. The meter sits behind a beam splitter, so this costs nothing
+    but a serial round trip -- and it is the only record of the LED drooping
+    during a long scan, which is a real effect this rig showed (see the LED
+    settle note in `service/modules.py`). Off leaves `intensity_w` empty."""
+
     acquisition_timeout_s: float = 30.0
+    """How long to wait for the scope to return a trace before giving up on
+    the shot. Not a measurement setting: it is the guard against a run that
+    hangs for ever because the 81150A never armed and the scope is waiting for
+    a trigger that will not come."""
 
     external_trigger: bool = True
     """Arm the 81150A from its external trigger input -- the 33220A Sync --

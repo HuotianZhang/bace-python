@@ -413,6 +413,14 @@ export function renderChainStrip(el, state, { onFix, onPark, status, parkArmed }
     h('span.spacer'),
     status ? h('span', { class: 'st status ' + (status.level || '') },
       h('span', { text: status.text }),
+      // A refused Start answers 422 with the checks that refused it, and the
+      // list is the answer -- "invalid" alone tells the operator nothing they
+      // can act on. `error.checks`, not `detail` (M1's finding).
+      (status.checks || []).length
+        ? h('span.checks', (status.checks || [])
+          .filter((c) => c.level === 'crit' || c.level === 'invalid')
+          .map((c) => h('span', { class: 'ck ' + c.level, title: c.text, text: c.code })))
+        : null,
       // A refusal that names a remedy gets a button for it, or the operator is
       // told what to do and given no way to do it.
       status.offer

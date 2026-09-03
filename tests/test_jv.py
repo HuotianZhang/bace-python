@@ -12,7 +12,7 @@ import pytest
 from bace.drivers.simulated import make_bench
 from bace.experiment import events as E
 from bace.experiment.jv import (JVConfig, JVCurveDone, JVFinished, JVStarted,
-                                metrics, run_jv)
+                                illumination_state, metrics, run_jv)
 from bace.experiment.rig import Rig, RigConfig
 from bace.storage.jv import JVRecorder, record
 
@@ -404,7 +404,7 @@ def test_the_file_says_which_curves_were_taken_with_the_shutter_open(tmp_path):
     list(record(run_jv(rig, JVConfig(dark=True, led_levels_v=(1.020,)),
                        sleep=NO_SLEEP), rec))
     with h5py.File([p for p in rec.written if p.endswith(".h5")][0], "r") as f:
-        assert f.attrs["schema"] == "bace-jv/2"
+        assert f.attrs["schema"] == "bace-jv/3"
         assert f["config/resolved"].attrs["led_output_polarity"] == "INV"
         assert f["config/resolved"].attrs["shutter"] == "open"   # the last one
         by_name = {n: f["curves"][n].attrs["shutter"] for n in f["curves"]}
@@ -423,3 +423,288 @@ def test_hdf5_keeps_dark_and_light_together(tmp_path):
         assert len(names) == 2
         assert any("dark" in n for n in names)
         assert f["curves"][names[0]].attrs["dark"]
+
+
+# -- light_control="leave": the light is not this run's -------------------
+def _leave(**kw):
+    # The default sweep, so the lit curve actually reaches V_oc: the point of
+    # several of these is that an unknown curve gets the same metrics a lit
+    # one does, and a range that crosses nothing would prove it by accident.
+    return JVConfig(light_control="leave", **kw)
+
+
+def test_leave_touches_neither_shutter_nor_led_going_in_or_coming_out():
+    """The whole of the `jv` module is this test. A run that sets no light has
+    no business unwinding one, so the shutter is where it was found on both
+    sides of the sweep -- including the `finally`, which under `manage` shuts
+    it whatever happened."""
+    sim, rig = build()
+    rig.shutter.unblock()
+    rig.led.set_dc(1.02)
+    rig.led.enable_output(True)
+    before = (rig.shutter.is_open, rig.led.mode, rig.led.output_enabled)
+
+    events = run(rig, _leave())
+    assert (rig.shutter.is_open, rig.led.mode, rig.led.output_enabled) == before
+    assert rig.shutter.is_open, "the shutter was open before the run and stays open"
+
+    # And the same on the abort path, which is the one that goes through
+    # `finally` with the run unfinished.
+    gen = run_jv(rig, _leave(), sleep=NO_SLEEP)
+    next(gen)
+    gen.close()
+    assert rig.shutter.is_open
+
+    curves = [e for e in events if isinstance(e, JVCurveDone)]
+    assert len(curves) == 1, "one curve: there is no dark-plus-levels plan"
+    assert curves[0].dark is False and curves[0].led_level_v == 1.02
+    assert curves[0].label == "as found 1.02 V"
+    assert curves[0].metrics.voc is not None, "a lit curve reports its V_oc"
+
+
+def test_leave_reads_the_dark_it_finds_rather_than_making_one():
+    sim, rig = build()
+    rig.led.set_dc(1.02)
+    rig.led.enable_output(True)
+    rig.shutter.shut()
+    curves = [e for e in run(rig, _leave()) if isinstance(e, JVCurveDone)]
+    assert curves[0].dark is True and curves[0].label == "as found dark"
+    assert curves[0].illumination["shutter"] == "shut"
+    assert curves[0].metrics.voc is None, "a curve read as dark gets the dark metrics"
+
+
+def test_a_bench_that_cannot_say_gets_unknown_and_a_warning_never_dark():
+    """`None` is not `False`. A rig with no shutter cannot know whether light
+    reaches the sample however confident the generator is, and a curve
+    labelled dark there would be the failure `ui-rules` §9 is about.
+
+    The generator has to be *on* for this to be the unknown case: an LED that
+    is off is proof of dark on its own, shutter or no shutter, and answering
+    `unknown` there would be its own kind of wrong."""
+    sim = make_bench(seed=5)
+    rig = Rig(bias=sim.bias, scope=sim.scope, shutter=None,
+              config=RigConfig(), smu=sim.smu, led=sim.led)
+    rig.led.set_dc(1.02)
+    rig.led.enable_output(True)
+    events = run(rig, _leave())
+    curve = [e for e in events if isinstance(e, JVCurveDone)][0]
+    assert curve.dark is None and curve.label == "as found unknown"
+    assert curve.illumination["lit"] is None
+    warnings = [e for e in events if isinstance(e, E.Notice) and e.level == "warning"]
+    assert any("unknown" in w.text and "not as dark" in w.text for w in warnings)
+    # Unknown gets the full metric set: V_oc and FF are interpolations of the
+    # curve either way, and withholding them would hide the operator's own
+    # evidence that the light was on.
+    assert curve.metrics.voc is not None
+
+
+def test_leave_refuses_led_levels_because_a_level_is_a_request_to_set_the_light():
+    with pytest.raises(ValueError, match="cannot take led_levels_v"):
+        JVConfig(light_control="leave", led_levels_v=(1.02,))
+    with pytest.raises(ValueError, match="must be 'manage' or 'leave'"):
+        JVConfig(light_control="off")
+
+
+def test_illumination_state_needs_all_three_to_say_lit():
+    sim, rig = build()
+    rig.led.set_dc(1.02)
+    rig.led.enable_output(True)
+    rig.shutter.unblock()
+    assert illumination_state(rig)["lit"] is True
+    rig.shutter.shut()
+    assert illumination_state(rig)["lit"] is False, "shutter shut is dark, LED or not"
+    rig.shutter.unblock()
+    rig.led.off()
+    assert illumination_state(rig)["lit"] is False, "LED off is dark, shutter or not"
+
+
+def test_an_unknown_curve_has_no_dark_attribute_in_the_file(tmp_path):
+    """`bace-jv/3`: absent, not False. A reader that asks for `dark` on an
+    unknown curve gets a KeyError, which is loud; a False would have been a
+    dark label on a curve nobody read."""
+    import h5py
+    sim = make_bench(seed=6)
+    rig = Rig(bias=sim.bias, scope=sim.scope, shutter=None,
+              config=RigConfig(), smu=sim.smu, led=sim.led)
+    rig.led.set_dc(1.02)                # on: an LED that is off proves dark
+    rig.led.enable_output(True)
+    rec = JVRecorder(str(tmp_path), "20260903_120000", metadata={},
+                     rig_config=rig.config.as_dict())
+    list(record(run_jv(rig, _leave(), sleep=NO_SLEEP), rec))
+    with h5py.File([p for p in rec.written if p.endswith(".h5")][0], "r") as f:
+        assert f.attrs["schema"] == "bace-jv/3"
+        group = f["curves"][sorted(f["curves"])[0]]
+        assert group.attrs["illumination"] == "unknown"
+        assert "dark" not in group.attrs
+
+
+def test_a_driver_that_was_asked_and_would_not_answer_is_unread_not_cached():
+    """`Agilent33220A.read_state()` answers `output: None` when `:OUTP?` goes
+    unanswered and `mode: "?"` when `FUNC:SHAP?` does, while the instance still
+    holds the flags it last set. Reading the cache there turns "the generator
+    did not reply" into a measurement -- and the cache is most likely to be
+    stale exactly when it matters, after somebody used the front panel.
+
+    The `"?"` half is the sharper one: `"?" != "OFF"` is true, so an unread
+    mode used to count *towards* lit."""
+    sim, rig = build()
+    rig.shutter.unblock()
+
+    class Deaf:
+        """Answers read_state, and read_state answers nothing."""
+
+        mode = "DC"                     # the stale cache, saying the LED is on
+        output_enabled = True
+        last_levels = (1.02, None)
+
+        def __init__(self, **state):
+            self._state = {"output": None, "mode": "?", "high_v": 1.02, **state}
+
+        def read_state(self):
+            return dict(self._state)
+
+    rig.led = Deaf()
+    state = illumination_state(rig)
+    assert state["lit"] is None, "no output read-back is not a light reading"
+    assert state["led_output"] is None and state["led_mode"] is None
+    assert any("OUTP?" in u for u in state["unread"])
+    assert any("FUNC:SHAP?" in u for u in state["unread"])
+
+    # Half an answer is still not an answer.
+    rig.led = Deaf(output=True)
+    assert illumination_state(rig)["lit"] is None, "the mode is still unread"
+    rig.led = Deaf(mode="DC")
+    assert illumination_state(rig)["lit"] is None, "the output is still unread"
+
+    # Both read: now it is a reading.
+    rig.led = Deaf(output=True, mode="DC")
+    got = illumination_state(rig)
+    assert got["lit"] is True and got["unread"] == []
+
+    # And the curve follows: unknown, never dark.
+    rig.led = Deaf()
+    curve = [e for e in run(rig, _leave()) if isinstance(e, JVCurveDone)][0]
+    assert curve.dark is None and curve.label == "as found unknown"
+
+
+def test_a_driver_with_no_read_state_still_uses_its_own_flags():
+    """The simulator, and any driver that never claimed to read back: its
+    flags are the only account there is, and using them is not a claim about
+    an instrument someone may have touched."""
+    sim, rig = build()
+    rig.shutter.unblock()
+    rig.led.set_dc(1.02)
+    rig.led.enable_output(True)
+    assert not hasattr(rig.led, "read_state"), "the simulated LED has no read-back"
+    assert illumination_state(rig)["lit"] is True
+
+
+def test_the_shutter_line_is_read_not_the_cache_that_starts_at_none():
+    """`is_open` is `self._state == OPEN`, and `_state` is None on a fresh
+    open -- it only knows what *this* object has set. So after a service
+    restart, or any change made at the bench, `is_open` reads False on a
+    physically open shutter, and turning that into "shut" is a dark label on a
+    lit curve. `read_line()` asks the module; the bench snapshot has always
+    preferred it and this must too."""
+    sim, rig = build()
+    rig.led.set_dc(1.02)
+    rig.led.enable_output(True)
+
+    class Restarted:
+        """A DIO shutter this process has not touched: the cache says shut
+        (it starts as None), the line says the shutter is open."""
+
+        is_open = False                 # `_state == OPEN` with `_state = None`
+        line: int | None = 1
+
+        def read_line(self):
+            return self.line
+
+    rig.shutter = Restarted()
+    assert illumination_state(rig)["shutter"] == "open", "the line, not the cache"
+    curve = [e for e in run(rig, _leave()) if isinstance(e, JVCurveDone)][0]
+    assert curve.dark is False, "a lit curve, and it would have been labelled dark"
+
+    # And a read-back that will not answer is unread, not the cache either.
+    rig.shutter.line = None
+    state = illumination_state(rig)
+    assert state["shutter"] is None and state["lit"] is None
+    assert any("would not read back" in u for u in state["unread"])
+
+
+def test_a_dc_level_is_the_offset_not_a_stale_pulse_amplitude():
+    """`set_dc` writes `:VOLT:OFFS`, and `read_state` reports that separately
+    from `high_v`, which in DC still holds whatever the last pulse left.
+    Labelling a DC J-V with `high_v` puts the wrong number in the file *and*
+    registers the V_oc at that level -- and the level is exactly what the
+    coupling check compares."""
+    sim, rig = build()
+    rig.shutter.unblock()
+
+    class Generator:
+        output_enabled, mode = True, "DC"
+
+        def __init__(self, **state):
+            self._state = state
+
+        def read_state(self):
+            return dict(self._state)
+
+    # DC at 1.02, with 1.30 left in the amplitude registers by an earlier pulse.
+    rig.led = Generator(output=True, mode="DC", offset_v=1.02, high_v=1.30)
+    got = illumination_state(rig)
+    assert got["led_level_v"] == 1.02, "the DC offset is the level"
+    curve = [e for e in run(rig, _leave()) if isinstance(e, JVCurveDone)][0]
+    assert curve.label == "as found 1.02 V" and curve.led_level_v == 1.02
+
+    # In PULSE the high level is the level, as before.
+    rig.led = Generator(output=True, mode="PULSE", offset_v=0.71, high_v=1.02)
+    assert illumination_state(rig)["led_level_v"] == 1.02
+
+    # And there is no falling back between the two. `:VOLT:OFFS?` unanswered
+    # while `:VOLT:HIGH?` answers would have recorded the stale pulse
+    # amplitude *as the DC drive* -- the same "unread is not cached" mistake
+    # in a new place, and the first version of this fix made it.
+    rig.led = Generator(output=True, mode="DC", high_v=1.30)
+    got = illumination_state(rig)
+    assert got["led_level_v"] is None, "an unread level is absent, not the other register"
+    assert got["lit"] is True, "but the light is still known to be reaching the sample"
+    curve = [e for e in run(rig, _leave()) if isinstance(e, JVCurveDone)][0]
+    assert curve.label == "as found lit" and curve.dark is False
+    assert curve.led_level_v is None
+
+
+def test_one_proof_of_dark_is_enough_and_light_needs_all_three():
+    """The shutter *is* the light switch: shut means no light reaches the
+    sample whatever the generator does, and an LED that is off or in OFF mode
+    means there is none to reach it whatever the shutter does. Any one of
+    those, definitively read, settles the question — where claiming *light*
+    still needs all three.
+
+    The all-or-nothing gate this replaced made a supported arrangement
+    useless: `light(shutter="shut")` on a bench with no LED is explicitly
+    allowed, and the `jv` after it came out `unknown`, with the full non-dark
+    metric set, though the closed shutter proved it dark."""
+    sim, rig = build()
+
+    # A shut shutter, and no LED at all to ask about.
+    rig.led = None
+    rig.shutter.shut()
+    got = illumination_state(rig)
+    assert got["lit"] is False, "shut is dark, LED or no LED"
+    curve = [e for e in run(rig, _leave()) if isinstance(e, JVCurveDone)][0]
+    assert curve.dark is True and curve.label == "as found dark"
+    assert curve.metrics.voc is None, "and it gets the dark metrics"
+
+    # An LED that is off, with no shutter to ask about.
+    sim, rig = build()
+    rig.shutter = None
+    rig.led.off()
+    assert illumination_state(rig)["lit"] is False, "off is dark, shutter or no shutter"
+
+    # But claiming *light* still needs all three: LED on, shutter unreadable.
+    sim, rig = build()
+    rig.shutter = None
+    rig.led.set_dc(1.02)
+    rig.led.enable_output(True)
+    assert illumination_state(rig)["lit"] is None

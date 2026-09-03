@@ -528,7 +528,13 @@ class _Run:
             self.step_ts.setdefault(line.get("node_path") or "", []).append(float(ts))
         elif kind == "JVCurveDone":
             metrics = data.get("metrics") or {}
-            if (not data.get("dark") and isinstance(metrics, dict)
+            # `dark is False`, not `not dark`. On the wire the field is
+            # three-valued since the `jv`/`light` split, and `None` -- nobody
+            # could read whether light reached the sample -- is falsy. Counting
+            # such a curve as light writes its interpolated V_oc into the
+            # *persisted* summary, so `/runs` would advertise a noise crossing
+            # as a measurement for as long as the journal lives.
+            if (data.get("dark") is False and isinstance(metrics, dict)
                     and metrics.get("voc") is not None):
                 voc = float(metrics["voc"])
                 self._last_voc = voc

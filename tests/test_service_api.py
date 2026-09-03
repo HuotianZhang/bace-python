@@ -94,6 +94,14 @@ def wait_until(predicate, timeout_s: float = TIMEOUT) -> None:
         time.sleep(0.01)
 
 
+def _settled(session: Session, quiet_s: float = 0.05) -> bool:
+    """True once `last_seq` has not moved for `quiet_s` -- every frame the
+    last job produced is numbered and published."""
+    seq = session.last_seq
+    time.sleep(quiet_s)
+    return session.last_seq == seq
+
+
 def wait_run(session: Session, run_id: str) -> None:
     assert session.wait_run(run_id, TIMEOUT), f"{run_id} did not end"
 
@@ -202,6 +210,13 @@ def test_bench_read_and_the_chain_fix_by_hand(service):
     r = client.post("/bench/read", params={"wait": "false"})
     assert r.status_code == 202 and set(r.json()) == {"job"}
     wait_until(lambda: session.worker.idle)
+    # `worker.idle` says the job's generator returned, not that every frame it
+    # produced has been numbered -- the last verdicts of a read-back are
+    # published just after. Taking the cursor on `idle` alone let one of them
+    # land *after* it about one run in six, and this test then read a `Verdict`
+    # where it wanted the `BenchAction` first. So the barrier is the sequence
+    # itself: wait until it stops moving.
+    wait_until(lambda: _settled(session))
 
     before = session.last_seq
     r = client.post("/bench/actions/set-33220a-pol-inv")
@@ -278,7 +293,7 @@ def test_modules_show_provenance_and_needs(service):
     r = client.get("/modules")
     assert r.status_code == 200
     mods = r.json()["modules"]
-    assert [m["name"] for m in mods] == ["jv_dark", "jv_bace", "bace", "power",
+    assert [m["name"] for m in mods] == ["jv", "jv_bace", "bace", "light", "power",
                                          "temperature", "park", "wait", "note"]
     card = next(m for m in mods if m["name"] == "bace")
     assert (card["status"], card["kind"], card["relay"]) == ("built", "measurement", "transient")
@@ -353,7 +368,7 @@ def test_a_manual_run_streams_over_the_websocket_and_lands_in_the_record(service
         assert hello["data"]["session"]["id"] == SID
         assert hello["data"]["bench"]["state"] == "idle" and set(hello["data"]["bench"]) == BENCH_KEYS
 
-        r = client.post("/runs", json={"module": "jv_dark", "params": {"step_v": 0.1},
+        r = client.post("/runs", json={"module": "jv", "params": {"step_v": 0.1},
                                        "name": "dark"})
         assert r.status_code == 202, r.text
         body = r.json()
@@ -371,15 +386,15 @@ def test_a_manual_run_streams_over_the_websocket_and_lands_in_the_record(service
     assert states_of(got) == ["queued", "preflight", "running", "done", "parked"]
     assert got[0]["data"]["params"]["step_v"] == 0.1 and got[0]["data"]["name"] == "dark"
     curve = next(f for f in got if f["type"] == "JVCurveDone")
-    assert curve["node_path"] == "jv_dark" and len(curve["data"]["voltage"]) == 15
+    assert curve["node_path"] == "jv" and len(curve["data"]["voltage"]) == 15
     assert curve["decimated"] == {}, "a J-V curve goes whole on the socket"
     assert "NodeDone" in types and "Verdict" in types, "the chain read at Start"
 
     rec = client.get(f"/runs/{run_id}").json()
     assert (rec["state"], rec["parked"], rec["kind"], rec["module"]) == \
-        ("done", True, "manual", "jv_dark")
-    assert rec["node_outcomes"]["jv_dark"]["outcome"] == "ok"
-    assert rec["params_as_executed"]["jv_dark"]["step_v"]["source"] == "edited"
+        ("done", True, "manual", "jv")
+    assert rec["node_outcomes"]["jv"]["outcome"] == "ok"
+    assert rec["params_as_executed"]["jv"]["step_v"]["source"] == "edited"
     assert len(rec["folders"]) == 1 and rec["folder"] is None
     assert rec["chain_at_start"]["total"] == 4 and rec["data_in_memory"]
 
@@ -388,14 +403,14 @@ def test_a_manual_run_streams_over_the_websocket_and_lands_in_the_record(service
     data = r.json()
     assert len(data["curves"]) == 1 and len(data["curves"][0]["voltage"]) == 15
     assert data["curves"][0]["metrics"]["voc"] is None or isinstance(data["curves"][0]["metrics"]["voc"], float)
-    assert client.get(f"/runs/{run_id}/data", params={"node": "jv_dark"}).json() == data
+    assert client.get(f"/runs/{run_id}/data", params={"node": "jv"}).json() == data
 
     idx = client.get("/runs").json()
     assert [x["run_id"] for x in idx] == [run_id] and idx[0]["state"] == "done"
     assert idx[0]["outcome_text"] == "1 curve" and idx[0]["kind"] == "manual"
     assert client.get("/runs", params={"session": "all"}).json()[0]["run_id"] == run_id
     assert client.get("/runs", params={"session": "19990101_000000"}).json() == []
-    card = client.get("/modules/jv_dark").json()
+    card = client.get("/modules/jv").json()
     assert card["last"]["run_id"] == run_id and card["last"]["state"] == "done"
     assert card["last"]["summary"] == "1 curve"
     p = {x["name"]: x for x in card["params"]}
@@ -706,7 +721,7 @@ def test_a_second_run_queues_while_the_first_is_busy_and_runs_afterwards(service
     first = r.json()["run_id"]
     wait_until(lambda: client.get(f"/runs/{first}").json()["state"] == "paused")
 
-    r = client.post("/runs", json={"module": "jv_dark", "params": {"step_v": 0.1}})
+    r = client.post("/runs", json={"module": "jv", "params": {"step_v": 0.1}})
     assert r.status_code == 202
     second = r.json()["run_id"]
     assert r.json()["state"] == "queued" and r.json()["position"] == 0
@@ -715,7 +730,7 @@ def test_a_second_run_queues_while_the_first_is_busy_and_runs_afterwards(service
     assert client.post("/bench/read").status_code == 409
     assert client.post("/bench/actions/led-off").status_code == 409
     assert client.post(f"/runs/{second}/resume", json={}).status_code == 409
-    assert client.get("/modules/jv_dark").json()["last"]["state"] == "queued"
+    assert client.get("/modules/jv").json()["last"]["state"] == "queued"
 
     r = client.post("/pipelines", json={"tree": temperature_tree(bace(1, voc=0.9)),
                                         "name": "later"})
@@ -872,7 +887,7 @@ def test_python_m_bace_service_sim_fast_starts_and_answers(tmp_path):
         index = _get(f"http://127.0.0.1:{port}/")
         assert any(e["path"] == "/bench" for e in index["routes"])
         modules = _get(f"http://127.0.0.1:{port}/modules")["modules"]
-        assert [m["name"] for m in modules][:3] == ["jv_dark", "jv_bace", "bace"]
+        assert [m["name"] for m in modules][:4] == ["jv", "jv_bace", "bace", "light"]
         journal = out / "journal" / f"{bench['session']['id']}.jsonl"
         assert journal.is_file()
     finally:
@@ -942,7 +957,7 @@ def test_the_temperature_monitor_route_refuses_without_a_console(service):
 def test_a_run_of_an_earlier_session_is_served_from_the_journal(tmp_path):
     earlier = make_session(tmp_path, sid="20260902_215900")
     with TestClient(create_app(earlier)) as client:
-        run_id = client.post("/runs", json={"module": "jv_dark", "params": {"step_v": 0.1}}).json()["run_id"]
+        run_id = client.post("/runs", json={"module": "jv", "params": {"step_v": 0.1}}).json()["run_id"]
         wait_run(earlier, run_id)
         assert client.get(f"/runs/{run_id}").json()["from"] == "session"
     session = make_session(tmp_path)
@@ -950,8 +965,8 @@ def test_a_run_of_an_earlier_session_is_served_from_the_journal(tmp_path):
         r = client.get(f"/runs/{run_id}")
         assert r.status_code == 200, r.text
         rec = r.json()
-        assert rec["from"] == "journal" and rec["state"] == "done" and rec["module"] == "jv_dark"
-        assert rec["nodes"]["jv_dark"]["outcome"] == "ok" and rec["tree"]["module"] == "jv_dark"
+        assert rec["from"] == "journal" and rec["state"] == "done" and rec["module"] == "jv"
+        assert rec["nodes"]["jv"]["outcome"] == "ok" and rec["tree"]["module"] == "jv"
         assert rec["data_in_memory"] is False
         assert client.get(f"/runs/{run_id}/data").status_code == 404
         assert client.get("/runs/20260101_000000-001").status_code == 404

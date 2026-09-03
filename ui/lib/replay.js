@@ -16,6 +16,12 @@
 //   * **`fixtures/hello_*.json`** is the bench snapshot, which no journal
 //     contains, and **`fixtures/jv_*.json`** the J-V curves at full precision,
 //     which the journal reduces to metrics;
+//   * **`fixtures/modules_sim.json`** is `GET /modules` — every parameter of
+//     every module with its provenance, its `doc` and its `doc_full`. It is
+//     what M2's cards are generated from, so with it the bench tab is
+//     workable offline; recorded off a service with a *clean* journal, or the
+//     last-used layer of whoever recorded it rides along as if it were the
+//     catalogue's own;
 //   * **`fixtures/bench_running_*.json`** is `GET /bench` taken *while a run
 //     held the worker*, which is the only place the `inferred` overlay exists:
 //     at rest every instrument on the rail is a read-back.
@@ -44,6 +50,9 @@ export const FIXTURES = [
   { key: 'bench-running', kind: 'bench',
     label: 'sim — GET /bench mid-scan: the four instruments the run implies, every one inferred',
     url: 'fixtures/bench_running_sim.json' },
+  { key: 'modules', kind: 'modules',
+    label: 'sim — GET /modules: the catalogue the six bench cards are generated from',
+    url: 'fixtures/modules_sim.json' },
   { key: 'jv-curves', kind: 'data', label: 'sim — GET /runs/{id}/data for the J-V',
     url: 'fixtures/jv_sim.json' },
   { key: 'transient', kind: 'data',

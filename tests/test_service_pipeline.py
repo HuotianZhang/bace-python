@@ -73,15 +73,26 @@ def _smu_specs() -> list[ParamSpec]:
 
 
 def _jv_specs(*, light: bool) -> list[ParamSpec]:
-    exclude = ("led_levels_v",) if light else ("led_levels_v", "dark", "led_settle_s")
+    # `light_control` is the module's identity in the real catalogue, not a
+    # form field (`modules._JV_NOT_A_PARAM`), so the fake does not offer it
+    # either — a fake that accepts a parameter the real one refuses is a test
+    # passing on a tree the service would reject.
+    common = ("led_levels_v", "light_control")
+    exclude = common if light else common + ("dark", "led_settle_s")
     specs = specs_from_dataclass(JVConfig, group="jv", exclude=exclude,
                                  units={"start_v": "V", "stop_v": "V", "step_v": "V",
                                         "settle_s": "s", "led_settle_s": "s"})
     if light:
-        specs += [ParamSpec("led_start_v", "float", 1.020, unit="V", group="led"),
-                  ParamSpec("led_stop_v", "float", 1.020, unit="V", group="led"),
-                  ParamSpec("led_step_v", "float", 0.020, unit="V", group="led"),
-                  ParamSpec("led_low_v", "float", 0.4, unit="V", group="led")]
+        specs += [
+            # Nullable, as the real one is: None means "sweep the range", and a
+            # value means *that* is the level and the range is not read. The
+            # fake was missing it, so no test could reach the branch of
+            # `led.levels` and `axis.geometry` that a typed level takes.
+            ParamSpec("led_v", "float", None, unit="V", group="led", nullable=True),
+            ParamSpec("led_start_v", "float", 1.020, unit="V", group="led"),
+            ParamSpec("led_stop_v", "float", 1.020, unit="V", group="led"),
+            ParamSpec("led_step_v", "float", 0.020, unit="V", group="led"),
+            ParamSpec("led_low_v", "float", 0.4, unit="V", group="led")]
     return specs + _smu_specs()
 
 
@@ -106,8 +117,8 @@ def _bace_specs() -> list[ParamSpec]:
 
 
 SPECS = {
-    "jv_dark": ModuleSpec("jv_dark", "jv_dark", "measurement", "built", "dc", False,
-                          None, (), ("jv", "sourcemeter")),
+    "jv": ModuleSpec("jv", "jv", "measurement", "built", "dc", False,
+                     None, (), ("jv", "sourcemeter")),
     "jv_bace": ModuleSpec("jv_bace", "jv_bace", "measurement", "built", "dc", True,
                           None, ("led_start_v", "led_stop_v", "led_step_v", "led_low_v"),
                           ("jv", "led", "sourcemeter")),
@@ -117,6 +128,8 @@ SPECS = {
     "power": ModuleSpec("power", "power", "observer", "built", None, False, None, (), ()),
     "temperature": ModuleSpec("temperature", "temperature", "utility", "partial", None,
                               False, None, (), ()),
+    "light": ModuleSpec("light", "light", "utility", "built", None, False, None,
+                        ("led_v", "led_low_v"), ("illumination", "timing")),
     "park": ModuleSpec("park", "park", "utility", "built", None, False, None, (), ()),
     "wait": ModuleSpec("wait", "wait", "utility", "built", None, False, None, (), ()),
     "note": ModuleSpec("note", "note", "utility", "built", None, False, None, (), ()),
@@ -124,7 +137,7 @@ SPECS = {
 
 
 def _specs_for(name: str) -> list[ParamSpec]:
-    if name == "jv_dark":
+    if name == "jv":
         return _jv_specs(light=False)
     if name == "jv_bace":
         return _jv_specs(light=True)
@@ -138,6 +151,15 @@ def _specs_for(name: str) -> list[ParamSpec]:
                 ParamSpec("tolerance_k", "float", 0.2, unit="K"),
                 ParamSpec("hold_s", "float", 60.0, unit="s"),
                 ParamSpec("timeout_s", "float", 1800.0, unit="s")]
+    if name == "light":
+        return [ParamSpec("shutter", "enum", "leave", choices=("open", "shut", "leave")),
+                ParamSpec("led_mode", "enum", "leave",
+                          choices=("dc", "pulse", "off", "leave")),
+                ParamSpec("led_v", "float", 1.0, unit="V"),
+                ParamSpec("led_low_v", "float", 0.4, unit="V"),
+                ParamSpec("pulse_frequency_hz", "float", 500.0, unit="Hz"),
+                ParamSpec("duty_percent", "float", 50.0, unit="%"),
+                ParamSpec("settle_s", "float", 0.0, unit="s")]
     if name == "wait":
         return [ParamSpec("seconds", "float", 1.0, unit="s")]
     if name == "note":
@@ -587,9 +609,9 @@ def test_a_compliance_above_the_bench_ceiling_is_crit():
     [bad] = v.by_code("smu.ceiling")
     assert bad.level == "crit" and "0.1 A" in bad.text and "0.05 A" in bad.text
     assert bad.data["max_current_compliance_a"] == RIG.max_current_compliance_a
-    v = validate(module("jv_dark", smu_voltage_compliance_v=9.0))
+    v = validate(module("jv", smu_voltage_compliance_v=9.0))
     assert levels(v, "smu.ceiling") == ["crit"]
-    v = validate(module("jv_dark"))
+    v = validate(module("jv"))
     assert levels(v, "smu.ceiling") == ["ok"]
 
 
@@ -747,7 +769,7 @@ def test_the_chain_read_back_becomes_warnings_with_named_fixes():
     assert i.level == "info" and "leaves" in i.text
 
     # a J-V-only tree does not use the Sync edge
-    v = validate(module("jv_dark"), bench=bench_snapshot(led_pol="NORM"))
+    v = validate(module("jv"), bench=bench_snapshot(led_pol="NORM"))
     assert levels(v, "chain.led-polarity") == ["info"]
     assert levels(v, "chain.bias-arm") == ["ok"]
 
@@ -954,24 +976,24 @@ def test_an_unreadable_33220a_polarity_is_a_warn_for_a_transient_and_info_for_a_
     assert w.level == "warn" and w.data["fix"] == "set-33220a-pol-inv"
     assert "unproven" in w.text and w.data["value"] == "?"
     assert v.valid
-    v = validate(module("jv_dark"), bench=bench_snapshot(led_pol="?"))
+    v = validate(module("jv"), bench=bench_snapshot(led_pol="?"))
     assert levels(v, "chain.led-polarity") == ["info"]
 
 
 def test_a_module_whose_instrument_is_unplugged_is_refused_at_validate():
     """The real catalogue knows what each module cannot run without; with a
-    read-back that lists the Keithley as unavailable a jv_dark is refused
+    read-back that lists the Keithley as unavailable a jv is refused
     with a check, not accepted, queued and failed at preflight."""
     from bace.service.modules import Catalogue
 
     cat = Catalogue(rig_config=RIG, run_toml={}, history=None)
     snap = bench_snapshot()
     snap["unavailable"] = {"smu": "GPIB0::24::INSTR: VisaIOError: VI_ERROR_RSRC_NFOUND"}
-    v = validate(module("jv_dark"), catalogue=cat, bench=snap)
+    v = validate(module("jv"), catalogue=cat, bench=snap)
     assert not v.valid
     [c] = v.by_code("bench.instrument")
     assert c.level == "invalid" and c.data["missing"] == ["smu"]
-    assert "VI_ERROR_RSRC_NFOUND" in c.text and c.node_path == "jv_dark"
+    assert "VI_ERROR_RSRC_NFOUND" in c.text and c.node_path == "jv"
 
     # bace inside the canonical tree: the same read-back says the scope is gone
     snap["unavailable"] = {"scope": "TCPIP0::PwM-DSO9054H.local::inst0::INSTR: timeout"}
@@ -982,8 +1004,8 @@ def test_a_module_whose_instrument_is_unplugged_is_refused_at_validate():
 
     # nothing missing: ok, and a bench not read yet is information
     snap["unavailable"] = {}
-    assert levels(validate(module("jv_dark"), catalogue=cat, bench=snap), "bench.instrument") == ["ok"]
-    assert levels(validate(module("jv_dark"), catalogue=cat, bench=None), "bench.instrument") == ["info"]
+    assert levels(validate(module("jv"), catalogue=cat, bench=snap), "bench.instrument") == ["ok"]
+    assert levels(validate(module("jv"), catalogue=cat, bench=None), "bench.instrument") == ["info"]
     # the power meter is advisory for a bace (intensity NaN) and required by `power`
     snap["unavailable"] = {"power": "the 1918-C console is not answering"}
     assert levels(validate(module("bace", measure_dc=True), catalogue=cat, bench=snap),
@@ -1060,3 +1082,85 @@ def test_the_temperature_check_tells_a_console_gone_since_start_from_an_instrume
     assert P.temperature_automatic(with_temperature(wired=True, connected=False)) is False
     assert P.temperature_automatic(with_temperature(wired=False)) is False
     assert P.temperature_automatic(None) is None
+
+
+def test_a_run_that_only_sets_the_light_is_refused_because_park_would_undo_it():
+    """Every run ends parked -- the executor's `finally` and then the worker's
+    -- so a light-only run hands the bench back exactly as dark as it found
+    it. The operator would watch a run succeed and change nothing, which is
+    the failure `ui-rules` §9 is about wearing a green tick."""
+    v = validate(module("light", shutter="open", led_mode="dc", led_v=1.02))
+    assert levels(v, "light.undone-by-park") == ["invalid"] and not v.valid
+    c = v.by_code("light.undone-by-park")[0]
+    assert "bench actions" in c.text and "shutter-open" in c.text
+
+    # Inside a tree the node is the point: it sets the light for the steps
+    # after it, and park at the end of the run is where the bench should end.
+    seq = {"kind": "loop", "loop": "repeat", "count": 1,
+           "children": [module("light", shutter="open", led_mode="dc", led_v=1.02),
+                        module("jv")]}
+    v = validate(seq)
+    assert levels(v, "light.undone-by-park") == ["ok"]
+
+
+def test_a_jv_sweep_has_geometry_too_and_it_is_checked():
+    """Until this, `axis.geometry` skipped every module without an
+    `axis_name`, which is every J-V module — so `step_v = 0` validated clean,
+    was queued, and died at build time with `jv: step_v: step_v must be
+    positive`. The card's own estimate already read "cannot estimate" while
+    the Run button beside it stayed enabled.
+
+    Pre-existing (it applied to `jv_dark` just the same); named here because
+    the split is what made it visible."""
+    ok = validate(module("jv"))
+    assert levels(ok, "axis.geometry") == ["ok"]
+
+    bad = validate(module("jv", step_v=0))
+    assert levels(bad, "axis.geometry") == ["invalid"] and not bad.valid
+    assert "step_v must be positive" in bad.by_code("axis.geometry")[0].text
+
+    # A range of LED levels with no step is the same shape of refusal, and the
+    # one `_jv_levels` makes in the builder.
+    span = validate(module("jv_bace", led_start_v=1.02, led_stop_v=1.06, led_step_v=0))
+    assert levels(span, "axis.geometry") == ["invalid"]
+    assert "led_step_v" in span.by_code("axis.geometry")[0].text
+
+    # One level is not a range: start = stop needs no step.
+    one = validate(module("jv_bace", led_start_v=1.02, led_stop_v=1.02, led_step_v=0))
+    assert levels(one, "axis.geometry") == ["ok"]
+
+    # And a typed or inherited `led_v` *is* the level: `_jv_levels` never looks
+    # at the range there, so checking it refuses a run over numbers nobody
+    # uses — the same mistake this check was written to fix, made by it.
+    typed = validate(module("jv_bace", led_v=1.02, led_start_v=1.02,
+                            led_stop_v=1.06, led_step_v=0))
+    assert levels(typed, "axis.geometry") == ["ok"]
+
+
+def test_a_light_node_is_checked_only_on_the_levels_its_mode_reads():
+    """Every `light` node carries a non-null `led_v` — it has a default — so
+    `led.levels` treated all of them as an active drive and built the whole
+    `LedDrive` from the low level, the frequency and the duty. A shutter-only
+    node was then refused for an unused pulse low level sitting above the
+    threshold: a check about a waveform the node never sends.
+
+    `_build_light` validates exactly the relationships the chosen mode uses,
+    and this now makes the same test."""
+    bad_low = {"led_v": 1.02, "led_low_v": 1.4}          # above the 1.0 threshold
+
+    # Not driving the LED at all: the levels are inert and not its business.
+    for mode in ("leave", "off"):
+        v = validate(module("light", shutter="open", led_mode=mode, **bad_low))
+        assert levels(v, "led.levels") == ["ok"], mode
+
+    # DC reads the level and nothing else about the square wave.
+    v = validate(module("light", led_mode="dc", **bad_low))
+    assert levels(v, "led.levels") == ["ok"], "the low level is a pulse property"
+    below = validate(module("light", led_mode="dc", led_v=0.5, led_low_v=0.4))
+    assert levels(below, "led.levels") == ["invalid"], "but the threshold still applies"
+    assert "below the LED threshold" in below.by_code("led.levels")[0].text
+
+    # Pulse reads all of them, and is refused as it always was.
+    v = validate(module("light", led_mode="pulse", **bad_low))
+    assert levels(v, "led.levels") == ["invalid"]
+    assert "not below the LED threshold" in v.by_code("led.levels")[0].text
