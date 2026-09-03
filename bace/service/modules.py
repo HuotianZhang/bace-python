@@ -559,12 +559,15 @@ def _light_specs() -> list[ParamSpec]:
                       "generators, so this does not constrain the scan after it."),
         ParamSpec("duty_percent", "float", 50.0, unit="%", group="timing",
                   minimum=0.0, maximum=100.0,
-                  doc="The 33220A's light/dark split within one period, so at 500 Hz "
-                      "and 50 % the device gets 1 ms of light then 1 ms of dark "
-                      "(`pulse` only). The on-phase is the part that matters -- the "
-                      "device has to reach its light V_oc within it -- and nothing "
-                      "checks it for you, because that depends on the device's own "
-                      "settling time and no parameter carries it."),
+                  doc="The 33220A's duty cycle: the fraction of the period at the "
+                      "waveform's high level, so at 50 % the device gets 1 ms of "
+                      "light then 1 ms of dark at 500 Hz (`pulse` only). Away from "
+                      "50 %, read it inverted -- this rig runs the generator at "
+                      "`:OUTP:POL INV`, which flips which half is lit, so the lit "
+                      "fraction is `100 - duty_percent` and raising this shortens "
+                      "the illumination. Whether the lit half is long enough for "
+                      "the device to reach its light V_oc is the operator's call: "
+                      "nothing checks it."),
         ParamSpec("settle_s", "float", 0.0, unit="s", group="timing", minimum=0.0,
                   doc="Wait after the light is set, before the node finishes -- so "
                       "the step that follows starts under a settled lamp. 0 does not "
