@@ -54,6 +54,19 @@ export default {
      * left alone until the answer arrives.
      */
     let edits = Promise.resolve();
+
+    /**
+     * `true` once an edit in the current burst has been refused. Awaiting the
+     * chain is not enough on its own: the chain has to keep going for the
+     * *next* edit, so its `catch` resolves — and a resolved promise tells a
+     * waiting Run or DC to carry on, with the value the refused edit did not
+     * replace. The operator types something the service will not take, clicks
+     * DC, and the lamp is driven at the old number with a refusal on screen.
+     *
+     * So the flag is the answer, not the promise: an action after a refused
+     * edit does nothing, and the next successful edit clears it.
+     */
+    let refused = false;
     const settled = () => edits;
 
     /**
@@ -102,6 +115,12 @@ export default {
     /** Which cards a bench read-back could have changed the answer for. */
     let validatedAt = null;
 
+    /** What a Run or an action does when the edit before it was refused. */
+    const stale = () => notify(
+      'the edit before this was refused, so nothing was started: the value on '
+      + 'the bench is still the old one. Fix the field, or reload the card.',
+      'warn');
+
     const fail = (err) => {
       // A refusal reaches the operator as its sentence, never as `-> 409`.
       // `error.text` and `error.checks` are on `ApiError` since M1, and
@@ -137,7 +156,8 @@ export default {
               // Inside the chain, so `run`'s `await settled()` waits for it
               // too: the button and the checks that gate it move together.
               await revalidate([name]);
-            } catch (err) { fail(err); render(); }
+              refused = false;
+            } catch (err) { refused = true; fail(err); render(); }
           });
           return edits;
         },
@@ -146,12 +166,14 @@ export default {
           submitting = true;
           try {
             await settled();
+            if (refused) return stale();
             const params = button.kind === 'shot' ? { n_loops: 1 } : {};
             await api.startRun(model.name, params);
           } catch (err) { fail(err); } finally { submitting = false; }
         },
         async act(model, action) {
           await settled();
+          if (refused) return stale();
           try {
             // Re-derived after the edits land, never the arguments captured
             // when the card was drawn: `cardModel` computes an action's args

@@ -589,3 +589,66 @@ def test_a_driver_with_no_read_state_still_uses_its_own_flags():
     rig.led.enable_output(True)
     assert not hasattr(rig.led, "read_state"), "the simulated LED has no read-back"
     assert illumination_state(rig)["lit"] is True
+
+
+def test_the_shutter_line_is_read_not_the_cache_that_starts_at_none():
+    """`is_open` is `self._state == OPEN`, and `_state` is None on a fresh
+    open -- it only knows what *this* object has set. So after a service
+    restart, or any change made at the bench, `is_open` reads False on a
+    physically open shutter, and turning that into "shut" is a dark label on a
+    lit curve. `read_line()` asks the module; the bench snapshot has always
+    preferred it and this must too."""
+    sim, rig = build()
+    rig.led.set_dc(1.02)
+    rig.led.enable_output(True)
+
+    class Restarted:
+        """A DIO shutter this process has not touched: the cache says shut
+        (it starts as None), the line says the shutter is open."""
+
+        is_open = False                 # `_state == OPEN` with `_state = None`
+        line: int | None = 1
+
+        def read_line(self):
+            return self.line
+
+    rig.shutter = Restarted()
+    assert illumination_state(rig)["shutter"] == "open", "the line, not the cache"
+    curve = [e for e in run(rig, _leave()) if isinstance(e, JVCurveDone)][0]
+    assert curve.dark is False, "a lit curve, and it would have been labelled dark"
+
+    # And a read-back that will not answer is unread, not the cache either.
+    rig.shutter.line = None
+    state = illumination_state(rig)
+    assert state["shutter"] is None and state["lit"] is None
+    assert any("would not read back" in u for u in state["unread"])
+
+
+def test_a_dc_level_is_the_offset_not_a_stale_pulse_amplitude():
+    """`set_dc` writes `:VOLT:OFFS`, and `read_state` reports that separately
+    from `high_v`, which in DC still holds whatever the last pulse left.
+    Labelling a DC J-V with `high_v` puts the wrong number in the file *and*
+    registers the V_oc at that level -- and the level is exactly what the
+    coupling check compares."""
+    sim, rig = build()
+    rig.shutter.unblock()
+
+    class Generator:
+        output_enabled, mode = True, "DC"
+
+        def __init__(self, **state):
+            self._state = state
+
+        def read_state(self):
+            return dict(self._state)
+
+    # DC at 1.02, with 1.30 left in the amplitude registers by an earlier pulse.
+    rig.led = Generator(output=True, mode="DC", offset_v=1.02, high_v=1.30)
+    got = illumination_state(rig)
+    assert got["led_level_v"] == 1.02, "the DC offset is the level"
+    curve = [e for e in run(rig, _leave()) if isinstance(e, JVCurveDone)][0]
+    assert curve.label == "as found 1.02 V" and curve.led_level_v == 1.02
+
+    # In PULSE the high level is the level, as before.
+    rig.led = Generator(output=True, mode="PULSE", offset_v=0.71, high_v=1.02)
+    assert illumination_state(rig)["led_level_v"] == 1.02

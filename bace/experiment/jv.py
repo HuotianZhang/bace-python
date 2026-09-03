@@ -439,10 +439,31 @@ def illumination_state(rig: Rig) -> dict:
                  "unread": []}
 
     if shutter is not None:
-        try:
-            out["shutter"] = "open" if bool(shutter.is_open) else "shut"
-        except Exception as exc:                            # noqa: BLE001
-            out["unread"].append(f"shutter ({type(exc).__name__})")
+        # `read_line()` asks the DIO module; `is_open` is `self._state == OPEN`,
+        # and `_state` "only knows what *this* object has set, and is None on a
+        # fresh open" (`drivers/shutter.py`). So after a service restart, or
+        # any change made outside this process, `is_open` reads False on a
+        # physically open shutter -- and this function would turn that into the
+        # definite answer "shut", which becomes a *dark label on a lit curve*.
+        # Same order `service.rigs._shutter_state` uses for the bench snapshot.
+        line = None
+        reader = getattr(shutter, "read_line", None)
+        if callable(reader):
+            try:
+                line = reader()
+            except Exception:                               # noqa: BLE001
+                line = None
+        if line is not None:
+            out["shutter"] = "open" if bool(line) else "shut"
+        elif callable(reader):
+            # It has a read-back and the read-back would not answer. The cached
+            # flag is not a substitute for it.
+            out["unread"].append("shutter (the line would not read back)")
+        else:
+            try:
+                out["shutter"] = "open" if bool(shutter.is_open) else "shut"
+            except Exception as exc:                        # noqa: BLE001
+                out["unread"].append(f"shutter ({type(exc).__name__})")
     else:
         out["unread"].append("shutter (none on this bench)")
 
@@ -485,7 +506,15 @@ def illumination_state(rig: Rig) -> dict:
                     out["led_mode"] = mode
             except Exception as exc:                        # noqa: BLE001
                 out["unread"].append(f"LED mode ({type(exc).__name__})")
-        level = state.get("high_v")
+        # **In DC the level is the offset.** `set_dc` writes `:VOLT:OFFS`, and
+        # `read_state` returns that separately from `high_v` -- which in DC
+        # holds whatever amplitude the last pulse left. Taking `high_v` would
+        # label a DC J-V with a stale number and register its V_oc at that
+        # level, which is exactly what the coupling check compares.
+        mode_now = str(out["led_mode"] or "").upper()
+        level = state.get("offset_v") if mode_now == "DC" else state.get("high_v")
+        if level is None and mode_now == "DC":
+            level = state.get("high_v")
         if level is None:
             # `last_levels` is the spelling the drivers keep -- the simulated
             # ones and the 33220A both -- and the one `service.rigs._levels`
