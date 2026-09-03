@@ -720,6 +720,14 @@ program on the instrument; here the journal is where an operator looks).
 The 350 K ceiling and the front-panel settings hold whoever owns the bus, and
 each failure is named for what it is:
 
+- **the heater watchdog** cuts the heater (`RANGE 0`) after
+  `Limits.max_consecutive_faults` consecutive reads whose control-sensor
+  status is not ok, and the count resets on the first good one. It runs on
+  every `read()`, so the monitor and the settle both feed it. This is the
+  console poller's rule, moved in with the instrument: without it a sensor
+  going open-circuit leaves the heater energised for as long as the run
+  lasts. `DirectTemperatureController.heater_cut` holds the reason once it
+  has fired;
 - a setpoint above the 350 K ceiling (`[temperature] max_setpoint_k`, or the
   console's own limit when a console owns the bus) is **refused**, never
   clamped — `Verdict(crit, "temperature.refused", <the controller's own
@@ -907,13 +915,22 @@ and in the journal, the `/bench` temperature block follows it (`kelvin`,
 "294.8 K · 331 reads" while a scan runs. `DELETE /monitors/temperature` stops it.
 
 **The one exception to "observers never touch the bus."** When this process
-owns the 331's GPIB session, its monitor *is* on GPIB0, so it takes
-`skip_while` and skips any tick while the worker has a job
-(`worker.idle` false), rather than putting a second thread on the bus
-mid-acquisition. A skipped tick counts in `skipped` on `GET /monitors`, is
-not a failure, and loses nothing: a settling temperature node emits its own
-`TemperatureRead`s from the worker. A predicate that raises is read as busy.
-With a console named the 331 is HTTP again and nothing is skipped.
+owns the 331's GPIB session its monitor *is* on GPIB0, so it takes
+`RunWorker.bus` -- the lock the worker holds for the whole of a job --
+acquires it **without blocking**, and reads only while holding it. A tick
+that cannot take it is skipped and counted in `skipped` on `GET /monitors`;
+a skip is not a failure. Holding the lock rather than testing `worker.idle`
+is the point: the boolean was true one instant and stale the next, so a
+multi-query read could straddle the start of a job. With a console named the
+331 is HTTP again and no lock is passed.
+
+**What that costs.** A pipeline run holds the bus for its whole length, so
+during a long subtree the temperature monitor emits nothing and the card's
+reading goes stale. `skipped` is how a UI says *why* rather than showing an
+old number as if it were current — **render it**. Readings still arrive from
+the worker where it is safe to take them: while a temperature node settles,
+and while a run is paused for the operator. Sampling at safe points inside a
+run is a change to the measurement path and is not in this round.
 
 ---
 

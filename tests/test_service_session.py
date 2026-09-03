@@ -785,47 +785,76 @@ def test_run_record_answers_from_the_journal_for_a_run_of_an_earlier_session(tmp
         assert later.runs_index("all")[-1]["light_curves"] == 1
 
 
-def test_a_monitor_on_the_bus_skips_its_tick_while_the_worker_has_a_job():
+def test_a_monitor_on_the_bus_reads_only_while_it_holds_the_bus_lock():
     """The bench-lock rule: one thread on GPIB0. The 1918-C is USB or HTTP and
     reads right through a scan, but the 331 is on the bus when this process
-    owns it, so its monitor skips instead of interleaving with an
-    acquisition. A skipped tick is not a failure -- a settling node emits its
-    own readings from the worker, so nothing is lost."""
+    owns it, so its monitor takes the worker's lock -- without blocking -- and
+    skips the tick when a job holds it.
+
+    Holding rather than asking `worker.idle`: the boolean was true one instant
+    and stale the next, so a multi-query read could straddle the start of a
+    job. Here the read cannot begin unless the lock is free, and cannot be
+    interrupted by a job once it has, which is what the test's second half
+    pins. A skipped tick is not a failure."""
+    import threading
+
     from bace.experiment import events as E
     from bace.service.monitors import Monitor
 
-    busy = {"now": True}
+    bus = threading.Lock()
+    inside = threading.Event()
+    release = threading.Event()
 
     class Counting(Monitor):
         name = "counting"
 
         def read(self):
+            inside.set()
+            release.wait(5.0)
             return E.Notice("info", "read")
 
-    m = Counting(emit=lambda ev: None, interval_s=0.01,
-                 skip_while=lambda: busy["now"])
+    bus.acquire()                       # a job is running
+    m = Counting(emit=lambda ev: None, interval_s=0.01, bus=bus)
     m.start()
     try:
         wait_until(lambda: m.skipped >= 3)
         assert m.readings == 0 and m.failures == 0, "skipped, not failed"
-        busy["now"] = False
-        wait_until(lambda: m.readings >= 3)
+        assert not inside.is_set(), "read() must not have been entered at all"
+
+        bus.release()                   # the job ends
+        wait_until(lambda: inside.is_set())
+        # the read is in flight and holds the bus: a job cannot start now
+        assert bus.locked(), "the read holds the lock it read under"
+        assert bus.acquire(blocking=False) is False
+        release.set()
+        wait_until(lambda: m.readings >= 1)
         assert m.info()["skipped"] >= 3
     finally:
+        release.set()
         m.stop()
 
-    # a predicate that raises is read as "busy": if we cannot tell whether the
-    # bus is free, we do not touch it
-    def explode():
-        raise RuntimeError("cannot tell")
-
-    m = Counting(emit=lambda ev: None, interval_s=0.01, skip_while=explode)
-    m.start()
+    # no lock at all: an off-the-bus monitor (the meter, or a console-backed
+    # 331) never skips
+    free = Counting(emit=lambda ev: None, interval_s=0.01)
+    free.start()
     try:
-        wait_until(lambda: m.skipped >= 2)
-        assert m.readings == 0
+        wait_until(lambda: free.readings >= 3)
+        assert free.skipped == 0
     finally:
-        m.stop()
+        free.stop()
+
+
+def test_the_worker_holds_its_bus_lock_for_the_whole_of_a_job(tmp_path):
+    """What the monitor's lock is actually synchronised against. If the worker
+    ever stopped holding this for the length of a job, the monitor would read
+    mid-acquisition and no test would notice."""
+    with make_session(tmp_path) as s:
+        assert not s.worker.bus.locked()
+        run_id, _ = s.submit(tree_for_module("jv_dark", {"step_v": 0.2}))
+        wait_until(lambda: s.worker.bus.locked() or
+                   s.run_record(run_id)["state"] == "done")
+        assert s.wait_run(run_id, TIMEOUT)
+        assert not s.worker.bus.locked(), "released when the job ends"
 
 
 def test_the_temperature_monitor_reads_the_331_beside_the_bench(tmp_path):

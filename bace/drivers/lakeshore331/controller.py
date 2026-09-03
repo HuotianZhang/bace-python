@@ -24,10 +24,16 @@ What the console kept and this keeps:
 
 * the **350 K ceiling** (`config.Limits`), refused with `TemperatureError`
   and never clamped -- quietly giving 350 K for 400 K hides the mistake;
+* the **heater watchdog** (`_watch`): `max_consecutive_faults` bad readings
+  of the control sensor and the heater is cut with `RANGE 0`. This lived in
+  the console's poller, which did not come with the instrument code -- so
+  for one commit `emergency_stop` sat here with nothing calling it while a
+  run could leave the heater energised behind a dead sensor;
 * the **heater range, PID, ramp and loop wiring** read, never driven: the
   front panel owns them, `discover()` reads back how the box is wired, and
   a run gets whatever is set. Raising the heater range needs an explicit
-  confirm that this class never passes.
+  confirm that this class never passes. Lowering it to zero is the one
+  write the watchdog is allowed, because that is the safe direction.
 
 What is different from the console, deliberately: `note()` has no separate
 audit file. The console kept one because it was the only program on the
@@ -72,6 +78,7 @@ class DirectTemperatureController:
                  max_setpoint_k: float = 350.0,
                  control_loop: int = 1,
                  simulate: bool = False,
+                 watchdog: bool = True,
                  audit: Callable[[str], None] | None = None):
         settings = Settings(limits=Limits(max_setpoint_k=max_setpoint_k),
                             connection=Connection(resource=resource,
@@ -80,7 +87,11 @@ class DirectTemperatureController:
         self.settings = settings
         self.resource = resource
         self.audit = audit
+        self.watchdog = watchdog
         self.last: TemperatureReading | None = None
+        self.heater_cut: str | None = None
+        """The reason the watchdog last cut the heater, once it has."""
+        self._faults = 0
         self._setpoint_written_at: float | None = None
         try:
             self._transport = open_transport(settings.connection, simulated=simulate,
@@ -160,6 +171,7 @@ class DirectTemperatureController:
                 max_setpoint_k=self.settings.limits.max_setpoint_k)
             self.last = r
             return r
+        self._watch(status)
         r = TemperatureReading(
             kelvin=float(kelvin),
             setpoint_k=None if setpoint is None else float(setpoint),
@@ -171,6 +183,47 @@ class DirectTemperatureController:
             max_setpoint_k=self.settings.limits.max_setpoint_k)
         self.last = r
         return r
+
+    # -- the watchdog -----------------------------------------------------
+    def _watch(self, status: Any) -> None:
+        """Cut the heater after `max_consecutive_faults` bad control-sensor
+        readings, and reset the count on the first good one.
+
+        This is `ls331/service.py::_check_faults`, which lived in the console's
+        poller. The poller did not come with the instrument code, so when the
+        service took the bus this protection was left behind: `emergency_stop`
+        and `check_faults` sat in `instrument.py` with nothing calling them,
+        and a sensor going open-circuit with the heater energised had nobody
+        watching. A run only ever writes setpoints, so the heater can stay on
+        for hours after the thing measuring it stopped making sense.
+
+        Counted per read, as the console counted per poll -- so it is the
+        monitor and the settle that feed it, both of which call `read()`.
+        `RANGE 0` is the documented off switch and is harmless in any
+        configuration; a failure to send it is swallowed, because a watchdog
+        that raises out of a read would take the read with it.
+        """
+        if not self.watchdog:
+            return
+        if getattr(status, "ok", True):
+            self._faults = 0
+            return
+        self._faults += 1
+        if self._faults < self.settings.limits.max_consecutive_faults:
+            return
+        reason = (f"control sensor reported '{status}' on {self._faults} "
+                  "consecutive reads")
+        self._faults = 0
+        try:
+            with _LOCK:
+                self.device.emergency_stop(reason)
+            self.heater_cut = reason
+            log.error("heater cut: %s", reason)
+            if self.audit is not None:
+                self.audit(f"331 heater cut by the watchdog: {reason}")
+        except Exception as exc:                            # noqa: BLE001
+            self.heater_cut = f"{reason} (RANGE 0 failed: {exc})"
+            log.error("heater cut FAILED: %s", self.heater_cut)
 
     def _elapsed(self) -> float | None:
         """Seconds since this controller last wrote a setpoint. The console

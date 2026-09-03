@@ -170,7 +170,7 @@ def test_a_write_the_console_did_not_answer_but_applied_settles_with_a_notice():
     assert kinds(events) == ["TemperatureRead", "Notice", "Verdict"]
     notice = events[1]
     assert notice.level == "warning"
-    assert notice.text.startswith("T=250K: the 331 console did not answer the setpoint write in "
+    assert notice.text.startswith("T=250K: the 331 did not answer the setpoint write in "
                                   "time but reports 250 K in force -- settling (cannot reach")
     assert events[2].code == "temperature.settled" and events[2].data["polls"] == 1
     assert out.how == "settled" and out.temperature_k == 250.1 and c.setpoints == [250.0]
@@ -276,9 +276,9 @@ def test_the_heater_off_is_said_at_once_and_only_when_heat_is_needed():
     assert (off.level, off.node_path) == ("warn", "T=300K")
     assert off.data == {"setpoint_k": 300.0, "kelvin": 294.8, "heater_range": 0,
                         "source": "simulated", "console": None}
-    assert off.text == ("300 K asked for with the heater range off on the 331 console (reading "
+    assert off.text == ("300 K asked for with the heater range off on the 331 (reading "
                         "294.80 K): the setpoint is written but nothing will drive toward it "
-                        "until the range is raised on the console")
+                        "until the range is raised on the front panel")
     assert t.setpoints == [300.0] and t.heater_range == 0 and t.kelvin == 294.8
     assert verdicts[1].data["reason"] == "timeout" and out.how == "operator"
 

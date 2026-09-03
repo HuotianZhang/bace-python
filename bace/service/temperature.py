@@ -118,10 +118,19 @@ def _float_or_none(v: Any) -> float | None:
 
 
 def source_of(controller: Any) -> str:
-    """`console` for the HTTP driver, `simulated` for the stand-in -- the
-    `source` every `TemperatureRead` and verdict carries, so a file written
-    under `--sim` says so."""
-    return "console" if getattr(controller, "base_url", None) else "simulated"
+    """The `source` every `TemperatureRead`, settle verdict and
+    `RunMetadata.temperature_source` carries, so a file written under `--sim`
+    says so.
+
+    Delegates to `rigs.temperature_source` rather than deciding again. This
+    was two functions until 2026-09-03 and they disagreed the moment the
+    direct driver arrived: the bench read-back said `instrument` and the
+    settle path -- the one that writes the *file* -- still tested only
+    `base_url` and fell through to `simulated`, stamping every real 331
+    reading as made up. One classifier, so they cannot drift apart again.
+    """
+    from .rigs import temperature_source
+    return temperature_source(controller)
 
 
 def _note(controller: Any, text: str) -> bool:
@@ -324,11 +333,11 @@ def settle(rig: Rig, ctx: "RunContext", detail: dict, *, node_path: str,
                         p.error = str(exc)
                         break
                     # The write outlived the client's patience and landed
-                    # anyway: the console is slow, not gone.
+                    # anyway: the bus is slow, not gone.
                     yield E.Notice("warning",
-                                   f"{node_path}: the 331 console did not answer the "
-                                   f"setpoint write in time but reports {setpoint:g} K "
-                                   f"in force -- settling ({exc})")
+                                   f"{node_path}: the 331 did not answer the setpoint "
+                                   f"write in time but reports {setpoint:g} K in force "
+                                   f"-- settling ({exc})")
                 written = True
             if reading.heater_range == 0 and setpoint - reading.kelvin > tolerance \
                     and not heater_said:
@@ -339,9 +348,9 @@ def settle(rig: Rig, ctx: "RunContext", detail: dict, *, node_path: str,
                 yield E.Verdict(
                     level="warn", code="temperature.heater-off",
                     text=(f"{setpoint:g} K asked for with the heater range off on the 331 "
-                          f"console (reading {reading.kelvin:.2f} K): the setpoint is written "
-                          "but nothing will drive toward it until the range is raised on the "
-                          "console"),
+                          f"(reading {reading.kelvin:.2f} K): the setpoint is written but "
+                          "nothing will drive toward it until the range is raised on the "
+                          "front panel"),
                     node_path=node_path,
                     data={"setpoint_k": setpoint, "kelvin": float(reading.kelvin),
                           "heater_range": 0, "source": source, "console": console})
