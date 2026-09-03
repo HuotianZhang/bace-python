@@ -34,6 +34,7 @@ from bace.drivers.lakeshore331 import (ConsoleTemperatureController,
                                        TemperatureError,
                                        open_temperature_controller)
 from bace.drivers.lakeshore331 import controller as ls_controller
+from bace.drivers.lakeshore331 import protocol as p
 from bace.drivers.lakeshore331.transport import SimulatedTransport as Sim331
 from bace.drivers.lakeshore331.transport import TransportError
 from bace.drivers.newport1918c import (ConsolePowerMeter, DirectPowerMeter,
@@ -234,6 +235,73 @@ def test_a_331_that_never_answers_does_not_produce_a_controller(monkeypatch):
         DirectTemperatureController()
 
 
+def test_the_watchdog_cuts_the_heater_after_repeated_sensor_faults(monkeypatch):
+    """The console's poller counted bad control-sensor reads and cut the
+    heater at `max_consecutive_faults` (`ls331/service.py::_check_faults`).
+    That poller did not come with the instrument code, so for one commit
+    `emergency_stop` sat in `instrument.py` with nothing calling it while a
+    run could leave the heater energised behind a dead sensor. The direct
+    owner counts them now, per read -- which is what the monitor and the
+    settle both do."""
+    bad = p.parse_reading_status("16")          # temperature under-range
+    good = p.parse_reading_status("0")
+    assert bad.ok is False and good.ok is True
+
+    t = _direct331(monkeypatch)
+    writes: list[str] = []
+    try:
+        t.device._write = lambda msg, reason="": writes.append(msg)
+        t.device.reading_status = lambda channel="A": bad
+
+        t.read(); t.read()
+        assert writes == [] and t.heater_cut is None, "two is under the limit"
+        t.read()
+        assert "RANGE 0" in writes, "three consecutive faults cut the heater"
+        assert t.heater_cut and "3 consecutive reads" in t.heater_cut
+
+        # the count resets on a good reading, so an intermittent sensor does
+        # not accumulate its way to a cut over an hour
+        writes.clear()
+        t.device.reading_status = lambda channel="A": good
+        t.read()
+        t.device.reading_status = lambda channel="A": bad
+        t.read(); t.read()
+        assert writes == []
+    finally:
+        t.close()
+
+    off = _direct331(monkeypatch, watchdog=False)
+    try:
+        writes = []
+        off.device._write = lambda msg, reason="": writes.append(msg)
+        off.device.reading_status = lambda channel="A": bad
+        for _ in range(5):
+            off.read()
+        assert writes == [] and off.heater_cut is None
+    finally:
+        off.close()
+
+
+def test_a_watchdog_that_cannot_cut_says_so_instead_of_breaking_the_read(monkeypatch):
+    """A watchdog that raised out of `read()` would take the reading with it,
+    and the monitor would report a dead instrument rather than a live one
+    with a bad sensor. The failure is recorded and the read still returns."""
+    t = _direct331(monkeypatch)
+    try:
+        t.device.reading_status = lambda channel="A": p.parse_reading_status("16")
+
+        def refuse(reason):
+            raise TransportError("bus gone")
+
+        t.device.emergency_stop = refuse
+        for _ in range(3):
+            r = t.read()
+        assert r.connected is True, "the reading survived"
+        assert t.heater_cut and "RANGE 0 failed" in t.heater_cut
+    finally:
+        t.close()
+
+
 def test_notes_and_writes_reach_the_audit_hook(monkeypatch):
     """The console kept its own audit file because it was the only program on
     the instrument. Here the session journal is where an operator looks, so
@@ -272,6 +340,54 @@ def test_provenance_separates_the_instrument_from_the_console_and_the_stand_in(
         t.close()
     assert temperature_source(ConsoleTemperatureController("http://x:8331")) == "console"
     assert temperature_source(object()) == "simulated"
+
+
+def test_the_settle_path_and_the_bench_agree_on_where_a_temperature_came_from(
+        monkeypatch):
+    """There were two classifiers. The bench read-back used the newer,
+    `resource`-aware one and the settle path -- the one whose answer reaches
+    `RunMetadata.temperature_source` and the HDF5 -- still tested only
+    `base_url`, so every reading off a real 331 was written down as
+    `simulated`. They are one function now; this fails if a second appears."""
+    from bace.service import temperature as svc_temperature
+
+    t = _direct331(monkeypatch)
+    try:
+        for controller, expected in ((t, "instrument"),
+                                     (ConsoleTemperatureController("http://x:8331"),
+                                      "console"),
+                                     (object(), "simulated")):
+            assert svc_temperature.source_of(controller) == expected
+            assert svc_temperature.source_of(controller) == temperature_source(controller)
+    finally:
+        t.close()
+
+
+def test_the_wavelength_travels_with_every_direct_reading():
+    """Watts mean nothing without the wavelength that set the responsivity.
+    The console client got it free in each `/api/reading`; the direct adapter
+    has to read it back and keep it, or the power monitor's events and the
+    `read-power` action carry a number nobody can interpret."""
+    m = DirectPowerMeter(simulate=True, wavelength_nm=530.0)
+    try:
+        assert m.wavelength_nm == 530.0
+        assert m.read().wavelength_nm == 530.0
+        m.set_wavelength(505.0)
+        assert m.wavelength_nm == 505.0 and m.read().wavelength_nm == 505.0
+
+        from bace.service.rigs import power_reading
+        assert power_reading(m).wavelength_nm == 505.0
+    finally:
+        m.close()
+
+    # a caller that sets none gets whatever the meter was left holding,
+    # rather than None -- the meter is stateful and somebody set it once
+    left = DirectPowerMeter(simulate=True)
+    try:
+        assert left.wavelength_nm is not None
+        assert left.read().wavelength_nm == left.wavelength_nm
+    finally:
+        left.close()
 
 
 def test_a_power_reading_is_never_labelled_simulated_when_it_is_not():

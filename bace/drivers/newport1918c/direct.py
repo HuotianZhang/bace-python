@@ -55,8 +55,16 @@ class DirectPowerMeter:
                 "[power_meter] dll in rig.toml") from exc
         self.info: dict = dict(getattr(self._meter, "info", {}) or {})
         self.last: Reading | None = None
+        self.wavelength_nm: float | None = None
+        """The wavelength the meter reports holding, kept because every
+        `Reading` carries it and `rigs.power_reading` falls back to it. The
+        console client got it free in each `/api/reading`; here it has to be
+        read back and remembered, or a watt reading arrives with no way to
+        know which responsivity produced it."""
         if wavelength_nm is not None:
             self.set_wavelength(wavelength_nm)
+        else:
+            self._read_wavelength()
 
     @property
     def source(self) -> str:
@@ -85,12 +93,27 @@ class DirectPowerMeter:
     def set_wavelength(self, nm: float) -> None:
         """Responsivity is wavelength dependent, and the driver refuses a
         value outside the head's calibrated range rather than extrapolating
-        into a confident wrong number."""
+        into a confident wrong number.
+
+        What is remembered is what the meter *reports* after the write, not
+        what was asked for: the instrument rounds to whole nanometres.
+        """
         from .meter import MeterError
         try:
-            self._meter.set_wavelength(float(nm))
+            answered = self._meter.set_wavelength(float(nm))
         except MeterError as exc:
             raise PowerMeterError(str(exc)) from exc
+        got = (answered or {}).get("wavelength")
+        self.wavelength_nm = float(got) if got is not None else float(nm)
+
+    def _read_wavelength(self) -> None:
+        """Whatever the meter was left holding, for a caller that set none."""
+        try:
+            got = self._meter.settings().get("wavelength")
+        except Exception:                                   # noqa: BLE001
+            return          # a meter that will not say is not a reason to fail
+        if got is not None:
+            self.wavelength_nm = float(got)
 
     def set_units_watts(self) -> None:
         """A meter left in amps or dBm returns a perfectly plausible number
@@ -114,7 +137,7 @@ class DirectPowerMeter:
                     saturated=bool(st.get("saturated")),
                     overrange=bool(st.get("overrange")),
                     units=st.get("units"),
-                    wavelength_nm=None)
+                    wavelength_nm=self.wavelength_nm)
         self.last = r
         return r
 

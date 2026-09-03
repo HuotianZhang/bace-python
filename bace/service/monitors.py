@@ -12,12 +12,27 @@ for it differently:
   generators. It is serialised against the worker's own reads by
   `rigs._METER_LOCK` and by the driver's internal lock.
 * **The 331 is on GPIB when this process owns it** (since 2026-09-03), and
-  that *is* the bus. So the temperature monitor takes `skip_while`: while
-  the worker has a job in flight it skips the tick entirely rather than
-  putting a second thread on GPIB0 mid-acquisition. Nothing is lost, because
-  a temperature node emits its own `TemperatureRead` from the worker while
-  it settles. With a console named the 331 is HTTP again and nothing is
-  skipped.
+  that *is* the bus. So the temperature monitor takes `bus` -- the worker's
+  own lock, held for the whole of a job -- and reads only while holding it,
+  without ever blocking on it. A tick that cannot take it is skipped rather
+  than run beside an acquisition. With a console named the 331 is HTTP again
+  and no lock is passed.
+
+  Holding it rather than asking `worker.idle` is the point: the boolean was
+  racy, true one instant and stale the next, so a multi-query read could
+  straddle the start of a job. Held, the two cannot overlap in either
+  direction -- and a job that wants to start while a read is in flight waits
+  the few tens of milliseconds it takes, which is the right way round.
+
+**What this costs, and it is not nothing.** A pipeline run holds the bus for
+its whole length, so during an hours-long subtree the temperature monitor
+emits nothing at all and the card's reading goes stale. `skipped` on
+`GET /monitors` is how a UI can say *why* instead of showing an old number as
+if it were current. Readings still arrive from the worker itself where it is
+safe to take them -- while a temperature node settles, and while a run is
+paused for the operator (`Job.wait_for_operator`'s `on_poll`). Closing the
+gap properly means the worker sampling at safe points inside a run, which is
+a change to the measurement path and not this one.
 
 A skipped tick is not a failure and is not counted as one.
 
@@ -50,7 +65,7 @@ class Monitor:
     name = "monitor"
 
     def __init__(self, *, emit: Callable[[E.Event], None], interval_s: float = 1.0,
-                 console: str = "", skip_while: Callable[[], bool] | None = None):
+                 console: str = "", bus: Any = None):
         interval_s = float(interval_s)
         if not MIN_INTERVAL_S <= interval_s <= MAX_INTERVAL_S:
             raise ValueError(f"interval_s must be between {MIN_INTERVAL_S:g} and "
@@ -58,10 +73,11 @@ class Monitor:
         self.emit = emit
         self.interval_s = interval_s
         self.console = console
-        self.skip_while = skip_while
-        """Asked before every tick. True = do not read now. For a monitor
-        whose instrument is on the bus the worker owns, this is how the
-        bench-lock rule is kept: skip, do not queue and do not fail."""
+        self.bus = bus
+        """The worker's bus lock, for a monitor whose instrument is on the
+        bus the worker owns; None for one whose is not. Acquired without
+        blocking and held across the read, so the tick either happens with
+        the bus to itself or does not happen."""
         self.skipped = 0
         self.started_at: float | None = None
         self.readings = 0
@@ -115,16 +131,15 @@ class Monitor:
 
     def _loop(self) -> None:
         while not self._stop.is_set():
-            skip = False
-            if self.skip_while is not None:
-                try:
-                    skip = bool(self.skip_while())
-                except Exception:                           # noqa: BLE001
-                    skip = True     # cannot tell whether the bus is free: do not touch it
-            if skip:
-                self.skipped += 1
-            else:
+            if self.bus is None:
                 self._read_once()
+            elif self.bus.acquire(blocking=False):
+                try:
+                    self._read_once()
+                finally:
+                    self.bus.release()
+            else:
+                self.skipped += 1
             if self._stop.wait(self.interval_s):
                 return
 
@@ -206,13 +221,13 @@ class TemperatureMonitor(Monitor):
 
     def __init__(self, console: str, *, emit: Callable[[E.Event], None],
                  interval_s: float = 5.0, controller: Any = None,
-                 skip_while: Callable[[], bool] | None = None):
+                 bus: Any = None):
         if not console and controller is None:
             raise ValueError("no 331 on this bench: nothing is attached at "
                              "[temperature] address and [temperature] console is "
                              "empty, so there is nothing to monitor")
         super().__init__(emit=emit, interval_s=interval_s, console=console,
-                         skip_while=skip_while)
+                         bus=bus)
         self.controller = controller
 
     def read(self) -> E.Event:

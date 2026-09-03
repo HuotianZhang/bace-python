@@ -1470,17 +1470,15 @@ class Session:
         controller = self.bench.rig.temperature
         # When this process holds the 331's GPIB session, the monitor's thread
         # would be a second thread on GPIB0 -- the one thing the bench-lock
-        # rule forbids. It skips its tick while the worker has a job instead;
-        # a settling temperature node emits its own readings from the worker,
-        # so nothing is lost. A console-backed controller is HTTP and never
-        # skips.
+        # rule forbids. So it reads only while holding the worker's own bus
+        # lock, and skips the tick when a job holds it. A console-backed
+        # controller is HTTP, off the bus, and gets no lock.
         on_the_bus = getattr(controller, "resource", None) is not None
         monitor = TemperatureMonitor(self.rig_config.temperature_console,
                                      emit=lambda ev: self._dispatch(None, ev, node_path=""),
                                      interval_s=interval_s,
                                      controller=controller,
-                                     skip_while=(None if not on_the_bus
-                                                 else lambda: not self.worker.idle))
+                                     bus=self.worker.bus if on_the_bus else None)
         self._temperature_monitor = monitor
         monitor.start()
         return monitor.info()
