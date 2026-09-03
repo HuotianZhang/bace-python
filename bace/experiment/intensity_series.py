@@ -58,8 +58,8 @@ class SeriesConfig:
     led_stop_v: float = 1.020
     led_step_v: float = 0.020
     led_low_v: float = 0.4
-    """Pulse low level. Must be below the LED's turn-on threshold, so the dark
-    half of the cycle really is dark; `LedDrive` refuses otherwise."""
+    """The 33220A pulse low level. Must be below the LED's turn-on threshold, so
+    the dark half of the cycle really is dark; `LedDrive` refuses otherwise."""
 
     led_settle_s: float = 2.0
     """The original's 'LED stab. time', which had its own panel control — a hint

@@ -344,18 +344,24 @@ SMU_UNITS: dict[str, str] = {
 
 AXIS_DOCS: dict[str, str] = {
     "axis_name": "Which quantity is swept: vpre (BACE), delay_ns (TDCF) or vcoll.",
-    "axis_start": "First value; an offset from V_oc when centre_on_voc is on.",
-    "axis_stop": "Last value; start = stop is one point (repeats come from n_loops).",
-    "axis_step": "Spacing; the point count is rounded from the span, never truncated.",
+    "axis_start": "First value of the swept quantity; an offset from V_oc when "
+                   "centre_on_voc is on.",
+    "axis_stop": "Last value of the swept quantity; start = stop is one point "
+                  "(repeats come from n_loops).",
+    "axis_step": "Spacing of the swept values; the point count is rounded from the "
+                  "span, never truncated.",
     "centre_on_voc": "Make start/stop offsets from the V_oc measured under the "
                      "illumination in force (vpre only).",
 }
 
 PINNED_DOCS: dict[str, str] = {
-    "vpre": "Prebias at the device, when it is not the swept axis; an offset from V_oc "
-            "when vpre_on_voc is set.",
-    "vcoll": "Collection bias at the device, when it is not the swept axis.",
-    "delay_ns": "After the LED falling edge, before the collection pulse.",
+    "vpre": "Prebias at the device, sourced by the 81150A -- `core.pulses` divides it "
+            "by the amplifier gain before it is written -- when it is not the swept "
+            "axis; an offset from V_oc when vpre_on_voc is set.",
+    "vcoll": "Collection bias at the device, sourced by the 81150A through the same "
+             "gain division, when it is not the swept axis.",
+    "delay_ns": "How long the 81150A waits after the LED falling edge before it fires "
+                "the collection pulse (`:PULS:DEL1`).",
     "n_loops": "How many times the axis is swept; the statistics tighten with each.",
 }
 
@@ -419,16 +425,21 @@ def _jv_led_specs() -> list[ParamSpec]:
     jv_docs = field_docs(JVConfig)
     return [
         ParamSpec("led_v", "float", None, unit="V", group="led", nullable=True,
-                  doc="One light curve at this level: inherited from an illumination "
-                      "loop, or typed. Empty means sweep led_start_v to led_stop_v."),
+                  doc="One light curve at this 33220A drive level: inherited from an "
+                      "illumination loop, or typed. Empty means sweep led_start_v to "
+                      "led_stop_v."),
         ParamSpec("led_start_v", "float", 1.020, unit="V", group="led",
                   doc="First LED drive level, at the 33220A output."),
         ParamSpec("led_stop_v", "float", 1.020, unit="V", group="led",
-                  doc="Last LED drive level; equal to led_start_v for one curve."),
+                  doc="Last LED drive level, at the 33220A output; equal to "
+                      "led_start_v for one curve."),
         ParamSpec("led_step_v", "float", 0.020, unit="V", group="led", minimum=0.0,
-                  doc="Spacing of the LED levels; the count is rounded from the span."),
+                  doc="Spacing of the 33220A drive levels; the count is rounded "
+                      "from the span."),
         ParamSpec("led_low_v", "float", 0.4, unit="V", group="led",
-                  doc="Pulse low level, carried for the rail; run_jv drives the LED DC."),
+                  doc="The 33220A pulse low level. Not used by this module -- "
+                      "`jv_bace` drives the LED DC -- but carried so the rail can "
+                      "show it."),
         ParamSpec("led_settle_s", "float", 2.0, unit="s", group="led", minimum=0.0,
                   doc=jv_docs.get("led_settle_s", "After changing the LED level.")),
         ParamSpec("dark", "bool", True, group="led",
@@ -454,8 +465,8 @@ def _bace_specs(rig_config: RigConfig) -> list[ParamSpec]:
         ParamSpec("led_v", "float", 1.0, unit="V", group="illumination",
                   doc="33220A pulse high level: the same number the V_oc was measured at."),
         ParamSpec("led_low_v", "float", 0.4, unit="V", group="illumination",
-                  doc="Pulse low level, below the LED threshold so the dark half-cycle "
-                      "is dark."),
+                  doc="The 33220A pulse low level, below the LED threshold so the "
+                      "dark half-cycle is dark."),
         ParamSpec("voc", "float", None, unit="V", group="illumination", nullable=True,
                   doc="V_oc the axis is centred on. Derived from jv_bace or measure_dc; "
                       "typed by hand only as a last resort, and the validator says so."),
@@ -463,7 +474,8 @@ def _bace_specs(rig_config: RigConfig) -> list[ParamSpec]:
                   doc="Measure V_oc / J_sc / J_sat on the Keithley under the LED first, "
                       "as the intensity series does."),
         ParamSpec("v_sat", "float", -1.0, unit="V", group="illumination",
-                  doc="Bias at which J_sat is measured (measure_dc)."),
+                  doc="The bias the 2400 holds while it reads J_sat (measure_dc "
+                      "only)."),
         ParamSpec("led_settle_s", "float", 2.0, unit="s", group="illumination",
                   minimum=0.0,
                   doc="The least time after the LED is set to pulse before anything is "
@@ -476,8 +488,9 @@ def _bace_specs(rig_config: RigConfig) -> list[ParamSpec]:
                       "wait was seen not to be enough (2026-09-02)."),
         ParamSpec("led_settle_tolerance", "float", 0.02, group="illumination",
                   minimum=0.0,
-                  doc="The LED counts as settled when the last three power readings, "
-                      "0.5 s apart, agree within this fraction of their mean."),
+                  doc="The LED counts as settled when the last three 1918-C power "
+                      "readings, 0.5 s apart, agree within this fraction of their "
+                      "mean."),
     ]
     run = _regroup(specs_from_dataclass(RunConfig, choices=RUN_CHOICES, units=RUN_UNITS),
                    RUN_GROUPS, RunConfig)
@@ -525,19 +538,26 @@ def _light_specs() -> list[ParamSpec]:
                       "the next module waits for it all over again."),
         ParamSpec("led_v", "float", 1.0, unit="V",
                   group="illumination",
-                  doc="The DC level, or the pulse high level. The same number the "
-                      "V_oc must be measured at and `bace` must pulse at -- the "
-                      "coupling invariant is one level, in one place."),
+                  doc="The 33220A drive level: its DC offset under `dc`, its pulse "
+                      "high level under `pulse`. The same number the V_oc must be "
+                      "measured at and `bace` must pulse at -- the coupling invariant "
+                      "is one level, in one place."),
         ParamSpec("led_low_v", "float", 0.4, unit="V",
                   group="illumination",
-                  doc="Pulse low level, below the LED threshold so the dark "
-                      "half-cycle is dark. `pulse` only."),
+                  doc="The 33220A pulse low level, below the LED threshold so the "
+                      "dark half-cycle is dark. `pulse` only."),
         ParamSpec("pulse_frequency_hz", "float", 500.0, unit="Hz", group="timing",
                   minimum=0.0,
-                  doc="`pulse` only. Both generators were found at 500 Hz on the rig "
-                      "(2026-08-31)."),
+                  doc="The rate the 33220A chops the LED at (`pulse` only; this "
+                      "node touches no other instrument). 500 Hz is what the rig was "
+                      "found at (2026-08-31), and a `bace` after this must pulse at "
+                      "the same rate -- it is armed by this generator's Sync."),
         ParamSpec("duty_percent", "float", 50.0, unit="%", group="timing",
-                  minimum=0.0, maximum=100.0, doc="`pulse` only."),
+                  minimum=0.0, maximum=100.0,
+                  doc="The 33220A's light/dark split within one period, so 50 % gives "
+                      "the device equal light and dark halves (`pulse` only). Only "
+                      "sensible near 50 %: a `bace` takes its two traces either side "
+                      "of that boundary."),
         ParamSpec("settle_s", "float", 0.0, unit="s", group="timing", minimum=0.0,
                   doc="Wait after the light is set, before the node finishes -- so "
                       "the step that follows starts under a settled lamp. 0 does not "
@@ -555,11 +575,13 @@ def _power_specs(rig_config: RigConfig) -> list[ParamSpec]:
     return [
         ParamSpec("wavelength_nm", "float", rig_config.power_meter_wavelength_nm,
                   unit="nm", group="acquisition", minimum=0.0,
-                  doc="Responsivity is wavelength dependent; the meter is set to this "
-                      "before it is read."),
+                  doc="The wavelength the 1918-C is told to assume: its "
+                      "responsivity is wavelength dependent, so this is written "
+                      "before the meter is read."),
         ParamSpec("samples", "int", 1, group="acquisition", minimum=1,
-                  doc="1 reads one value; more asks the meter for a mean over that many, "
-                      "on its own clock."),
+                  doc="How many readings the 1918-C is asked for: 1 reads one "
+                      "value, more asks the meter for a mean over that many, on its "
+                      "own clock."),
     ]
 
 
@@ -570,7 +592,8 @@ def _temperature_specs() -> list[ParamSpec]:
                       "wired (its 350 K ceiling applies), else set by the operator at "
                       "the pause."),
         ParamSpec("tolerance_k", "float", 0.2, unit="K", group="timing", minimum=0.0,
-                  doc="How close the reading must be to count as in band."),
+                  doc="How close the 331's reading must be to `setpoint_k` to "
+                      "count as in band."),
         ParamSpec("hold_s", "float", 60.0, unit="s", group="timing", minimum=0.0,
                   doc="Dwell inside the band before measuring: from the reading entering "
                       "it when the 331 settles, after the resume when the operator does."),

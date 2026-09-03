@@ -47,10 +47,12 @@ class RunConfig:
     """The measurement recipe. Copied verbatim into the output."""
 
     n_averages: int = 200
-    """Hardware averages per trace. Noise falls as 1/sqrt(n); time rises as n."""
+    """How many traces the scope averages in hardware before it hands one
+    back. Noise falls as 1/sqrt(n); time rises as n."""
 
     timebase_ns_per_div: float = 200.0
-    """Panel units: nanoseconds per division, ten divisions on screen.
+    """The scope's horizontal scale, in nanoseconds per division with ten
+    divisions across the record — so the record is ten times this.
 
     200 is what the LabVIEW panel shows (`Timebase (200 ns) = 200E+0`) and what
     the 2026-08 archive was taken with. It briefly defaulted to 500 here on the
@@ -66,8 +68,9 @@ class RunConfig:
     """
 
     record_length: int = 5000
-    """Requested points. The instrument may return fewer — 5000 gave 4000 in
-    the 2026-08-07 archive — so nothing here assumes it got what it asked for."""
+    """How many samples the scope is asked for per trace. It may return fewer
+    — 5000 gave 4000 in the 2026-08-07 archive — so nothing here assumes it got
+    what it asked for."""
 
     t0_int_s: float = 3.18e-7
     """Where charge integration starts, in the units `t0_int_reference` names."""
@@ -106,7 +109,8 @@ class RunConfig:
     """
 
     output_polarity: str = "auto"
-    """`auto`, `NORM`, `INV` or `leave` — what to do with `:OUTP1:POL`.
+    """What to do with the 81150A's output polarity (`:OUTP1:POL`): `auto`,
+    `NORM`, `INV` or `leave`.
 
     `auto` uses `inverted_output`, which is what every run did before this
     existed. `leave` writes nothing: the polarity found on the instrument is
@@ -129,22 +133,31 @@ class RunConfig:
     in a few hundred ns."""
 
     pulse_frequency_hz: float = 500.0
-    """Both generators were found at 500 Hz on the rig (2026-08-31), not the
-    1 kHz assumed from the recovered code. The 81150A is armed by the 33220A
-    sync, so the two must match; 500 Hz gives a 2 ms period and a 1 ms
-    on-phase."""
+    """The rate **both** generators run at: the 33220A chopping the LED and
+    the 81150A firing the collection pulse. Both were found at 500 Hz on the
+    rig (2026-08-31), not the 1 kHz assumed from the recovered code. The 81150A
+    is armed by the 33220A sync, so the two must match; 500 Hz gives a 2 ms
+    period and a 1 ms on-phase."""
     duty_percent: float = 50.0
-    """The 81150A's on/off split within one period. At 500 Hz and 50 % the
-    device gets 1 ms of light and 1 ms of dark per cycle; the shot is taken
-    across that boundary. Only sensible near 50 % -- the two halves are the
-    light and dark traces the photocurrent is the difference of."""
+    """The LED's light/dark split within one period, written to the 33220A
+    (`FUNC:PULS:DCYC`). At 500 Hz and 50 % the device gets 1 ms of light and
+    1 ms of dark per cycle; the shot is taken across that boundary. Only
+    sensible near 50 % -- the two halves are the light and dark traces the
+    photocurrent is the difference of.
+
+    The same number is written to the 81150A too, by `configure_shape`, where
+    it does not survive: `set_levels` writes `PULS:WIDT` from `pulse_width_ns`
+    afterwards and again on every shot, and the width is what the collection
+    pulse actually has. So this controls the lamp, not the extraction."""
 
     offset_correct: bool = True
-    """Subtract the mean of the last 10 % of the photocurrent record."""
+    """Subtract the mean of the last 10 % of the scope's photocurrent record
+    from the whole trace, taking a constant baseline off with it."""
 
     invert_polarity: bool = False
-    """The original's `New Sample?`: swaps and negates both bias levels for a
-    device of the opposite architecture. A sign convention, not a feature —
+    """Swap and negate both 81150A bias levels in software, before they are
+    written, for a device of the opposite architecture — the original's
+    `New Sample?`. A sign convention, not a feature —
     getting it wrong flips the charge, it does not merely disable something.
 
     This is the *software* half. `inverted_output` below is the instrument half.
@@ -169,13 +182,16 @@ class RunConfig:
     """
 
     settle_s: float = 0.2
-    """After opening the shutter and setting the light levels, before acquiring."""
+    """How long the run waits once the shutter is open and the light levels
+    are on the 81150A, before the scope acquires."""
 
     dark_settle_s: float = 0.2
-    """After switching to the dark levels, before the shutter closes."""
+    """How long the run waits once the 81150A holds the dark levels, before
+    the shutter closes."""
 
     dark_reference: str = "translated"
-    """How the dark trace is biased. `"translated"` | `"same"`.
+    """Which levels the 81150A holds for the dark trace: `"translated"` |
+    `"same"`.
 
     `"translated"` is what this port reconstructed from the VI and what
     `core.pulses.pulse_levels` returns a second pair of levels for: the dark
@@ -195,7 +211,8 @@ class RunConfig:
     """
 
     shutter_settle_s: float = 0.0
-    """After the shutter has moved, before acquiring. **Applied to both traces.**
+    """How long the run waits after the shutter has finished moving, before
+    the scope acquires. **Applied to both traces.**
 
     Until 2026-09-01 the two branches were not symmetric: the light trace waited
     `settle_s` after `unblock()`, while the dark trace slept `dark_settle_s`
@@ -242,23 +259,26 @@ class RunConfig:
     """
 
     trigger_slope_positive: bool = True
-    """Arm on the rising edge of the external trigger. With the 33220A at
+    """Arm the 81150A on the rising edge of the external trigger — the 33220A
+    Sync. With the 33220A at
     `:OUTP:POL INV` the rising Sync edge is light-off, the edge extraction
     has to follow; arming on the falling edge would extract in the middle of
     generation. Moot when `external_trigger` is False."""
 
     trigger_sweep: str = "AUTO"
-    """`AUTO` or `TRIG`. The recovered driver used AUTO, so that is the default.
+    """**The scope's** trigger sweep mode, `AUTO` or `TRIG` — not the 81150A's
+    arming, which is `external_trigger` beside it. The recovered driver used
+    AUTO, so that is the default.
     AUTO sweeps anyway when no trigger arrives, so a loose sync cable produces
     untriggered noise whose dark subtraction cancels to nearly zero charge — a
     plausible result from a disconnected cable. TRIG waits instead, turning that
     into a timeout. Worth switching once the trigger path is known good."""
 
     calibrate_trigger: bool = False
-    """Acquire the trigger channel once and set the threshold to
-    `max(CHAN3) * 0.5 * attenuation`, as the original did. Needs a digitizer
-    that can acquire that channel before any range has been set, so it is off
-    by default and switched on for the real rig."""
+    """Have the scope acquire its trigger channel once before the scan and set
+    its edge threshold to `max(CHAN3) * 0.5 * attenuation`, as the original did.
+    Needs a digitizer that can acquire that channel before any range has been
+    set, so it is off by default and switched on for the real rig."""
 
     def __post_init__(self) -> None:
         if self.t0_int_reference not in ("record", "trigger", "pulse"):
