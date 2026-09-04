@@ -648,10 +648,24 @@ class _Executor:
         led_v = ctx.led_v if ctx.led_v is not None else (values or {}).get("led_v")
         if led_v is not None:
             detail["led_v"] = led_v
-        if ctx.temperature_k is not None:
-            detail["temperature_k"] = ctx.temperature_k
-            detail["temperature_how"] = ctx.temperature_how
-            detail["temperature_source"] = ctx.temperature_source
+        # The same triple the recorder wrote into the HDF5, from the same
+        # resolver: the tree's binding when a temperature node made one, the
+        # session's typed number otherwise (`RunContext.temperature`). Read
+        # off the raw `ctx.temperature_k` this was absent on every manual run
+        # and every pipeline without a temperature node, so the journal said
+        # nothing about the temperature of exactly the runs whose folder
+        # name was the only record of it (`docs/naming-plan.md` §1).
+        kelvin, how, source = ctx.temperature()
+        if kelvin is not None:
+            detail["temperature_k"] = kelvin
+            detail["temperature_how"] = how
+            detail["temperature_source"] = source
+        # Whether the recorder subtracted the dark trace's baseline: a bench
+        # property of the *file*, restated on the node so a results view can
+        # say it beside the charge. `offset_correct` is a transient's
+        # parameter; a J-V has no baseline and says nothing.
+        if values and "offset_correct" in values:
+            detail["offset_corrected"] = bool(values.get("offset_correct"))
         if error is not None:
             detail["error"] = error
         return detail

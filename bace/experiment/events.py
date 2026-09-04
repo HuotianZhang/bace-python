@@ -271,10 +271,15 @@ class RunQueued(Event):
     chose for the module -- the edited layer and last-used values carried
     forward, never the V_oc -- which is what the journal hands back as
     last-used next session; `resolved` every value the module runs with;
-    `folder` the pipeline's parent folder when there is one. A fact about
-    the queue, not something a run emits, so the recorders never see it; it
-    lives here so the wire has one vocabulary and the service assembles none
-    of it."""
+    `folder` the pipeline's parent folder when there is one; `sample` the
+    `[sample]` block the run was queued under -- `sample`, `material`,
+    `pixel`, `operator`, `comment` -- which is the run's identity and
+    travels with it rather than only in the session header, because a
+    journal file is resumed by a second process started in the same second
+    and a header is a property of the file, not of the runs in it
+    (`docs/naming-plan.md` rule 1). A fact about the queue, not something a
+    run emits, so the recorders never see it; it lives here so the wire has
+    one vocabulary and the service assembles none of it."""
 
     kind: str
     module: str | None
@@ -283,6 +288,7 @@ class RunQueued(Event):
     resolved: dict | None = None
     name: str = ""
     folder: str | None = None
+    sample: dict | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in ("manual", "pipeline"):

@@ -29,7 +29,12 @@
 //     checks, the schedule in order, the counters and the cost of a tree
 //     nobody ran. It is what M5's schedule and its time bar are drawn from,
 //     and the one endpoint in the set that can be recorded on a live bench at
-//     any time, because it touches nothing.
+//     any time, because it touches nothing;
+//   * **`fixtures/runs_*.json`** and **`fixtures/run_*_*.json`** are
+//     `GET /runs?session=all` and two `GET /runs/{id}` records — the identity
+//     on every row, the temperature triple and what was measured on every
+//     module node — which is everything M6's results tab reads. Recorded off
+//     `--sim` by `--only results`, which answers its own pauses.
 //
 // The journals also do *not* exercise the reconnect path — their `seq` runs
 // 0…N with no gap, because that is what a journal is. Gaps and
@@ -78,6 +83,15 @@ export const FIXTURES = [
   { key: 'validate-nested', kind: 'validate',
     label: 'sim — validate with a temperature loop inside a temperature loop',
     url: 'fixtures/validate_nested_sim.json' },
+  { key: 'runs-index', kind: 'index',
+    label: 'sim — GET /runs?session=all: every row with the device it ran on',
+    url: 'fixtures/runs_sim.json' },
+  { key: 'run-grid', kind: 'record',
+    label: 'sim — GET /runs/{id} of a 2 T x 2 level pipeline stopped inside its last cell: the results grid',
+    url: 'fixtures/run_grid_sim.json' },
+  { key: 'run-bace', kind: 'record',
+    label: 'sim — GET /runs/{id} of a manual bace at the V_oc a jv_bace measured: one cell',
+    url: 'fixtures/run_bace_sim.json' },
 ];
 
 /** Parse a JSONL body into frames, skipping blank lines. */

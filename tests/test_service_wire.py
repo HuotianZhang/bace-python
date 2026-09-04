@@ -286,7 +286,7 @@ def test_make_envelope_stamps_now_and_refuses_non_events():
     assert ws == journal and ws["type"] == "RunQueued"
     assert ws["data"] == {"kind": "manual", "module": "bace",
                           "tree": {"kind": "module", "module": "bace"}, "params": {"n_loops": 3},
-                          "resolved": None, "name": "", "folder": None}
+                          "resolved": None, "name": "", "folder": None, "sample": None}
     with pytest.raises(TypeError, match="run_id"):
         W.make_envelope(1, 3, "bace", E.Notice("info", "x"))
 

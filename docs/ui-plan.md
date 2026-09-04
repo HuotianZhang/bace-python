@@ -979,15 +979,77 @@ before:
 
 ### M6 · The results tab
 
-A stub until here. Preceded by a design pass, because R2·3 is a Round 2
-artboard and Round 3 left the tab empty — the standing instruction is to
-iterate in Claude Design before coding a screen that differs from Round 3. By
-this point bench and pipeline are running and the requirements put to that pass
-are drawn from real result shapes rather than guessed.
+*Built 2026-09-04.* R2·3 as it stands, in Round 3's shell: the runs the
+journal knows on the left, grouped by session and newest first, and the open
+run on the right — its identity, its T × LED grid of Q at V_pre = V_oc with the
+V_oc beneath each cell, the summary strip, Q(led_v) per T (or its transpose),
+every module node in the order it ran, and the selected node's numbers, its
+flags with their reasons, its folder and its provenance summary. `ui/lib/
+history.js` is the models, `ui/lib/grid.js` the DOM, `ui/lib/charts/grid.js`
+the chart, `ui/views/results.js` the tab; the offline page draws the same
+grid off the two record fixtures.
 
-What the view needs decides what gets written, not the other way round: the run
-folders on disk today are artefacts of back-end debugging, and R2·3's file list
-predates all of it.
+**The design pass.** The standing instruction was to iterate in Claude Design
+before coding a screen that differs from Round 3. R2·3 is a finished design
+that Round 3 never replaced, so what was built is that artboard, not a screen
+that differs from it — and the two things `docs/design/README.md` said had to
+be settled before it could be treated as a specification were settled in the
+code and are recorded there: there is no `flags.json`, so the flags are built
+from the record (the run's verdicts where they apply, the node's outcome and
+counts, the temperature and V_oc provenance, the meter's silence), and the
+saturation line is the corrected wording — the digitiser's verdict on each
+shot is the service's judgment, so the line counts the shots the service
+*flagged* and says nothing about a shared extreme it judged as nothing. What
+did not happen is the iteration *with the user*: this session ran without one.
+The tab as built is the artboard to iterate on — it draws from real records,
+which is what that pass was waiting for — and a Round 3 results artboard in
+Claude Design, if wanted, now has something to be drawn from.
+
+**What the view needed decided what the service writes** (`docs/naming-plan.md`
+rule 1, built for this). Three things, all on the record and none in a folder
+name: the `[sample]` block travels on `RunQueued` and is exposed on every row
+of `GET /runs` and on `GET /runs/{id}`; every module node carries the
+temperature triple — from the same resolver the recorder uses, so a manual run
+says `290.0 K · typed` where it used to say nothing — beside its LED level,
+its V_oc with the level *that* was measured at, and whether the baseline was
+subtracted; and each node carries what it measured, reduced to what a grid
+needs and never a trace: its axis and `q_mean`/`q_std` per point, a J-V's
+curves as their metrics, and how many of its shots carried an intensity or a
+digitiser verdict. A node that was stopped keeps the statistics of the loops
+that ran (`LoopDone`, or the last shot's running mean before one), which is
+what "kept as it is" costs. `journal.node_record` builds the shape, and
+`RunRecord.as_wire` builds its `nodes` through the same function, so the tab
+does not know which side of a restart a run is on — `tests/test_service_api.py`
+holds the two answers byte for byte equal.
+
+**Three rules R2·3 states, made true by construction.** The partial cell is a
+cell with `kept < requested`: outlined in the accent, its Q the running mean
+over the shots that ran, excluded from the span *with the line saying so*, and
+never dropped; a cell of the T × LED product that never ran stays in the grid
+hatched. σ_Q = 0 is *not recorded* — `fmt.sigmaQ` already answered `null` for
+it, and the legend is R2·3's `□ σ_Q not recorded · ● σ_Q measured`. Every
+flag is a sentence in the voice of `ui-rules` §10. And the temperature row
+says how it knows: `operator/operator` reads *typed by the operator at the
+pause*, `settled/simulated` reads *not a measurement*, `typed` reads *nobody
+read an instrument* — `how` and `source` both, as `docs/ui-kickoff.md` asks.
+
+**What it costs.** One `GET /runs?session=all` at mount and at every `parked`,
+one `GET /runs/{id}` per selection — 84 KB for the 2 × 2 fixture, two thirds
+of it the `schedule` and `params_as_executed` of fourteen nodes, which the
+provenance line reads and nothing else needs. Nothing on the stream redraws
+the tab: a run in flight is the monitor's, and its row here reads its state
+off the store. Measured in headless Chromium with the tab open through a
+`jv_bace` and a twenty-loop `bace` on `--sim --fast`: the list was rebuilt a
+handful of times — at each park, and as the running row's state moved — and
+the open grid, its chart and its panel not at all.
+
+**Two things it does not do, on purpose.** "Open folder" is a path shown
+whole and selectable — a browser cannot open one, and a truncated path is the
+one thing `ui-rules` §1 forbids. And "Re-queue this cell" is one *manual* run
+of the node's module with its own overrides and the level the loop gave it,
+never its V_oc and never a pipeline: the caption says the run goes at the
+bench's V_oc and temperature as they are, because a manual run has no loop to
+bind them.
 
 ### Alongside · The rig tab
 
@@ -1047,8 +1109,8 @@ that have not started. They are here so they are not rediscovered there:
 | before | must be done |
 |---|---|
 | anything on the rig | the folder-name defect in `docs/naming-plan.md` §2 — `material = "PTQ10:IT-4F"` builds a path segment with a colon, which fails on Windows and passes on Linux |
-| M6 | `docs/naming-plan.md` rule 1 — the journal carries the sample block and the temperature triple on every node, **and `GET /runs` exposes them on each row**; writing them into `SessionStarted` alone leaves `run_index()` emitting summaries with no identity |
-| M6 | a Round 3 design pass on results, with the user, in Claude Design |
+| M6 | ~~`docs/naming-plan.md` rule 1 — the journal carries the sample block and the temperature triple on every node, **and `GET /runs` exposes them on each row**; writing them into `SessionStarted` alone leaves `run_index()` emitting summaries with no identity~~ **built 2026-09-04**, in the service: `RunQueued.sample`, the triple from `RunContext.temperature()` on every node, and one `node_record` shape from both `GET /runs/{id}` sources |
+| M6 | ~~a Round 3 design pass on results, with the user, in Claude Design~~ **R2·3 built as it stands, 2026-09-04**, its two open questions settled in the code; the iteration with the user is still to be had, on the built tab |
 | M3 | ~~nothing — the chart foundation is new code with no service dependency~~ **built 2026-09-03**; nothing in the service changed |
 | M4 | ~~nothing~~ **built 2026-09-03**; nothing in the service changed. The simulator's lit-photocurrent magnitude is a defect in `--sim`, not on the path |
 | M5 | ~~nothing~~ **built 2026-09-04**; nothing in the service changed. One thing the schedule does not carry was found and worked around in the client rather than added to the wire: `Step.detail.temperature_k` is the enclosing loop's setpoint and is `null` under a `temperature` module, so the console applies the executor's binding rule itself |
@@ -1062,6 +1124,8 @@ the canonical tree against an unchanged service.
 - **Which parameters sit above the fold on each card.** A table produced during
   M2, from the Round 3 artboard plus what `GET /modules` actually returns,
   reviewed then rather than guessed now.
-- **The results grid's data source.** M6, from the view's needs.
+- ~~**The results grid's data source.** M6, from the view's needs.~~ Decided in
+  M6: `GET /runs/{id}`'s `nodes`, one shape from this process and from the
+  journal, with the per-point statistics on the node and never a trace.
 - **Whether to keep `[sample] temperature_k = 290.0` in the recipes.**
   `docs/naming-plan.md` §4 states the problem; it is a bench-habit decision.

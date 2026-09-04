@@ -267,7 +267,11 @@ to change.)
 - Path: `<out>/journal/<session_id>.jsonl`. One JSON object per line, the wire
   envelope (journal payload policy). Append-only; `flush()` after every line.
   Never rewritten. (Future failure recovery replays it; this round only writes.)
-- First line: `{"type": "SessionStarted", "data": {"session_id", "mode": "sim"|"rig", "rig_toml", "run_toml", "out", "fingerprint": bench.checks.fingerprint(bace root), "python", "version", "fast", "startup_writes": [...]}}`.
+- First line: `{"type": "SessionStarted", "data": {"session_id", "mode": "sim"|"rig", "rig_toml", "run_toml", "out", "fingerprint": bench.checks.fingerprint(bace root), "python", "version", "fast", "startup_writes": [...], "sample": {…}}}`.
+  `sample` is the session's own `[sample]` block — what a file with no runs
+  in it can still say. It is *also* on every `RunQueued` (`data.sample`),
+  because a resumed file keeps the header of whoever opened it and two
+  processes started in the same second share one.
   `startup_writes` lists the instrument writes the assembly made before the
   worker started (the scope's `default_setup`, the 1918-C's units and
   wavelength): not a run and not a by-hand action, so this is where they are
@@ -291,13 +295,19 @@ to change.)
     line gives the V_oc *range* over its light curves when there were several
     (`"6 curves · V_oc 1.0269 … 1.0479 V"`), and each summary carries
     `voc_min`, `voc_max`, `light_curves`.
-  - `run_record(run_id) -> dict | None`: one run's `summary()` plus its `tree`
-    and `nodes` — every module node's `NodeDone` reduced to `{module, outcome,
-    kept, requested, voc, voc_how, led_v, temperature_k, temperature_how,
-    temperature_source, summary, folder,
-    finished_at}` — from whichever session file holds it. What `GET /runs/{id}`
-    answers for a run this process never held (§6): the pipeline tab's grey
-    V_oc grid is the *previous* run's, and that record died with its process.
+  - `run_record(run_id) -> dict | None`: one run's `summary()` plus its `tree`,
+    its `verdicts` (every `warn`/`crit` the run's lines carried) and its
+    `nodes` — every module node reduced by `node_record()` to the shape §6
+    lists under `GET /runs/{id}`: its `NodeDone` detail (module, outcome,
+    counts, the V_oc with the level it was measured at, the LED level, the
+    temperature triple, whether the baseline was subtracted, the folder) and
+    what it measured (the axis and `q_mean`/`q_std` per point from
+    `RunFinished`, `LoopDone` or the running mean; a J-V's curves as their
+    metrics; its shot counts) — from whichever session file holds it. What
+    `GET /runs/{id}` answers for a run this process never held (§6): the
+    pipeline tab's grey V_oc grid is the *previous* run's, that record died
+    with its process, and the results tab draws its grid from these without
+    opening an HDF5.
   - `settle_history() -> dict[float, list[float]]`: seconds between
     `NeedsOperator(what="temperature")` and the matching `OperatorResumed`,
     keyed by setpoint (rounded to 0.1 K); when the 331 is wired this becomes
@@ -309,6 +319,11 @@ to change.)
   - `shot_time_s(module="bace") -> float | None`: median interval between
     consecutive `StepDone` of the last completed bace run — same bench filter as
     `settle_history`, for the same reason (a sim shot is a millisecond).
+- The submit-time checks that are not `ok` are journaled as `Verdict` lines
+  right after the `queued` transition, each on its own `node_path`, so a
+  record read back from the file carries the same flags this process does
+  (`trigger.auto`, `intensity.factor`, `temperature.not-wired`); the Start
+  re-read's chain verdicts follow and replace by `(code, node_path)`.
 - `RunQueued` (`experiment.events.RunQueued`; `service/journal.py run_queued()`
   builds the same line for a test or a script), `RunStateChanged`,
   `NodeStarted/NodeDone`, `Verdict`, `NeedsOperator`, `OperatorResumed`,
@@ -566,7 +581,11 @@ warns that it was ignored rather than letting it vanish from the schedule.
 - `POST /runs/{id}/resume` body `{"note": "set to 250.0 K by hand", "temperature_k": 250.1}`
   → 202; 409 if not paused. `temperature_k` becomes the context temperature
   for the subtree (folder names, metadata) and is journaled in `OperatorResumed`.
-- `GET /runs?session=<id>|all` → `[RunSummary]`: `run_id, kind ("manual"|"pipeline"), name, module|tree_summary, state, queued_at, started_at, finished_at, kept, requested, outcome_text, folder, node_count, voc_min, voc_max, light_curves`.
+- `GET /runs?session=<id>|all` → `[RunSummary]`: `run_id, session_id, kind ("manual"|"pipeline"), name, module|tree_summary, sample, state, queued_at, started_at, finished_at, kept, requested, outcome_text, folder, node_count, node_count_done, voc_min, voc_max, light_curves`.
+  `sample` is the `[sample]` block the run was queued under (`sample, material,
+  pixel, operator, comment, temperature_k`), on every row — the identity
+  travels with the run, not only in the session header (`docs/naming-plan.md`
+  rule 1, 2026-09-04), so a grid grouped by device parses no folder name.
 - `GET /runs/{id}` → the full record: tree, resolved schedule, params with
   provenance as executed per node, per-node outcomes (`NodeDone` details),
   verdicts (one entry per `(code, node_path)` — the Start re-read replaces the
@@ -576,10 +595,21 @@ warns that it was ignored rather than letting it vanish from the schedule.
   re-derived ETA: `{eta_s, finish_at, at, node_path, done, total}`; null for a
   manual run), and `cost` whose `finish_at` follows that ETA once one has been
   measured (`finish_source: "measured"`, `finish_at_submit` kept beside it).
+  `sample` as on the index row, and `nodes` — every module node that has
+  ended, in the shape §3 `run_record` gives (`journal.node_record` builds it
+  for both, so the two sources agree byte for byte): `{node_path, module,
+  outcome, kept, requested, voc, voc_how, voc_led_v, led_v, temperature_k,
+  temperature_how, temperature_source, offset_corrected, summary, folder,
+  error, reason, started_at, finished_at, elapsed_s, axis, values, q_mean,
+  q_std, curves, shots, intensity_recorded, shots_flagged}`. `axis`/`values`/
+  `q_mean`/`q_std` are a transient's per-point statistics (from `RunFinished`;
+  from the last `LoopDone` or the last shot's running mean when the node was
+  stopped before one), `curves` a J-V's curves reduced to their metrics, and
+  the three counts what the node's `StepDone` lines said — never a trace.
   `from: "session"`. For a run this process never held — last week's — the
   answer is the journal's record (§3 `run_record`): the summary fields plus
-  `tree` and `nodes`, `from: "journal"`, `data_in_memory: false`; 404 when no
-  journal file knows the id.
+  `tree`, `nodes` and `verdicts`, `from: "journal"`, `data_in_memory: false`;
+  404 when no journal file knows the id.
 - `GET /runs/{id}/data?node=<node_path>` → for `bace`:
   `{"axis": {…}, "values": […], "q_mean": […], "q_std": […], "q_all": [[…]], "time_s": […], "light": [[…]], "dark": [[…]], "photo": [[…]], "last_shot": {"light": […], "dark": […], "photo": […], "cumulative_q": […], "t0_int_record_s": …}, "kept": 12, "requested": 20}`;
   for `jv_*`: `{"curves": [{label, dark, led_level_v, direction, voltage, current, density, metrics}]}`

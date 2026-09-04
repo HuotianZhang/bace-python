@@ -26,7 +26,12 @@ lines and nothing else, so the session must journal them for every run:
   value the module ran with, for the record. The two are separate because a
   journal that fed every resolved default back as "last-used" would, after
   one run, show the whole card as last-used and hide a recipe edit behind it
-  for twenty sessions.
+  for twenty sessions. `sample` is the `[sample]` block the run was queued
+  under -- its identity, per run rather than only in the header
+  (`docs/naming-plan.md` rule 1): `Journal` resumes an existing file and
+  writes `SessionStarted` only when it did not, so two processes started in
+  the same second share a file and the second one's device would otherwise
+  be attributed to the first's. `run_index` exposes it on every row.
 - `RunStateChanged` -- `data = {state, reason}`, on every transition. The
   terminal state (`done`, `stopped`, `aborted`, `failed`, `blocked`,
   `cancelled`) is what `run_index` reports and what `last_used_params`
@@ -43,11 +48,16 @@ lines and nothing else, so the session must journal them for every run:
   `detail.kept`/`detail.requested` feed the run index. A pipeline's counts
   are the sum over its module nodes, the same sum the session's run record
   makes, so `GET /runs` and `GET /runs/{id}` cannot disagree about a run.
-  Each module node is also kept whole (`nodes[<path>]`: module, outcome,
-  counts, the V_oc it centred on, its LED level and temperature, its folder)
-  so a run from an earlier session can still answer `GET /runs/{id}` -- the
-  pipeline tab's grey V_oc grid is the *previous* run's, and that record
-  died with the process that made it.
+  Each module node is also kept whole (`nodes[<path>]`, the shape
+  `node_record()` builds: module, outcome, counts, the V_oc it centred on,
+  its LED level and the temperature triple, its folder, and what it
+  measured -- a transient's axis with `q_mean`/`q_std` per point from its
+  `RunFinished`, a J-V's curves reduced to their metrics from `JVFinished`,
+  and how many of its shots carried an intensity or a digitiser verdict) so
+  a run from an earlier session can still answer `GET /runs/{id}` -- the
+  pipeline tab's grey V_oc grid is the *previous* run's, that record died
+  with the process that made it, and the results tab draws its grid from
+  these without opening a single HDF5.
 - `Progress` with `node_path == ""` -- the run's own progress. A loop's
   `Progress` carries the loop's path and counts iterations, not shots, and
   is not folded into the counts.
@@ -109,7 +119,7 @@ RUN_KINDS: tuple[str, ...] = ("manual", "pipeline")
 def run_queued(*, seq: int, ts: float | None, run_id: str, kind: str,
                module: str | None, tree: dict | None, params: dict | None,
                name: str = "", folder: str | None = None,
-               resolved: dict | None = None) -> dict:
+               resolved: dict | None = None, sample: dict | None = None) -> dict:
     """The `RunQueued` line as the session writes it: the
     `experiment.events.RunQueued` dataclass in a wire envelope, so a line
     built here for a test or a script is byte-for-byte what the one event
@@ -117,11 +127,11 @@ def run_queued(*, seq: int, ts: float | None, run_id: str, kind: str,
     `module` is the module name for a manual run and None for a pipeline;
     `params` is what the operator chose for the module (what
     `last_used_params` hands back next session); `resolved` is every value
-    it will run with. The dataclass refuses a bad `kind` and a manual run
-    with no module.
+    it will run with; `sample` the `[sample]` block it was queued under.
+    The dataclass refuses a bad `kind` and a manual run with no module.
     """
     event = RunQueued(kind=kind, module=module, tree=tree, params=params,
-                      resolved=resolved, name=name, folder=folder)
+                      resolved=resolved, name=name, folder=folder, sample=sample)
     return envelope_to_wire(Envelope(seq=int(seq), ts=time.time() if ts is None else float(ts),
                                      run_id=run_id, node_path="", event=event))
 
@@ -474,9 +484,19 @@ class _Run:
         self.folders: list[str] = []
         self.error: str | None = None
         self.step_ts: dict[str, list[float]] = {}
+        self.verdicts: list[dict] = []
+        """Every verdict but `ok` this run's lines carried -- the submit-time
+        checks and the Start re-read -- one per (code, node_path)."""
+        self.sample: dict | None = None
         self.nodes: dict[str, dict] = {}
-        """Each module node's `NodeDone`, reduced: what the pipeline tab's
-        V_oc grid and `GET /runs/{id}` need from a run of another session."""
+        """Each module node's `NodeDone`, reduced by `node_record()`: what
+        the pipeline tab's V_oc grid, the results tab and `GET /runs/{id}`
+        need from a run of another session."""
+        self._started: dict[str, float | None] = {}
+        self._results: dict[str, dict] = {}
+        """Per node path, what the node measured before its `NodeDone`:
+        `RunFinished`'s axis and per-point statistics, `JVFinished`'s
+        reduced curves, and the counts folded from its `StepDone` lines."""
         self._last_voc: float | None = None
         self.voc_min: float | None = None
         self.voc_max: float | None = None
@@ -495,6 +515,10 @@ class _Run:
             self.queued_at = ts
             if data.get("folder"):
                 self.folder = str(data["folder"])
+            if isinstance(data.get("sample"), dict):
+                self.sample = dict(data["sample"])
+        elif kind == "NodeStarted":
+            self._started[str(data.get("node_path") or line.get("node_path") or "")] = ts
         elif kind == "RunStateChanged":
             state = data.get("state")
             if state == "parked":
@@ -521,11 +545,34 @@ class _Run:
             if self.requested is not None:
                 self.kept = self.requested
             self.outcome_text = _finished_text(data, self.kept, self.requested)
+            self._result(line).update(finished_result(data))
         elif kind == "RunFailed":
             self.error = str(data.get("error", ""))
             self.outcome_text = f"failed: {self.error}"
-        elif kind == "StepDone" and ts is not None:
-            self.step_ts.setdefault(line.get("node_path") or "", []).append(float(ts))
+        elif kind == "StepDone":
+            if ts is not None:
+                self.step_ts.setdefault(line.get("node_path") or "", []).append(float(ts))
+            count_shot(self._result(line), data)
+        elif kind == "AxisResolved":
+            self._result(line).update(axis_result(data))
+        elif kind == "LoopDone":
+            self._result(line).update(loop_result(data))
+        elif kind == "Verdict":
+            # Every level but `ok`: `info` is `trigger.auto`, which the results
+            # tab says beside a charge near zero. One entry per (code, node),
+            # the newest winning -- the Start re-read replaces the submit-time
+            # copy, exactly as the registry's record does.
+            if data.get("level") in ("info", "warn", "crit", "invalid"):
+                entry = {"level": data.get("level"), "code": data.get("code"),
+                         "text": data.get("text"),
+                         "node_path": data.get("node_path") or line.get("node_path") or "",
+                         "ts": ts}
+                for i, old in enumerate(self.verdicts):
+                    if old["code"] == entry["code"] and old["node_path"] == entry["node_path"]:
+                        self.verdicts[i] = entry
+                        break
+                else:
+                    self.verdicts.append(entry)
         elif kind == "JVCurveDone":
             metrics = data.get("metrics") or {}
             # `dark is False`, not `not dark`. On the wire the field is
@@ -541,10 +588,12 @@ class _Run:
                 self.light_curves += 1
                 self.voc_min = voc if self.voc_min is None else min(self.voc_min, voc)
                 self.voc_max = voc if self.voc_max is None else max(self.voc_max, voc)
+            add_curve(self._result(line), data)
         elif kind == "JVFinished":
             n = data.get("n_curves", len(data.get("curves") or []))
             self.outcome_text = f"{n} curve" + ("" if n == 1 else "s")
             self.outcome_text += self._voc_text()
+            self._result(line).update(jv_result(data))
         elif kind == "NodeDone":
             detail = data.get("detail") or {}
             if not isinstance(detail, dict):
@@ -561,20 +610,12 @@ class _Run:
                     self.node_kept = (self.node_kept or 0) + kept
                     self.node_requested = (self.node_requested or 0) + requested
                 path = str(data.get("node_path") or line.get("node_path") or "")
-                voc = detail.get("voc")
-                self.nodes[path] = {
-                    "module": detail.get("module"), "outcome": data.get("outcome"),
-                    "kept": kept, "requested": requested,
-                    "voc": voc.get("value") if isinstance(voc, dict) else voc,
-                    "voc_how": voc.get("how") if isinstance(voc, dict) else None,
-                    "led_v": detail.get("led_v"), "temperature_k": detail.get("temperature_k"),
-                    # Beside the number, as `voc_how` sits beside the V_oc:
-                    # a node recorded at 220 K is worth knowing whether the
-                    # console settled there or a loop only asked.
-                    "temperature_how": detail.get("temperature_how"),
-                    "temperature_source": detail.get("temperature_source"),
-                    "summary": detail.get("summary"), "folder": folder,
-                    "finished_at": ts}
+                self.nodes[path] = node_record(
+                    path, data.get("outcome"), detail, self._results.get(path),
+                    started_at=self._started.get(path), finished_at=ts)
+
+    def _result(self, line: dict) -> dict:
+        return self._results.setdefault(str(line.get("node_path") or ""), {})
 
     def _voc_text(self) -> str:
         """` · V_oc 0.906 V` for one light curve; the range over the levels
@@ -589,7 +630,8 @@ class _Run:
     def record(self) -> dict:
         """`summary()` plus the tree and the per-node reductions: what
         `GET /runs/{id}` serves for a run from the journal."""
-        return {**self.summary(), "tree": self.tree, "nodes": dict(self.nodes)}
+        return {**self.summary(), "tree": self.tree, "nodes": dict(self.nodes),
+                "verdicts": list(self.verdicts)}
 
     def summary(self) -> dict:
         kept, requested = self.kept, self.requested
@@ -616,6 +658,7 @@ class _Run:
             text = f"blocked: {self.error or ''}".rstrip(": ")
         return {"run_id": self.run_id, "session_id": self.session_id, "kind": self.kind,
                 "name": self.name, "module": self.module,
+                "sample": dict(self.sample) if self.sample else None,
                 "tree_summary": _tree_summary(self.tree),
                 "node_count": _node_count(self.tree), "state": self.state,
                 "parked": self.parked, "queued_at": self.queued_at,
@@ -625,6 +668,141 @@ class _Run:
                 "folders": list(self.folders), "error": self.error,
                 "voc_min": self.voc_min, "voc_max": self.voc_max,
                 "light_curves": self.light_curves, "node_count_done": len(self.nodes)}
+
+
+# -- the node record: one shape from both sources ---------------------------
+NODE_RESULT_KEYS: tuple[str, ...] = ("axis", "values", "q_mean", "q_std", "curves",
+                                     "shots", "intensity_recorded", "shots_flagged")
+"""What `node_record` takes from a node's measurement beside its `NodeDone`."""
+
+
+def node_record(node_path: str, outcome: Any, detail: dict, result: dict | None, *,
+                started_at: float | None, finished_at: float | None) -> dict:
+    """One module node, reduced: the shape `nodes[<path>]` has in
+    `GET /runs/{id}` **whichever process answers** -- this one from its
+    `RunRecord`, or a later one from the journal file. Built here, once, so
+    the two cannot drift: the results tab draws its grid from these and
+    must not have to know which side of a restart a run is on.
+
+    `detail` is the `NodeDone`'s; `result` is what the node measured before
+    it (`finished_result`, `jv_result`, `count_shot`). Only the scalars a
+    grid or a list needs: a transient's per-point `q_mean`/`q_std` over its
+    axis `values`, never a trace; a J-V's curves as their metrics, never a
+    sweep. Both are 1-D and small; `GET /runs/{id}/data` has the rest while
+    the run is in memory, the HDF5 has it forever.
+    """
+    voc = detail.get("voc")
+    out = {
+        "node_path": node_path,
+        "module": detail.get("module"), "outcome": outcome,
+        "kept": _int(detail.get("kept"), None), "requested": _int(detail.get("requested"), None),
+        "voc": voc.get("value") if isinstance(voc, dict) else voc,
+        "voc_how": voc.get("how") if isinstance(voc, dict) else None,
+        "voc_led_v": voc.get("led_v") if isinstance(voc, dict) else None,
+        "led_v": detail.get("led_v"), "temperature_k": detail.get("temperature_k"),
+        # Beside the number, as `voc_how` sits beside the V_oc: a node
+        # recorded at 220 K is worth knowing whether the console settled
+        # there, a loop only asked, or somebody typed it into `[sample]`.
+        "temperature_how": detail.get("temperature_how"),
+        "temperature_source": detail.get("temperature_source"),
+        "offset_corrected": detail.get("offset_corrected"),
+        "summary": detail.get("summary"), "folder": detail.get("folder"),
+        "error": detail.get("error"), "reason": detail.get("reason"),
+        "started_at": started_at, "finished_at": finished_at,
+        "elapsed_s": detail.get("elapsed_s"),
+    }
+    for key in NODE_RESULT_KEYS:
+        out[key] = (result or {}).get(key)
+    running = (result or {}).get("running")
+    if out["q_mean"] is None and isinstance(running, dict) and running:
+        # No LoopDone ever came: the per-point running statistics of the
+        # last shot at each point, over the points reached.
+        n = max(running)
+        out["q_mean"] = [_num(running[i][0]) if i in running else None for i in range(1, n + 1)]
+        out["q_std"] = [_num(running[i][1]) if i in running else None for i in range(1, n + 1)]
+    return out
+
+
+def _num(value: Any) -> float | None:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def axis_result(data: dict) -> dict:
+    """`AxisResolved`: the axis and its values, before a single shot -- so a
+    node stopped inside its first loop still says what it was sweeping."""
+    return {"axis": data.get("axis"), "values": _floats(data.get("values"))}
+
+
+def loop_result(data: dict) -> dict:
+    """`LoopDone`: the service's mean and σ over every point so far. The
+    newest wins, and `RunFinished` replaces it when the node completes --
+    so a node that was stopped after its third loop carries the statistics
+    of three loops, which is what "kept as it is" means (R2·3)."""
+    return {"q_mean": _floats(data.get("q_mean")), "q_std": _floats(data.get("q_std"))}
+
+
+def finished_result(data: dict) -> dict:
+    """The per-point statistics of a `RunFinished`, as the journal keeps
+    them: the axis, its values, and `q_mean`/`q_std` per point. `q_all`
+    and the traces stay where they are."""
+    return {"axis": data.get("axis"), "values": _floats(data.get("values")),
+            "q_mean": _floats(data.get("q_mean")), "q_std": _floats(data.get("q_std"))}
+
+
+JV_CURVE_KEYS: tuple[str, ...] = ("label", "dark", "led_level_v", "direction", "n_points")
+
+
+def jv_result(data: dict) -> dict:
+    """A `JVFinished`'s curves reduced to their labels and metrics -- the
+    interpolated numbers, which `ui-rules` §6 says to label derived. The
+    whole list, replacing the one `add_curve` built as they arrived."""
+    return {"curves": [_curve(c) for c in data.get("curves") or [] if isinstance(c, dict)]}
+
+
+def add_curve(result: dict, data: dict) -> None:
+    """One `JVCurveDone`, reduced, onto the node's list. A stop asked for
+    `after_shot` is honoured between curves and the node ends without a
+    `JVFinished`, so a J-V that kept one curve of two must still say so --
+    the same reason a stopped transient keeps its `LoopDone`."""
+    result.setdefault("curves", []).append(_curve(data))
+
+
+def _curve(curve: dict) -> dict:
+    entry = {key: curve.get(key) for key in JV_CURVE_KEYS}
+    entry["metrics"] = dict(curve["metrics"]) if isinstance(curve.get("metrics"), dict) else None
+    return entry
+
+
+def count_shot(result: dict, data: dict) -> None:
+    """Fold one `StepDone` into a node's counts: how many shots there were,
+    how many carried an intensity reading (the power meter answered) and
+    how many carried a digitiser verdict that was not `ok` -- the two
+    absences and the one failure R2·3's summary strip states outright."""
+    result["shots"] = int(result.get("shots") or 0) + 1
+    # The running mean and σ *at this point, including this shot* -- the
+    # service's own, carried on every StepDone -- so a node stopped inside
+    # its first loop, before any LoopDone, still has a number per point it
+    # reached. A later LoopDone or RunFinished replaces the whole array.
+    step = data.get("step")
+    if isinstance(step, int) and not isinstance(step, bool) and step >= 1:
+        running = result.setdefault("running", {})
+        running[step] = (data.get("q_mean"), data.get("q_std"))
+    if data.get("intensity_w") is not None:
+        result["intensity_recorded"] = int(result.get("intensity_recorded") or 0) + 1
+    else:
+        result.setdefault("intensity_recorded", 0)
+    verdict = data.get("verdict")
+    flagged = isinstance(verdict, dict) and verdict.get("level") in ("warn", "crit")
+    result["shots_flagged"] = int(result.get("shots_flagged") or 0) + (1 if flagged else 0)
+
+
+def _floats(values: Any) -> list | None:
+    if not isinstance(values, list):
+        return None
+    out = []
+    for v in values:
+        out.append(float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None)
+    return out
 
 
 def _int(value: Any, fallback: int | None) -> int | None:

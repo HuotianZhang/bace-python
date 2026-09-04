@@ -10,6 +10,7 @@ the bace centred on is the number the jv_bace at the same level measured.
 """
 from __future__ import annotations
 
+import dataclasses
 import os
 import pathlib
 import threading
@@ -312,6 +313,37 @@ def test_a_manual_run_takes_the_sessions_voc_as_the_source_it_is(tmp_path):
     assert vocs == [], "the session's own source is not announced back to it"
     assert store["bace"]["voc"] == 0.9
     assert b.sim.led.output_enabled and not b.sim.bench.bias_output
+
+
+def test_a_manual_node_records_the_typed_temperature_and_the_baseline_choice(tmp_path):
+    """`docs/naming-plan.md` rule 1. A manual run has no temperature node
+    above it, so `ctx.temperature_k` is never set -- and the node record used
+    to say nothing about the temperature of exactly the runs whose folder name
+    was the only record of it. `_node_detail` now asks the resolver the
+    recorder asks (`RunContext.temperature`): the session's typed number, as
+    `typed`, with no instrument behind it. And whether the dark baseline was
+    subtracted is a property of the file the node wrote, restated on the node."""
+    b = bench()
+    schedule = schedule_of(bace_node(1, measure_dc=True))
+
+    def make(step) -> RunContext:
+        ctx = factory(None, str(tmp_path))(step)
+        return dataclasses.replace(ctx, metadata=dataclasses.replace(
+            ctx.metadata, temperature_k=290.0, temperature_how="typed"))
+
+    evs = list(run_pipeline(b.rig, schedule, catalogue=catalogue(), ctx_factory=make))
+    done = evs[-1]
+    assert isinstance(done, E.NodeDone) and done.outcome == "ok"
+    assert (done.detail["temperature_k"], done.detail["temperature_how"],
+            done.detail["temperature_source"]) == (290.0, "typed", "")
+    assert done.detail["offset_corrected"] is True, "run.toml's offset_correct, restated"
+    assert "290K" in os.path.basename(done.detail["folder"]), "the same number the folder carries"
+
+    # And with nothing typed at all, the triple is absent rather than a
+    # number invented for it: "not recorded" is representable.
+    evs = list(run_pipeline(b.rig, schedule_of(bace_node(1, measure_dc=True)),
+                            catalogue=catalogue(), ctx_factory=factory(None, str(tmp_path))))
+    assert "temperature_k" not in evs[-1].detail
 
 
 def test_measure_dc_becomes_the_sessions_next_voc(tmp_path):

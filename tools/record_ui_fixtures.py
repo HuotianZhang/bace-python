@@ -76,8 +76,9 @@ def _request(url: str, method: str = "GET", body: dict | None = None) -> dict:
                          f"start one with:  python3 -m bace.service --sim --fast --port 8900")
 
 
-OPT_IN = frozenset({"tree"})
-"""Steps that never run unless `--only` names them. See `_record_tree`."""
+OPT_IN = frozenset({"tree", "results"})
+"""Steps that never run unless `--only` names them. See `_record_tree`;
+`results` answers its pauses the same way."""
 
 
 def _dump(path: str, obj, *, jsonl: bool = False) -> None:
@@ -255,7 +256,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="also dump the transient's undecimated /runs/{id}/data (megabytes)")
     ap.add_argument("--only", default=None,
                     help="record a subset: a comma-separated list of jv, bace, pipeline, "
-                         "stopped, bench, hello, and tree (default: all but tree)")
+                         "stopped, bench, hello, validate, and tree or results "
+                         "(default: all but tree and results)")
     a = ap.parse_args(argv)
     only = set(a.only.split(",")) if a.only else None
     # `tree` is named or it does not happen. It is the one step that answers
@@ -300,6 +302,12 @@ def main(argv: list[str] | None = None) -> int:
     #      three scales and a `TemperatureRead` typed by a person.
     if wanted("tree"):
         _record_tree(a, base, ws_url, tag, who["mode"])
+
+    # 3b' · what the results tab reads (M6): `GET /runs?session=all` and two
+    #       `GET /runs/{id}` records — a grid-shaped pipeline with one partial
+    #       cell, and a manual bace. Answers its own pauses, so simulator only.
+    if wanted("results"):
+        _record_results(a, base, ws_url, tag, who["mode"])
 
     # 3c · a scan stopped after its third shot. `docs/ui-rules.md` §9: a
     #      truncated run is normal, not exceptional — the archive declares 100
@@ -439,6 +447,102 @@ def _record_tree(a, base: str, ws_url: str, tag: str, mode: str) -> None:
         ws_url, base, {"tree": tree, "name": "ui-fixture-tree"},
         timeout_s=a.timeout_s, path="/pipelines", answer_pauses=True))
     _dump(os.path.join(a.out, f"stream_tree_{tag}.jsonl"), frames, jsonl=True)
+
+
+def _record_results(a, base: str, ws_url: str, tag: str, mode: str) -> None:
+    """The M6 fixtures: the index and two records, in the shape the results
+    tab draws its grid from.
+
+    The pipeline is `T [250, 280] x led [1.010, 1.020] x (jv_bace + bace)`
+    -- the canonical tree's shape at the smallest size that still makes a
+    grid -- stopped `after_shot` inside its last leaf, so the grid has three
+    complete cells and one **partial** one: R2·3's "outlined, never averaged
+    in silently, never dropped" needs a partial cell to be drawn at all. The
+    manual pair before it is a `jv_bace` (the V_oc source) and a two-loop
+    `bace` at that V_oc: one run, one cell, no grid -- which is most of what
+    a bench day is, and the case the tab must not be awkward about.
+
+    Simulator only, for `_record_tree`'s reason: the temperature pauses are
+    answered with a number nobody read.
+    """
+    if mode != "sim":
+        raise SystemExit(
+            f"the results fixtures are simulator-only and this service is mode {mode!r}:\n"
+            "the tree answers its own temperature pauses with a number nobody read.\n"
+            "Record them against `python -m bace.service --sim --fast`.")
+    print("results: a manual jv_bace and bace …")
+    _request(f"{base}/runs", "POST", {"module": "jv_bace", "params": {"step_v": 0.05}})
+    _, manual = asyncio.run(_run_and_capture(
+        ws_url, base, {"module": "bace", "name": "ui-fixture-results-manual",
+                       "params": {"n_loops": 5, "store_shots": False, "record_length": 500}},
+        timeout_s=a.timeout_s))
+    manual_id = manual["run_id"]
+    print("results: the 2 x 2 grid, stopped inside its last cell …")
+    leaf = {"kind": "module", "module": "bace",
+            "params": {"n_loops": 200, "store_shots": False, "record_length": 500}}
+    tree = {"kind": "loop", "loop": "temperature", "label": "T", "values_k": [250.0, 280.0],
+            "tolerance_k": 0.5, "hold_s": 1.0, "timeout_s": 60.0, "children": [
+                {"kind": "loop", "loop": "illumination", "levels_v": [1.010, 1.020],
+                 "led_low_v": 0.4, "led_settle_s": 0.1, "children": [
+                     {"kind": "module", "module": "jv_bace", "params": {"step_v": 0.05}},
+                     leaf]}]}
+    # Two hundred loops of one point per leaf. Driven over HTTP alone: the
+    # pauses answered off `pending`, and the stop asked for a few shots into
+    # the last cell. Under `--fast` a twenty-shot cell is over before a stop
+    # can land, and the socket runs behind the bench, so neither a short
+    # cell nor a count of frames received gives a partial cell -- polling
+    # the record, which is behind nothing, does.
+    def in_last_cell(rec: dict) -> bool:
+        # Seven module nodes ended and the eighth's own `progress` -- the
+        # leaf's, which names its node -- three shots in: ask.
+        ended = sum(1 for n in (rec.get("node_outcomes") or {}).values()
+                    if n.get("outcome") is not None and (n.get("detail") or {}).get("module"))
+        progress = rec.get("progress") or {}
+        return (ended == 7 and str(progress.get("node_path", "")).endswith("led=1.020V/bace")
+                and (progress.get("done") or 0) >= 3)
+
+    grid = _drive_over_http(base, {"tree": tree, "name": "ui-fixture-results-grid"},
+                            timeout_s=a.timeout_s, stop_when=in_last_cell, expect="stopped")
+    grid_id = grid["run_id"]
+    _dump(os.path.join(a.out, f"run_grid_{tag}.json"), _request(f"{base}/runs/{grid_id}"))
+    _dump(os.path.join(a.out, f"run_bace_{tag}.json"), _request(f"{base}/runs/{manual_id}"))
+    _dump(os.path.join(a.out, f"runs_{tag}.json"), _request(f"{base}/runs?session=all"))
+
+
+def _drive_over_http(base: str, body: dict, *, timeout_s: float, stop_when=None,
+                     expect: str) -> dict:
+    """Post a pipeline and see it through with `GET /runs/{id}` alone: a
+    `pending` pause is answered with the setpoint plus a tenth (the same
+    invented number `_run_and_capture` types, and the same simulator-only
+    caveat), a record `stop_when` accepts asks for `after_shot`, and the
+    call returns the record once the run has parked."""
+    posted = _request(f"{base}/pipelines", "POST", body)
+    run_id = posted["run_id"]
+    answered: set[float] = set()
+    stopped = False
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        rec = _request(f"{base}/runs/{run_id}")
+        pending = rec.get("pending") or {}
+        since = pending.get("since")
+        if pending.get("what") and since not in answered:
+            answered.add(since)
+            setpoint = float((pending.get("detail") or {}).get("setpoint_k", 0.0))
+            time.sleep(0.3)
+            _request(f"{base}/runs/{run_id}/resume", "POST",
+                     {"temperature_k": round(setpoint + 0.1, 3),
+                      "note": f"set to {setpoint:g} K by hand, reads {setpoint + 0.1:g} K"})
+            continue
+        if stop_when is not None and not stopped and stop_when(rec):
+            stopped = True
+            _request(f"{base}/runs/{run_id}/stop", "POST", {"mode": "after_shot"})
+        if rec.get("parked"):
+            if rec.get("state") != expect:
+                raise SystemExit(f"the pipeline ended {rec.get('state')}, not {expect} — "
+                                 f"see the service log")
+            return rec
+        time.sleep(0.005)
+    raise SystemExit(f"the pipeline did not finish within {timeout_s} s")
 
 
 TXILL = {

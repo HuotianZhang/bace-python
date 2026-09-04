@@ -1,7 +1,12 @@
 # What goes in the name, and what goes in the record
 
-2026-09-02. A proposal, not yet implemented — for review before any code
-moves. It answers one instruction:
+2026-09-02. A proposal, for review before any code moves — **rule 1 built
+2026-09-04**, for the results tab (`docs/ui-plan.md` M6): `RunQueued.sample`,
+the temperature triple from `RunContext.temperature()` on every node with
+`offset_corrected` beside it, `SessionStarted.sample`, and both `GET /runs`
+and `GET /runs/{id}` exposing them; `node_record()` in `service/journal.py`
+gives the node one shape from either source. Rule 2 and §2 are still the
+proposal. It answers one instruction:
 
 > *the journal record must not depend on the file name; the file name should be
 > more regular — if it has to carry measurement parameters, the unknown ones
