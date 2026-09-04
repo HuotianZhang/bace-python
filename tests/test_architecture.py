@@ -15,7 +15,7 @@ FORBIDDEN_FOR_CORE = {"drivers", "experiment", "storage", "service", "ui"}
 
 
 def _imported_subpackages(path: pathlib.Path) -> set[str]:
-    tree = ast.parse(path.read_text(), filename=str(path))
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     out: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
