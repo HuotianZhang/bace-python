@@ -681,6 +681,13 @@ What the view needs decides what gets written, not the other way round: the run
 folders on disk today are artefacts of back-end debugging, and R2·3's file list
 predates all of it.
 
+**The brief for that pass is `docs/ui-results-brief.md`** (2026-09-04): what
+R2·3 carries, what `GET /runs`, the journal, the run folders and the HDF5
+actually hold — measured against the rig day's three journals rather than read
+off the contract — and the eleven decisions the pass has to make. Its D4 is the
+one that becomes service work: what each row of `GET /runs` must carry, which
+is `docs/naming-plan.md` rule 1 plus whatever the grid turns out to need.
+
 ### Alongside · The rig tab
 
 Read-only reference, and `ch-rig` is a static schematic that ports as it
@@ -740,7 +747,7 @@ that have not started. They are here so they are not rediscovered there:
 |---|---|
 | anything on the rig | the folder-name defect in `docs/naming-plan.md` §2 — `material = "PTQ10:IT-4F"` builds a path segment with a colon, which fails on Windows and passes on Linux |
 | M6 | `docs/naming-plan.md` rule 1 — the journal carries the sample block and the temperature triple on every node, **and `GET /runs` exposes them on each row**; writing them into `SessionStarted` alone leaves `run_index()` emitting summaries with no identity |
-| M6 | a Round 3 design pass on results, with the user, in Claude Design |
+| M6 | a Round 3 design pass on results, with the user, in Claude Design — briefed by `docs/ui-results-brief.md` |
 | M3 | ~~nothing — the chart foundation is new code with no service dependency~~ **built 2026-09-03**; nothing in the service changed |
 
 Nothing else in the service is on the critical path. The API is complete for

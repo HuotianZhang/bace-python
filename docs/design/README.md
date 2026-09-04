@@ -68,6 +68,12 @@ journal. And its `saturation` line uses the pre-correction wording: the service
 reports a shared extreme but **judges it as nothing**, so the line may read the
 same only if it no longer means the same.
 
+Both are D1 and D2 of `../ui-results-brief.md`, the brief for the design pass
+that gives this artboard its Round 3 replacement. On the first, the evidence
+now points one way: the `Verdict` lines are already in the journal with
+`level`, `code` and `text` — `_Run` simply drops every code but
+`temperature.settled` on the way to a run record.
+
 ## What has been corrected here, and what has not
 
 Rounds 2 and 3 were corrected on 2026-09-02, because both are live inputs to
