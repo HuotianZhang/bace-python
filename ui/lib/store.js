@@ -162,6 +162,17 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         if ((verdict.ts || 0) > readAt) replaceVerdict(merged, verdict);
       }
       state.verdicts = merged;
+      // The cost model's finish time is a *constant* of the run, computed when
+      // it was submitted (`session.py`: `rec.cost`), so unlike `run`, `queue`
+      // and `state` it cannot race the stream and is taken from a read-back
+      // too. That is the only path it ever arrives by for a run started while
+      // the console was open: the boot snapshot is older than the run, and
+      // `applyRunRecord` is asked only when the ring fell short. Without it a
+      // J-V — whose every `Progress` carries `eta_s: null` on purpose — shows
+      // no ETA at all for the whole of a sweep that is minutes on the rig.
+      if (bench.run && bench.run.run_id && bench.run.finish_at) {
+        run(bench.run.run_id).finish_at = bench.run.finish_at;
+      }
       if (!readBack) {
         state.queue = bench.queue || [];
         state.benchState = bench.state || 'idle';
@@ -173,6 +184,11 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
           record.module = bench.run.module || record.module;
           record.progress = bench.run.progress || record.progress;
           record.eta = bench.run.eta || record.eta;
+          // Authoritative: this snapshot is the boot's or a reconnect's
+          // `Hello`, assembled from the record as it stands, and the replay
+          // that follows re-delivers whatever the ring still holds. So a
+          // pause it does not mention is a pause that is not open.
+          adoptPending(record, bench.run.pending, { authoritative: true });
         } else {
           state.activeRunId = null;
         }
@@ -230,6 +246,10 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
       }
       if (payload.progress && !record.progress) record.progress = payload.progress;
       if (payload.eta && !record.eta) record.eta = payload.eta;
+      if (payload.cost && payload.cost.finish_at && !record.finish_at) {
+        record.finish_at = payload.cost.finish_at;
+      }
+      adoptPending(record, payload.pending);
       if (payload.error && !record.error) record.error = { text: payload.error, where: '', ts: null };
       record.hydrated = true;
       notify();
@@ -375,6 +395,8 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
           kind: data.kind, label: data.label, started_at: frame.ts, outcome: null,
         });
         record.node_path = data.node_path;
+        // Whatever segment the previous node was in, this one is not in it.
+        record.phase = null;
         break;
 
       case 'NodeDone': {
@@ -399,6 +421,10 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         });
         const node = nodeOf(record, frame.node_path);
         if (typeof data.n_shots === 'number') node.requested = data.n_shots;
+        // Per node as well: a pipeline's every `RunStarted` overwrites the
+        // run-level copy, and a card showing an earlier node's shot would
+        // otherwise label it with a later node's `trigger_sweep`.
+        node.config = data.config || null;
         rollUp(record);
         break;
       }
@@ -420,15 +446,32 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         break;
 
       case 'StepStarted':
-        record.step = data;
-        record.phase = null;
+        // With its node path, for the reason the phase carries one: the index
+        // restarts at zero on every module node, so the shot in flight is
+        // only this node's if the frame said so.
+        record.step = { ...data, node_path: frame.node_path || '' };
+        // The phase is cleared only by a shot at or after the one it
+        // describes. `StepPhase` is live-only and the numbered frames are
+        // not: a client catching up after a 1008 drop folds the ring's
+        // `StepStarted` for shot 300 while the instrument is inside shot 560
+        // — and clearing the phase on every replayed start starved the
+        // indicator for the whole of a `--fast` scan, measured in a browser.
+        // The phase carries its own `index`, so it knows which shot it is.
+        // The index restarts at zero on every module node, so a shot that
+        // looks older may be the next node's first: the phase is kept only
+        // for a start on the *same* node that is behind it.
+        if (!record.phase || typeof record.phase.index !== 'number'
+            || (frame.node_path || '') !== (record.phase.node_path || '')
+            || data.index >= record.phase.index) {
+          record.phase = null;
+        }
         break;
 
       case 'StepPhase':
         // Live-only, `seq` null, never journalled or replayed: where inside
         // the shot the run is *now* (`docs/ui-rules.md` §7). Held on its own,
         // so a reconnect that loses it leaves the shot itself untouched.
-        record.phase = { ...data, ts: frame.ts };
+        record.phase = { ...data, node_path: frame.node_path || '', ts: frame.ts };
         break;
 
       case 'StepDone':
@@ -654,6 +697,50 @@ function keepTraces(traced, shot, previous) {
   }
 }
 
+/**
+ * The pause a snapshot says is open, when the stream could not say it.
+ *
+ * A temperature pause is the one thing on this bench that lasts hours — that
+ * is what it is *for* — and the ring is 5000 envelopes, so a console opened
+ * during one, or dropped and reconnected through it, replays a tail with no
+ * `NeedsOperator` in it. The prompt is the only way to answer, so without
+ * this the screen shows a paused run and no way to resume it, and the
+ * experiment is blocked from the console until someone curls the endpoint.
+ * `/bench`'s `run.pending` and `GET /runs/{id}`'s carry it (`session.py`:
+ * `rec.pending`), and both are asked for at boot and after a gap.
+ *
+ * Nothing here moves anything backwards, which is decision 2's rule for
+ * everything fetched: a run that has ended took its pause with it, a prompt
+ * the stream is already showing is the newer one, and a resume the stream has
+ * carried answers the pause a snapshot taken before it still describes.
+ */
+function adoptPending(record, pending, { authoritative = false } = {}) {
+  if (!record) return;
+  if (record.parked_at || TERMINAL.has(record.state)) return;
+  if (!pending || !pending.what) {
+    // The other half of the same problem: this console was away while
+    // another answered the pause, and the `OperatorResumed` that says so
+    // fell out of the ring. The snapshot reports no pause, and a prompt left
+    // on screen is a Resume form for a run that is measuring again — every
+    // submission a 409. Only an authoritative snapshot clears it; a
+    // read-back's run block is the stream's to say and is not one.
+    if (authoritative) record.needsOperator = null;
+    return;
+  }
+  const since = pending.since || 0;
+  // Newer than the prompt in hand, or there is no prompt. A console that was
+  // away while another client answered one pause and the run opened the next
+  // holds a prompt for a node the run has left — and Resume answers *the*
+  // open pause, whichever it is, so the operator would type a temperature
+  // for T=250K into the pause at T=280K and the metadata would say so.
+  if (record.needsOperator && (record.needsOperator.ts || 0) >= since) return;
+  if (record.resumes.some((resume) => (resume.ts || 0) >= since)) return;
+  record.needsOperator = {
+    what: pending.what, node_path: pending.node_path || '',
+    detail: pending.detail || {}, ts: since,
+  };
+}
+
 /** One entry per `(code, node_path)`: a re-read replaces the earlier copy. */
 function replaceVerdict(list, entry) {
   const at = list.findIndex((v) => v.code === entry.code && v.node_path === entry.node_path);
@@ -711,7 +798,8 @@ export function emptyRun(runId) {
     shots: [], shotsByKey: {}, lastShot: null, shotWarnings: [],
     loops: [], q_mean: null, q_std: null,
     curves: [], jv: null, jvFinished: null, seriesPoints: [],
-    progress: null, progressByNode: {}, eta: null, finished: null, aborted: null, error: null,
+    progress: null, progressByNode: {}, eta: null, finish_at: null,
+    finished: null, aborted: null, error: null,
     needsOperator: null, resumes: [],
     nodes: {}, verdicts: [], notices: [], instruments: {}, hydrated: false,
     kept: null, requested: null,

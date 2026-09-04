@@ -493,3 +493,153 @@ test('the trace cap is one ring for the store, not one per node', () => {
     assert.equal(typeof shot.q, 'number', 'the charge survives the forgetting');
   }
 });
+
+test('a replayed StepStarted from behind does not clear the phase of the shot in flight', () => {
+  // `StepPhase` is live-only; the numbered frames replay from the ring. A
+  // client catching up after a drop folds old starts while the instrument is
+  // far ahead, and the indicator must describe the shot the bench is in.
+  const s = store();
+  const run = 'r1';
+  s.applyFrame({ seq: 1, ts: 1, run_id: run, node_path: 'bace', type: 'RunQueued', data: { kind: 'manual', module: 'bace' } });
+  s.applyFrame({ seq: null, ts: 2, run_id: run, node_path: 'bace', type: 'StepPhase', data: { index: 560, phase: 'acquire light', k: 3, of: 7 } });
+  s.applyFrame({ seq: 300, ts: 3, run_id: run, node_path: 'bace', type: 'StepStarted', data: { index: 300, loop: 15, step: 1 } });
+  assert.equal(s.getState().runs[run].phase.phase, 'acquire light', 'an older start leaves it');
+  s.applyFrame({ seq: 900, ts: 4, run_id: run, node_path: 'bace', type: 'StepStarted', data: { index: 561, loop: 27, step: 16 } });
+  assert.equal(s.getState().runs[run].phase, null, 'the next shot clears it');
+
+  // But the index restarts at zero on every module node: the next node's
+  // first shot is not an older shot of this one, and a new node is never in
+  // the segment the last one was.
+  s.applyFrame({ seq: null, ts: 5, run_id: run, node_path: 'rep=1/bace', type: 'StepPhase', data: { index: 560, phase: 'acquire dark', k: 6, of: 7 } });
+  s.applyFrame({ seq: 901, ts: 6, run_id: run, node_path: 'rep=2/bace', type: 'StepStarted', data: { index: 0, loop: 1, step: 1 } });
+  assert.equal(s.getState().runs[run].phase, null, 'another node\'s start clears it');
+  s.applyFrame({ seq: null, ts: 7, run_id: run, node_path: 'rep=2/bace', type: 'StepPhase', data: { index: 0, phase: 'levels', k: 1, of: 7 } });
+  s.applyFrame({ seq: 902, ts: 8, run_id: run, node_path: 'rep=3', type: 'NodeStarted', data: { node_path: 'rep=3', kind: 'repeat', label: 'rep=3' } });
+  assert.equal(s.getState().runs[run].phase, null, 'and so does a node starting');
+});
+
+test('a pipeline keeps each node\'s acquisition config, not only the last one started', () => {
+  const s = store();
+  replayInto(s, parseJsonl(fixture('stream_tree_sim.jsonl')));
+  const state = s.getState();
+  const run = state.runs[state.order[0]];
+  const leaves = Object.values(run.nodes).filter((n) => n.kind === 'bace');
+  assert.equal(leaves.length, 4);
+  for (const node of leaves) assert.equal(node.config.run.trigger_sweep, 'AUTO', node.node_path);
+});
+
+test('a pause the ring no longer holds comes back from the snapshot', () => {
+  // A temperature pause lasts hours — that is what it is for — and the ring is
+  // 5000 envelopes, so a console opened during one replays a tail with no
+  // `NeedsOperator` in it. Without the snapshot's `pending` the screen shows a
+  // paused run and no way to answer it: the experiment is blocked from the UI.
+  const s = store();
+  const pending = { what: 'temperature', node_path: 'T=250K', since: 100,
+    detail: { setpoint_k: 250, tolerance_k: 0.2, hold_s: 60, index: 4, count: 9 } };
+  s.applyBench({ state: 'paused', queue: [], instruments: {}, verdicts: [],
+    run: { run_id: 'r1', state: 'paused', node_path: 'T=250K', pending } });
+  const run = s.getState().runs.r1;
+  assert.equal(run.needsOperator.what, 'temperature');
+  assert.equal(run.needsOperator.node_path, 'T=250K');
+  assert.equal(run.needsOperator.detail.setpoint_k, 250);
+  assert.equal(run.needsOperator.ts, 100, 'when it opened, so a later resume can answer it');
+
+  // The run record answers with the same field, for the boot that asks it.
+  const other = store();
+  other.applyRunRecord({ run_id: 'r2', state: 'paused', pending });
+  assert.equal(other.getState().runs.r2.needsOperator.what, 'temperature');
+});
+
+test('a pause the stream has already answered does not come back with the snapshot', () => {
+  // Nothing fetched moves anything backwards (decision 2): an HTTP response
+  // and the socket race, and the answer is the newer fact.
+  const s = store();
+  s.applyFrame({ seq: 1, ts: 1, run_id: 'r1', node_path: '', type: 'RunQueued', data: { kind: 'pipeline' } });
+  s.applyFrame({ seq: 2, ts: 90, run_id: 'r1', node_path: 'T=250K', type: 'NeedsOperator',
+    data: { what: 'temperature', node_path: 'T=250K', detail: {} } });
+  s.applyFrame({ seq: 3, ts: 120, run_id: 'r1', node_path: 'T=250K', type: 'OperatorResumed',
+    data: { node_path: 'T=250K', note: 'set by hand', detail: {} } });
+  s.applyBench({ state: 'running', queue: [], instruments: {}, verdicts: [],
+    run: { run_id: 'r1', state: 'running',
+      pending: { what: 'temperature', node_path: 'T=250K', since: 100, detail: {} } } });
+  assert.equal(s.getState().runs.r1.needsOperator, null, 'the snapshot was taken before the resume');
+});
+
+test('a pause does not outlive the run it belonged to', () => {
+  const s = store();
+  s.applyFrame({ seq: 1, ts: 1, run_id: 'r1', node_path: '', type: 'RunStateChanged',
+    data: { state: 'stopped', reason: 'requested' } });
+  s.applyRunRecord({ run_id: 'r1', state: 'stopped',
+    pending: { what: 'temperature', node_path: 'T=250K', since: 5, detail: {} } });
+  assert.equal(s.getState().runs.r1.needsOperator, null, 'nobody is waiting for an answer');
+});
+
+test('a pause the run has moved on from is replaced by the one that is open', () => {
+  // This console was away while another client answered T=250K and the run
+  // opened T=280K, and those frames left the ring. Resume answers *the* open
+  // pause, so a prompt still showing the old node would have the operator
+  // type a temperature for a node the cryostat has left.
+  const s = store();
+  s.applyFrame({ seq: 1, ts: 1, run_id: 'r1', node_path: '', type: 'RunQueued', data: { kind: 'pipeline' } });
+  s.applyFrame({ seq: 2, ts: 100, run_id: 'r1', node_path: 'T=250K', type: 'NeedsOperator',
+    data: { what: 'temperature', node_path: 'T=250K', detail: { setpoint_k: 250 } } });
+  assert.equal(s.getState().runs.r1.needsOperator.node_path, 'T=250K');
+
+  s.applyBench({ state: 'paused', queue: [], instruments: {}, verdicts: [],
+    run: { run_id: 'r1', state: 'paused', node_path: 'T=280K',
+      pending: { what: 'temperature', node_path: 'T=280K', since: 900, detail: { setpoint_k: 280 } } } });
+  const held = s.getState().runs.r1.needsOperator;
+  assert.equal(held.node_path, 'T=280K', 'the open one');
+  assert.equal(held.detail.setpoint_k, 280);
+
+  // And a snapshot older than the prompt in hand changes nothing.
+  s.applyBench({ state: 'paused', queue: [], instruments: {}, verdicts: [],
+    run: { run_id: 'r1', state: 'paused',
+      pending: { what: 'temperature', node_path: 'T=250K', since: 100, detail: { setpoint_k: 250 } } } });
+  assert.equal(s.getState().runs.r1.needsOperator.node_path, 'T=280K');
+});
+
+test('the cost model\'s finish time is kept, for the runs that have no measured ETA', () => {
+  const s = store();
+  // On a read-back too: that is the only path it takes for a run started
+  // while the console was open, and it is a constant of the run rather than
+  // a state that could race the stream.
+  s.applyBench({ state: 'running', queue: [], instruments: {}, verdicts: [],
+    run: { run_id: 'r1', state: 'running', finish_at: 1788400000 } }, { readBack: true });
+  assert.equal(s.getState().runs.r1.finish_at, 1788400000);
+  assert.equal(s.getState().activeRunId, null, 'and the run block itself is still the stream\'s');
+
+  const other = store();
+  other.applyRunRecord({ run_id: 'r2', state: 'running', cost: { finish_at: 1788400111, lower_bound: false } });
+  assert.equal(other.getState().runs.r2.finish_at, 1788400111);
+});
+
+test('a snapshot with no pause open answers the prompt this console still holds', () => {
+  // The other half of the hydration problem: away while another console
+  // resumed the run, and the `OperatorResumed` fell out of the ring. A
+  // Resume form left on screen for a run that is measuring again answers
+  // every submission with a 409.
+  const s = store();
+  s.applyFrame({ seq: 1, ts: 1, run_id: 'r1', node_path: '', type: 'RunQueued', data: { kind: 'pipeline' } });
+  s.applyFrame({ seq: 2, ts: 100, run_id: 'r1', node_path: 'T=250K', type: 'NeedsOperator',
+    data: { what: 'temperature', node_path: 'T=250K', detail: { setpoint_k: 250 } } });
+  assert.ok(s.getState().runs.r1.needsOperator);
+
+  // A reconnect's Hello: the run is running and nothing is pending.
+  s.applyHello({ seq: null, ts: 200, type: 'Hello', data: { seq: 42, session: { id: 'x' },
+    bench: { state: 'running', queue: [], instruments: {}, verdicts: [],
+      run: { run_id: 'r1', state: 'running', node_path: 'T=250K/bace' } } } });
+  assert.equal(s.getState().runs.r1.needsOperator, null);
+});
+
+test('a read-back is not authoritative about the pause, because it is not about the run at all', () => {
+  // The run block of a read-back is the stream's to say (`readBack: true`
+  // exists for exactly that), so it neither opens a prompt nor closes one.
+  const s = store();
+  s.applyFrame({ seq: 1, ts: 1, run_id: 'r1', node_path: '', type: 'RunQueued', data: { kind: 'pipeline' } });
+  s.applyFrame({ seq: 2, ts: 100, run_id: 'r1', node_path: 'T=250K', type: 'NeedsOperator',
+    data: { what: 'temperature', node_path: 'T=250K', detail: { setpoint_k: 250 } } });
+  s.applyBench({ state: 'running', queue: [], instruments: {}, verdicts: [],
+    run: { run_id: 'r1', state: 'running' } }, { readBack: true });
+  assert.ok(s.getState().runs.r1.needsOperator, 'still waiting for an answer');
+});

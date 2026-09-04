@@ -162,10 +162,13 @@ and the chain strip, the six generated bench cards with the `edited` layer
 behind them, and the charts — the scale/axis foundation, the J–V, the transient
 with its window and running integral, and the timing diagram, which sits on the
 `bace` card because it is a function of the form and shows a wrong polarity or
-an impossible delay *before* the run. Nothing in the service changed for any of
-it. **M4 is next** — the live monitor: `StepPhase` as the shot-segment
-indicator, the per-shot verdict, and Q per loop / Q(axis) with the
-zero-width-axis switch drawn rather than silent. M4–M6 are not built. **Explicit
+an impossible delay *before* the run — and, as of M4, the run monitor under the
+rail on every tab (the counters at three time scales, the shot's segment, the
+ETA, stop after-shot, abort, and the operator's answer to a temperature pause),
+the newest shot's verdict beside its trace, and Q per loop / Q(axis) with the
+zero-width-axis switch drawn rather than silent. Nothing in the service changed
+for any of it. **M5 is next** — the pipeline tab: the tree editor, the Dry run
+and the schedule. M5 and M6 are not built. **Explicit
 instruction from the user, 2026-09-01:**
 
 > *"I do not want the same shape as JV console and the 331 controller. I want a
