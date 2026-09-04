@@ -495,12 +495,42 @@ node path. Two `bace` siblings under a loop is the tree that would catch it
 if it ever did."""
 
 
+NESTED = {
+    "kind": "loop", "loop": "temperature", "values_k": [290, 250], "hold_s": 30,
+    "children": [
+        {"kind": "module", "module": "bace",
+         "params": {"axis_name": "delay_ns", "axis_start": 0.0, "axis_stop": 100.0,
+                    "axis_step": 50.0, "centre_on_voc": False, "n_loops": 1,
+                    "vpre": 1.0, "vcoll": -2.0}},
+        {"kind": "loop", "loop": "temperature", "values_k": [200, 180], "hold_s": 10,
+         "children": [
+             {"kind": "module", "module": "bace",
+              "params": {"axis_name": "delay_ns", "axis_start": 0.0, "axis_stop": 100.0,
+                         "axis_step": 50.0, "centre_on_voc": False, "n_loops": 2,
+                         "vpre": 1.0, "vcoll": -2.0}},
+         ]},
+        {"kind": "module", "module": "wait", "params": {}},
+    ],
+}
+"""A temperature loop inside a temperature loop, with a module on either side
+of the inner one.
+
+Legal, and pathological in the same way `docs/ui-rules.md` section 8's
+temperature-inside-illumination is -- but the cost model handles it
+(`estimate` keeps `open_temperatures` as a list, so a module's time is
+attributed to every temperature it is inside and its own settle and hold are
+counted once), and so must the console's time bar. Drawn as one block per
+*outer* iteration it lost the inner holds entirely: 62 s of bar against a
+cost of 102 s. This is the fixture that says so."""
+
+
 def _record_validate(a, base: str, tag: str) -> None:
-    """`POST /pipelines/validate` on both trees. Touches nothing: no worker
-    job, no instrument, no folder -- the endpoint's whole contract."""
+    """`POST /pipelines/validate` on all three trees. Touches nothing: no
+    worker job, no instrument, no folder -- the endpoint's whole contract."""
     print("pipelines/validate …")
     for stem, tree, why in (("txill", TXILL, "9 T x 5 levels"),
-                            ("bound", BOUND, "a temperature module, and duplicate siblings")):
+                            ("bound", BOUND, "a temperature module, and duplicate siblings"),
+                            ("nested", NESTED, "a temperature loop inside a temperature loop")):
         answer = _request(f"{base}/pipelines/validate", "POST",
                           {"tree": tree, "name": f"ui-fixture-{stem}"})
         counters = answer.get("counters") or {}

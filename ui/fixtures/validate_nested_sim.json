@@ -4,10 +4,10 @@
   {
    "level": "ok",
    "code": "tree.shape",
-   "text": "tree resolves: 1 loop, 8 module runs",
+   "text": "tree resolves: 2 loops, 8 module runs",
    "node_path": "",
    "data": {
-    "loops": 1,
+    "loops": 2,
     "modules": 8
    }
   },
@@ -61,13 +61,13 @@
   {
    "level": "ok",
    "code": "axis.geometry",
-   "text": "4 scans: delay_ns: 0 -> 100 step 50 ns (3 pts) x 2; delay_ns: 0 -> 100 step 50 ns (3 pts) x 1",
+   "text": "6 scans: delay_ns: 0 -> 100 step 50 ns (3 pts) x 1; delay_ns: 0 -> 100 step 50 ns (3 pts) x 2",
    "node_path": "",
    "data": {
-    "scans": 4,
+    "scans": 6,
     "axes": [
-     "delay_ns: 0 -> 100 step 50 ns (3 pts) x 2",
-     "delay_ns: 0 -> 100 step 50 ns (3 pts) x 1"
+     "delay_ns: 0 -> 100 step 50 ns (3 pts) x 1",
+     "delay_ns: 0 -> 100 step 50 ns (3 pts) x 2"
     ]
    }
   },
@@ -156,11 +156,22 @@
    }
   },
   {
-   "level": "ok",
+   "level": "warn",
    "code": "temperature.not-wired",
-   "text": "no temperature loop",
-   "node_path": "",
-   "data": {}
+   "text": "331 not wired: the run pauses at each of the 4 temperatures (180-290 K) for a manual set; GPIB0::7::INSTR is not answering",
+   "node_path": "T=290K",
+   "data": {
+    "setpoints": [
+     290.0,
+     250.0,
+     200.0,
+     180.0
+    ],
+    "console": "",
+    "at": "GPIB0::7::INSTR",
+    "wired": false,
+    "connected": null
+   }
   },
   {
    "level": "ok",
@@ -172,10 +183,10 @@
   {
    "level": "info",
    "code": "trigger.auto",
-   "text": "trigger_sweep = AUTO on 4 scans: the scope sweeps without a trigger, so a loose Sync cable gives untriggered noise that subtracts to a plausible charge",
-   "node_path": "rep=1/bace",
+   "text": "trigger_sweep = AUTO on 6 scans: the scope sweeps without a trigger, so a loose Sync cable gives untriggered noise that subtracts to a plausible charge",
+   "node_path": "T=290K/bace",
    "data": {
-    "scans": 4
+    "scans": 6
    }
   },
   {
@@ -186,27 +197,27 @@
    "data": {
     "console": "",
     "at": "the 1918-C on USB",
-    "readers": 4,
+    "readers": 6,
     "watts": 0.0
    }
   },
   {
    "level": "info",
    "code": "intensity.factor",
-   "text": "no calibration factor: intensity is recorded in watts at the meter, not as irradiance at the sample (4 readers)",
+   "text": "no calibration factor: intensity is recorded in watts at the meter, not as irradiance at the sample (6 readers)",
    "node_path": "",
    "data": {
-    "readers": 4
+    "readers": 6
    }
   },
   {
    "level": "ok",
    "code": "cost.long",
-   "text": "about 2 min",
+   "text": "about 2 min at least",
    "node_path": "",
    "data": {
-    "total_s": 136.4,
-    "lower_bound": false,
+    "total_s": 126.0,
+    "lower_bound": true,
     "store_shots_bytes": 0.0
    }
   },
@@ -217,356 +228,35 @@
    "node_path": "",
    "data": {
     "read_at": 1788485324.3905623,
-    "age_s": 6.522487640380859
+    "age_s": 6.535554647445679
    }
   }
  ],
  "schedule": [
   {
-   "node_path": "rep=1",
+   "node_path": "T=290K",
    "kind": "loop-enter",
-   "loop": "repeat",
-   "value": 1,
+   "loop": "temperature",
+   "value": 290,
    "module": null,
    "params": {},
-   "needs_operator": false,
-   "relay": null,
-   "estimate_s": 0.0,
-   "detail": {
-    "node_key": "repeat",
-    "index": 0,
-    "count": 2,
-    "label": ""
-   }
-  },
-  {
-   "node_path": "rep=1/temperature",
-   "kind": "module",
-   "loop": null,
-   "value": null,
-   "module": "temperature",
-   "params": {
-    "setpoint_k": {
-     "value": 250.0,
-     "source": "edited",
-     "detail": "pipeline node"
-    },
-    "tolerance_k": {
-     "value": 0.2,
-     "source": "default",
-     "detail": ""
-    },
-    "hold_s": {
-     "value": 60.0,
-     "source": "default",
-     "detail": ""
-    },
-    "timeout_s": {
-     "value": 1800.0,
-     "source": "default",
-     "detail": ""
-    }
-   },
    "needs_operator": true,
    "relay": null,
-   "estimate_s": 60.0,
+   "estimate_s": null,
    "detail": {
-    "node_key": "repeat/temperature",
+    "node_key": "temperature",
+    "index": 0,
+    "count": 2,
     "label": "",
-    "title": "temperature",
-    "module_kind": "utility",
-    "status": "partial",
-    "led_v": null,
-    "temperature_k": null,
-    "in_illumination": false,
-    "centre_on_voc": false,
-    "voc_needed_by": [],
-    "shots": 0,
-    "relay_transition": false,
-    "relay_from": null
+    "setpoint_k": 290,
+    "settle_s": null,
+    "tolerance_k": 0.2,
+    "hold_s": 30,
+    "timeout_s": 1800.0
    }
   },
   {
-   "node_path": "rep=1/bace",
-   "kind": "module",
-   "loop": null,
-   "value": null,
-   "module": "bace",
-   "params": {
-    "axis_name": {
-     "value": "delay_ns",
-     "source": "edited",
-     "detail": "pipeline node"
-    },
-    "axis_start": {
-     "value": 0.0,
-     "source": "edited",
-     "detail": "pipeline node"
-    },
-    "axis_stop": {
-     "value": 100.0,
-     "source": "edited",
-     "detail": "pipeline node"
-    },
-    "axis_step": {
-     "value": 50.0,
-     "source": "edited",
-     "detail": "pipeline node"
-    },
-    "centre_on_voc": {
-     "value": false,
-     "source": "edited",
-     "detail": "pipeline node"
-    },
-    "vpre": {
-     "value": 1.0,
-     "source": "edited",
-     "detail": "pipeline node"
-    },
-    "vcoll": {
-     "value": -2.0,
-     "source": "edited",
-     "detail": "pipeline node"
-    },
-    "delay_ns": {
-     "value": 90.0,
-     "source": "run.toml",
-     "detail": "run.toml [pinned]"
-    },
-    "vpre_on_voc": {
-     "value": false,
-     "source": "default",
-     "detail": ""
-    },
-    "n_loops": {
-     "value": 2,
-     "source": "edited",
-     "detail": "pipeline node"
-    },
-    "led_v": {
-     "value": 1.0,
-     "source": "run.toml",
-     "detail": "run.toml [illumination]"
-    },
-    "led_low_v": {
-     "value": 0.4,
-     "source": "run.toml",
-     "detail": "run.toml [illumination]"
-    },
-    "voc": {
-     "value": null,
-     "source": "default",
-     "detail": ""
-    },
-    "measure_dc": {
-     "value": false,
-     "source": "default",
-     "detail": ""
-    },
-    "v_sat": {
-     "value": -1.0,
-     "source": "run.toml",
-     "detail": "run.toml [illumination]"
-    },
-    "led_settle_s": {
-     "value": 2.0,
-     "source": "default",
-     "detail": ""
-    },
-    "led_settle_max_s": {
-     "value": 60.0,
-     "source": "default",
-     "detail": ""
-    },
-    "led_settle_tolerance": {
-     "value": 0.02,
-     "source": "default",
-     "detail": ""
-    },
-    "n_averages": {
-     "value": 200,
-     "source": "run.toml",
-     "detail": "run.toml [acquisition]"
-    },
-    "timebase_ns_per_div": {
-     "value": 200.0,
-     "source": "run.toml",
-     "detail": "run.toml [acquisition]"
-    },
-    "record_length": {
-     "value": 5000,
-     "source": "run.toml",
-     "detail": "run.toml [acquisition]"
-    },
-    "t0_int_s": {
-     "value": 1.205e-07,
-     "source": "run.toml",
-     "detail": "run.toml [acquisition]"
-    },
-    "t0_int_reference": {
-     "value": "trigger",
-     "source": "run.toml",
-     "detail": "run.toml [acquisition]"
-    },
-    "output_polarity": {
-     "value": "NORM",
-     "source": "run.toml",
-     "detail": "run.toml [acquisition]"
-    },
-    "pulse_width_ns": {
-     "value": 5000.0,
-     "source": "run.toml",
-     "detail": "run.toml [acquisition]"
-    },
-    "pulse_frequency_hz": {
-     "value": 500.0,
-     "source": "run.toml",
-     "detail": "run.toml [acquisition]"
-    },
-    "duty_percent": {
-     "value": 50.0,
-     "source": "run.toml",
-     "detail": "run.toml [acquisition]"
-    },
-    "offset_correct": {
-     "value": true,
-     "source": "run.toml",
-     "detail": "run.toml [acquisition]"
-    },
-    "invert_polarity": {
-     "value": true,
-     "source": "run.toml",
-     "detail": "run.toml [acquisition]"
-    },
-    "inverted_output": {
-     "value": false,
-     "source": "run.toml",
-     "detail": "run.toml [acquisition]"
-    },
-    "settle_s": {
-     "value": 0.3,
-     "source": "run.toml",
-     "detail": "run.toml [acquisition]"
-    },
-    "dark_settle_s": {
-     "value": 0.3,
-     "source": "run.toml",
-     "detail": "run.toml [acquisition]"
-    },
-    "dark_reference": {
-     "value": "translated",
-     "source": "default",
-     "detail": ""
-    },
-    "shutter_settle_s": {
-     "value": 5.0,
-     "source": "run.toml",
-     "detail": "run.toml [acquisition]"
-    },
-    "read_intensity": {
-     "value": true,
-     "source": "run.toml",
-     "detail": "run.toml [acquisition]"
-    },
-    "acquisition_timeout_s": {
-     "value": 30.0,
-     "source": "default",
-     "detail": ""
-    },
-    "external_trigger": {
-     "value": true,
-     "source": "run.toml",
-     "detail": "run.toml [acquisition]"
-    },
-    "trigger_slope_positive": {
-     "value": true,
-     "source": "run.toml",
-     "detail": "run.toml [acquisition]"
-    },
-    "trigger_sweep": {
-     "value": "AUTO",
-     "source": "run.toml",
-     "detail": "run.toml [acquisition]"
-    },
-    "calibrate_trigger": {
-     "value": true,
-     "source": "run.toml",
-     "detail": "run.toml [acquisition]"
-    },
-    "store_shots": {
-     "value": false,
-     "source": "run.toml",
-     "detail": "run.toml [acquisition]"
-    },
-    "smu_current_compliance_a": {
-     "value": 0.01,
-     "source": "run.toml",
-     "detail": "run.toml [sourcemeter]"
-    },
-    "smu_voltage_compliance_v": {
-     "value": 2.0,
-     "source": "run.toml",
-     "detail": "run.toml [sourcemeter]"
-    },
-    "smu_settle_jsc_ms": {
-     "value": 1000.0,
-     "source": "run.toml",
-     "detail": "run.toml [sourcemeter]"
-    },
-    "smu_settle_voc_ms": {
-     "value": 1000.0,
-     "source": "run.toml",
-     "detail": "run.toml [sourcemeter]"
-    },
-    "smu_settle_jsat_ms": {
-     "value": 1000.0,
-     "source": "run.toml",
-     "detail": "run.toml [sourcemeter]"
-    },
-    "smu_nplc": {
-     "value": 1.0,
-     "source": "run.toml",
-     "detail": "run.toml [sourcemeter]"
-    },
-    "smu_averaging": {
-     "value": 10,
-     "source": "run.toml",
-     "detail": "run.toml [sourcemeter]"
-    },
-    "smu_terminals": {
-     "value": "FRON",
-     "source": "run.toml",
-     "detail": "run.toml [sourcemeter]"
-    },
-    "smu_four_wire": {
-     "value": false,
-     "source": "run.toml",
-     "detail": "run.toml [sourcemeter]"
-    }
-   },
-   "needs_operator": false,
-   "relay": "transient",
-   "estimate_s": 4.800000000000001,
-   "detail": {
-    "node_key": "repeat/bace",
-    "label": "",
-    "title": "bace",
-    "module_kind": "measurement",
-    "status": "built",
-    "led_v": 1.0,
-    "temperature_k": null,
-    "in_illumination": false,
-    "centre_on_voc": false,
-    "voc_needed_by": [],
-    "voc": null,
-    "voc_rejected": null,
-    "shots": 6,
-    "relay_transition": false,
-    "relay_from": null
-   }
-  },
-  {
-   "node_path": "rep=1/bace#2",
+   "node_path": "T=290K/bace",
    "kind": "module",
    "loop": null,
    "value": null,
@@ -827,13 +517,13 @@
    "relay": "transient",
    "estimate_s": 2.4000000000000004,
    "detail": {
-    "node_key": "repeat/bace#2",
+    "node_key": "temperature/bace",
     "label": "",
     "title": "bace",
     "module_kind": "measurement",
     "status": "built",
     "led_v": 1.0,
-    "temperature_k": null,
+    "temperature_k": 290.0,
     "in_illumination": false,
     "centre_on_voc": false,
     "voc_needed_by": [],
@@ -841,123 +531,350 @@
     "voc_rejected": null,
     "shots": 3,
     "relay_transition": false,
-    "relay_from": "transient"
-   }
-  },
-  {
-   "node_path": "rep=1/wait",
-   "kind": "module",
-   "loop": null,
-   "value": null,
-   "module": "wait",
-   "params": {
-    "seconds": {
-     "value": 1.0,
-     "source": "default",
-     "detail": ""
-    }
-   },
-   "needs_operator": false,
-   "relay": null,
-   "estimate_s": 1.0,
-   "detail": {
-    "node_key": "repeat/wait",
-    "label": "",
-    "title": "wait",
-    "module_kind": "utility",
-    "status": "built",
-    "led_v": null,
-    "temperature_k": null,
-    "in_illumination": false,
-    "centre_on_voc": false,
-    "voc_needed_by": [],
-    "shots": 0,
-    "relay_transition": false,
     "relay_from": null
    }
   },
   {
-   "node_path": "rep=1",
+   "node_path": "T=290K/T=200K",
+   "kind": "loop-enter",
+   "loop": "temperature",
+   "value": 200,
+   "module": null,
+   "params": {},
+   "needs_operator": true,
+   "relay": null,
+   "estimate_s": null,
+   "detail": {
+    "node_key": "temperature/temperature",
+    "index": 0,
+    "count": 2,
+    "label": "",
+    "setpoint_k": 200,
+    "settle_s": null,
+    "tolerance_k": 0.2,
+    "hold_s": 10,
+    "timeout_s": 1800.0
+   }
+  },
+  {
+   "node_path": "T=290K/T=200K/bace",
+   "kind": "module",
+   "loop": null,
+   "value": null,
+   "module": "bace",
+   "params": {
+    "axis_name": {
+     "value": "delay_ns",
+     "source": "edited",
+     "detail": "pipeline node"
+    },
+    "axis_start": {
+     "value": 0.0,
+     "source": "edited",
+     "detail": "pipeline node"
+    },
+    "axis_stop": {
+     "value": 100.0,
+     "source": "edited",
+     "detail": "pipeline node"
+    },
+    "axis_step": {
+     "value": 50.0,
+     "source": "edited",
+     "detail": "pipeline node"
+    },
+    "centre_on_voc": {
+     "value": false,
+     "source": "edited",
+     "detail": "pipeline node"
+    },
+    "vpre": {
+     "value": 1.0,
+     "source": "edited",
+     "detail": "pipeline node"
+    },
+    "vcoll": {
+     "value": -2.0,
+     "source": "edited",
+     "detail": "pipeline node"
+    },
+    "delay_ns": {
+     "value": 90.0,
+     "source": "run.toml",
+     "detail": "run.toml [pinned]"
+    },
+    "vpre_on_voc": {
+     "value": false,
+     "source": "default",
+     "detail": ""
+    },
+    "n_loops": {
+     "value": 2,
+     "source": "edited",
+     "detail": "pipeline node"
+    },
+    "led_v": {
+     "value": 1.0,
+     "source": "run.toml",
+     "detail": "run.toml [illumination]"
+    },
+    "led_low_v": {
+     "value": 0.4,
+     "source": "run.toml",
+     "detail": "run.toml [illumination]"
+    },
+    "voc": {
+     "value": null,
+     "source": "default",
+     "detail": ""
+    },
+    "measure_dc": {
+     "value": false,
+     "source": "default",
+     "detail": ""
+    },
+    "v_sat": {
+     "value": -1.0,
+     "source": "run.toml",
+     "detail": "run.toml [illumination]"
+    },
+    "led_settle_s": {
+     "value": 2.0,
+     "source": "default",
+     "detail": ""
+    },
+    "led_settle_max_s": {
+     "value": 60.0,
+     "source": "default",
+     "detail": ""
+    },
+    "led_settle_tolerance": {
+     "value": 0.02,
+     "source": "default",
+     "detail": ""
+    },
+    "n_averages": {
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "timebase_ns_per_div": {
+     "value": 200.0,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "record_length": {
+     "value": 5000,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "t0_int_s": {
+     "value": 1.205e-07,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "t0_int_reference": {
+     "value": "trigger",
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "output_polarity": {
+     "value": "NORM",
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "pulse_width_ns": {
+     "value": 5000.0,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "pulse_frequency_hz": {
+     "value": 500.0,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "duty_percent": {
+     "value": 50.0,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "offset_correct": {
+     "value": true,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "invert_polarity": {
+     "value": true,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "inverted_output": {
+     "value": false,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "settle_s": {
+     "value": 0.3,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "dark_settle_s": {
+     "value": 0.3,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "dark_reference": {
+     "value": "translated",
+     "source": "default",
+     "detail": ""
+    },
+    "shutter_settle_s": {
+     "value": 5.0,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "read_intensity": {
+     "value": true,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "acquisition_timeout_s": {
+     "value": 30.0,
+     "source": "default",
+     "detail": ""
+    },
+    "external_trigger": {
+     "value": true,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "trigger_slope_positive": {
+     "value": true,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "trigger_sweep": {
+     "value": "AUTO",
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "calibrate_trigger": {
+     "value": true,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "store_shots": {
+     "value": false,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "smu_current_compliance_a": {
+     "value": 0.01,
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    },
+    "smu_voltage_compliance_v": {
+     "value": 2.0,
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    },
+    "smu_settle_jsc_ms": {
+     "value": 1000.0,
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    },
+    "smu_settle_voc_ms": {
+     "value": 1000.0,
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    },
+    "smu_settle_jsat_ms": {
+     "value": 1000.0,
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    },
+    "smu_nplc": {
+     "value": 1.0,
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    },
+    "smu_averaging": {
+     "value": 10,
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    },
+    "smu_terminals": {
+     "value": "FRON",
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    },
+    "smu_four_wire": {
+     "value": false,
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    }
+   },
+   "needs_operator": false,
+   "relay": "transient",
+   "estimate_s": 4.800000000000001,
+   "detail": {
+    "node_key": "temperature/temperature/bace",
+    "label": "",
+    "title": "bace",
+    "module_kind": "measurement",
+    "status": "built",
+    "led_v": 1.0,
+    "temperature_k": 200.0,
+    "in_illumination": false,
+    "centre_on_voc": false,
+    "voc_needed_by": [],
+    "voc": null,
+    "voc_rejected": null,
+    "shots": 6,
+    "relay_transition": false,
+    "relay_from": "transient"
+   }
+  },
+  {
+   "node_path": "T=290K/T=200K",
    "kind": "loop-exit",
-   "loop": "repeat",
-   "value": 1,
+   "loop": "temperature",
+   "value": 200,
    "module": null,
    "params": {},
    "needs_operator": false,
    "relay": null,
    "estimate_s": 0.0,
    "detail": {
-    "node_key": "repeat",
+    "node_key": "temperature/temperature",
     "index": 0,
     "count": 2
    }
   },
   {
-   "node_path": "rep=2",
+   "node_path": "T=290K/T=180K",
    "kind": "loop-enter",
-   "loop": "repeat",
-   "value": 2,
+   "loop": "temperature",
+   "value": 180,
    "module": null,
    "params": {},
-   "needs_operator": false,
-   "relay": null,
-   "estimate_s": 0.0,
-   "detail": {
-    "node_key": "repeat",
-    "index": 1,
-    "count": 2,
-    "label": ""
-   }
-  },
-  {
-   "node_path": "rep=2/temperature",
-   "kind": "module",
-   "loop": null,
-   "value": null,
-   "module": "temperature",
-   "params": {
-    "setpoint_k": {
-     "value": 250.0,
-     "source": "edited",
-     "detail": "pipeline node"
-    },
-    "tolerance_k": {
-     "value": 0.2,
-     "source": "default",
-     "detail": ""
-    },
-    "hold_s": {
-     "value": 60.0,
-     "source": "default",
-     "detail": ""
-    },
-    "timeout_s": {
-     "value": 1800.0,
-     "source": "default",
-     "detail": ""
-    }
-   },
    "needs_operator": true,
    "relay": null,
-   "estimate_s": 60.0,
+   "estimate_s": null,
    "detail": {
-    "node_key": "repeat/temperature",
+    "node_key": "temperature/temperature",
+    "index": 1,
+    "count": 2,
     "label": "",
-    "title": "temperature",
-    "module_kind": "utility",
-    "status": "partial",
-    "led_v": null,
-    "temperature_k": null,
-    "in_illumination": false,
-    "centre_on_voc": false,
-    "voc_needed_by": [],
-    "shots": 0,
-    "relay_transition": false,
-    "relay_from": null
+    "setpoint_k": 180,
+    "settle_s": null,
+    "tolerance_k": 0.2,
+    "hold_s": 10,
+    "timeout_s": 1800.0
    }
   },
   {
-   "node_path": "rep=2/bace",
+   "node_path": "T=290K/T=180K/bace",
    "kind": "module",
    "loop": null,
    "value": null,
@@ -1218,13 +1135,13 @@
    "relay": "transient",
    "estimate_s": 4.800000000000001,
    "detail": {
-    "node_key": "repeat/bace",
+    "node_key": "temperature/temperature/bace",
     "label": "",
     "title": "bace",
     "module_kind": "measurement",
     "status": "built",
     "led_v": 1.0,
-    "temperature_k": null,
+    "temperature_k": 180.0,
     "in_illumination": false,
     "centre_on_voc": false,
     "voc_needed_by": [],
@@ -1236,7 +1153,93 @@
    }
   },
   {
-   "node_path": "rep=2/bace#2",
+   "node_path": "T=290K/T=180K",
+   "kind": "loop-exit",
+   "loop": "temperature",
+   "value": 180,
+   "module": null,
+   "params": {},
+   "needs_operator": false,
+   "relay": null,
+   "estimate_s": 0.0,
+   "detail": {
+    "node_key": "temperature/temperature",
+    "index": 1,
+    "count": 2
+   }
+  },
+  {
+   "node_path": "T=290K/wait",
+   "kind": "module",
+   "loop": null,
+   "value": null,
+   "module": "wait",
+   "params": {
+    "seconds": {
+     "value": 1.0,
+     "source": "default",
+     "detail": ""
+    }
+   },
+   "needs_operator": false,
+   "relay": null,
+   "estimate_s": 1.0,
+   "detail": {
+    "node_key": "temperature/wait",
+    "label": "",
+    "title": "wait",
+    "module_kind": "utility",
+    "status": "built",
+    "led_v": null,
+    "temperature_k": 290.0,
+    "in_illumination": false,
+    "centre_on_voc": false,
+    "voc_needed_by": [],
+    "shots": 0,
+    "relay_transition": false,
+    "relay_from": null
+   }
+  },
+  {
+   "node_path": "T=290K",
+   "kind": "loop-exit",
+   "loop": "temperature",
+   "value": 290,
+   "module": null,
+   "params": {},
+   "needs_operator": false,
+   "relay": null,
+   "estimate_s": 0.0,
+   "detail": {
+    "node_key": "temperature",
+    "index": 0,
+    "count": 2
+   }
+  },
+  {
+   "node_path": "T=250K",
+   "kind": "loop-enter",
+   "loop": "temperature",
+   "value": 250,
+   "module": null,
+   "params": {},
+   "needs_operator": true,
+   "relay": null,
+   "estimate_s": null,
+   "detail": {
+    "node_key": "temperature",
+    "index": 1,
+    "count": 2,
+    "label": "",
+    "setpoint_k": 250,
+    "settle_s": null,
+    "tolerance_k": 0.2,
+    "hold_s": 30,
+    "timeout_s": 1800.0
+   }
+  },
+  {
+   "node_path": "T=250K/bace",
    "kind": "module",
    "loop": null,
    "value": null,
@@ -1497,13 +1500,13 @@
    "relay": "transient",
    "estimate_s": 2.4000000000000004,
    "detail": {
-    "node_key": "repeat/bace#2",
+    "node_key": "temperature/bace",
     "label": "",
     "title": "bace",
     "module_kind": "measurement",
     "status": "built",
     "led_v": 1.0,
-    "temperature_k": null,
+    "temperature_k": 250.0,
     "in_illumination": false,
     "centre_on_voc": false,
     "voc_needed_by": [],
@@ -1515,7 +1518,641 @@
    }
   },
   {
-   "node_path": "rep=2/wait",
+   "node_path": "T=250K/T=200K",
+   "kind": "loop-enter",
+   "loop": "temperature",
+   "value": 200,
+   "module": null,
+   "params": {},
+   "needs_operator": true,
+   "relay": null,
+   "estimate_s": null,
+   "detail": {
+    "node_key": "temperature/temperature",
+    "index": 0,
+    "count": 2,
+    "label": "",
+    "setpoint_k": 200,
+    "settle_s": null,
+    "tolerance_k": 0.2,
+    "hold_s": 10,
+    "timeout_s": 1800.0
+   }
+  },
+  {
+   "node_path": "T=250K/T=200K/bace",
+   "kind": "module",
+   "loop": null,
+   "value": null,
+   "module": "bace",
+   "params": {
+    "axis_name": {
+     "value": "delay_ns",
+     "source": "edited",
+     "detail": "pipeline node"
+    },
+    "axis_start": {
+     "value": 0.0,
+     "source": "edited",
+     "detail": "pipeline node"
+    },
+    "axis_stop": {
+     "value": 100.0,
+     "source": "edited",
+     "detail": "pipeline node"
+    },
+    "axis_step": {
+     "value": 50.0,
+     "source": "edited",
+     "detail": "pipeline node"
+    },
+    "centre_on_voc": {
+     "value": false,
+     "source": "edited",
+     "detail": "pipeline node"
+    },
+    "vpre": {
+     "value": 1.0,
+     "source": "edited",
+     "detail": "pipeline node"
+    },
+    "vcoll": {
+     "value": -2.0,
+     "source": "edited",
+     "detail": "pipeline node"
+    },
+    "delay_ns": {
+     "value": 90.0,
+     "source": "run.toml",
+     "detail": "run.toml [pinned]"
+    },
+    "vpre_on_voc": {
+     "value": false,
+     "source": "default",
+     "detail": ""
+    },
+    "n_loops": {
+     "value": 2,
+     "source": "edited",
+     "detail": "pipeline node"
+    },
+    "led_v": {
+     "value": 1.0,
+     "source": "run.toml",
+     "detail": "run.toml [illumination]"
+    },
+    "led_low_v": {
+     "value": 0.4,
+     "source": "run.toml",
+     "detail": "run.toml [illumination]"
+    },
+    "voc": {
+     "value": null,
+     "source": "default",
+     "detail": ""
+    },
+    "measure_dc": {
+     "value": false,
+     "source": "default",
+     "detail": ""
+    },
+    "v_sat": {
+     "value": -1.0,
+     "source": "run.toml",
+     "detail": "run.toml [illumination]"
+    },
+    "led_settle_s": {
+     "value": 2.0,
+     "source": "default",
+     "detail": ""
+    },
+    "led_settle_max_s": {
+     "value": 60.0,
+     "source": "default",
+     "detail": ""
+    },
+    "led_settle_tolerance": {
+     "value": 0.02,
+     "source": "default",
+     "detail": ""
+    },
+    "n_averages": {
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "timebase_ns_per_div": {
+     "value": 200.0,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "record_length": {
+     "value": 5000,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "t0_int_s": {
+     "value": 1.205e-07,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "t0_int_reference": {
+     "value": "trigger",
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "output_polarity": {
+     "value": "NORM",
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "pulse_width_ns": {
+     "value": 5000.0,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "pulse_frequency_hz": {
+     "value": 500.0,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "duty_percent": {
+     "value": 50.0,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "offset_correct": {
+     "value": true,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "invert_polarity": {
+     "value": true,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "inverted_output": {
+     "value": false,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "settle_s": {
+     "value": 0.3,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "dark_settle_s": {
+     "value": 0.3,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "dark_reference": {
+     "value": "translated",
+     "source": "default",
+     "detail": ""
+    },
+    "shutter_settle_s": {
+     "value": 5.0,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "read_intensity": {
+     "value": true,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "acquisition_timeout_s": {
+     "value": 30.0,
+     "source": "default",
+     "detail": ""
+    },
+    "external_trigger": {
+     "value": true,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "trigger_slope_positive": {
+     "value": true,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "trigger_sweep": {
+     "value": "AUTO",
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "calibrate_trigger": {
+     "value": true,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "store_shots": {
+     "value": false,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "smu_current_compliance_a": {
+     "value": 0.01,
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    },
+    "smu_voltage_compliance_v": {
+     "value": 2.0,
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    },
+    "smu_settle_jsc_ms": {
+     "value": 1000.0,
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    },
+    "smu_settle_voc_ms": {
+     "value": 1000.0,
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    },
+    "smu_settle_jsat_ms": {
+     "value": 1000.0,
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    },
+    "smu_nplc": {
+     "value": 1.0,
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    },
+    "smu_averaging": {
+     "value": 10,
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    },
+    "smu_terminals": {
+     "value": "FRON",
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    },
+    "smu_four_wire": {
+     "value": false,
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    }
+   },
+   "needs_operator": false,
+   "relay": "transient",
+   "estimate_s": 4.800000000000001,
+   "detail": {
+    "node_key": "temperature/temperature/bace",
+    "label": "",
+    "title": "bace",
+    "module_kind": "measurement",
+    "status": "built",
+    "led_v": 1.0,
+    "temperature_k": 200.0,
+    "in_illumination": false,
+    "centre_on_voc": false,
+    "voc_needed_by": [],
+    "voc": null,
+    "voc_rejected": null,
+    "shots": 6,
+    "relay_transition": false,
+    "relay_from": "transient"
+   }
+  },
+  {
+   "node_path": "T=250K/T=200K",
+   "kind": "loop-exit",
+   "loop": "temperature",
+   "value": 200,
+   "module": null,
+   "params": {},
+   "needs_operator": false,
+   "relay": null,
+   "estimate_s": 0.0,
+   "detail": {
+    "node_key": "temperature/temperature",
+    "index": 0,
+    "count": 2
+   }
+  },
+  {
+   "node_path": "T=250K/T=180K",
+   "kind": "loop-enter",
+   "loop": "temperature",
+   "value": 180,
+   "module": null,
+   "params": {},
+   "needs_operator": true,
+   "relay": null,
+   "estimate_s": null,
+   "detail": {
+    "node_key": "temperature/temperature",
+    "index": 1,
+    "count": 2,
+    "label": "",
+    "setpoint_k": 180,
+    "settle_s": null,
+    "tolerance_k": 0.2,
+    "hold_s": 10,
+    "timeout_s": 1800.0
+   }
+  },
+  {
+   "node_path": "T=250K/T=180K/bace",
+   "kind": "module",
+   "loop": null,
+   "value": null,
+   "module": "bace",
+   "params": {
+    "axis_name": {
+     "value": "delay_ns",
+     "source": "edited",
+     "detail": "pipeline node"
+    },
+    "axis_start": {
+     "value": 0.0,
+     "source": "edited",
+     "detail": "pipeline node"
+    },
+    "axis_stop": {
+     "value": 100.0,
+     "source": "edited",
+     "detail": "pipeline node"
+    },
+    "axis_step": {
+     "value": 50.0,
+     "source": "edited",
+     "detail": "pipeline node"
+    },
+    "centre_on_voc": {
+     "value": false,
+     "source": "edited",
+     "detail": "pipeline node"
+    },
+    "vpre": {
+     "value": 1.0,
+     "source": "edited",
+     "detail": "pipeline node"
+    },
+    "vcoll": {
+     "value": -2.0,
+     "source": "edited",
+     "detail": "pipeline node"
+    },
+    "delay_ns": {
+     "value": 90.0,
+     "source": "run.toml",
+     "detail": "run.toml [pinned]"
+    },
+    "vpre_on_voc": {
+     "value": false,
+     "source": "default",
+     "detail": ""
+    },
+    "n_loops": {
+     "value": 2,
+     "source": "edited",
+     "detail": "pipeline node"
+    },
+    "led_v": {
+     "value": 1.0,
+     "source": "run.toml",
+     "detail": "run.toml [illumination]"
+    },
+    "led_low_v": {
+     "value": 0.4,
+     "source": "run.toml",
+     "detail": "run.toml [illumination]"
+    },
+    "voc": {
+     "value": null,
+     "source": "default",
+     "detail": ""
+    },
+    "measure_dc": {
+     "value": false,
+     "source": "default",
+     "detail": ""
+    },
+    "v_sat": {
+     "value": -1.0,
+     "source": "run.toml",
+     "detail": "run.toml [illumination]"
+    },
+    "led_settle_s": {
+     "value": 2.0,
+     "source": "default",
+     "detail": ""
+    },
+    "led_settle_max_s": {
+     "value": 60.0,
+     "source": "default",
+     "detail": ""
+    },
+    "led_settle_tolerance": {
+     "value": 0.02,
+     "source": "default",
+     "detail": ""
+    },
+    "n_averages": {
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "timebase_ns_per_div": {
+     "value": 200.0,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "record_length": {
+     "value": 5000,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "t0_int_s": {
+     "value": 1.205e-07,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "t0_int_reference": {
+     "value": "trigger",
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "output_polarity": {
+     "value": "NORM",
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "pulse_width_ns": {
+     "value": 5000.0,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "pulse_frequency_hz": {
+     "value": 500.0,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "duty_percent": {
+     "value": 50.0,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "offset_correct": {
+     "value": true,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "invert_polarity": {
+     "value": true,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "inverted_output": {
+     "value": false,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "settle_s": {
+     "value": 0.3,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "dark_settle_s": {
+     "value": 0.3,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "dark_reference": {
+     "value": "translated",
+     "source": "default",
+     "detail": ""
+    },
+    "shutter_settle_s": {
+     "value": 5.0,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "read_intensity": {
+     "value": true,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "acquisition_timeout_s": {
+     "value": 30.0,
+     "source": "default",
+     "detail": ""
+    },
+    "external_trigger": {
+     "value": true,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "trigger_slope_positive": {
+     "value": true,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "trigger_sweep": {
+     "value": "AUTO",
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "calibrate_trigger": {
+     "value": true,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "store_shots": {
+     "value": false,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
+    },
+    "smu_current_compliance_a": {
+     "value": 0.01,
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    },
+    "smu_voltage_compliance_v": {
+     "value": 2.0,
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    },
+    "smu_settle_jsc_ms": {
+     "value": 1000.0,
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    },
+    "smu_settle_voc_ms": {
+     "value": 1000.0,
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    },
+    "smu_settle_jsat_ms": {
+     "value": 1000.0,
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    },
+    "smu_nplc": {
+     "value": 1.0,
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    },
+    "smu_averaging": {
+     "value": 10,
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    },
+    "smu_terminals": {
+     "value": "FRON",
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    },
+    "smu_four_wire": {
+     "value": false,
+     "source": "run.toml",
+     "detail": "run.toml [sourcemeter]"
+    }
+   },
+   "needs_operator": false,
+   "relay": "transient",
+   "estimate_s": 4.800000000000001,
+   "detail": {
+    "node_key": "temperature/temperature/bace",
+    "label": "",
+    "title": "bace",
+    "module_kind": "measurement",
+    "status": "built",
+    "led_v": 1.0,
+    "temperature_k": 180.0,
+    "in_illumination": false,
+    "centre_on_voc": false,
+    "voc_needed_by": [],
+    "voc": null,
+    "voc_rejected": null,
+    "shots": 6,
+    "relay_transition": false,
+    "relay_from": "transient"
+   }
+  },
+  {
+   "node_path": "T=250K/T=180K",
+   "kind": "loop-exit",
+   "loop": "temperature",
+   "value": 180,
+   "module": null,
+   "params": {},
+   "needs_operator": false,
+   "relay": null,
+   "estimate_s": 0.0,
+   "detail": {
+    "node_key": "temperature/temperature",
+    "index": 1,
+    "count": 2
+   }
+  },
+  {
+   "node_path": "T=250K/wait",
    "kind": "module",
    "loop": null,
    "value": null,
@@ -1531,13 +2168,13 @@
    "relay": null,
    "estimate_s": 1.0,
    "detail": {
-    "node_key": "repeat/wait",
+    "node_key": "temperature/wait",
     "label": "",
     "title": "wait",
     "module_kind": "utility",
     "status": "built",
     "led_v": null,
-    "temperature_k": null,
+    "temperature_k": 250.0,
     "in_illumination": false,
     "centre_on_voc": false,
     "voc_needed_by": [],
@@ -1547,75 +2184,95 @@
    }
   },
   {
-   "node_path": "rep=2",
+   "node_path": "T=250K",
    "kind": "loop-exit",
-   "loop": "repeat",
-   "value": 2,
+   "loop": "temperature",
+   "value": 250,
    "module": null,
    "params": {},
    "needs_operator": false,
    "relay": null,
    "estimate_s": 0.0,
    "detail": {
-    "node_key": "repeat",
+    "node_key": "temperature",
     "index": 1,
     "count": 2
    }
   }
  ],
  "counters": {
-  "temperatures": 0,
+  "temperatures": 4,
   "levels": 0,
   "modules": 8,
-  "shots": 18
+  "shots": 30
  },
  "cost": {
-  "total_s": 136.4,
-  "measuring_s": 136.4,
-  "waiting_s": 0.0,
-  "per_temperature": [],
-  "lower_bound": false,
-  "finish_at": 1788485467.31305,
+  "total_s": 126.0,
+  "measuring_s": 26.000000000000004,
+  "waiting_s": null,
+  "per_temperature": [
+   {
+    "setpoint_k": 290,
+    "settle_s": null,
+    "hold_s": 30.0,
+    "measure_s": 13.000000000000002
+   },
+   {
+    "setpoint_k": 200,
+    "settle_s": null,
+    "hold_s": 10.0,
+    "measure_s": 4.800000000000001
+   },
+   {
+    "setpoint_k": 180,
+    "settle_s": null,
+    "hold_s": 10.0,
+    "measure_s": 4.800000000000001
+   },
+   {
+    "setpoint_k": 250,
+    "settle_s": null,
+    "hold_s": 30.0,
+    "measure_s": 13.000000000000002
+   },
+   {
+    "setpoint_k": 200,
+    "settle_s": null,
+    "hold_s": 10.0,
+    "measure_s": 4.800000000000001
+   },
+   {
+    "setpoint_k": 180,
+    "settle_s": null,
+    "hold_s": 10.0,
+    "measure_s": 4.800000000000001
+   }
+  ],
+  "lower_bound": true,
+  "finish_at": null,
   "t_shot_s": 0.8,
   "t_shot_source": "default",
   "unestimated_modules": 0
  },
  "node_paths": [
-  "rep=1/temperature",
-  "rep=1/bace",
-  "rep=1/bace#2",
-  "rep=1/wait",
-  "rep=2/temperature",
-  "rep=2/bace",
-  "rep=2/bace#2",
-  "rep=2/wait"
+  "T=290K/bace",
+  "T=290K/T=200K/bace",
+  "T=290K/T=180K/bace",
+  "T=290K/wait",
+  "T=250K/bace",
+  "T=250K/T=200K/bace",
+  "T=250K/T=180K/bace",
+  "T=250K/wait"
  ],
  "tree": {
   "kind": "loop",
-  "loop": "repeat",
-  "count": 2,
+  "loop": "temperature",
+  "values_k": [
+   290,
+   250
+  ],
+  "hold_s": 30,
   "children": [
-   {
-    "kind": "module",
-    "module": "temperature",
-    "params": {
-     "setpoint_k": 250.0
-    }
-   },
-   {
-    "kind": "module",
-    "module": "bace",
-    "params": {
-     "axis_name": "delay_ns",
-     "axis_start": 0.0,
-     "axis_stop": 100.0,
-     "axis_step": 50.0,
-     "centre_on_voc": false,
-     "n_loops": 2,
-     "vpre": 1.0,
-     "vcoll": -2.0
-    }
-   },
    {
     "kind": "module",
     "module": "bace",
@@ -1631,12 +2288,37 @@
     }
    },
    {
+    "kind": "loop",
+    "loop": "temperature",
+    "values_k": [
+     200,
+     180
+    ],
+    "hold_s": 10,
+    "children": [
+     {
+      "kind": "module",
+      "module": "bace",
+      "params": {
+       "axis_name": "delay_ns",
+       "axis_start": 0.0,
+       "axis_stop": 100.0,
+       "axis_step": 50.0,
+       "centre_on_voc": false,
+       "n_loops": 2,
+       "vpre": 1.0,
+       "vcoll": -2.0
+      }
+     }
+    ]
+   },
+   {
     "kind": "module",
     "module": "wait",
     "params": {}
    }
   ]
  },
- "folder": "runs/ui-fixture-bound",
- "folder_pattern": "runs/ui-fixture-bound_YYYYMMDD_HHMMSS"
+ "folder": "runs/ui-fixture-nested",
+ "folder_pattern": "runs/ui-fixture-nested_YYYYMMDD_HHMMSS"
 }

@@ -85,6 +85,7 @@ shape `GET /runs/{id}/data` answers, because a browser cannot open HDF5.
 | `stream_stopped_sim.jsonl` | a 20-loop scan stopped `after_shot` at loop 13 — 60 requested, 39 kept: the one `RunAborted`, `stopping`, `stopped`, and a node that ended `stopped` in the set |
 | `validate_txill_sim.json` | `POST /pipelines/validate` on the canonical 9 T × 5 level tree — 90 module runs, 198 steps, 4500 shots, and a cost that is a floor because no settle has been measured on this bench. The whole pipeline tab is drawn from one of these |
 | `validate_bound_sim.json` | the same endpoint on the two shapes the canonical tree has none of: a `temperature` **module**, whose setpoint binds the rest of the run, and duplicate sibling modules (`bace`, `bace#2`). Its cost is the counter-case — nothing settles, so nothing is a floor |
+| `validate_nested_sim.json` | a temperature loop **inside** a temperature loop, with a module either side of the inner one. Legal, pathological, and the case the time bar got wrong: `pipeline.estimate` counts every temperature's settle and hold once however deep, and a bar drawn one block per *outer* iteration read 62 s against a cost of 102 s |
 
 Everything with `_sim` in its name came off `--sim`, and says so in its name on
 purpose: a simulated J-V is a plausible-looking curve, and must never be
@@ -220,6 +221,18 @@ Three more things it is careful about:
   elapsed time rather than a clock, and each unmeasured settle is hatched and
   takes no time on it — never the median of the others, when a settle is 14
   minutes to 2 hours.
+* **A control that says it changes how values are written must not change what
+  they are.** A list is switched to a range only when it is evenly spaced: the
+  canonical temperature list steps 5 K once and 10 K after, so as
+  `295 → 220 step 5` it is sixteen temperatures where the list is nine, and
+  the switch refuses with that number in its sentence.
+* **What is on screen while a validate is in flight is a moment old, and says
+  so.** Blanked instead, the schedule read *"no nodes yet"* on a tree with
+  four nodes in it for the third of a second after every commit. `stale` marks
+  the header, the check line and the Start button, which refuses while it is
+  set — the tree rows are the only thing held back, because they match a node
+  to its schedule entries by counting iterations and a mismatched shape would
+  put one node's numbers on another's row.
 
 ### What a scan costs the pipeline tab
 

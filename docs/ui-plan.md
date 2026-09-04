@@ -916,6 +916,41 @@ reset beside it. The catalogue stands in when there is no schedule, with the
 node's own overrides on top and a note saying the loops' bindings are not
 shown.
 
+**A second round found three more**, and the first is the same class as the
+five above — the console silently changing the experiment:
+
+* **A list that is not evenly spaced became a range that runs something
+  else.** The canonical temperature list steps 5 K once and 10 K after, so
+  read as `295 → 220 step 5` it is **sixteen** temperatures where the list is
+  nine. One click, on a control that only claims to change how the values are
+  written. `canSwitchForm` refuses it now and names the cost in its sentence.
+* **The nested schedule did not follow a revalidation of the same tree.** Its
+  key was the node paths and the count, which a Dry run or a bench read-back
+  leaves exactly where they were while `needs_operator`, the settles, the
+  estimates and the shots all move — the 331 coming online would have turned
+  every *waits for the operator* off in the chart and left them on in the
+  rows beside it. Each fold of an answer is stamped, and that is the key.
+* **A temperature loop inside a temperature loop lost its inner blocks.** It
+  is legal, and `pipeline.estimate` handles it (`open_temperatures` is a
+  list), so the bar has to: drawn as one block per outer iteration it kept the
+  outer holds, dropped the four inner ones and attributed the inner modules'
+  time to the outer setpoint — **62 s of bar against a cost of 102 s**. Every
+  module now belongs to the innermost temperature open over it, which is what
+  makes the two totals equal however deep the nesting goes.
+  `validate_nested_sim.json` is the third fixture, and the assertion is the
+  same one the other two carry.
+
+And one more the third uncovered, found by looking at the screen rather than
+at the code: for the third of a second between a commit and its answer the
+right-hand card read **"no nodes yet — add a loop or a module"** on a tree
+with four nodes in it, on every keystroke that committed. The schedule keeps
+describing the previous tree now and says so — `stale` was already on the
+header, on the check line and on the Start button, and could never be seen
+because the thing it marked had been blanked. The tree rows are the exception
+and stay fresh-only: they match a node to its schedule entries by counting
+iterations, so zipped against a schedule for a differently shaped tree they
+would put one node's shots on another node's row.
+
 ### M6 · The results tab
 
 A stub until here. Preceded by a design pass, because R2·3 is a Round 2

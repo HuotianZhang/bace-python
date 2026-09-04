@@ -75,6 +75,9 @@ export const FIXTURES = [
   { key: 'validate-bound', kind: 'validate',
     label: 'sim — validate with a temperature module: the setpoint binds the rest of the run',
     url: 'fixtures/validate_bound_sim.json' },
+  { key: 'validate-nested', kind: 'validate',
+    label: 'sim — validate with a temperature loop inside a temperature loop',
+    url: 'fixtures/validate_nested_sim.json' },
 ];
 
 /** Parse a JSONL body into frames, skipping blank lines. */

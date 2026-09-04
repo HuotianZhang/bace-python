@@ -119,7 +119,7 @@
    "text": "bias and SourceMeter outputs off",
    "node_path": "",
    "data": {
-    "read_at": 1788481021.0004625
+    "read_at": 1788485324.3905623
    }
   },
   {
@@ -235,13 +235,13 @@
    }
   },
   {
-   "level": "info",
+   "level": "ok",
    "code": "chain.stale",
-   "text": "chain read-back is 16 min old; it is re-read at Start",
+   "text": "chain read back 6 s ago",
    "node_path": "",
    "data": {
-    "read_at": 1788481021.0004625,
-    "age_s": 958.4385964870453
+    "read_at": 1788485324.3905623,
+    "age_s": 6.376110315322876
    }
   }
  ],
@@ -523,9 +523,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -982,9 +982,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -1441,9 +1441,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -1900,9 +1900,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -2359,9 +2359,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -2856,9 +2856,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -3315,9 +3315,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -3774,9 +3774,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -4233,9 +4233,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -4692,9 +4692,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -5189,9 +5189,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -5648,9 +5648,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -6107,9 +6107,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -6566,9 +6566,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -7025,9 +7025,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -7522,9 +7522,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -7981,9 +7981,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -8440,9 +8440,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -8899,9 +8899,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -9358,9 +9358,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -9855,9 +9855,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -10314,9 +10314,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -10773,9 +10773,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -11232,9 +11232,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -11691,9 +11691,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -12188,9 +12188,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -12647,9 +12647,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -13106,9 +13106,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -13565,9 +13565,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -14024,9 +14024,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -14521,9 +14521,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -14980,9 +14980,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -15439,9 +15439,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -15898,9 +15898,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -16357,9 +16357,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -16854,9 +16854,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -17313,9 +17313,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -17772,9 +17772,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -18231,9 +18231,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -18690,9 +18690,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -19187,9 +19187,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -19646,9 +19646,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -20105,9 +20105,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -20564,9 +20564,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,
@@ -21023,9 +21023,9 @@
      "detail": ""
     },
     "n_averages": {
-     "value": 3,
-     "source": "edited",
-     "detail": ""
+     "value": 200,
+     "source": "run.toml",
+     "detail": "run.toml [acquisition]"
     },
     "timebase_ns_per_div": {
      "value": 200.0,

@@ -240,8 +240,8 @@ export function setValueForm(tree, path, form, resolved) {
   const node = nodeAt(tree, path);
   const spec = node && LOOPS[node.loop];
   if (!spec || !spec.list) return tree;
+  if (!canSwitchForm(node, resolved, form).ok) return tree;
   const values = loopValues(node, resolved);
-  if (!values || !values.length) return tree;
   return updateAt(tree, path, (n) => {
     const next = { ...n };
     for (const key of [spec.list, ...spec.range]) delete next[key];
@@ -262,10 +262,51 @@ export function setValueForm(tree, path, form, resolved) {
   });
 }
 
-/** Whether `setValueForm` can convert this loop without inventing values. */
-export function canSwitchForm(node, resolved) {
-  const values = node && LOOPS[node.loop] ? loopValues(node, resolved) : null;
-  return Boolean(values && values.length);
+/**
+ * Whether `setValueForm` can convert this loop **without changing what it
+ * runs**, and the sentence for when it cannot.
+ *
+ * Two ways it cannot, and the second is the one that matters:
+ *
+ *   * to a **list**, from a range nothing has expanded yet — only the service
+ *     expands a range, so there are no values anywhere to list;
+ *   * to a **range**, from a list that is not evenly spaced. A range is three
+ *     numbers and a rounding rule, and it cannot say `295, 290, 280 …`: the
+ *     canonical temperature list steps 5 K once and 10 K after, so read as
+ *     `295 → 220 step 5` it is **sixteen** temperatures where the list is
+ *     nine. That is a different experiment, arrived at by one click on a
+ *     control that only claims to change how the values are written.
+ */
+export function canSwitchForm(node, resolved, form = 'list') {
+  const spec = node && LOOPS[node.loop];
+  if (!spec || !spec.list) return { ok: false, why: 'this loop has no value list' };
+  const values = loopValues(node, resolved);
+  if (!values || !values.length) {
+    return {
+      ok: false,
+      why: 'the range has not been checked yet, so there are no values to list. '
+        + 'The service is the only thing that expands a range — try again in a moment.',
+    };
+  }
+  if (form === 'range' && !evenlySpaced(values)) {
+    const rule = Math.abs(values[1] - values[0]);
+    const would = Math.round(Math.abs(values[values.length - 1] - values[0]) / rule) + 1;
+    return {
+      ok: false,
+      why: `these ${values.length} values are not evenly spaced, and a range can only say `
+        + `one spacing: ${fmtNum(values[0], spec.decimals)} → `
+        + `${fmtNum(values[values.length - 1], spec.decimals)} step `
+        + `${fmtNum(rule, spec.decimals)} would run ${would}. Keep the list.`,
+    };
+  }
+  return { ok: true, why: '' };
+}
+
+/** Every gap the same, to the nine decimals the service rounds its own to. */
+function evenlySpaced(values) {
+  if (values.length < 3) return true;
+  const first = values[1] - values[0];
+  return values.every((v, i) => i === 0 || Math.abs((v - values[i - 1]) - first) < 1e-9);
 }
 
 /** Which form a loop's values are typed in — the range wins if any of it is set. */
@@ -559,14 +600,16 @@ export function scheduleLeaves(nodes, out = []) {
  */
 export function timeline(nodes) {
   const out = [];
-  /** Measuring that is not under any temperature loop, until one appears. */
-  let carry = null;
   /**
-   * A stretch of measuring that is not inside a temperature loop. `settles`
-   * is false and that is the whole point: its `settle_s` is null because
-   * there is no cryostat settle here at all, not because nobody has measured
-   * one, and the bar must not hatch it as an unknown.
+   * `carry` is measuring that is not inside any temperature loop; `current`
+   * is the innermost temperature block open right now. Every module's time
+   * goes to one of the two — never to both, and never to none — which is
+   * what makes the bar total exactly what the cost totals: `pipeline.
+   * estimate` adds a module once to `measuring` and its temperature's settle
+   * and hold once to `waiting`, however deep the nesting goes.
    */
+  let carry = null;
+  let current = null;
   const blank = () => ({
     node_path: '', setpoint_k: null, settles: false, settle_s: null, hold_s: null,
     measure_s: 0, modules: 0, shots: 0, needs_operator: false,
@@ -575,41 +618,60 @@ export function timeline(nodes) {
     if (carry && (carry.measure_s > 0 || carry.modules)) out.push(carry);
     carry = null;
   };
+  const into = () => {
+    if (current) return current;
+    carry = carry || blank();
+    return carry;
+  };
 
   const visit = (list) => {
     for (const node of list) {
       if (node.kind === 'module') {
-        carry = carry || blank();
-        carry.measure_s += node.estimate_s || 0;
-        carry.modules += 1;
-        carry.shots += node.shots || 0;
-        carry.needs_operator = carry.needs_operator || node.needs_operator;
+        const block = into();
+        block.measure_s += node.estimate_s || 0;
+        block.modules += 1;
+        block.shots += node.shots || 0;
+        block.needs_operator = block.needs_operator || node.needs_operator;
         // Whatever the cryostat is at while this runs — a `temperature`
-        // module's binding, where there is one.
-        if (node.temperature && node.temperature.k !== null && node.temperature.k !== undefined) {
-          carry.setpoint_k = node.temperature.k;
+        // module's binding, where there is one and no loop has said already.
+        if (!current && node.temperature && node.temperature.k !== null
+            && node.temperature.k !== undefined) {
+          block.setpoint_k = node.temperature.k;
         }
         continue;
       }
       if (node.loop === 'temperature') {
-        // A temperature iteration is a block of its own: settle, hold, then
-        // everything measured inside it. Whatever was accumulating before it
-        // is a block too — it happened, and at a different temperature.
+        // A temperature iteration is a block of its own: settle, hold, and
+        // what is measured at *this* temperature. Whatever was accumulating
+        // outside one is a block too — it happened, at another temperature.
+        //
+        // Nested inside another temperature loop, which is legal and which
+        // the cost model handles (`open_temperatures` is a list), the inner
+        // iterations get their own blocks and the outer keeps only what runs
+        // directly under it. Drawn as one block instead, the canonical
+        // nested case lost 40 s of inner holds and the bar read 62 s against
+        // a cost of 102. The bar's *order* is approximate there — a module
+        // after an inner loop is drawn inside the outer block, which sits
+        // before it — and its total is exact, which is the property the
+        // number beside it has to have.
         flush();
-        out.push({
+        const block = {
           node_path: node.node_path, setpoint_k: node.value, settles: true,
           settle_s: node.settle_s, hold_s: node.detail.hold_s ?? null,
-          measure_s: node.measure_s, modules: node.modules, shots: node.shots,
-          needs_operator: node.needs_operator,
-        });
+          measure_s: 0, modules: 0, shots: 0, needs_operator: node.needs_operator,
+        };
+        out.push(block);
+        const enclosing = current;
+        current = block;
+        visit(node.children);
+        // Back to the enclosing temperature, exactly as the cost model pops
+        // `open_temperatures` at a loop exit.
+        current = enclosing;
         continue;
       }
-      // Any other loop outside a temperature: its own settle is measuring
-      // (the cost model counts an illumination level's), then its children.
-      if (node.loop === 'illumination') {
-        carry = carry || blank();
-        carry.measure_s += node.estimate_s || 0;
-      }
+      // Any other loop: its own settle is measuring (the cost model counts an
+      // illumination level's), then its children.
+      if (node.loop === 'illumination') into().measure_s += node.estimate_s || 0;
       visit(node.children);
     }
   };

@@ -182,22 +182,47 @@ export default {
      * (`change` and `revalidate`) and never edited in place.
      */
     let memo = null;
+    /** Stamped on each fold, so a renderer can key on "this answer". */
+    let folds = 0;
 
     function derived() {
       if (memo && memo.typed === typed && memo.answer === answer) return memo;
+      folds += 1;
       const fresh = Boolean(answer) && tree.sameTree(typed, answered);
-      const nodes = tree.scheduleTree((fresh && answer.schedule) || []);
+      /**
+       * **The schedule keeps describing the previous tree while the next
+       * answer is on the wire, and says so.**
+       *
+       * Blanked instead — which is what the first cut did, for the ~350 ms
+       * between a commit and its answer — the right-hand card read *"no nodes
+       * yet — add a loop or a module"* on a tree with four nodes in it, on
+       * every keystroke that committed. A screen saying something false is
+       * worse than one saying something a moment old, and `stale` is already
+       * on the header, on the check line and on the Start button, which
+       * refuses while it is set.
+       *
+       * The **tree rows** are the exception and stay fresh-only: they match a
+       * node to its schedule entries by counting iterations, so zipped
+       * against a schedule for a tree with a different shape they would put
+       * one node's shots on another node's row. An absent tag for a third of
+       * a second is the right cost for that.
+       */
+      const nodes = tree.scheduleTree((answer && answer.schedule) || []);
       memo = {
+        id: folds,
         typed,
         answer,
         fresh,
+        /** The answer, only while it still describes what is on screen. */
         answered: fresh ? answer : null,
+        /** The answer as drawn — a moment old while a validate is in flight. */
+        shown: answer,
         stale: Boolean(answer) && !fresh,
         nodes,
-        rows: typed ? tree.treeRows(typed, fresh ? answer.tree : null, nodes) : [],
-        checks: tree.checkSummary((fresh && answer.checks) || []),
-        cost: tree.costModel(fresh && answer.cost),
-        counters: (fresh && answer.counters) || {},
+        rows: typed && fresh ? tree.treeRows(typed, answer.tree, nodes) : (typed ? tree.treeRows(typed) : []),
+        checks: tree.checkSummary((answer && answer.checks) || []),
+        cost: tree.costModel(answer && answer.cost),
+        counters: (answer && answer.counters) || {},
         blocks: tree.timeline(nodes),
         grid: tree.gridModel(nodes),
         leaves: tree.scheduleLeaves(nodes),
@@ -452,18 +477,18 @@ export default {
     }
 
     /**
-     * Switch how a loop's values are written — and refuse rather than lose
-     * them. Only the service expands a range into levels, so a range typed a
-     * moment ago and not yet validated has no list anywhere; converting it
-     * would mean inventing one, and the honest answer is to say so and wait
-     * the quarter-second out.
+     * Switch how a loop's values are written — and refuse rather than change
+     * what it runs. `tree.canSwitchForm` owns both refusals and both
+     * sentences: a range nothing has expanded yet has no values to list, and
+     * a list that is not evenly spaced cannot be a range without becoming a
+     * different sweep.
      */
     function switchForm(form, row) {
       const node = tree.nodeAt(typed, selected);
       const resolved = row && row.resolved;
-      if (!tree.canSwitchForm(node, resolved)) {
-        notify('the range has not been checked yet, so there are no values to list. '
-          + 'The service is the only thing that expands a range — try again in a moment.', 'warn');
+      const can = tree.canSwitchForm(node, resolved, form);
+      if (!can.ok) {
+        notify(can.why, 'warn');
         return;
       }
       change(tree.setValueForm(typed, selected, form, resolved));
@@ -879,14 +904,20 @@ export default {
       keyed(chartEl, JSON.stringify([v.blocks, v.cost]),
         () => chart(scheduleModel({ blocks: v.blocks, cost: v.cost })));
 
-      keyed(stepsEl, JSON.stringify([v.nodes.length, [...expanded].sort(), showFlat,
-        v.nodes.map((n) => n.node_path)]), () => {
+      // Keyed on the *answer*, not on the shape of it. Revalidating the same
+      // tree — a Dry run, or a bench read-back — leaves the node paths and
+      // the count exactly where they were while `needs_operator`, the settle
+      // times, the estimates and the shots all move: the 331 coming online
+      // turns every `waits for the operator` off, and a key built from paths
+      // would have kept them on screen beside a chart that had already
+      // dropped them. `derived()` stamps each answer it folds.
+      keyed(stepsEl, JSON.stringify([v.id, [...expanded].sort(), showFlat]), () => {
         if (!v.nodes.length) return h('p.absent', 'nothing scheduled yet.');
         return [
           h('div.schedbar',
             h('span.cs', {
               text: showFlat
-                ? `every step, in order — ${((v.answer && v.answer.schedule) || []).length}, loop boundaries included`
+                ? `every step, in order — ${((v.shown && v.shown.schedule) || []).length}, loop boundaries included`
                 : 'three scales — expand a temperature for its levels, a level for its modules',
             }),
             h('span', { style: { flex: '1' } }),
@@ -915,7 +946,7 @@ export default {
         ];
       });
 
-      const folder = v.answer && v.answer.folder_pattern;
+      const folder = v.shown && v.shown.folder_pattern;
       keyed(folderEl, JSON.stringify([folder, v.counters.modules]), () => (folder
         ? `writes ${v.counters.modules || 0} folders under ${folder}/ — the stamp is taken at Start, `
           + 'so a Dry run cannot name it. A run that stops early says kept of requested.'
@@ -977,7 +1008,7 @@ export default {
      * exactly what an operator opens this view to look at.
      */
     function flatSteps(v) {
-      const steps = (v.answer && v.answer.schedule) || [];
+      const steps = (v.shown && v.shown.schedule) || [];
       return h('div.flatsteps', steps.map((step, i) => h('div.fs' + (step.kind === 'module' ? '.mod' : ''),
         h('span.i', { text: String(i + 1) }),
         h('span.k', { text: step.kind === 'loop-enter' ? 'enter' : step.kind === 'loop-exit' ? 'exit' : 'run' }),

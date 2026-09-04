@@ -192,6 +192,29 @@ def test_the_bound_fixture_is_what_the_canonical_tree_has_none_of():
     assert v["cost"]["finish_at"] is not None
 
 
+def test_the_nested_fixture_is_a_temperature_loop_inside_a_temperature_loop():
+    """Legal, pathological, and the case the console's time bar got wrong.
+
+    `pipeline.estimate` keeps `open_temperatures` as a *list*: a module's time
+    is attributed to every temperature it is inside, and each temperature's
+    own settle and hold are counted once. So the total covers the inner holds
+    -- and a bar that drew one block per outer iteration lost them, reading
+    62 s against a cost of 102 s. `ui/tests/tree.test.mjs` asserts the bar
+    totals this file's `cost.total_s`.
+    """
+    v = _fixture("validate_nested_sim.json")
+    assert v["valid"] is True
+    enters = [s for s in v["schedule"] if s["kind"] == "loop-enter"]
+    assert [s["node_path"] for s in enters] == [
+        "T=290K", "T=290K/T=200K", "T=290K/T=180K",
+        "T=250K", "T=250K/T=200K", "T=250K/T=180K",
+    ]
+    assert v["counters"]["temperatures"] == 4, "two values in each of the two loops"
+    assert len(v["cost"]["per_temperature"]) == 6, "one per iteration, inner ones included"
+    holds = sum(t["hold_s"] for t in v["cost"]["per_temperature"])
+    assert holds == 2 * 30 + 4 * 10, "the inner holds are in the cost, so they must be in the bar"
+
+
 def test_the_journals_have_no_seq_gaps():
     """`docs/ui-kickoff.md` says these carry "real seq gaps". They do not.
 

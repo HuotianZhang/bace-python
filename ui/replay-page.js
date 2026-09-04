@@ -155,7 +155,7 @@ function renderCharts() {
     state.bench ? state.bench.read_at : 'no-bench',
     shot ? `${shot.node_path}:${shot.loop}:${shot.index}:${shot.ts}` : 'no-shot',
     payloads.transient ? 'rig-transient' : '-',
-    ['validate-txill', 'validate-bound'].filter((k) => payloads[k]).join(','),
+    ['validate-txill', 'validate-bound', 'validate-nested'].filter((k) => payloads[k]).join(','),
     `curves:${curves.length}`,
     bace ? `${bace.node.shots.length}:${bace.node.loops.length}:${bace.node.outcome || ''}:${bace.record.state || ''}` : 'no-node',
   ].join('|');
@@ -193,11 +193,11 @@ function renderCharts() {
       h('p.chart-note', 'a settle nobody has measured is hatched and takes no time on the axis, '
         + 'and there is no clock under a total that is a floor — `cost.finish_at` is null exactly '
         + 'when `lower_bound` is set'),
-      ...['validate-txill', 'validate-bound'].filter((k) => payloads[k]).map((k) => chart(scheduleModel({
+      ...['validate-txill', 'validate-bound', 'validate-nested'].filter((k) => payloads[k]).map((k) => chart(scheduleModel({
         blocks: timeline(scheduleTree(payloads[k].schedule)),
         cost: costModel(payloads[k].cost),
       }))),
-      payloads['validate-txill'] || payloads['validate-bound']
+      payloads['validate-txill'] || payloads['validate-bound'] || payloads['validate-nested']
         ? null : h('p.absent', 'load a validate fixture for the schedule bar'),
     ];
   });

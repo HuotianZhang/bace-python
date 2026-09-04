@@ -27,6 +27,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const load = (name) => JSON.parse(fs.readFileSync(path.join(here, '..', 'fixtures', name), 'utf8'));
 const TXILL = load('validate_txill_sim.json');
 const BOUND = load('validate_bound_sim.json');
+const NESTED = load('validate_nested_sim.json');
 
 /** The canonical tree, as `docs/service-contract.md` §7 spells it. */
 const canonical = () => ({
@@ -235,17 +236,43 @@ test('a form switch never invents values, and never loses the ones typed', () =>
   // some up; the first cut made an empty list, which lost the operator's
   // sweep on a click meant to change how it is written.
   const fresh = canonical();
-  assert.equal(canSwitchForm(nodeAt(fresh, [0]), null), false, 'a range with no answer');
+  assert.equal(canSwitchForm(nodeAt(fresh, [0]), null, 'list').ok, false, 'a range with no answer');
+  assert.match(canSwitchForm(nodeAt(fresh, [0]), null, 'list').why, /has not been checked yet/);
   assert.equal(setValueForm(fresh, [0], 'list', null), fresh, 'so the tree is left alone');
 
-  // The other direction needs nothing from the service: a typed list is its
-  // own answer (`pipeline._loop_values` returns it unchanged).
-  assert.equal(canSwitchForm(nodeAt(fresh, []), null), true);
-  const asRange = setValueForm(fresh, [], 'range', null);
-  assert.equal(asRange.start_k, 295);
-  assert.equal(asRange.stop_k, 220);
-  assert.equal(asRange.step_k, 5);
-  assert.ok(!('values_k' in asRange));
+  // With the answer in hand it converts, and to the levels the service made.
+  const resolved = TXILL.tree.children[0];
+  assert.equal(canSwitchForm(nodeAt(fresh, [0]), resolved, 'list').ok, true);
+  const asList = setValueForm(fresh, [0], 'list', resolved);
+  assert.deepEqual(nodeAt(asList, [0]).levels_v, [1.01, 1.015, 1.02, 1.025, 1.03]);
+  assert.ok(!('led_start_v' in nodeAt(asList, [0])), 'and the range that made them is gone');
+
+  // And back, because those five *are* evenly spaced.
+  const back = setValueForm(asList, [0], 'range', null);
+  assert.equal(nodeAt(back, [0]).led_start_v, 1.01);
+  assert.equal(nodeAt(back, [0]).led_stop_v, 1.03);
+  assert.ok(Math.abs(nodeAt(back, [0]).led_step_v - 0.005) < 1e-9,
+    'the step is read off the values, never invented');
+});
+
+test('a list that is not evenly spaced cannot become a range, because that is a different sweep', () => {
+  // The canonical temperature list steps 5 K once and 10 K after. Read as
+  // `295 → 220 step 5` it is sixteen temperatures where the list is nine —
+  // a different experiment, one click away, on a control that only claims to
+  // change how the values are written.
+  const node = canonical();
+  const can = canSwitchForm(node, null, 'range');
+  assert.equal(can.ok, false);
+  assert.match(can.why, /not evenly spaced/);
+  assert.match(can.why, /would run 16/);
+  assert.match(can.why, /Keep the list/);
+  assert.equal(setValueForm(node, [], 'range', null), node, 'and the list is untouched');
+
+  // An evenly spaced list converts, and a list of one or two always can.
+  const even = setField(canonical(), [], 'values_k', [295, 290, 285]);
+  assert.equal(canSwitchForm(even, null, 'range').ok, true);
+  assert.equal(canSwitchForm(setField(even, [], 'values_k', [295]), null, 'range').ok, true);
+  assert.equal(canSwitchForm(setField(even, [], 'values_k', [295, 220]), null, 'range').ok, true);
 });
 
 test('a typed list is authoritative over an answer describing the list before it', () => {
@@ -311,12 +338,28 @@ test('the time bar totals exactly what the cost totals', () => {
   // The bar and the number under it are the same run. Measured once at 90 s
   // apart, because the cost counts an illumination level's settle as
   // measuring and the first version of the walk did not.
-  for (const fixture of [TXILL, BOUND]) {
+  for (const fixture of [TXILL, BOUND, NESTED]) {
     const blocks = timeline(scheduleTree(fixture.schedule));
     const total = blocks.reduce((sum, b) => sum + (b.settle_s || 0) + (b.hold_s || 0) + b.measure_s, 0);
     assert.ok(Math.abs(total - fixture.cost.total_s) < 1e-6,
       `${total} vs ${fixture.cost.total_s}`);
   }
+});
+
+test('a temperature loop inside another gets its own blocks, and the total still holds', () => {
+  // Legal, and the cost model handles it (`open_temperatures` is a list), so
+  // the bar has to. Drawn as one block per *outer* iteration it kept the
+  // outer holds and dropped the inner ones: 62 s of bar against a cost of
+  // 102 s, with the inner modules' time attributed to the outer setpoint.
+  const blocks = timeline(scheduleTree(NESTED.schedule));
+  assert.deepEqual(blocks.map((b) => b.setpoint_k), [290, 200, 180, 250, 200, 180],
+    'two outer iterations, each with its own two inner ones');
+  assert.deepEqual(blocks.map((b) => b.hold_s), [30, 10, 10, 30, 10, 10]);
+  // Every module is counted once, by the innermost temperature it is inside.
+  assert.deepEqual(blocks.map((b) => b.modules), [2, 1, 1, 2, 1, 1]);
+  assert.equal(blocks.reduce((n, b) => n + b.modules, 0), NESTED.counters.modules);
+  const total = blocks.reduce((sum, b) => sum + (b.settle_s || 0) + (b.hold_s || 0) + b.measure_s, 0);
+  assert.ok(Math.abs(total - NESTED.cost.total_s) < 1e-6, `${total} vs ${NESTED.cost.total_s}`);
 });
 
 test('the timeline is one block per temperature, or one block for a run without any', () => {
