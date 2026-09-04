@@ -451,9 +451,11 @@ export default {
         rows.push(h('div.pf.range',
           h('span.l', 'values'),
           h('span.v.rng',
-            h('span.seg',
-              ...['list', 'range'].map((f) => h('span.sego', {
+            h('span.seg', { role: 'group', 'aria-label': 'values as' },
+              ...['list', 'range'].map((f) => h('button.opt', {
+                type: 'button',
                 class: form === f ? 'on' : '',
+                'aria-pressed': form === f ? 'true' : 'false',
                 onclick: () => switchForm(f, row),
               }, f))),
             form === 'list' ? listInput(node, spec) : null,

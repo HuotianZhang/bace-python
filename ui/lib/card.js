@@ -39,6 +39,7 @@ export function moduleCard(entry, ctx, open) {
   const form = [
     h('div.pr', model.above.map((row) => renderRow(row, model, ctx))),
     model.readback ? readback(model.readback) : null,
+    provSummary(model),
     needsList(model),
     fold(model, ctx, open),
     blocked.length ? blockedNote(blocked) : null,
@@ -58,7 +59,11 @@ export function moduleCard(entry, ctx, open) {
 function header(model, ctx, busy, blocked) {
   const buttons = [];
   for (const action of model.actions) {
-    buttons.push(h('button.btns', {
+    // `led-off` is the one action on this card that makes the bench safe, and
+    // it looked exactly like `Pulse`, which drives the lamp. §3's loudness is
+    // for meaning: this one is not another verb in the row.
+    const danger = action.action === 'led-off';
+    buttons.push(h('button' + (danger ? '.btnd' : '.btns'), {
       disabled: busy || null,
       title: busy ? 'a run holds the worker; every action but park answers 409'
         : `POST /bench/actions/${action.action}`,
@@ -67,7 +72,11 @@ function header(model, ctx, busy, blocked) {
   }
   for (const [i, run] of model.run.entries()) {
     const last = i === model.run.length - 1;
-    buttons.push(h(last ? 'button.btnp' : 'button.btns', {
+    // Temperature settles in 14 min – 2 h (§5) and "must not look like a step
+    // that runs". A red primary, the same button `Scan` uses, is exactly that.
+    const slow = SLOW_RUN.has(model.name);
+    const plain = slow || PLAIN_RUN.has(model.name);
+    buttons.push(h(last && !plain ? 'button.btnp' : slow ? 'button.btnw' : 'button.btns', {
       disabled: busy || blocked.length > 0 || null,
       title: blocked.length ? blocked.map((c) => `${c.level}: ${c.text}`).join('\n') : model.estimate,
       onclick: () => ctx.run(model, run),
@@ -76,11 +85,62 @@ function header(model, ctx, busy, blocked) {
   return h('div.ch',
     h('span.cn', { text: model.name }),
     model.status !== 'built' ? h('span.tag.nb', { text: model.status }) : null,
-    h('span.cs', { text: model.estimate }),
+    h('span.cs', { text: subtitle(model) }),
     model.chips.map((text) => h('span.tag.cost', { text })),
     lastTag(model.last),
     h('span', { style: { flex: '1' } }),
     buttons);
+}
+
+/** A run whose iteration is minutes to hours, not seconds (`ui-rules` §5). */
+const SLOW_RUN = new Set(['temperature']);
+
+/** A run that reads and touches nothing: it does not want the primary. */
+const PLAIN_RUN = new Set(['power']);
+
+/**
+ * What the card costs. A card with actions and no run does not cost a run at
+ * all — and the service's `nothing to set` read as a contradiction over six
+ * editable fields the buttons beside it send.
+ */
+function subtitle(model) {
+  if (!model.run.length && model.actions.length) return 'acts now · no run, no files';
+  return model.estimate;
+}
+
+/** Every parameter drawn above the fold, whatever row shape carried it. */
+function aboveSpecs(model) {
+  const out = [];
+  for (const row of model.above) {
+    if (row.kind === 'range') out.push(row.start, row.stop, row.step);
+    else if (row.kind === 'voc') out.push(row.voc, row.led);
+    else if (row.kind === 'polarity') out.push(row.mode, row.fallback);
+    else if (row.spec) out.push(row.spec);
+  }
+  return out.filter(Boolean);
+}
+
+/**
+ * The quiet provenance, once. Twenty rows saying `run.toml` is twenty
+ * repetitions of "normal"; the count is the whole of what it was telling you,
+ * and the rows that are a statement still carry their own tag.
+ */
+function provSummary(model) {
+  const specs = aboveSpecs(model);
+  if (!specs.length) return null;
+  const counted = new Map();
+  for (const spec of specs) {
+    if (!QUIET_SOURCES.has(spec.source)) continue;
+    counted.set(spec.source, (counted.get(spec.source) || 0) + 1);
+  }
+  if (!counted.size) return null;
+  // Each quiet source with its count; the rows that are a statement (typed,
+  // a loop's, measured) keep their own tag and are not counted as "the rest".
+  const order = ['run.toml', 'last-used', 'default'];
+  const text = order.filter((k) => counted.has(k))
+    .map((k) => (k === 'default' ? `${counted.get(k)} default${counted.get(k) === 1 ? '' : 's'}` : `${counted.get(k)} from ${k}`))
+    .join(' · ');
+  return h('div.provsum', { text });
 }
 
 function lastTag(last) {
@@ -123,20 +183,53 @@ export function field(spec, ctx, model, { segmented = false, accent = false } = 
   if (accent) cls.push('acc');
 
   const commit = (value) => ctx.edit(model.name, { [spec.name]: value });
-  return h('div.' + cls.join('.'), help(spec),
-    h('span.l', { text: spec.name }, spec.unit ? h('i', { text: spec.unit }) : null),
+  return h('div.pw', h('div.' + cls.join('.'), help(spec),
+    label(spec, ctx, model),
     editable ? input(spec, commit, segmented) : h('span.v', { text: display(spec) }),
-    provenance(spec, ctx, model, editable));
+    provenance(spec, ctx, model, editable)), docLine(spec, ctx, model));
 }
 
 /** The value as text, for a field the operator may not type into. */
 function display(spec) {
   if (spec.value === null || spec.value === undefined) return fmt.ABSENT;
   if (spec.type === 'bool') return spec.value ? 'true' : 'false';
-  return String(spec.value);
+  return typed(spec);
 }
 
-function input(spec, commit, segmented) {
+/**
+ * The value as the operator should read it, which is not always as JSON sent
+ * it. `ui-rules` §2: significant figures carry meaning, because they are what
+ * the measurement resolves — so a level reads `1.000` where the rail beside it
+ * reads `1.000 V`, and `0.4` and `1` do not sit in one column as `0.4` and
+ * `1`. Volts to 3, V_oc to 4 (§2), everything else as it came: only the
+ * quantities whose resolution is known are given a width.
+ */
+function typed(spec) {
+  const v = spec.value;
+  if (typeof v !== 'number' || !Number.isFinite(v)) return String(v);
+  if (spec.name === 'voc') return v.toFixed(4);
+  if (spec.unit === 'V') return v.toFixed(3);
+  return String(v);
+}
+
+/**
+ * The choosers are `<button>`s, not clickable spans.
+ *
+ * A span with an `onclick` cannot be tabbed to, has no role, and is invisible
+ * to a screen reader — and these are the polarity, the shutter and the LED
+ * mode, which is not a set of controls to leave mouse-only. `aria-pressed`
+ * carries the selection, which is what the dark chip says visually.
+ */
+function option(label, on, commit) {
+  return h('button.opt', {
+    type: 'button',
+    class: on ? 'on' : '',
+    'aria-pressed': on ? 'true' : 'false',
+    onclick: () => commit(),
+  }, label);
+}
+
+function input(spec, commit, segmented, { blank = false } = {}) {
   // **Not editable is not an input, wherever the value is drawn.** `field`
   // branches on this too, but the composite rows — the range, the V_oc row's
   // `led_v`, the polarity pair — reach `input` directly, and the pipeline
@@ -148,25 +241,22 @@ function input(spec, commit, segmented) {
   // reads as inherited, showing the value it will get.
   if (spec.editable === false) return h('span.v', { text: display(spec) });
   if (spec.type === 'bool') {
-    return h('span.bool',
-      ...[true, false].map((v) => h('span', {
-        class: spec.value === v ? 'on' : '',
-        onclick: () => commit(v),
-      }, v ? 'true' : 'false')));
+    return h('span.bool', { role: 'group', 'aria-label': spec.name },
+      ...[true, false].map((v) => option(v ? 'true' : 'false', spec.value === v, () => commit(v))));
   }
   if (spec.type === 'enum' && segmented) {
-    return h('span.seg', ...spec.choices.map((choice) => h('span.sego', {
-      class: spec.value === choice ? 'on' : '',
-      onclick: () => commit(choice),
-    }, choice)));
+    return h('span.seg', { role: 'group', 'aria-label': spec.name },
+      ...spec.choices.map((choice) => option(choice, spec.value === choice, () => commit(choice))));
   }
   if (spec.type === 'enum') {
-    return h('select.v', { onchange: (e) => commit(e.target.value) },
+    return h('select.v', { 'aria-label': spec.name, onchange: (e) => commit(e.target.value) },
       ...spec.choices.map((choice) => h('option', { value: choice, selected: spec.value === choice || null }, choice)));
   }
   const el = h('input.v', {
     type: 'text',
-    value: spec.value === null || spec.value === undefined ? '' : String(spec.value),
+    class: blank ? 'blank' : '',
+    'aria-label': spec.name,
+    value: spec.value === null || spec.value === undefined ? '' : typed(spec),
     onchange: (e) => {
       const raw = e.target.value.trim();
       // An emptied nullable field is `PUT null`, which is the reset: the
@@ -183,8 +273,17 @@ function input(spec, commit, segmented) {
  * `ui-rules` §6: this is rendered, never re-derived, and the reset is a `PUT`
  * of `null` rather than a locally remembered previous value.
  */
+/**
+ * The sources that are not a statement. `run.toml` is where most values come
+ * from, so a boxed tag on every row was twenty repetitions of "normal" — and
+ * the answer of making it nearly the paper's own colour left an illegible tag
+ * still holding a column. It is counted once per card instead
+ * (`provSummary`), and only the three that *say* something keep a tag.
+ */
+const QUIET_SOURCES = new Set(['default', 'run.toml', 'last-used']);
+
 function provenance(spec, ctx, model, editable) {
-  const label = spec.source === 'default' ? '' : spec.source;
+  const label = QUIET_SOURCES.has(spec.source) ? '' : spec.source;
   // Who can take the value back. On a bench card that is whoever edited it,
   // and `source === 'edited'` says so. On a pipeline node form it is not:
   // the node's overrides and the bench card's edits **both** resolve as
@@ -216,15 +315,42 @@ function provenance(spec, ctx, model, editable) {
 }
 
 /**
- * The one sentence, and the whole of it on hover. `title` is deliberate rather
- * than a custom tooltip: it works before any CSS loads, it is what a keyboard
- * user's browser will read out, and it cannot be clipped by an overflowing
- * card. The visible line is `doc`; `doc_full` is the rest.
+ * The one sentence, and the whole of it — reachable, which it was not.
+ *
+ * `title` alone was the bug: it lives on a `div` with no `tabindex`, so the
+ * explanation of `smu_nplc` was mouse-only, and `ui-rules` §1 asks for a field
+ * that *can be expanded*, not one that can be hovered. So the name is a
+ * `<button>` — tab to it, press it, and `doc` (then `doc_full`) opens under
+ * the row. The `title` stays for the pointer.
  */
 function help(spec) {
   const full = spec.doc_full && spec.doc_full !== spec.doc ? spec.doc_full : spec.doc;
   if (!spec.doc) return {};
   return { class: 'has-help', title: full, 'data-doc': spec.doc };
+}
+
+/** The name, as a label or as the button that opens the explanation. */
+function label(spec, ctx, model, text) {
+  const name = text || spec.name;
+  if (!spec.doc) {
+    return h('span.l', { text: name }, spec.unit ? h('i', { text: spec.unit }) : null);
+  }
+  const key = `${model.name}:${spec.name}`;
+  const open = ctx.docOpen ? ctx.docOpen(key) : false;
+  return h('button.l.lh', {
+    type: 'button',
+    'aria-expanded': open ? 'true' : 'false',
+    title: spec.doc_full && spec.doc_full !== spec.doc ? spec.doc_full : spec.doc,
+    onclick: () => ctx.toggleDoc && ctx.toggleDoc(key),
+  }, name, spec.unit ? h('i', { text: spec.unit }) : null);
+}
+
+/** The explanation itself, under the row it belongs to. */
+function docLine(spec, ctx, model) {
+  const key = `${model.name}:${spec.name}`;
+  if (!spec.doc || !ctx.docOpen || !ctx.docOpen(key)) return null;
+  const full = spec.doc_full && spec.doc_full !== spec.doc ? spec.doc_full : null;
+  return h('div.doc', h('span', { text: spec.doc }), full ? h('span.dfull', { text: full }) : null);
 }
 
 /**
@@ -236,16 +362,25 @@ function help(spec) {
 function rangeRow(row, ctx, model) {
   const commit = (name) => (value) => ctx.edit(model.name, { [name]: value });
   const specs = [row.start, row.stop, row.step];
-  return h('div.pf.range', { class: 'has-help', title: rangeHelp(row) },
-    h('span.l', { text: row.label }),
-    h('span.v.rng',
-      input(row.start, commit(row.start.name), false),
-      h('i', '→'),
-      input(row.stop, commit(row.stop.name), false),
-      h('i', 'step'),
-      input(row.step, commit(row.step.name), false),
-      row.points !== null ? h('i.pts', { text: `${row.points} pts` }) : null),
-    rangeProvenance(specs, ctx, model));
+  // `start == stop` is a *repeat*, not a sweep — "Q at V_oc twenty times" — and
+  // `ui-rules` §4 says the switch must be visible rather than silent: the chart
+  // beside this row changes from Q(axis) to Q per loop on exactly this test.
+  // Only on the swept axis (`row.accent`): a jv_bace's LED levels from 1.000
+  // to 1.000 is one level, not a repeat, and `n_loops` says nothing about it.
+  const repeat = Boolean(row.accent) && row.start.value !== null && Number(row.start.value) === Number(row.stop.value);
+  return h('div.pw',
+    h('div.pf.range' + (row.accent ? '.acc' : ''), { class: 'has-help', title: rangeHelp(row) },
+      h('span.l', { text: row.label }),
+      h('span.v.rng',
+        input(row.start, commit(row.start.name), false),
+        h('i', '→'),
+        input(row.stop, commit(row.stop.name), false),
+        h('i', 'step'),
+        input(row.step, commit(row.step.name), false),
+        repeat ? h('span.tag.rep', 'repeat')
+          : row.points !== null ? h('i.pts', { text: `${row.points} pts` }) : null),
+      rangeProvenance(specs, ctx, model)),
+    repeat ? h('div.note1', { text: 'start = stop: one point, measured n_loops times — Q per loop, not Q(axis)' }) : null);
 }
 
 /**
@@ -258,7 +393,7 @@ function rangeRow(row, ctx, model) {
 function rangeProvenance(specs, ctx, model) {
   const rank = ['default', 'run.toml', 'last-used', 'edited', 'inherited', 'derived'];
   const top = specs.reduce((a, b) => (rank.indexOf(b.source) > rank.indexOf(a.source) ? b : a));
-  if (top.source === 'default') return h('span.src');
+  if (QUIET_SOURCES.has(top.source)) return h('span.src');
   const edited = specs.filter((s) => s.source === 'edited');
   const which = specs.filter((s) => s.source === top.source).map((s) => s.name).join(', ');
   return h('span.src',
@@ -288,27 +423,30 @@ function vocRow(row, ctx, model) {
   const bound = voc.source === 'derived' || voc.source === 'inherited';
   const missing = voc.value === null || voc.value === undefined;
   const commit = (value) => ctx.edit(model.name, { voc: value });
-  return h('div.pf.voc', {
-    class: missing && row.need ? 'miss' : bound ? 'inh' : '',
-    title: voc.doc_full || voc.doc,
-  },
-    h('span.l', 'V_oc'),
-    h('span.v',
-      bound
-        ? h('span', { text: fmt.volts(voc.value) }, h('i', { text: voc.detail || 'derived' }))
-        // Missing shows the reason **and** the field. The typed V_oc is the
-        // documented last resort ("typed by hand only as a last resort, and
-        // the validator says so"), and it is the *only* route on a bench with
-        // no SourceMeter, where neither `jv_bace` nor `measure_dc` can run —
-        // so a row that offered only the sentence made a supported fallback
-        // unreachable and left a centred `bace` impossible to set up without
-        // editing run.toml by hand.
-        : [input(voc, commit, false),
-          missing && row.need ? h('span.need', { text: row.need.text }) : null],
-      h('i.at', '@'),
-      input(row.led, (v) => ctx.edit(model.name, { led_v: v }), false),
-      h('i', 'V LED')),
-    provenance(voc, ctx, model, !bound));
+  return h('div.pw',
+    h('div.pf.voc', {
+      class: missing && row.need ? 'miss' : bound ? 'inh' : '',
+      title: voc.doc_full || voc.doc,
+    },
+      h('span.l', 'V_oc'),
+      h('span.v',
+        bound
+          ? h('span', { text: fmt.volts(voc.value) })
+          // Missing shows the field, not a sentence where the field should be:
+          // the typed V_oc is the documented last resort and the *only* route
+          // on a bench with no SourceMeter, so it has to look like something
+          // you can type in. The reason goes on its own line below, where it
+          // cannot push `@ led_v` onto a second row.
+          : input(voc, commit, false, { blank: missing }),
+        h('i.at', '@'),
+        input(row.led, (v) => ctx.edit(model.name, { led_v: v }), false),
+        h('i', 'V LED'),
+        // Where the V_oc came from -- "jv_bace (this session, 11:49)" -- is a
+        // sentence, and on the value's own line it ran under the tag. Its own
+        // line, after the level it was measured at.
+        bound ? h('i.det', { text: voc.detail || 'derived' }) : null),
+      provenance(voc, ctx, model, !bound)),
+    missing && row.need ? h('div.need1', h('span.ico', '⚠'), h('span', { text: row.need.text })) : null);
 }
 
 /**
@@ -321,22 +459,19 @@ function polarityRow(row, ctx, model) {
   const mode = row.mode;
   const auto = String(mode.value).toLowerCase() === 'auto';
   const commit = (value) => ctx.edit(model.name, { output_polarity: value });
-  return h('div.pf.acc.pol', {
+  return h('div.pf.pol', {
     class: 'has-help',
     title: `${mode.name} / ${row.fallback.name} — ${mode.doc_full || mode.doc}\n\n`
       + `${row.fallback.name}: ${row.fallback.doc_full || row.fallback.doc}`,
   },
     h('span.l', '81150A output polarity'),
     h('span.v',
-      h('span.seg', ...mode.choices.map((choice) => h('span.sego', {
-        class: mode.value === choice ? 'on' : '',
-        onclick: () => commit(choice),
-      }, choice))),
+      h('span.seg', { role: 'group', 'aria-label': mode.name },
+        ...mode.choices.map((choice) => option(choice, mode.value === choice, () => commit(choice)))),
       auto
-        ? h('span.bool.acc', ...[true, false].map((v) => h('span', {
-          class: row.fallback.value === v ? 'on' : '',
-          onclick: () => ctx.edit(model.name, { inverted_output: v }),
-        }, v ? 'INV' : 'NORM')))
+        ? h('span.bool', { role: 'group', 'aria-label': row.fallback.name },
+          ...[true, false].map((v) => option(v ? 'INV' : 'NORM', row.fallback.value === v,
+            () => ctx.edit(model.name, { inverted_output: v }))))
         : null,
       h('i.eff', { text: `→ ${row.effective.text}` })),
     provenance(mode, ctx, model, true));
