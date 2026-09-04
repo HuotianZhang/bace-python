@@ -410,7 +410,8 @@ curl -X POST http://127.0.0.1:8900/runs -H "Content-Type: application/json" \
 On the stream, in order: `RunQueued`, `RunStateChanged` (`queued`, then
 `preflight`), the chain `Verdict`s from the read-back Start takes,
 `RunStateChanged(running)`, then with `node_path: "jv"`: `NodeStarted`,
-`JVStarted`, `InstrumentState`, `JVCurveDone` (the curve with its `metrics`:
+`JVStarted`, `InstrumentState`, a `JVPoint` per point as it is read (live
+only, `seq` null, like `StepPhase`), `JVCurveDone` (the curve with its `metrics`:
 `voc`, `jsc`, `fill_factor`, `p_max`, `v_mpp`, `j_mpp` — `voc` is `null` for a
 curve read as dark), `Progress`, `JVFinished`, `NodeDone(outcome="ok")`; then
 `RunStateChanged(done)` and `RunStateChanged(parked)`. Then

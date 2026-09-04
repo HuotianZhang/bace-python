@@ -1146,7 +1146,7 @@ class Catalogue:
             cfg.points()
         except ValueError as exc:
             raise ModuleError(f"{name}: step_v: {exc}") from None
-        temperature, temp_how, temp_source = ctx.temperature()
+        temperature, temp_how, temp_source = _bind_temperature(ctx, rig)
         meta = replace(ctx.metadata, temperature_k=temperature,
                        temperature_how=temp_how, temperature_source=temp_source,
                        led_drive_v=levels[0] if len(levels) == 1 else None,
@@ -1245,7 +1245,7 @@ class Catalogue:
             except IlluminationError as exc:
                 raise ModuleError(f"{name}: voc: {exc}") from None
 
-        temperature, temp_how, temp_source = ctx.temperature()
+        temperature, temp_how, temp_source = _bind_temperature(ctx, rig)
         store_shots = bool(p["store_shots"])
         v_sat = float(p["v_sat"])
         led_settle_s = float(p["led_settle_s"])
@@ -1635,6 +1635,37 @@ class _BaceData:
                 "photo": self.photo if self.photo is not None else empty,
                 "last_shot": self.last_shot, "kept": self.kept,
                 "requested": self.requested, "voc": self.voc, "dt": self.dt}
+
+
+def _bind_temperature(ctx: RunContext, rig: Rig) -> tuple[float | None, str, str]:
+    """The node's temperature triple, reading the controller when nobody
+    said one.
+
+    `ctx.temperature()` is the tree's binding or the session's typed number.
+    Until 2026-09-04 every recipe typed 290, so a run on a bench sitting at
+    220 K was filed as `290 K · typed` -- a wrong number wearing an honest
+    label (`docs/naming-plan.md` §4). The recipes now type nothing, and a
+    bench with a 331 is asked once, when the node starts: `how = "read"`,
+    the source the same classifier the settle uses. Bound onto `ctx`, so the
+    executor's `NodeDone` says the same as the file. A bench with no
+    controller, or one that does not answer, stays *not recorded*, which
+    the console renders as such -- never a number nobody measured.
+    """
+    kelvin, how, source = ctx.temperature()
+    if kelvin is not None or getattr(rig, "temperature", None) is None:
+        return kelvin, how, source
+    try:
+        reading = rig.temperature.read()
+    except Exception:                                       # noqa: BLE001
+        return kelvin, how, source
+    k = getattr(reading, "kelvin", None)
+    if not getattr(reading, "connected", False) or k is None or not math.isfinite(k):
+        return kelvin, how, source
+    from .temperature import source_of
+    ctx.temperature_k = float(k)
+    ctx.temperature_how = "read"
+    ctx.temperature_source = source_of(rig.temperature)
+    return ctx.temperature()
 
 
 class _JVData:

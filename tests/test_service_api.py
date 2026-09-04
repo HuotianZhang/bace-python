@@ -379,9 +379,12 @@ def test_a_manual_run_streams_over_the_websocket_and_lands_in_the_record(service
         assert body["cost"]["t_shot_source"] == "default"
 
         got = collect(ws, parked(run_id))
-    assert [f["seq"] for f in got] == list(range(since + 1, since + 1 + len(got)))
+    numbered = [f for f in got if f["seq"] is not None]
+    assert [f["seq"] for f in numbered] == list(range(since + 1, since + 1 + len(numbered)))
+    assert any(f["type"] == "JVPoint" and f["seq"] is None for f in got), (
+        "every point of the sweep reaches the socket live, unnumbered")
     assert {f["run_id"] for f in got} == {run_id}
-    types = [f["type"] for f in got]
+    types = [f["type"] for f in got if f["seq"] is not None]   # the ring holds no JVPoint
     # The submit-time checks are journaled as Verdict frames right after the
     # `queued` transition; the run's own frames keep their order around them.
     assert [t for t in types if t != "Verdict"][:3] == ["RunQueued", "RunStateChanged", "RunStateChanged"]

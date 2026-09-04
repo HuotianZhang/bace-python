@@ -21,6 +21,7 @@ This is contract section 3, implemented once so nothing else decides sizes:
                                                          the service's verdict
     StepPhase        in full, live only: seq null,       not written
                      not in the ring
+    JVPoint          in full, live only, like StepPhase  not written
     RunFinished      photo_averaged omitted; values,     the same, minus q_all above
                      q_mean, q_std, q_all in full        10 000 cells
     JVCurveDone      in full                             metrics, label, n_points and
@@ -63,10 +64,10 @@ import numpy as np
 
 from ..bench.checks import _rail_samples
 from ..experiment.events import Envelope, Event, RunFinished, StepDone, StepPhase
-from ..experiment.jv import JVCurveDone, JVFinished
+from ..experiment.jv import JVCurveDone, JVFinished, JVPoint
 from ..experiment.wire import envelope_to_wire, to_wire
 
-EPHEMERAL: tuple[type, ...] = (StepPhase,)
+EPHEMERAL: tuple[type, ...] = (StepPhase, JVPoint)
 """Events sent live and never journaled, ringed or numbered."""
 
 RAIL_RUN_SAMPLES = 7
@@ -107,7 +108,8 @@ samples can straddle the true extreme."""
 
 
 def is_ephemeral(event: Event) -> bool:
-    """Sent live, never journaled, ringed or given a `seq` (`StepPhase`)."""
+    """Sent live, never journaled, ringed or given a `seq` (`StepPhase`,
+    `JVPoint`)."""
     return isinstance(event, EPHEMERAL)
 
 

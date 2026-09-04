@@ -607,16 +607,28 @@ class SimulatedSourceMeter:
         sweep that followed the drive level alone would draw a lit curve under
         a dark label -- the exact mistake the sequence has to be caught in.
         """
+        got = list(self.sweep_points(start_v, stop_v, points, settle_s=settle_s))
+        return (np.array([v for v, _ in got], dtype=float),
+                np.array([i for _, i in got], dtype=float))
+
+    def sweep_points(self, start_v: float, stop_v: float, points: int, *,
+                     settle_s: float = 0.0):
+        """`sweep`, one `(v, i)` at a time -- the shape the real driver has
+        since 2026-09-04, so the J-V experiment streams a simulated curve
+        the way it streams a measured one. The light is read at every point,
+        not once: a shutter that moves mid-sweep shows in the curve, as it
+        would on the bench."""
         if points < 2:
             raise ValueError("a sweep needs at least two points")
         b = self.bench
-        lit = b.shutter_open and b.led_mode in ("DC", "PULSE")
-        drive = b.led_drive_v if lit else 0.0
-        v = np.linspace(float(start_v), float(stop_v), int(points))
-        i = np.array([b.device.current(float(x), drive) for x in v])
-        i += b.rng.normal(0.0, self.noise_a, i.size)
-        self.clipped = bool((np.abs(i) > self.compliance_a).any())
-        return v, np.clip(i, -self.compliance_a, self.compliance_a)
+        self.clipped = False
+        for x in np.linspace(float(start_v), float(stop_v), int(points)):
+            lit = b.shutter_open and b.led_mode in ("DC", "PULSE")
+            drive = b.led_drive_v if lit else 0.0
+            i = float(b.device.current(float(x), drive) + b.rng.normal(0.0, self.noise_a))
+            if abs(i) > self.compliance_a:
+                self.clipped = True
+            yield float(x), float(np.clip(i, -self.compliance_a, self.compliance_a))
 
     def enable_output(self, on: bool = True) -> None:
         self._output = bool(on)

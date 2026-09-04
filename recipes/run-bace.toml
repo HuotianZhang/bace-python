@@ -99,6 +99,10 @@ v_sat = -1.0
 sample = ""
 material = ""
 pixel = ""
-temperature_k = 290.0
+# temperature_k is deliberately not typed here (2026-09-04): every recipe said
+# 290 and a run at 220 K was filed as "290 K, typed". A bench with a 331 reads
+# the controller as each node starts (how = "read"), a temperature node settles
+# it, and only a bench with no controller should type a number here -- the
+# file will say it was typed.
 operator = ""
 comment = "BACE delay scan - combination 4"

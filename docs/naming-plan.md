@@ -385,4 +385,12 @@ recipes so it resolves to `None`/`""` and the console renders "not recorded".
 The cost is that every manual run then shows a blank temperature until someone
 fills it in, which is a change to bench habit, not to code. Not decided here.
 
+**Decided 2026-09-04**, on the first hardware day with the console: the line
+is gone from `run.toml` and every recipe, and a bench with a 331 no longer
+shows a blank — `modules._bind_temperature` reads the controller once as the
+node starts and files `how = "read"` with the settle's `source` classifier.
+Only a bench with no controller shows *not recorded*, and typing a number
+there still says `typed`. `tests/run-quickcheck.toml` keeps the 290 on
+purpose: it freezes the old recipe for the tests that pin `typed`.
+
 **Migration of existing folders**: not proposed. See above.

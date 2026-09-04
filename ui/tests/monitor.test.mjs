@@ -354,6 +354,10 @@ test('a J-V counts the curve it is sweeping, not the ones that finished', () => 
   const node = record.nodes.jv_bace;
   assert.equal(shotCounter(record, node).text, 'curve 1 of 2', 'inside the first sweep');
 
+  store.applyFrame({ seq: null, ts: 3.5, run_id: run, node_path: 'jv_bace', type: 'JVPoint',
+    data: { index: 0, k: 12, of: 71, label: 'dark', dark: true, led_level_v: null, direction: 'forward', voltage: 0.02, current: 1e-10, density: null } });
+  assert.equal(shotCounter(record, node).text, 'curve 1 of 2 · point 12 of 71', 'the point inside the sweep, from the live points');
+
   store.applyFrame({ seq: 4, ts: 4, run_id: run, node_path: 'jv_bace', type: 'JVCurveDone',
     data: { label: 'dark', dark: true, metrics: {}, n_points: 71 } });
   assert.equal(shotCounter(record, node).text, 'curve 2 of 2', 'and inside the second');

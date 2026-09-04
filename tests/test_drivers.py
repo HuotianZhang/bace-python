@@ -125,19 +125,44 @@ def test_the_output_is_off_again_after_every_measurement():
     assert io.log.count(":OUTP OFF;") == 3
 
 
-def test_sweep_unpacks_interleaved_voltage_and_current():
-    io = FakeIO(reads=["0.0,-2.0E-4,0.5,-1.5E-4,1.0,1.0E-4"])
+def test_sweep_is_one_point_at_a_time_and_unpacks_each_reading():
+    """Since 2026-09-04 the sweep is the host's, not the 2400's: one
+    `:SOUR:VOLT:LEV`, a settle, one `:READ?` answering `V,I` per point. The
+    output comes on at the first level, never at *RST's 0 V."""
+    io = FakeIO(reads=["0.0,-2.0E-4", "0.5,-1.5E-4", "1.0,1.0E-4"])
+    k = Keithley2400(io)
+    got = list(k.sweep_points(0.0, 1.0, 3))
+    assert got == [(0.0, -2e-4), (0.5, -1.5e-4), (1.0, 1e-4)]
+    levels = [c for c in io.log if c.startswith(":SOUR:VOLT:LEV")]
+    assert levels == [":SOUR:VOLT:LEV 0;", ":SOUR:VOLT:LEV 0;", ":SOUR:VOLT:LEV 0.5;",
+                      ":SOUR:VOLT:LEV 1;"], "the start level before the output, then each point"
+    assert io.log.index(":SOUR:VOLT:LEV 0;") < io.log.index(":OUTP ON;")
+    assert io.log.count(":READ?") == 3 and not any("SWE" in c for c in io.log)
+    assert k.output_enabled is False and io.log[-1] == ":OUTP OFF;"
+
+    io = FakeIO(reads=["0.0,-2.0E-4", "0.5,-1.5E-4", "1.0,1.0E-4"])
     v, i = Keithley2400(io).sweep(0.0, 1.0, 3)
     np.testing.assert_allclose(v, [0.0, 0.5, 1.0])
     np.testing.assert_allclose(i, [-2e-4, -1.5e-4, 1e-4])
-    assert any(":SOUR:SWE:POIN 3" in c for c in io.log)
 
 
-def test_the_sweep_timeout_covers_what_the_2400_actually_takes():
+def test_a_sweep_left_half_way_switches_the_output_off():
+    """The consumer may stop iterating -- an abort between two points -- and
+    the source it switched on into the device must not stay on."""
+    io = FakeIO(reads=["0.0,-2.0E-4", "0.5,-1.5E-4", "1.0,1.0E-4"])
+    k = Keithley2400(io)
+    gen = k.sweep_points(0.0, 1.0, 3)
+    next(gen)
+    gen.close()
+    assert k.output_enabled is False and io.log[-1] == ":OUTP OFF;"
+    assert io.log.count(":READ?") == 1
+
+
+def test_the_sweep_budget_covers_what_the_2400_actually_takes():
     """Measured on the rig: 0.83 s per point at NPLC 1, averaging 10, 50 ms
     source delay -- 36 points in 30 s (2026-09-04), 71 in 57 s (2026-09-02).
-    The budget must clear both with room, and it must be what the resource
-    holds while `:READ?` is waiting, then be put back."""
+    The whole-curve budget must clear both with room. Per point that is well
+    inside the session's 20 s, so a validated recipe's reads keep it."""
     class Watch(FakeIO):
         def query(self, cmd):
             if cmd.startswith(":READ?"):
@@ -145,14 +170,14 @@ def test_the_sweep_timeout_covers_what_the_2400_actually_takes():
             return super().query(cmd)
 
     cfg = SourceMeterConfig(nplc=1.0, averaging=10)
-    io = Watch(reads=["0.0,-2.0E-4,0.5,-1.5E-4,1.0,1.0E-4"])
+    io = Watch(reads=["0.0,-2.0E-4", "0.5,-1.5E-4", "1.0,1.0E-4"])
     io.timeout = 20000
     k = Keithley2400(io, config=cfg)
     assert k.sweep_budget_s(36, settle_s=0.05) >= 1.5 * 36 * 0.83
     assert k.sweep_budget_s(71, settle_s=0.05) >= 1.5 * 71 * 0.83
-    k.sweep(0.0, 1.0, 3, settle_s=0.05)
-    assert io.timeout_during_read == int(k.sweep_budget_s(3, 0.05) * 1000)
-    assert io.timeout == 20000, "restored after the sweep"
+    k.sweep(0.0, 1.0, 3, settle_s=0.0)
+    assert io.timeout_during_read == 20000, "one point of the validated recipe fits"
+    assert io.timeout == 20000
     assert k.last_sweep_s >= 0.0
 
 
@@ -630,7 +655,9 @@ def test_run_toml_builds_a_usable_plan():
     # inverting amplifier, so extraction never stops).
     assert run.invert_polarity and run.output_polarity == "NORM"
     assert run.shutter_settle_s == pytest.approx(5.0)
-    assert meta.temperature_k == pytest.approx(290.0)
+    # Not typed since 2026-09-04: a bench with a 331 reads it as the node
+    # starts, and a recipe that says nothing files nothing.
+    assert meta.temperature_k is None and meta.temperature_how == ""
 
 
 def test_compliance_is_a_run_setting_under_a_bench_ceiling():
@@ -973,14 +1000,13 @@ def test_probe_tells_a_console_before_its_first_poll_from_no_console(monkeypatch
     assert t.probe() is None and t.available() is False
 
 
-def test_a_long_sweep_sizes_the_visa_timeout_from_its_own_arithmetic():
-    """The whole J-V sweep is one `:READ?`: the 2400 steps, settles, integrates
-    and averages every point before it answers. With the validated recipe
-    (71 points, 50 ms source delay, averaging 10, NPLC 1) that is ~18 s, and
-    the session's blanket 20 s VISA timeout cut it off on the rig
-    (VI_ERROR_TMO, session 20260902_143927). The driver now raises the
-    resource timeout for the read -- sized from the sweep, factor two -- and
-    puts it back afterwards."""
+def test_a_slow_point_raises_the_visa_timeout_for_its_read_and_puts_it_back():
+    """Every read is one point, but a recipe can make a point long: NPLC 10
+    with 50 readings averaged is four apertures each, 40 s of measuring.
+    The driver sizes the read's timeout from that (`sweep_budget_s(1)`) and
+    restores the session's afterwards, so the next quick query fails fast.
+    Session 20260902_143927 lost a sweep to a 20 s timeout; run
+    20260904_214634-024 to a 28 s one that NI-488 rounded to 30."""
 
     class Timed(FakeIO):
         def __init__(self, **kw):
@@ -993,16 +1019,14 @@ def test_a_long_sweep_sizes_the_visa_timeout_from_its_own_arithmetic():
                 self.timeout_at_read = self.timeout
             return super().query(cmd)
 
-    io_ = Timed(reads=["0.0,-2.0E-4,0.5,-1.5E-4"])
-    k = Keithley2400(io_, config=SourceMeterConfig(averaging=10, nplc=1.0))
-    k.sweep(0.0, 0.5, 71, settle_s=0.05)
-    # 71 x (0.05 + 10 x 0.02) = 17.75 s of instrument time; the budget is
-    # 10 + 2 x that, in ms
-    assert io_.timeout_at_read >= 45000
+    io_ = Timed(reads=["0.0,-2.0E-4", "0.5,-1.5E-4"])
+    k = Keithley2400(io_, config=SourceMeterConfig(averaging=50, nplc=10.0))
+    k.sweep(0.0, 0.5, 2, settle_s=1.0)
+    assert io_.timeout_at_read == int(k.sweep_budget_s(1, 1.0) * 1000) > 20000
     assert io_.timeout == 20000, "restored, so the next quick query fails fast"
 
-    # a quick sweep leaves the session's timeout alone
-    io_ = Timed(reads=["0.0,-2.0E-4,0.5,-1.5E-4"])
+    # a quick point leaves the session's timeout alone
+    io_ = Timed(reads=["0.0,-2.0E-4", "0.5,-1.5E-4"])
     Keithley2400(io_, config=SourceMeterConfig(averaging=1, nplc=1.0)).sweep(
-        0.0, 0.5, 3, settle_s=0.0)
+        0.0, 0.5, 2, settle_s=0.0)
     assert io_.timeout_at_read == 20000

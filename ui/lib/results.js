@@ -56,7 +56,8 @@ function newestNode(record, name) {
   for (let i = nodes.length - 1; i >= 0; i -= 1) {
     const node = nodes[i];
     if (node.kind !== name) continue;
-    if ((node.curves && node.curves.length) || (node.shots && node.shots.length)) return node;
+    if ((node.curves && node.curves.length) || (node.shots && node.shots.length)
+      || (node.partial && node.partial.k)) return node;
   }
   return null;
 }
@@ -104,6 +105,8 @@ export function resultKeys(name, entry, found, bench) {
       const last = node.curves[node.curves.length - 1];
       data.push(`curves:${node.curves.length}:${last.label}:${last.ts}`);
     }
+    // The sweep in flight: the chart moves with every point read.
+    if (node.partial) data.push(`partial:${node.partial.index}:${node.partial.direction}:${node.partial.k}`);
   }
   return { form: form.join('|'), data: data.join('|') };
 }
@@ -298,9 +301,17 @@ export function pulseDelayS(shot, values, rig) {
 }
 
 function jvResult(found) {
-  const curves = (found && found.node.curves) || [];
-  if (!curves.length) return [h('p.absent', 'no curves yet — a sweep draws here as each one finishes')];
-  const model = jvModel(curves);
+  const node = found && found.node;
+  const curves = ((node && node.curves) || []).slice();
+  // The curve being swept, drawn with the finished ones — point by point,
+  // as the service streams them (`JVPoint`, live-only).
+  if (node && node.partial && node.partial.voltage.length) curves.push(node.partial);
+  if (!curves.length) return [h('p.absent', 'no curves yet — a sweep draws here point by point as it is read')];
+  // The planned sweep range, so the axis does not grow with the curve.
+  const jv = found.record && found.record.jv;
+  const cfg = jv && jv.config && jv.config.jv;
+  const planned = cfg && Number.isFinite(cfg.start_v) && Number.isFinite(cfg.stop_v) ? [cfg.start_v, cfg.stop_v] : null;
+  const model = jvModel(curves, { planned });
   const out = [chart(model)];
   if (model.metrics.entries.length) out.push(metricsTable(model.metrics));
   return out;

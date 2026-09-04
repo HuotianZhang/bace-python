@@ -64,7 +64,7 @@ export const TERMINAL = new Set(['done', 'stopped', 'aborted', 'failed', 'blocke
 const RUN_SCOPED = new Set([
   'RunQueued', 'RunStateChanged', 'NodeStarted', 'NodeDone', 'RunStarted', 'AxisResolved',
   'DCMeasured', 'InstrumentState', 'StepStarted', 'StepPhase', 'StepDone', 'LoopDone',
-  'Progress', 'RunFinished', 'RunAborted', 'RunFailed', 'JVStarted', 'JVCurveDone',
+  'Progress', 'RunFinished', 'RunAborted', 'RunFailed', 'JVStarted', 'JVPoint', 'JVCurveDone',
   'JVFinished', 'SeriesPointDone', 'NeedsOperator', 'OperatorResumed',
 ]);
 
@@ -532,12 +532,37 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         break;
       }
 
+      case 'JVPoint': {
+        // Live-only, `seq` null, like `StepPhase`: the sweep in flight, one
+        // point at a time. Held on the node as a curve-shaped object so the
+        // J-V chart draws it with the finished ones; the `JVCurveDone` that
+        // follows carries the whole curve and replaces it. A reconnect that
+        // missed some points loses only the picture of the curve growing.
+        const node = nodeOf(record, frame.node_path);
+        let p = node.partial;
+        if (!p || p.index !== data.index || p.direction !== data.direction) {
+          p = node.partial = {
+            index: data.index, label: data.label, dark: data.dark, led_level_v: data.led_level_v,
+            direction: data.direction, of: data.of, k: 0, partial: true,
+            voltage: [], current: [], density: (data.density === null || data.density === undefined) ? null : [],
+            node_path: frame.node_path || '', ts: frame.ts,
+          };
+        }
+        p.k = data.k;
+        p.ts = frame.ts;
+        p.voltage.push(data.voltage);
+        p.current.push(data.current);
+        if (p.density) p.density.push(data.density);
+        break;
+      }
+
       case 'JVCurveDone': {
         const curve = { ...data, node_path: frame.node_path || '', ts: frame.ts };
         const node = nodeOf(record, frame.node_path);
         record.curves.push(curve);
         node.curves.push(curve);
         node.kept = node.curves.length;
+        node.partial = null;
         rollUp(record);
         break;
       }
@@ -762,7 +787,7 @@ function nodeOf(record, path) {
   const key = path || '';
   const existing = record.nodes[key];
   if (existing) return existing;
-  const created = { node_path: key, shots: [], curves: [], loops: [] };
+  const created = { node_path: key, shots: [], curves: [], loops: [], partial: null };
   record.nodes[key] = created;
   return created;
 }

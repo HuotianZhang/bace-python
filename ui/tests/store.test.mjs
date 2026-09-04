@@ -238,6 +238,38 @@ test('a J-V counts its curves as they complete, not at the end', () => {
                    'requested at JVStarted, kept as each curve arrives');
 });
 
+test('a J-V point grows the sweep in flight, and the finished curve replaces it', () => {
+  // `JVPoint` is live-only (`seq` null): the store folds each one onto a
+  // curve-shaped `partial` on the node, so the J-V chart draws the sweep as
+  // it is read; `JVCurveDone` carries the whole curve and clears it.
+  const s = store();
+  const run = 'r1';
+  s.applyFrame({ seq: 1, ts: 1, run_id: run, node_path: 'jv_bace', type: 'RunQueued', data: { kind: 'manual', module: 'jv_bace' } });
+  s.applyFrame({ seq: 2, ts: 2, run_id: run, node_path: 'jv_bace', type: 'NodeStarted', data: { node_path: 'jv_bace', kind: 'jv_bace', label: 'J-V light' } });
+  s.applyFrame({ seq: 3, ts: 3, run_id: run, node_path: 'jv_bace', type: 'JVStarted', data: { n_curves: 2, n_points: 3, config: { jv: { start_v: -0.2, stop_v: 1.2 } } } });
+  const point = (index, k, v, i, d, ts) => s.applyFrame({ seq: null, ts, run_id: run, node_path: 'jv_bace', type: 'JVPoint',
+    data: { index, k, of: 3, label: index ? '1.02 V' : 'dark', dark: index === 0, led_level_v: index ? 1.02 : null, direction: 'forward', voltage: v, current: i, density: d } });
+  point(0, 1, -0.2, -1e-10, -2.5e-6, 4);
+  point(0, 2, 0.5, 2e-9, 5e-5, 5);
+  const node = s.getState().runs[run].nodes.jv_bace;
+  assert.equal(node.partial.k, 2);
+  assert.deepEqual(node.partial.voltage, [-0.2, 0.5]);
+  assert.deepEqual(node.partial.density, [-2.5e-6, 5e-5]);
+  assert.equal(node.partial.partial, true, 'shaped like a curve, and says it is not one yet');
+  assert.equal(node.curves.length, 0, 'no curve until JVCurveDone');
+  assert.equal(currentRun(s.getState()).kept, null, 'the rail counts curves, not points');
+
+  s.applyFrame({ seq: 4, ts: 7, run_id: run, node_path: 'jv_bace', type: 'JVCurveDone',
+    data: { index: 0, label: 'dark', dark: true, direction: 'forward', voltage: [-0.2, 0.5, 1.2], current: [-1e-10, 2e-9, 1e-3], density: [-2.5e-6, 5e-5, 25], metrics: {}, n_points: 3 } });
+  assert.equal(node.partial, null, 'the finished curve replaces the partial');
+  assert.equal(node.curves.length, 1);
+
+  point(1, 1, -0.2, -9e-5, -2.25, 8);
+  assert.equal(node.partial.index, 1, 'a new curve starts a new partial');
+  assert.equal(node.partial.dark, false);
+  assert.equal(node.curves.length, 1);
+});
+
 test('a journalled shot has no traces to draw, and says so', () => {
   // The journal keeps "enough to render the session log and the history
   // queries, never the traces": a journalled StepDone carries the scalars and

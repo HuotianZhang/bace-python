@@ -139,6 +139,11 @@ export function shotCounter(record, node) {
     : null;
   const nth = step ? Math.max(kept, step.index + 1) : inFlight ?? kept;
   const parts = [`${isJv ? 'curve' : 'shot'} ${nth}${requested !== null ? ' of ' + requested : ''}`];
+  // The point inside the sweep, from the live `JVPoint`s (2026-09-04): the
+  // J-V's equivalent of the shot's `StepPhase`.
+  if (isJv && !node.outcome && node.partial && node.partial.of) {
+    parts.push(`point ${node.partial.k} of ${node.partial.of}`);
+  }
   if (step) {
     parts.push(`loop ${step.loop}`);
     if (node.values && node.values.length > 1) parts.push(`point ${step.step} of ${node.values.length}`);

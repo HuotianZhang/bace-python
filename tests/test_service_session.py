@@ -761,7 +761,11 @@ def test_under_an_asyncio_loop_frames_reach_an_awaiting_subscriber(tmp_path):
                     break
             assert [f["type"] for f in seen if f["type"] != "Verdict"][:3] == \
                 ["RunQueued", "RunStateChanged", "RunStateChanged"]
-            assert [f["seq"] for f in seen] == list(range(1, len(seen) + 1))
+            numbered = [f for f in seen if f["seq"] is not None]
+            assert [f["seq"] for f in numbered] == list(range(1, len(numbered) + 1))
+            points = [f for f in seen if f["type"] == "JVPoint"]
+            assert points and {f["seq"] for f in points} == {None}, (
+                "every point reaches a live subscriber, unnumbered")
             assert any(f["type"] == "JVCurveDone" for f in seen)
             assert s.run_record(run_id)["state"] == "done"
             snap = await asyncio.get_running_loop().run_in_executor(None, s.bench_read)

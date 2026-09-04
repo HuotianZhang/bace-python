@@ -119,6 +119,8 @@ def realistic_events() -> dict[type, E.Event]:
                           source="operator"),
         J.JVStarted(n_curves=2, n_points=71,
                     config={"jv": J.JVConfig().as_dict(), "rig": cfg["rig"]}),
+        J.JVPoint(index=1, k=12, of=71, label="1.02 V", dark=False, led_level_v=1.02,
+                  direction="forward", voltage=0.24, current=-9.1e-5, density=-9.1),
         _curve(0, dark=True),
         J.JVFinished(curves=(_curve(0, True), _curve(1, False)), elapsed_s=3.0),
         S.SeriesStarted(levels=np.array([1.02, 1.06]), n_levels=2,

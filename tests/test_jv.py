@@ -11,7 +11,7 @@ import pytest
 
 from bace.drivers.simulated import make_bench
 from bace.experiment import events as E
-from bace.experiment.jv import (JVConfig, JVCurveDone, JVFinished, JVStarted,
+from bace.experiment.jv import (JVConfig, JVCurveDone, JVFinished, JVPoint, JVStarted,
                                 illumination_state, metrics, run_jv)
 from bace.experiment.rig import Rig, RigConfig
 from bace.storage.jv import JVRecorder, record
@@ -228,18 +228,106 @@ def test_walking_away_leaves_the_sourcemeter_off_the_shutter_shut_and_the_led_as
     assert sim.bench.led_drive_v == 1.020
 
 
-def test_abort_stops_before_the_next_illumination():
+def test_abort_lands_between_two_points_not_after_the_curve():
+    """Until 2026-09-04 the sweep was one blocking instrument call, so a stop
+    asked for during a curve landed only after it -- a minute on the rig.
+    The abort flag is now polled after every point: the curve in flight is
+    never reported done, the source is off and the shutter shut."""
     sim, rig = build()
     n = {"i": 0}
 
     def abort():
         n["i"] += 1
-        return n["i"] > 2
+        return n["i"] > 2            # once before the curve, then per point
 
     evs = list(run_jv(rig, JVConfig(dark=True, led_levels_v=(1.020, 1.060)),
                       abort=abort, sleep=NO_SLEEP))
-    assert isinstance(evs[-1], E.Notice)
+    assert isinstance(evs[-1], E.Notice) and "point 2 of" in evs[-1].text
+    assert len([e for e in evs if isinstance(e, JVPoint)]) == 2
+    assert not any(isinstance(e, JVCurveDone) for e in evs)
+    assert rig.smu.output_enabled is False and bool(rig.shutter.is_open) is False
+
+
+def test_abort_between_illuminations_keeps_the_curves_that_finished():
+    sim, rig = build()
+    seen = {"curves": 0}
+    cfg = JVConfig(dark=True, led_levels_v=(1.020, 1.060))
+    evs = []
+    for ev in run_jv(rig, cfg, abort=lambda: seen["curves"] >= 2, sleep=NO_SLEEP):
+        evs.append(ev)
+        if isinstance(ev, JVCurveDone):
+            seen["curves"] += 1
+    assert isinstance(evs[-1], E.Notice) and "before" in evs[-1].text
     assert len([e for e in evs if isinstance(e, JVCurveDone)]) == 2
+
+
+def test_every_point_is_on_the_stream_as_it_is_read():
+    """`JVPoint` k of `of`, carrying the curve's identity and the point in
+    the same units `JVCurveDone` will carry the arrays in -- amps, and
+    mA/cm2 when there is an area -- so a card can draw the curve growing
+    and file it before the curve is done."""
+    _, rig = build()
+    cfg = JVConfig(dark=True, led_levels_v=(1.020,), start_v=0.0, stop_v=0.4, step_v=0.1,
+                   pixel_area_cm2=0.04)
+    evs = run(rig, cfg)
+    points = [e for e in evs if isinstance(e, JVPoint)]
+    curves = [e for e in evs if isinstance(e, JVCurveDone)]
+    assert [p.k for p in points] == [1, 2, 3, 4, 5] * 2 and {p.of for p in points} == {5}
+    assert [p.index for p in points] == [0] * 5 + [1] * 5
+    assert points[0].dark is True and points[0].label == "dark"
+    assert points[5].dark is False and points[5].led_level_v == 1.02
+    for c in curves:
+        mine = [p for p in points if p.index == c.index]
+        np.testing.assert_allclose([p.voltage for p in mine], c.voltage)
+        np.testing.assert_allclose([p.current for p in mine], c.current)
+        np.testing.assert_allclose([p.density for p in mine], c.density)
+    # order: every point of a curve precedes its JVCurveDone
+    order = [type(e).__name__ for e in evs if isinstance(e, (JVPoint, JVCurveDone))]
+    assert order == ["JVPoint"] * 5 + ["JVCurveDone"] + ["JVPoint"] * 5 + ["JVCurveDone"]
+
+
+def test_the_recorder_keeps_the_sweep_in_flight_when_the_run_dies_mid_curve(tmp_path):
+    """Run 20260904_214634-024 failed on its fourth curve and the file kept
+    three: every point of the fourth was lost. The recorder now files the
+    partial curve, labelled so, with no metrics and `points_planned`."""
+    import h5py
+
+    _, rig = build()
+    rec = JVRecorder(str(tmp_path), "20260904_220109", metadata={},
+                     rig_config=rig.config.as_dict())
+    gen = record(run_jv(rig, JVConfig(dark=True, led_levels_v=(1.020,), start_v=0.0,
+                                      stop_v=0.4, step_v=0.1, pixel_area_cm2=0.04),
+                        sleep=NO_SLEEP), rec)
+    for ev in gen:
+        if isinstance(ev, JVPoint) and ev.index == 1 and ev.k == 3:
+            gen.close()          # the fault, three points into the light curve
+            break
+    assert len(rec.curves) == 1 and rec.partial is not None and rec.partial.k == 3
+    data = open([p for p in rec.written if "JV_Data" in p][0], "rb").read().decode()
+    head = data.split("\r\n")[0]
+    assert "dark fwd" in head and "1.02 V fwd partial 3 of 5" in head
+    with h5py.File([p for p in rec.written if p.endswith(".h5")][0]) as f:
+        names = sorted(f["curves"])
+        assert names == ["00_dark_fwd", "01_1.02_V_fwd_partial_3_of_5"]
+        part = f["curves"][names[1]]
+        assert bool(part.attrs["partial"]) is True and int(part.attrs["points_planned"]) == 5
+        assert part["voltage"].shape == (3,) and part.attrs["voc"] == ""
+        assert bool(f["curves"][names[0]].attrs["partial"]) is False
+
+
+def test_the_files_are_rewritten_as_each_curve_finishes(tmp_path):
+    import os
+    _, rig = build()
+    rec = JVRecorder(str(tmp_path), "20260904_220110", metadata={},
+                     rig_config=rig.config.as_dict())
+    sizes = []
+    for ev in record(run_jv(rig, JVConfig(dark=True, led_levels_v=(1.020, 1.06)),
+                            sleep=NO_SLEEP), rec):
+        if isinstance(ev, JVCurveDone):
+            path = [p for p in rec.written if "JV_Data" in p][0]
+            sizes.append(os.path.getsize(path))
+    assert len(sizes) == 3 and sizes == sorted(sizes) and sizes[0] < sizes[-1]
+    assert len(rec.written) == 3, "the same three paths, each named once"
 
 
 # -- the shutter ----------------------------------------------------------
