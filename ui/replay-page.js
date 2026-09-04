@@ -23,6 +23,8 @@ import { transientModel } from './lib/charts/transient.js';
 import { jvModel } from './lib/charts/jv.js';
 import { timingModel } from './lib/charts/timing.js';
 import { loopsModel } from './lib/charts/loops.js';
+import { scheduleModel } from './lib/charts/schedule.js';
+import { costModel, scheduleTree, timeline } from './lib/tree.js';
 import { pulseDelayS, runFor, shotBlock, valuesOf } from './lib/results.js';
 
 const store = createStore({ schedule: (fn) => requestAnimationFrame(fn) });
@@ -98,6 +100,16 @@ async function load(entry, { pace }) {
       // the chain, and not the run, the queue or the bench state.
       store.applyBench(frames, { readBack: loaded.length > 0 });
       renderControls(`bench applied — ${(frames.inferred || []).length} inferred: ${(frames.inferred || []).join(', ') || 'none'}`);
+    } else if (entry.kind === 'validate') {
+      // `POST /pipelines/validate`. Not frames and not a run: a tree nobody
+      // ran, with the schedule and the cost the pipeline tab draws from. It
+      // is the one endpoint whose fixture is the whole screen — M5's time
+      // bar, its three scales and its "at least" all come out of this.
+      payloads[entry.key] = frames;
+      renderCharts();
+      renderControls(`${entry.url} — ${frames.counters.modules} module runs, `
+        + `${(frames.schedule || []).length} steps, ${frames.checks.length} checks, `
+        + `cost ${frames.cost.lower_bound ? 'a floor' : 'known'}`);
     } else if (entry.kind === 'data') {
       // `GET /runs/{id}/data`: full precision, and the only place the running
       // integral and the J–V arrays exist offline. The journals cannot draw a
@@ -143,6 +155,7 @@ function renderCharts() {
     state.bench ? state.bench.read_at : 'no-bench',
     shot ? `${shot.node_path}:${shot.loop}:${shot.index}:${shot.ts}` : 'no-shot',
     payloads.transient ? 'rig-transient' : '-',
+    ['validate-txill', 'validate-bound', 'validate-nested'].filter((k) => payloads[k]).join(','),
     `curves:${curves.length}`,
     bace ? `${bace.node.shots.length}:${bace.node.loops.length}:${bace.node.outcome || ''}:${bace.record.state || ''}` : 'no-node',
   ].join('|');
@@ -176,6 +189,16 @@ function renderCharts() {
       bace ? chart(loopsModel(bace)) : h('p.absent', 'replay a recorded bace stream — the stopped one shows kept of requested'),
       h('h3', 'the J–V'),
       curves.length ? chart(jvModel(curves)) : h('p.absent', 'load the J-V fixture, or replay the jv stream'),
+      h('h3', 'the run as a length of time · M5'),
+      h('p.chart-note', 'a settle nobody has measured is hatched and takes no time on the axis, '
+        + 'and there is no clock under a total that is a floor — `cost.finish_at` is null exactly '
+        + 'when `lower_bound` is set'),
+      ...['validate-txill', 'validate-bound', 'validate-nested'].filter((k) => payloads[k]).map((k) => chart(scheduleModel({
+        blocks: timeline(scheduleTree(payloads[k].schedule)),
+        cost: costModel(payloads[k].cost),
+      }))),
+      payloads['validate-txill'] || payloads['validate-bound'] || payloads['validate-nested']
+        ? null : h('p.absent', 'load a validate fixture for the schedule bar'),
     ];
   });
 }

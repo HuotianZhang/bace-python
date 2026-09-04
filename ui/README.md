@@ -33,10 +33,12 @@ repo root for the offline bench at `/ui/replay.html`, which needs
 | `lib/charts/frame.js` | stacked panels over one x axis (or one each), their gridlines, captions, shading and crosshair. Every chart returns a *model* and this draws any of them |
 | `lib/charts/jv.js`, `transient.js`, `timing.js` | the three M3 components, as pure functions of the data — the same split the rail has |
 | `lib/charts/loops.js` | the M4 component: Q per loop, or Q(axis), with the switch between them in the caption — `ui-rules` §4's zero-width axis is a repeat, and the chart says so rather than drawing a curve through it |
+| `lib/charts/schedule.js` | the M5 component: the run as a length of time, settle in grey and measuring in accent, one pair per temperature. A settle nobody has measured is hatched and takes no time on the axis, and there is no clock under a total that is a floor |
+| `lib/tree.js` | the pipeline tree (M5): the tree as typed, the edit operations, the flat schedule nested back into the shape it was a walk of, what the cryostat will be at on every node, and the cost with `lower_bound` carried as the word "at least" |
 | `lib/results.js` | what goes in a card's result slot, and the key it is rebuilt on: the chart moves with every shot, the form does not. Since M4 the newest shot's own line comes first — Q, mean and σ at its point, the peaks, the digitiser's verdict and which `trigger_sweep` was in force |
 | `lib/monitor.js` | the run monitor (M4): `monitorModel(state)` is a pure function of the store — the loops at their three time scales, the shot, its segment from `StepPhase`, the ETA counting down, which of stop / abort / cancel apply, and the prompt a `NeedsOperator` opens — with the DOM beside it, under the rail on every tab |
 | `lib/replay.js`, `replay.html` | the offline bench: fixtures fed into the same store the socket feeds |
-| `views/` | bench is M2's six generated cards with M3's charts in three of them; pipeline · results · rig are stubs, and each says which milestone fills it |
+| `views/` | bench is M2's six generated cards with M3's charts in three of them; pipeline is M5's editor and schedule; results is a stub that says which milestone fills it, and rig is the read-back |
 | `fonts/` | IBM Plex Sans and Mono, Archivo — 24 woff2, 387 KB, lifted out of the Round 3 mockup by `tools/extract_ui_fonts.py`. Nothing is fetched from a network at runtime |
 | `fixtures/` | see below |
 | `tests/` | `node --test ui/tests/…` — and `tests/test_ui.py` runs them from the Python suite, skipping where there is no Node |
@@ -81,10 +83,18 @@ shape `GET /runs/{id}/data` answers, because a browser cannot open HDF5.
 | `stream_pipeline_sim.jsonl` | node identity: two `bace` nodes under one `run_id`, each numbering its own shots from one, and the loop's `Progress` beside the leaf's |
 | `stream_tree_sim.jsonl` | the M4 tree, 2 T x 2 levels x a three-point scan of two loops: both `NeedsOperator`s and the recorder's answers to them, the executor's `Progress` at three scales, and a `TemperatureRead` typed by a person. **`--only tree`, and `--sim` only**: the recorder answers this one's pauses itself, with a number nobody read, which on a bench would go into the folder names as a temperature the sample never reached |
 | `stream_stopped_sim.jsonl` | a 20-loop scan stopped `after_shot` at loop 13 — 60 requested, 39 kept: the one `RunAborted`, `stopping`, `stopped`, and a node that ended `stopped` in the set |
+| `validate_txill_sim.json` | `POST /pipelines/validate` on the canonical 9 T × 5 level tree — 90 module runs, 198 steps, 4500 shots, and a cost that is a floor because no settle has been measured on this bench. The whole pipeline tab is drawn from one of these |
+| `validate_bound_sim.json` | the same endpoint on the two shapes the canonical tree has none of: a `temperature` **module**, whose setpoint binds the rest of the run, and duplicate sibling modules (`bace`, `bace#2`). Its cost is the counter-case — nothing settles, so nothing is a floor |
+| `validate_nested_sim.json` | a temperature loop **inside** a temperature loop, with a module either side of the inner one. Legal, pathological, and the case the time bar got wrong: `pipeline.estimate` counts every temperature's settle and hold once however deep, and a bar drawn one block per *outer* iteration read 62 s against a cost of 102 s |
 
 Everything with `_sim` in its name came off `--sim`, and says so in its name on
 purpose: a simulated J-V is a plausible-looking curve, and must never be
 mistaken for a measured one. `--tag rig` records the same set on the bench.
+
+The two `validate_*` fixtures are the exception to "record it when the sample
+can take it": `POST /pipelines/validate` touches nothing — no worker job, no
+instrument, no folder — so they can be recorded against a live bench at any
+moment. `python3 tools/record_ui_fixtures.py --only validate`.
 
 **The journals do not exercise the reconnect path.** Their `seq` runs 0…N with
 no gap — that is what a journal is, and `tests/test_ui.py` asserts it rather
@@ -166,9 +176,106 @@ by `crit`.
 and the timing diagram, each in the card that owns it.
 
 **M4 is built**: the run monitor under the rail, the newest shot's verdict
-beside its trace, and Q per loop / Q(axis). **M5 is next** — the pipeline
-tab: the tree editor, the Dry run against `POST /pipelines/validate`, and the
-schedule as "what it will do, in order".
+beside its trace, and Q per loop / Q(axis).
+
+**M5 is built**: the pipeline tab — the tree editor, the schedule at three
+scales, and the cost. **M6 is next**, and is preceded by a design pass: R2·3
+is a Round 2 artboard and Round 3 left the results tab empty.
+
+### What the pipeline tab is, and what it never counts
+
+Two cards, from R3·3: the tree that gets posted, and what the service says it
+will do with it. Everything on the right-hand side, and every number under the
+tree on the left, is one `POST /pipelines/validate` — the checks, the schedule
+in order, the counters, the cost and the folder.
+
+**The console validates on every commit, not only on Dry run.** The bench tab
+already does this per card, and a pipeline has more ways to be wrong than a
+card: a V_oc with no source in scope, an LED level under turn-on, a module
+inside an illumination loop typing `led_v`. The corollary is the rule the
+whole tab is built on — **nothing on this screen is counted here**. How many
+levels `1.010 → 1.030 step 0.005` makes is a rounding question
+`pipeline.range_values` settled once, and the editor reads the answer off the
+resolved tree that comes back beside the schedule. Before the first answer, a
+range row says the range and no count. `validate` is 110 ms and 340 kB on the
+canonical tree, so the calls are coalesced; **Dry run** is the same request
+made deliberately, which is what it is for after a bench read-back.
+
+Three more things it is careful about:
+
+* **The schedule is drawn at three scales**, and flat behind a switch. 198
+  steps is the number `ui-rules` §5 exists to refuse; the nesting is which
+  temperature, which level, how far into the scan — the same three the monitor
+  draws during the run.
+* **A `temperature` module binds the rest of the run**, not the rest of one
+  iteration, and the schedule does not say so: `Step.detail.temperature_k` is
+  the enclosing *loop's* setpoint and is `null` under a module. `lib/tree.js`
+  re-walks the steps with the executor's own rule — root **and** every open
+  scope — so a run whose cryostat was set by a node reads as being at that
+  temperature everywhere after it, including the next iteration of a loop
+  enclosing it.
+* **`lower_bound` is "at least", never a promise.** It is set the moment any
+  temperature has no measured settle behind it, which on a fresh device is all
+  of them. So the total reads *at least 84 min*, `waiting for T` reads the em
+  dash rather than the holds the cost does know about, the time bar's axis is
+  elapsed time rather than a clock, and each unmeasured settle is hatched and
+  takes no time on it — never the median of the others, when a settle is 14
+  minutes to 2 hours.
+* **A control that says it changes how values are written must not change what
+  they are.** A list is switched to a range only when it is evenly spaced: the
+  canonical temperature list steps 5 K once and 10 K after, so as
+  `295 → 220 step 5` it is sixteen temperatures where the list is nine, and
+  the switch refuses with that number in its sentence.
+* **Removing a key the node types is not typing into it.** A module that
+  types `led_v` inside an illumination loop resolves `inherited` — read-only —
+  *and* is refused by `tree.owned-param`; the reset is offered anyway, or a
+  saved recipe with that in it would block Start with no way out but deleting
+  the node.
+* **What is on screen while a validate is in flight is a moment old, and says
+  so.** Blanked instead, the schedule read *"no nodes yet"* on a tree with
+  four nodes in it for the third of a second after every commit. `stale` marks
+  the header, the check line and the Start button, which refuses while it is
+  set — the tree rows are the only thing held back, because they match a node
+  to its schedule entries by counting iterations and a mismatched shape would
+  put one node's numbers on another's row.
+
+### What a scan costs the pipeline tab
+
+Nothing, and that is the design. Measured on a live `--sim --fast` scan —
+21 × 60, 1260 shots in 6.5 s, 8888 frames — with the canonical tree open on
+this tab the whole time: **29 DOM mutations inside it**, which are the Start
+button's own state changing as the worker is taken and given back, and **no
+`validate` at all**. The view reads three things off the store — whether the
+worker is held, the catalogue, and `bench.read_at` — and no shot, phase or
+progress frame moves any of them, so the subscription returns without
+rendering. `read_at` is stable through a scan by construction: a read-back is
+a job on the worker, and the worker is running the run.
+
+One commit is 515 elements: the tree rows, the value lists, the cost, the
+checks and the schedule, each keyed apart and each redrawn once.
+
+A module node's form is the bench's own card: `cardModel` and the field
+component from `lib/card.js`, over the ParamSet the *schedule* resolved for
+that node — so `led_v` reads as inherited from the illumination loop and `voc`
+as derived from the `jv_bace` two nodes earlier. Two things are added to each
+spec on the way in, and both are about what the node may take back:
+
+* **whether *this node* types the override**, which decides whether a reset is
+  offered: a bench edit and a node override both resolve as `edited`
+  (`ParamSet.update_layer` merges into the same layer), and only one of them
+  is the tree's to drop;
+* **whether it may be typed at all.** A schedule's `ParamValue` carries
+  `{value, source, detail}` and no `editable`, and the catalogue's `editable`
+  is the answer for the *bench's* ParamSet — so it is recomputed here by the
+  service's own rule (`params.LOCKED`: inherited and derived are never
+  editable, whatever the spec says). Without it a `bace` inside an
+  illumination loop offered an input on the level the loop owns.
+
+When the tree does not resolve at all — one bad value and `validate` answers
+`schedule: null` for every node in it — the catalogue stands in, with this
+node's own overrides on top. The form has to survive the typo that caused it:
+drawn from the schedule alone it vanished at exactly the moment it held the
+row to fix.
 
 ### What a run looks like while it runs
 

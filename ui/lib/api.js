@@ -81,8 +81,13 @@ export function createApi({ base = '', fetch: fetchImpl = globalThis.fetch } = {
     runData: (runId, node) => call('GET', `/runs/${runId}/data`, undefined, node ? { node } : null),
 
     // -- pipelines ---------------------------------------------------------
-    /** The Dry run button: validates, costs and schedules, and touches nothing. */
-    validate: (tree) => call('POST', '/pipelines/validate', { tree }),
+    /**
+     * The Dry run button: validates, costs and schedules, and touches nothing.
+     * `name` only decides the folder the answer quotes (`folder_pattern`), so
+     * it is optional — but a Dry run that named a different folder from the
+     * Start beside it would be describing a different run.
+     */
+    validate: (tree, name) => call('POST', '/pipelines/validate', { tree, ...(name ? { name } : {}) }),
     startPipeline: (tree, name) => call('POST', '/pipelines', { tree, ...(name ? { name } : {}) }),
     lastPipeline: () => call('GET', '/pipelines/last'),
     savedPipelines: () => call('GET', '/pipelines/saved'),

@@ -311,6 +311,13 @@ def main(argv: list[str] | None = None) -> int:
     if wanted("stopped"):
         _record_stopped(a, base, ws_url, tag)
 
+    # 3d · the two `POST /pipelines/validate` answers M5 develops against.
+    #      Neither is a run: `validate` touches nothing, so these are the one
+    #      pair of fixtures that can be recorded on a live bench at any time,
+    #      and the only ones the pipeline tab needs to be workable offline.
+    if wanted("validate"):
+        _record_validate(a, base, tag)
+
     # 4 · the bench mid-run: the `inferred` overlay, which exists nowhere at
     #     rest. Recorded before the read-back below, because it needs a run.
     if wanted("bench"):
@@ -432,6 +439,104 @@ def _record_tree(a, base: str, ws_url: str, tag: str, mode: str) -> None:
         ws_url, base, {"tree": tree, "name": "ui-fixture-tree"},
         timeout_s=a.timeout_s, path="/pipelines", answer_pauses=True))
     _dump(os.path.join(a.out, f"stream_tree_{tag}.jsonl"), frames, jsonl=True)
+
+
+TXILL = {
+    "kind": "loop", "loop": "temperature", "label": "T",
+    "values_k": [295, 290, 280, 270, 260, 250, 240, 230, 220],
+    "tolerance_k": 0.2, "hold_s": 60, "timeout_s": 1800,
+    "children": [
+        {"kind": "loop", "loop": "illumination",
+         "led_start_v": 1.010, "led_stop_v": 1.030, "led_step_v": 0.005,
+         "led_low_v": 0.4, "led_settle_s": 2.0,
+         "children": [
+             {"kind": "module", "module": "jv_bace", "params": {}},
+             {"kind": "module", "module": "bace", "params": {"n_loops": 100}},
+         ]},
+    ],
+}
+"""The canonical tree of `docs/ui-plan.md` M5, spelled exactly as
+`docs/service-contract.md` section 7 spells it: 9 temperatures x 5 levels,
+90 module runs, 4500 shots. It is the tree the pipeline tab has to be able
+to build, dry-run and submit, and the one every count on that screen is
+measured against."""
+
+BOUND = {
+    "kind": "loop", "loop": "repeat", "count": 2,
+    "children": [
+        {"kind": "module", "module": "temperature", "params": {"setpoint_k": 250.0}},
+        {"kind": "module", "module": "bace",
+         "params": {"axis_name": "delay_ns", "axis_start": 0.0, "axis_stop": 100.0,
+                    "axis_step": 50.0, "centre_on_voc": False, "n_loops": 2,
+                    "vpre": 1.0, "vcoll": -2.0}},
+        {"kind": "module", "module": "bace",
+         "params": {"axis_name": "delay_ns", "axis_start": 0.0, "axis_stop": 100.0,
+                    "axis_step": 50.0, "centre_on_voc": False, "n_loops": 1,
+                    "vpre": 1.0, "vcoll": -2.0}},
+        {"kind": "module", "module": "wait", "params": {}},
+    ],
+}
+"""The two shapes the canonical tree has none of, and both are rules the
+console has to get right.
+
+**A `temperature` module binds the rest of the run**, not the rest of one
+iteration (`executor.ExecCtx`): it writes into the root and every open
+scope, so the second `rep` is still at 250 K even though nothing in that
+iteration has settled yet. The resolver cannot say so -- `Step.detail.
+temperature_k` is the enclosing *loop's* setpoint and is null here -- so a
+console that drew the schedule from the schedule alone would show a run
+with no temperature anywhere on it, and `lib/tree.js` re-walks the steps
+with the executor's own rule instead. This fixture is what pins that.
+
+**Duplicate sibling modules** are `bace` and `bace#2`, which is the naming
+`ui/lib/tree.js` deliberately does *not* reimplement: it matches a tree
+node to its schedule entries by counting iterations, never by spelling a
+node path. Two `bace` siblings under a loop is the tree that would catch it
+if it ever did."""
+
+
+NESTED = {
+    "kind": "loop", "loop": "temperature", "values_k": [290, 250], "hold_s": 30,
+    "children": [
+        {"kind": "module", "module": "bace",
+         "params": {"axis_name": "delay_ns", "axis_start": 0.0, "axis_stop": 100.0,
+                    "axis_step": 50.0, "centre_on_voc": False, "n_loops": 1,
+                    "vpre": 1.0, "vcoll": -2.0}},
+        {"kind": "loop", "loop": "temperature", "values_k": [200, 180], "hold_s": 10,
+         "children": [
+             {"kind": "module", "module": "bace",
+              "params": {"axis_name": "delay_ns", "axis_start": 0.0, "axis_stop": 100.0,
+                         "axis_step": 50.0, "centre_on_voc": False, "n_loops": 2,
+                         "vpre": 1.0, "vcoll": -2.0}},
+         ]},
+        {"kind": "module", "module": "wait", "params": {}},
+    ],
+}
+"""A temperature loop inside a temperature loop, with a module on either side
+of the inner one.
+
+Legal, and pathological in the same way `docs/ui-rules.md` section 8's
+temperature-inside-illumination is -- but the cost model handles it
+(`estimate` keeps `open_temperatures` as a list, so a module's time is
+attributed to every temperature it is inside and its own settle and hold are
+counted once), and so must the console's time bar. Drawn as one block per
+*outer* iteration it lost the inner holds entirely: 62 s of bar against a
+cost of 102 s. This is the fixture that says so."""
+
+
+def _record_validate(a, base: str, tag: str) -> None:
+    """`POST /pipelines/validate` on all three trees. Touches nothing: no
+    worker job, no instrument, no folder -- the endpoint's whole contract."""
+    print("pipelines/validate …")
+    for stem, tree, why in (("txill", TXILL, "9 T x 5 levels"),
+                            ("bound", BOUND, "a temperature module, and duplicate siblings"),
+                            ("nested", NESTED, "a temperature loop inside a temperature loop")):
+        answer = _request(f"{base}/pipelines/validate", "POST",
+                          {"tree": tree, "name": f"ui-fixture-{stem}"})
+        counters = answer.get("counters") or {}
+        print(f"  {why}: valid={answer.get('valid')} "
+              f"{counters.get('modules')} runs, {len(answer.get('schedule') or [])} steps")
+        _dump(os.path.join(a.out, f"validate_{stem}_{tag}.json"), answer)
 
 
 def _record_stopped(a, base: str, ws_url: str, tag: str) -> None:
