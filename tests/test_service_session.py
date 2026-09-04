@@ -89,8 +89,9 @@ def test_a_manual_jv_goes_through_the_worker_the_journal_and_the_registry(tmp_pa
         frames = s.events_since(0)
         assert [f["seq"] for f in frames] == list(range(1, len(frames) + 1))
         assert {f["run_id"] for f in frames} == {run_id}
-        assert [f["type"] for f in frames[:3]] == ["RunQueued", "RunStateChanged",
-                                                   "RunStateChanged"]
+        # The submit-time checks are journaled as Verdict frames after `queued`.
+        assert [f["type"] for f in frames if f["type"] != "Verdict"][:3] == \
+            ["RunQueued", "RunStateChanged", "RunStateChanged"]
         assert frames[0]["data"] == {"kind": "manual", "module": "jv", "name": "a J-V",
                                      "tree": {"kind": "module", "module": "jv",
                                               "params": {"step_v": 0.1}},
@@ -758,8 +759,8 @@ def test_under_an_asyncio_loop_frames_reach_an_awaiting_subscriber(tmp_path):
                 seen.append(frame)
                 if frame["type"] == "RunStateChanged" and frame["data"]["state"] == "parked":
                     break
-            assert [f["type"] for f in seen[:3]] == ["RunQueued", "RunStateChanged",
-                                                     "RunStateChanged"]
+            assert [f["type"] for f in seen if f["type"] != "Verdict"][:3] == \
+                ["RunQueued", "RunStateChanged", "RunStateChanged"]
             assert [f["seq"] for f in seen] == list(range(1, len(seen) + 1))
             assert any(f["type"] == "JVCurveDone" for f in seen)
             assert s.run_record(run_id)["state"] == "done"

@@ -382,7 +382,10 @@ def test_a_manual_run_streams_over_the_websocket_and_lands_in_the_record(service
     assert [f["seq"] for f in got] == list(range(since + 1, since + 1 + len(got)))
     assert {f["run_id"] for f in got} == {run_id}
     types = [f["type"] for f in got]
-    assert types[:3] == ["RunQueued", "RunStateChanged", "RunStateChanged"]
+    # The submit-time checks are journaled as Verdict frames right after the
+    # `queued` transition; the run's own frames keep their order around them.
+    assert [t for t in types if t != "Verdict"][:3] == ["RunQueued", "RunStateChanged", "RunStateChanged"]
+    assert types[:2] == ["RunQueued", "RunStateChanged"]
     assert states_of(got) == ["queued", "preflight", "running", "done", "parked"]
     assert got[0]["data"]["params"]["step_v"] == 0.1 and got[0]["data"]["name"] == "dark"
     curve = next(f for f in got if f["type"] == "JVCurveDone")
@@ -468,8 +471,16 @@ def test_the_identity_travels_with_the_run_and_both_endpoints_agree_on_the_nodes
     # Byte for byte what a later process reads back from the file.
     for run_id in (first, second):
         from_file = session.journal.run_record(run_id)
-        assert from_file["nodes"] == client.get(f"/runs/{run_id}").json()["nodes"], run_id
+        live = client.get(f"/runs/{run_id}").json()
+        assert from_file["nodes"] == live["nodes"], run_id
         assert from_file["sample"] == identity
+        # The flags too: the submit-time checks are journaled beside the
+        # Start re-read, so `trigger.auto` and `intensity.factor` do not
+        # depend on which process answers.
+        keyed = lambda vs: {(v["code"], v.get("node_path") or ""): (v["level"], v["text"]) for v in vs}  # noqa: E731
+        assert keyed(from_file["verdicts"]) == keyed(live["verdicts"]), run_id
+        if run_id == second:
+            assert ("trigger.auto", "bace") in keyed(from_file["verdicts"]), "a submit-time check, from the file"
 
     # The header says it too: what a file with no runs in it can still say.
     with open(session.journal.path, encoding="utf-8") as fh:

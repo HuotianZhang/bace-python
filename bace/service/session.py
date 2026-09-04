@@ -715,6 +715,15 @@ class Session:
                 resolved=jsonable(resolved), name=name, folder=folder,
                 sample=dict(rec.sample)), queued_at, None)
             self._ingest(run_id, "", E.RunStateChanged("queued", "submitted"), time.time(), None)
+            # The submit-time checks, journaled: `trigger.auto`,
+            # `intensity.factor`, `temperature.not-wired` are what a results
+            # tab lists as flags, and a record read back from the file after
+            # a restart must carry the same ones this process does. The
+            # registry already holds them (`rec.verdicts`); `_apply` replaces
+            # by (code, node_path), so nothing is doubled.
+            for check in v.checks:
+                if check.level != "ok":
+                    self._ingest(run_id, check.node_path, check, time.time(), None)
         return run_id, v
 
     def _make_run(self, rec: RunRecord) -> Callable[[Job], Any]:

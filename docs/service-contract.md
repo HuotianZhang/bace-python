@@ -319,6 +319,11 @@ to change.)
   - `shot_time_s(module="bace") -> float | None`: median interval between
     consecutive `StepDone` of the last completed bace run — same bench filter as
     `settle_history`, for the same reason (a sim shot is a millisecond).
+- The submit-time checks that are not `ok` are journaled as `Verdict` lines
+  right after the `queued` transition, each on its own `node_path`, so a
+  record read back from the file carries the same flags this process does
+  (`trigger.auto`, `intensity.factor`, `temperature.not-wired`); the Start
+  re-read's chain verdicts follow and replace by `(code, node_path)`.
 - `RunQueued` (`experiment.events.RunQueued`; `service/journal.py run_queued()`
   builds the same line for a test or a script), `RunStateChanged`,
   `NodeStarted/NodeDone`, `Verdict`, `NeedsOperator`, `OperatorResumed`,

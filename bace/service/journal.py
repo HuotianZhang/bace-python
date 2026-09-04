@@ -485,7 +485,8 @@ class _Run:
         self.error: str | None = None
         self.step_ts: dict[str, list[float]] = {}
         self.verdicts: list[dict] = []
-        """Every `warn`/`crit` verdict this run's lines carried, in order."""
+        """Every verdict but `ok` this run's lines carried -- the submit-time
+        checks and the Start re-read -- one per (code, node_path)."""
         self.sample: dict | None = None
         self.nodes: dict[str, dict] = {}
         """Each module node's `NodeDone`, reduced by `node_record()`: what
@@ -557,12 +558,21 @@ class _Run:
         elif kind == "LoopDone":
             self._result(line).update(loop_result(data))
         elif kind == "Verdict":
-            if data.get("level") in ("warn", "crit"):
-                self.verdicts.append({
-                    "level": data.get("level"), "code": data.get("code"),
-                    "text": data.get("text"),
-                    "node_path": data.get("node_path") or line.get("node_path") or "",
-                    "ts": ts})
+            # Every level but `ok`: `info` is `trigger.auto`, which the results
+            # tab says beside a charge near zero. One entry per (code, node),
+            # the newest winning -- the Start re-read replaces the submit-time
+            # copy, exactly as the registry's record does.
+            if data.get("level") in ("info", "warn", "crit", "invalid"):
+                entry = {"level": data.get("level"), "code": data.get("code"),
+                         "text": data.get("text"),
+                         "node_path": data.get("node_path") or line.get("node_path") or "",
+                         "ts": ts}
+                for i, old in enumerate(self.verdicts):
+                    if old["code"] == entry["code"] and old["node_path"] == entry["node_path"]:
+                        self.verdicts[i] = entry
+                        break
+                else:
+                    self.verdicts.append(entry)
         elif kind == "JVCurveDone":
             metrics = data.get("metrics") or {}
             # `dark is False`, not `not dark`. On the wire the field is
