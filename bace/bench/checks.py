@@ -111,7 +111,8 @@ def stage_offline(report: Report, archive: str | None) -> None:
         sim.led.set_pulse(1.020, 0.4)
         rig = Rig(bias=sim.bias, scope=sim.scope, shutter=sim.shutter,
                   config=RigConfig(), power=sim.power)
-        cfg = RunConfig(n_averages=64, settle_s=0.0, dark_settle_s=0.0)
+        cfg = RunConfig(n_averages=64, settle_s=0.0, dark_settle_s=0.0,
+                        invert_polarity=True)
         fin = None
         for ev in run_transient_scan(rig, bace_sweep(0.88, 0.92, 0.02, n_loops=2),
                                      cfg, sleep=lambda s: None):
@@ -141,7 +142,7 @@ def stage_offline(report: Report, archive: str | None) -> None:
         pts = [e for e in S.run_intensity_series(
             rig, series, bace_at_voc(2),
             RunConfig(n_averages=32, settle_s=0.0, dark_settle_s=0.0,
-                      record_length=400), sleep=lambda s: None)
+                      record_length=400, invert_polarity=True), sleep=lambda s: None)
             if isinstance(e, S.SeriesPointDone)]
         c.data["levels"] = [p.level_v for p in pts]
         c.data["Voc"] = [round(p.voc, 4) for p in pts]
@@ -300,7 +301,7 @@ def stage_offline(report: Report, archive: str | None) -> None:
         list(record(run_transient_scan(
             rig, bace_sweep(0.88, 0.92, 0.02, n_loops=2),
             RunConfig(n_averages=32, settle_s=0.0, dark_settle_s=0.0,
-                      record_length=400), sleep=lambda s: None), rec))
+                      record_length=400, invert_polarity=True), sleep=lambda s: None), rec))
         c.data["folder"] = rec.folder
         c.data["files"] = [os.path.basename(p) for p in rec.written]
         assert rec.written, "the recorder wrote nothing"

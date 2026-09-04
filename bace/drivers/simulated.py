@@ -58,6 +58,7 @@ class SimulatedDevice:
     capacitance: float = 1.0e-9    # F, geometric — the dark run's charge
     tau_ext: float = 8.0e-8        # s, extraction time constant
     diode_n: float = 1.5           # ideality for V_oc vs intensity
+    saturation_efolds: float = 3.0 # e-folds of stored charge above V_oc before it saturates
     jsc_ref: float = 2.0e-4        # A at led_ref
     jsat_ref: float = 6.0e-4       # A at led_ref
     shunt_ohm: float = 2.0e5       # shunt resistance, for the J-V curve
@@ -110,7 +111,15 @@ class SimulatedDevice:
         i = self.led_current(drive_v)
         if i <= 0.0:
             return 0.0
-        rel = math.exp(np.clip((vpre - self.voc(drive_v)) / self.v_ideal, -50.0, 20.0))
+        # Exponential in the prebias up to V_oc, then saturating: a prebias
+        # `saturation_efolds * v_ideal` (0.135 V) above V_oc stores as much as
+        # one further above, about 20x `q_ref`. The clip used to sit at +20
+        # e-folds, which is no clip at all -- the bench landing the device
+        # 1.1 V above V_oc (see `Bench.vpre_device`) extracted 0.18 C, and a
+        # simulator that can hand the console a fifth of a coulomb is one
+        # whose numbers nobody can sanity-check against the archive.
+        rel = math.exp(np.clip((vpre - self.voc(drive_v)) / self.v_ideal,
+                               -50.0, self.saturation_efolds))
         return self.q_ref * (i ** 0.8) * (rel + self.charge_floor)
 
 
@@ -124,6 +133,11 @@ class Bench:
 
     # rig constants
     pulse_amp: float = 4.0             # the x4 amplifier in the bias path
+    amplifier_inverting: bool = True
+    """The x4 amplifier inverts: `run.toml` records that with `:OUTP1:POL NORM`
+    and `invert_polarity = true` the generator holds `-v_pre / 4` and the
+    device rests at `v_pre`. `pulse_amp` is the gain's magnitude, as
+    `RigConfig.pulse_amp` is; the sign lives here."""
     sense_resistor_ohm: float = 5.192
     baseline_a: float = -2.5e-5        # the DC offset the last-10 % correction removes
     noise_a: float = 3.0e-4            # single-shot rms current noise
@@ -138,6 +152,7 @@ class Bench:
     bias_low_v: float = 0.0
     bias_delay_s: float = 0.0
     bias_width_s: float = 5e-6
+    bias_inverted: bool = False        # :OUTP1:POL INV on the 81150A
     bias_output: bool = False
     smu_output: bool = False
     relay: str = "amplifier"
@@ -148,12 +163,33 @@ class Bench:
 
     # -- derived device conditions ---------------------------------------
     @property
+    def amplifier_gain(self) -> float:
+        return -self.pulse_amp if self.amplifier_inverting else self.pulse_amp
+
+    @property
+    def rest_level_v(self) -> float:
+        """The generator level the device sits at between pulses: the *low*
+        level under `:OUTP1:POL NORM`, the high one under INV (see
+        `RunConfig.inverted_output`). Which one is not a convention the
+        simulator may choose -- it decides what prebias the device is
+        charged at, and until 2026-09-03 this bench took the high level
+        whatever the polarity, so the recipe the rig validated (NORM with
+        `invert_polarity`) prebiased the simulated device at `-v_coll`."""
+        return self.bias_high_v if self.bias_inverted else self.bias_low_v
+
+    @property
+    def pulse_level_v(self) -> float:
+        """The generator level the pulse goes to: the other one."""
+        return self.bias_low_v if self.bias_inverted else self.bias_high_v
+
+    @property
     def vpre_device(self) -> float:
-        return self.bias_high_v * self.pulse_amp
+        """The prebias at the device: the rest level through the amplifier."""
+        return self.rest_level_v * self.amplifier_gain
 
     @property
     def vcoll_device(self) -> float:
-        return self.bias_low_v * self.pulse_amp
+        return self.pulse_level_v * self.amplifier_gain
 
     @property
     def swing(self) -> float:
@@ -226,6 +262,18 @@ class SimulatedBiasSource:
     @property
     def output_enabled(self) -> bool:
         return self.bench.bias_output
+
+    @property
+    def inverted(self) -> bool:
+        """`:OUTP1:POL` as the instrument holds it. Kept on the bench, because
+        the digitizer needs it: the polarity decides which level the device
+        rests at, so it decides the prebias the transient is synthesised
+        for."""
+        return self.bench.bias_inverted
+
+    @inverted.setter
+    def inverted(self, on: bool) -> None:
+        self.bench.bias_inverted = bool(on)
 
     @property
     def last_levels(self) -> tuple[float, float]:
