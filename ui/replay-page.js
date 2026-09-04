@@ -17,11 +17,13 @@ import { FIXTURES, loadFixture, replayInto, replayPaced } from './lib/replay.js'
 import { h, fill, keyed } from './lib/dom.js';
 import * as fmt from './lib/format.js';
 import { renderRail, renderChainStrip } from './lib/rail.js';
+import { renderMonitor } from './lib/monitor.js';
 import { chart } from './lib/charts/frame.js';
 import { transientModel } from './lib/charts/transient.js';
 import { jvModel } from './lib/charts/jv.js';
 import { timingModel } from './lib/charts/timing.js';
-import { pulseDelayS, runFor, valuesOf } from './lib/results.js';
+import { loopsModel } from './lib/charts/loops.js';
+import { pulseDelayS, runFor, shotBlock, valuesOf } from './lib/results.js';
 
 const store = createStore({ schedule: (fn) => requestAnimationFrame(fn) });
 const loaded = [];
@@ -37,12 +39,17 @@ const payloads = {};
 // the mid-scan snapshot, and it is the only fixture that carries an inferred
 // anything.
 const railEl = h('header.rail');
+// The real monitor too (M4): a paced replay of the tree fixture is the one
+// place the pauses, the counters at three scales and the segment indicator
+// can be watched with no service — the prompt's Resume says what it would
+// have posted, since nothing here can answer it.
+const monitorEl = h('section.monitor', { hidden: true });
 const stripEl = h('div.strip');
 const app = document.getElementById('app');
 app.replaceChildren(
   h('div.bar', h('span.wordmark', 'bace'), h('span.spacer'),
     h('span.chips', h('span.chip', { text: 'offline replay' }))),
-  railEl,
+  railEl, monitorEl,
   h('main.view', h('h1', 'offline replay'),
     h('p.lede', 'Fixtures fed into the same store the WebSocket feeds. The journals replay '
       + 'every run semantic and cannot draw a curve — the payload policy keeps the scalars '
@@ -137,6 +144,7 @@ function renderCharts() {
     shot ? `${shot.node_path}:${shot.loop}:${shot.index}:${shot.ts}` : 'no-shot',
     payloads.transient ? 'rig-transient' : '-',
     `curves:${curves.length}`,
+    bace ? `${bace.node.shots.length}:${bace.node.loops.length}:${bace.node.outcome || ''}:${bace.record.state || ''}` : 'no-node',
   ].join('|');
   keyed(charts, key, () => {
     const rig = (state.bench && state.bench.rig && state.bench.rig.values) || {};
@@ -154,6 +162,8 @@ function renderCharts() {
         ? h('div.alerts', timing.alerts.map((a) => h('div.warn1.' + a.level,
           h('span.code', { text: a.level }), h('span', { text: a.text }))))
         : null,
+      bace && bace.node.lastShot ? h('h3', 'the newest shot · M4') : null,
+      bace && bace.node.lastShot ? shotBlock(bace.node.lastShot, bace, (bace.record.config && bace.record.config.run) || {}) : null,
       h('h3', 'the transient'),
       source
         ? chart(transientModel(source, values ? {
@@ -162,6 +172,8 @@ function renderCharts() {
           offset_corrected: values.offset_correct, dark_reference: values.dark_reference,
         } : {}))
         : h('p.absent', 'load the rig transient fixture, or replay a recorded stream'),
+      h('h3', 'Q per loop, or Q(axis) · M4'),
+      bace ? chart(loopsModel(bace)) : h('p.absent', 'replay a recorded bace stream — the stopped one shows kept of requested'),
       h('h3', 'the J–V'),
       curves.length ? chart(jvModel(curves)) : h('p.absent', 'load the J-V fixture, or replay the jv stream'),
     ];
@@ -170,6 +182,11 @@ function renderCharts() {
 
 store.subscribe((state) => {
   renderRail(railEl, state);
+  renderMonitor(monitorEl, state, {
+    onStop: (id, mode) => renderControls(`offline: the monitor would POST /runs/${id}/stop {mode: ${mode}}`),
+    onAbort: (id) => renderControls(`offline: the monitor would POST /runs/${id}/stop {mode: abort}`),
+    onResume: (id, detail) => renderControls(`offline: the monitor would POST /runs/${id}/resume ${JSON.stringify(detail)}`),
+  });
   renderCharts();
   renderChainStrip(stripEl, state, {
     // Offline there is no service to answer, so the strip says what it would

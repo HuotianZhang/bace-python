@@ -456,3 +456,101 @@ button.link:hover { color: var(--accent-dark); }
 .metrics th { text-align: left; font-weight: 600; font-size: 11px; padding-top: 4px; }
 .metrics td.l { color: var(--grey); font-size: 11px; }
 .metrics td.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 11px; }
+
+/* -- the run monitor (M4) ---------------------------------------------------
+   Under the rail on every tab while a run holds the worker, gone when the
+   bench is parked. Three counters at three time scales (§5), the segment the
+   shot is in, the ETA, the two honest verbs — and the operator's answer to a
+   pause. It shares the strip's register: this is bench furniture. */
+.monitor {
+  display: flex; flex-direction: column; gap: 0;
+  border-bottom: 1px solid var(--rule);
+  background: var(--fill);
+  flex: 0 0 auto;
+}
+.monitor[hidden] { display: none; }
+.mon-row { display: flex; align-items: center; gap: 8px; padding: 5px 12px; }
+.mon-live, .mon-actions, .mon-prompt {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-family: var(--font-num); font-size: 11.5px;
+}
+.mon-live { flex: 1 1 auto; }
+.mon-actions { flex: 0 0 auto; }
+.mon-prompt { padding: 5px 12px; }
+.mon-prompt:empty { display: none; }
+.mon-prompt {
+  border-top: 1px dashed var(--rule);
+  background: #fff8ef;
+}
+.mon-state {
+  font-family: var(--font-head); font-weight: 800; font-size: 11px; text-transform: uppercase;
+  letter-spacing: .04em; padding: 1px 7px; background: var(--ink); color: #fff;
+}
+.mon-state.running { background: var(--accent); }
+.mon-state.paused, .mon-state.stopping { background: var(--warn); }
+.mon-run { font-family: var(--font-head); font-weight: 600; font-size: 12.5px; }
+.mon-count {
+  padding: 2px 7px; background: var(--paper); border: 1px solid var(--rule); white-space: nowrap;
+}
+/* The outer loops carry the time; the shot counter is the fast one (§5). */
+.mon-count.temperature { border-color: var(--ink); }
+.mon-count.open.temperature { font-weight: 600; }
+.mon-count.shots { border-color: transparent; background: none; color: var(--ink); }
+.mon-wait { color: var(--warn); font-weight: 600; }
+.mon-phase { display: inline-flex; align-items: center; gap: 6px; }
+.mon-seg-row { display: inline-flex; gap: 2px; }
+.mon-seg { width: 9px; height: 9px; border: 1px solid var(--rule); background: var(--paper); }
+.mon-seg.done { background: var(--rule); }
+.mon-seg.on { background: var(--accent); border-color: var(--accent); }
+.mon-phase-text { color: var(--ink); }
+.mon-verdict.alert { color: var(--alert); font-weight: 600; }
+.mon-verdict.ok { color: var(--grey); }
+.mon-eta { color: var(--grey); }
+.mon-status.ok { color: var(--ok); }
+.mon-status.bad { color: var(--alert); }
+.monitor .spacer { flex: 1 1 auto; }
+.monitor button.btns { font-family: var(--font-body); font-weight: 500; font-size: 11px; padding: 3px 8px; }
+.monitor button.armed { background: var(--alert); border-color: var(--alert); color: #fff; }
+/* The queue: runs waiting for the worker, each with the Cancel it needs. */
+.mon-queue {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 4px 12px;
+  border-top: 1px dashed var(--rule);
+  font-family: var(--font-num); font-size: 11px;
+}
+.mon-queue:empty { display: none; }
+.mon-qk {
+  font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase;
+  color: var(--grey);
+}
+.mon-q {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 6px; background: var(--paper); border: 1px solid var(--rule);
+}
+
+.mon-ask { font-weight: 600; color: var(--warn); }
+.mon-lines { display: inline-flex; gap: 10px; flex-wrap: wrap; color: var(--ink); }
+.mon-reading .ok { color: var(--ok); }
+.mon-reading .warn { color: var(--warn); }
+.mon-field { display: inline-flex; align-items: baseline; gap: 4px; }
+.mon-field input.v {
+  border: 1px solid var(--rule); background: var(--paper); padding: 2px 5px; width: 7em;
+  font-family: var(--font-num); font-size: 11.5px;
+}
+.mon-field input.v.note { width: 22em; }
+.mon-field input.v:focus { border-color: var(--accent); outline: none; }
+.mon-field i { font-style: normal; color: var(--grey); }
+.mon-fallback { color: var(--grey); font-size: 10.5px; }
+
+/* -- the newest shot, beside its trace (M4) -------------------------------- */
+.shot { border: 1px solid var(--rule); padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; }
+.shot.alert { border-color: var(--alert); }
+.shot-head { display: flex; align-items: center; gap: 8px; }
+.shot-title { font-family: var(--font-head); font-weight: 600; font-size: 12px; }
+.shot-rows { width: auto; }
+.shot-rows td.l { color: var(--grey); font-size: 11px; padding-right: 14px; }
+.shot-rows td.num { font-size: 11.5px; }
+.shot-verdict { font-size: 11px; color: var(--grey); }
+.shot-verdict.alert { color: var(--alert); font-weight: 600; }
+.shot-trigger { font-family: var(--font-num); font-size: 10.5px; color: var(--grey); }
+.shot-trigger.auto { color: var(--warn); }

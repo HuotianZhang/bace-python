@@ -262,3 +262,122 @@ test('the rail follows a run that is holding the worker', options, async () => {
   assert.notEqual(rested.find((c) => c.key === 'bias').value, 'LIVE');
   assert.equal(posted.state, 'queued');
 });
+
+// -- M4: the tree, the pauses, and the loop curve after a drop ---------------
+
+/**
+ * Stand in for the operator: answer every `NeedsOperator` this run raises
+ * through the same route the monitor's Resume posts to, with a typed
+ * temperature a tenth of a kelvin off the setpoint. Returns the answers.
+ */
+function answerPauses(store, api, runId) {
+  const answered = [];
+  let busy = false;
+  const off = store.subscribe(async (state) => {
+    const run = state.runs[runId];
+    if (!run || !run.needsOperator || busy) return;
+    const pending = run.needsOperator;
+    if (answered.some((a) => a.ts === pending.ts)) return;
+    busy = true;
+    try {
+      const setpoint = Number((pending.detail || {}).setpoint_k);
+      await api.resumeRun(runId, { temperature_k: Math.round((setpoint + 0.1) * 10) / 10, note: 'answered by the test' });
+      answered.push({ ts: pending.ts, node_path: pending.node_path, setpoint });
+    } catch (error) {
+      // A resume that lands after the pause closed is refused with 409 and
+      // dropped (contract §2) — which is right, and not this test's failure.
+      if (error.status !== 409) throw error;
+    } finally {
+      busy = false;
+    }
+  });
+  return { answered, stop: off };
+}
+
+test('a 2 T x 2 level tree stays readable start to finish, and a dropped client keeps its loop curve',
+     { ...options, timeout: 600000 }, async () => {
+  const { monitorModel } = await import('../lib/monitor.js');
+  const { loopsModel, pointSummary } = await import('../lib/charts/loops.js');
+  const api = createApi({ base });
+  const { store, stream } = connect();
+  const tree = {
+    kind: 'loop', loop: 'temperature', label: 'T', values_k: [250, 280], tolerance_k: 0.5, hold_s: 1, timeout_s: 60,
+    children: [{
+      kind: 'loop', loop: 'illumination', levels_v: [1.010, 1.020], led_low_v: 0.4, led_settle_s: 0.1,
+      children: [{
+        kind: 'module', module: 'bace',
+        // Enough shots per leaf to outrun the socket (the drop is the point),
+        // and short records so the run is seconds rather than minutes.
+        params: { axis_name: 'delay_ns', axis_start: 0, axis_stop: 200, axis_step: 10, centre_on_voc: false,
+          vpre: 1.0, vcoll: -2.0, n_loops: 30, store_shots: false, record_length: 500, n_averages: 8 },
+      }],
+    }],
+  };
+  let posted;
+  let pauses;
+  const seen = { loops: new Set(), paused: 0, states: new Set() };
+  try {
+    posted = await api.startPipeline(tree, 'ui-live-tree');
+    pauses = answerPauses(store, api, posted.run_id);
+    const watch = store.subscribe((state) => {
+      const model = monitorModel(state);
+      if (!model || model.run_id !== posted.run_id) return;
+      seen.states.add(model.state);
+      seen.loops.add(model.loops.map((l) => l.text).join(' / '));
+      if (model.state === 'paused') seen.paused += 1;
+      // Readable at every frame: no counter runs past its total.
+      if (model.shots) assert.ok(model.shots.kept <= model.shots.requested, model.shots.text);
+      for (const loop of model.loops) assert.ok(loop.current === null || loop.current <= loop.total, loop.text);
+    });
+    const run = await settle(store, posted.run_id, 540000);
+    watch();
+    const stats = stream.state.stats;
+
+    assert.equal(run.state, 'done');
+    assert.equal(pauses.answered.length, 2, 'both temperature nodes paused, and both were answered');
+    assert.deepEqual(pauses.answered.map((a) => a.node_path), ['T=250K', 'T=280K']);
+    assert.equal(run.resumes.length, 2);
+    assert.ok(seen.paused > 0);
+    // The subscriber samples once per batch and `--fast` folds a whole leaf
+    // into one, so what it *saw* is a sample; what the store *holds* is not.
+    assert.ok([...seen.loops].some((t) => /^T 250 K · 1 of 2 \/ LED 1\.0\d0 V · \d of 2$/.test(t)), [...seen.loops].join(' | '));
+    assert.ok([...seen.loops].some((t) => /^T 280 K · 2 of 2/.test(t)), [...seen.loops].join(' | '));
+    // The executor's exit `Progress` for a loop node says how many of its
+    // parent's children are done once it closed: the first temperature's
+    // exit reads 1 of 2, the second's 2 of 2 — which is what the counter
+    // shows, `T 250 K · 1 of 2`, and what the operator means by it.
+    const expected = { 'T=250K': 1, 'T=250K/led=1.010V': 1, 'T=250K/led=1.020V': 2,
+      'T=280K': 2, 'T=280K/led=1.010V': 1, 'T=280K/led=1.020V': 2 };
+    for (const [path, done] of Object.entries(expected)) {
+      const p = run.progressByNode[path];
+      assert.ok(p, `${path}: the executor's own Progress reached the store`);
+      assert.equal(p.total, 2, `${path}: of two`);
+      assert.equal(p.done, done, `${path}: closed at ${done}`);
+    }
+    assert.ok(stats.drops >= 1,
+      `the client was never dropped (${stats.frames} frames): the tree was too small to outrun the socket`);
+
+    // The loop curve, per leaf, after the drop: every point measured, with a
+    // σ behind it, whether or not its shots still carry their arrays — the
+    // ring replays older shots without them (`decimated[…].replay`) and the
+    // chart reads only the scalars.
+    const leaves = Object.values(run.nodes).filter((n) => n.kind === 'bace');
+    assert.equal(leaves.length, 4);
+    let stripped = 0;
+    for (const node of leaves) {
+      assert.equal(node.values.length, 21, `${node.node_path}: the axis`);
+      assert.equal(node.kept, 630, `${node.node_path}: kept`);
+      const points = pointSummary(node);
+      assert.ok(points.every((p) => p.mean !== null), `${node.node_path}: every point has a mean`);
+      assert.ok(points.every((p) => p.sigma !== null), `${node.node_path}: every point has a σ after 30 loops`);
+      const model = loopsModel({ record: run, node });
+      assert.equal(model.switch.repeat, false);
+      assert.equal(model.panels[0].rules.length, 21, `${node.node_path}: one error bar per point`);
+      stripped += node.shots.filter((s) => s.tracesGone).length;
+    }
+    assert.ok(stripped >= 1, 'no shot came back without its arrays: the drop reached nothing the ring had stripped');
+  } finally {
+    if (pauses) pauses.stop();
+    stream.close();
+  }
+});
