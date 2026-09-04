@@ -83,8 +83,11 @@ export const LAYOUT = {
 
   bace: {
     above: [
-      { kind: 'segmented', name: 'axis_name' },
-      { kind: 'range', label: 'axis', names: ['axis_start', 'axis_stop', 'axis_step'] },
+      // §3: the accent is the swept quantity, and which quantity is swept *is*
+      // the choice of experiment — `vpre` is BACE, `delay_ns` is TDCF. It was
+      // spent on the polarity pair, which is a knob, not the experiment.
+      { kind: 'segmented', name: 'axis_name', accent: true },
+      { kind: 'range', label: 'axis', names: ['axis_start', 'axis_stop', 'axis_step'], accent: true },
       // Exactly one of these two is ever valid, and `axis_name` decides which:
       // with the vpre axis the whole sweep is centred on V_oc; with any other
       // the *pinned* vpre is an offset from it. The other is not folded, it is
@@ -98,7 +101,7 @@ export const LAYOUT = {
       { kind: 'field', name: 'vcoll', when: (v) => v.axis_name !== 'vcoll' },
       { kind: 'field', name: 'delay_ns', when: (v) => v.axis_name !== 'delay_ns' },
       'n_loops', 'n_averages',
-      { kind: 'field', name: 'invert_polarity', accent: true },
+      { kind: 'field', name: 'invert_polarity' },
       { kind: 'polarity' },
     ],
     run: [{ label: 'Shot', kind: 'shot' }, { label: 'Scan', kind: 'run' }],
@@ -227,7 +230,7 @@ function rowNames(row) {
 function buildRow(row, wire, values, entry) {
   if (row.kind === 'range') {
     const [start, stop, step] = row.names.map((n) => wire[n]);
-    return { kind: 'range', label: row.label, start, stop, step, points: points(entry.estimate_text) };
+    return { kind: 'range', label: row.label, start, stop, step, points: points(entry.estimate_text), accent: Boolean(row.accent) };
   }
   if (row.kind === 'voc') {
     // The needs row. Both states the artboard draws are the two the service
@@ -244,7 +247,7 @@ function buildRow(row, wire, values, entry) {
     // or leave the boolean is inert, and two fields where one is silently
     // dead at three of four settings is a trap however they are laid out.
     return {
-      kind: 'polarity', accent: true,
+      kind: 'polarity',
       mode: wire.output_polarity, fallback: wire.inverted_output,
       effective: effectivePolarity(values),
     };

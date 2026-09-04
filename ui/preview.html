@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1920">
+<title>BACE console — bench tab, off fixtures</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="fonts/fonts.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app"></div>
+<script type="module">
+// A harness, not a deliverable: the real shell of `app.js` and the real
+// `views/bench.js`, fed from `fixtures/` with a stub api, so the implemented
+// bench tab can be looked at with no service running.
+import { createStore, currentRun } from './lib/store.js';
+import { h, fill, keyed } from './lib/dom.js';
+import * as fmt from './lib/format.js';
+import { renderRail, renderChainStrip } from './lib/rail.js';
+import { renderMonitor } from './lib/monitor.js';
+import bench from './views/bench.js';
+
+const store = createStore({ schedule: (fn) => requestAnimationFrame(fn) });
+
+const tabsEl = h('nav.tabs');
+const chipsEl = h('span.chips');
+const railEl = h('header.rail');
+const monitorEl = h('section.monitor', { hidden: true });
+const viewEl = h('main.view');
+const stripEl = h('div.strip');
+const barEl = h('footer.stream-bar.idle');
+
+document.getElementById('app').replaceChildren(
+  h('div.bar', h('span.wordmark', 'bace'), tabsEl, h('span.spacer'), chipsEl),
+  railEl, monitorEl, viewEl, stripEl, barEl);
+
+fill(tabsEl, ['bench', 'pipeline', 'results', 'rig'].map((name) => h('a', {
+  href: '#/' + name, class: name === 'bench' ? 'on' : '', text: name })));
+
+const api = {
+  validate: async () => ({ checks: [] }),
+  setParams: async (module, params) => {
+    const entry = store.getState().modules.byName[module];
+    const next = { ...entry, params: entry.params.map((p) => (p.name in params
+      ? { ...p, value: params[p.name], source: params[p.name] === null ? 'default' : 'edited' } : p)) };
+    return next;
+  },
+  action: async () => ({ bench: store.getState().bench }),
+  startRun: async () => { throw Object.assign(new Error('offline'), { text: 'offline harness: POST /runs was not sent' }); },
+};
+
+let stripStatus = null;
+function notify(text, level = 'warn', checks = null) {
+  stripStatus = { level, text, checks };
+  renderChainStrip(stripEl, store.getState(), { status: stripStatus, onFix: () => {}, onPark: () => {} });
+}
+
+function renderChips(state) {
+  const s = state.session || {};
+  keyed(chipsEl, JSON.stringify([s.mode, state.benchState]), () => [
+    h('span.chip', { text: 'fixtures · offline' }),
+    h('span.chip', { text: s.mode || fmt.ABSENT }),
+    h('span', { class: 'chip state ' + (state.benchState || 'idle'), text: state.benchState || 'idle' }),
+  ]);
+}
+
+store.subscribe((state) => {
+  renderRail(railEl, state);
+  renderChips(state);
+  renderMonitor(monitorEl, state, {});
+  renderChainStrip(stripEl, state, { status: stripStatus, onFix: () => {}, onPark: () => {} });
+  fill(barEl, h('span.dot'), h('span', { text: 'offline harness' }),
+    h('span', { text: 'fixtures/modules_sim.json + hello_sim.json' }));
+});
+
+const hello = await (await fetch('fixtures/hello_sim.json')).json();
+store.applyHello(hello);
+store.applyModules(await (await fetch('fixtures/modules_sim.json')).json());
+bench.mount(viewEl, { store, api, stream: { state: {} }, fmt, notify });
+</script>
+</body>
+</html>

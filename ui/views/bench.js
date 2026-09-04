@@ -28,6 +28,9 @@ export default {
     /** Which fold groups are open, per card. Kept here so a re-render — and
      *  every edit is one — does not shut a fold the operator just opened. */
     const open = new Map();
+    /** Which fields have their explanation open, as `module:param`. Keyed the
+     *  same way the folds are, and for the same reason. */
+    const docs = new Set();
     /**
      * Renders held back while a click is in flight.
      *
@@ -190,6 +193,11 @@ export default {
           if (set.has(group)) set.delete(group); else set.add(group);
           render();
         },
+        docOpen: (key) => docs.has(key),
+        toggleDoc(key) {
+          if (docs.has(key)) docs.delete(key); else docs.add(key);
+          render();
+        },
         edit(name, params) {
           edits = edits.then(async () => {
             try {
@@ -274,8 +282,8 @@ export default {
      * store and the api rather than over any value, and `act` re-derives its
      * arguments from the store at click time on purpose.
      */
-    const cardKey = (entry, c, open) => JSON.stringify(
-      [cardModel(entry, { bench: c.bench }), c.busy, c.checksFor(entry.name), [...open].sort()]);
+    const cardKey = (entry, c, open, docKeys) => JSON.stringify(
+      [cardModel(entry, { bench: c.bench }), c.busy, c.checksFor(entry.name), [...open].sort(), docKeys]);
 
     function render() {
       if (pressing) { missed = true; return; }
@@ -308,7 +316,8 @@ export default {
       for (const name of names) {
         const entry = byName[name];
         const open = opened(name);
-        const key = cardKey(entry, c, open);
+        const docKeys = [...docs].filter((k) => k.startsWith(name + ':')).sort();
+        const key = cardKey(entry, c, open, docKeys);
         const was = held.get(name);
         if (was && was.key === key) {
           // The card is unchanged; its result may not be. The two are keyed

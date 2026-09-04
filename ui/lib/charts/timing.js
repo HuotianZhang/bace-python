@@ -296,10 +296,11 @@ export function timingModel(values = {}, options = {}) {
       { label: 'light at the sample', colour: 'ink', width: 1.4, dash: '5 3' },
     ],
     readout: '',
+    // `ui-rules` §4: draw the shot, do not describe it. The segment-by-segment
+    // sentence was the diagram above restated in prose — the strip is already
+    // to scale and already labelled, and the durations are on it. What is left
+    // here is only what the picture cannot say.
     notes: [
-      'the shot, segment by segment: '
-        + segments.map((seg) => (seg.skipped ? `${seg.label} (skipped)` : `${seg.k} ${seg.label} ${seconds(seg.seconds)}`))
-          .join('  ·  '),
       `levels are at the device · the generator sees them divided by the ×${fmt.sig(rig.pulse_amp || 1, 2)} amplifier`,
       cycle.polaritySource,
       `33220A POL ${cycle.ledPolarity || '?'} · the Sync's rising edge means ${cycle.syncMeans}`,

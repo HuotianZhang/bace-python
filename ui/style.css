@@ -106,6 +106,16 @@ h1, h2, h3, .wordmark, button {
   min-width: 0;
 }
 .rail .brc:first-child { border-left: 0; }
+/* Below the 1920 the design is written for, the rail wraps instead of
+   ellipsising: §1 says the LED line has to say polarity *and* low level
+   without truncating, and a lab PC parked beside a LabVIEW window is a real
+   width. Two rows of four, nothing clipped. */
+@media (max-width: 1560px) {
+  .rail { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .rail .brc:nth-child(5) { border-left: 0; }
+  .rail .brc:nth-child(n+5) { border-top: 1px solid var(--rule); }
+  .rail .brv { font-size: 16px; }
+}
 .rail .brl {
   display: flex; align-items: center; gap: 5px;
   font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase;
@@ -162,14 +172,18 @@ h1, h2, h3, .wordmark, button {
 .rail .rw { flex: 1; height: 2px; background: var(--rule); }
 .rail .rw.on { background: var(--ink); }
 
-/* -- the chain strip: the trigger chain, and the fix for each check -------- */
+/* -- the chain strip: the trigger chain, and the fix for each check --------
+   It wraps rather than scrolls: `R_sense`, the gain and the sign convention
+   are bench properties §6 wants restated beside the numbers, and a horizontal
+   scrollbar in a fixed footer clipped them to `sign…` at 1920. */
 .strip {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 12px;
   border-top: 1px solid var(--rule);
   background: var(--fill);
   flex: 0 0 auto;
-  overflow-x: auto;
+  flex-wrap: wrap;
+  row-gap: 5px;
 }
 .strip .sk {
   font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase;
@@ -278,9 +292,10 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   padding: 7px 10px;
   border-bottom: 1px solid var(--rule);
   background: var(--fill);
+  flex-wrap: wrap; row-gap: 5px;
 }
 .ch .cn { font-family: var(--font-head); font-weight: 600; font-size: 13px; }
-.cs { color: var(--grey); font-size: 11px; }
+.cs { color: var(--grey); font-size: 11px; min-width: 0; }
 .cb { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 8px; }
 
 .tag {
@@ -296,6 +311,9 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 /* -- one field ------------------------------------------------------------ */
 .pr { display: flex; flex-direction: column; gap: 1px; }
 .pr.folded { border-top: 1px dashed var(--rule); padding-top: 6px; margin-top: 4px; }
+/* A row plus whatever belongs under it: the explanation, the reason a value
+   is missing, the note that a range is a repeat. */
+.pw { display: flex; flex-direction: column; }
 
 .pf {
   display: grid;
@@ -311,17 +329,53 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .pf .v, .pf input.v, .pf select.v {
   font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 12px;
 }
+/* Which of these fifty values can be typed into must not be a hover
+   discovery: an editable field carries a faint baseline, a read-only one does
+   not. `ui-rules` §1 asks for density, not for a guessing game. */
 .pf input.v, .pf select.v {
-  border: 1px solid transparent; background: transparent; color: inherit;
+  border: 1px solid transparent; border-bottom-color: var(--rule);
+  background: transparent; color: inherit;
   padding: 1px 3px; width: 100%; max-width: 15em; font-family: var(--font-num);
 }
 .pf input.v:hover, .pf select.v:hover { border-color: var(--rule); }
 .pf input.v:focus, .pf select.v:focus { border-color: var(--accent); outline: none; background: var(--paper); }
+/* An empty field that is the only route to a value — the typed V_oc on a
+   bench with no SourceMeter — has to look like something you can type in. */
+.pf input.v.blank { border-color: var(--warn); background: #fff8ef; min-width: 5em; }
 .pf .v i { font-style: normal; color: var(--grey); margin-left: 6px; font-size: 11px; }
 
-/* A name alone explains nothing (§1): the field that has more to say marks
-   itself, so the operator knows there is something to hover. */
-.pf.has-help .l { border-bottom: 1px dotted var(--rule); cursor: help; }
+/* The name, as the button that opens the explanation. §1 wants every field
+   expandable to the whole of it; a `title` on a div with no tabindex was
+   mouse-only. */
+.pf .l.lh {
+  border: 0; background: none; padding: 0; margin: 0;
+  font-family: var(--font-body); font-weight: 400; font-size: 12px;
+  color: var(--grey); text-align: left; cursor: pointer; letter-spacing: 0;
+}
+.pf .l.lh:hover, .pf .l.lh[aria-expanded="true"] { color: var(--ink); text-decoration: underline dotted; }
+.doc {
+  display: flex; flex-direction: column; gap: 3px;
+  margin: 2px 4px 6px 0; padding: 5px 8px;
+  border-left: 2px solid var(--accent); background: var(--fill);
+  font-size: 11.5px; color: var(--ink); max-width: 62ch; text-wrap: pretty;
+}
+.doc .dfull { color: var(--grey); }
+
+/* A reason, and a consequence, each on its own line under the row it is
+   about — never inside the value column, where it pushed `@ led_v` onto a
+   second line. */
+.need1, .note1 {
+  display: flex; align-items: baseline; gap: 5px;
+  padding: 1px 4px 3px; font-size: 11.5px; color: var(--warn); text-wrap: pretty;
+}
+.note1 { color: var(--grey); }
+/* §4: `start == stop` is a repeat, and the switch must be visible. */
+.tag.rep { border-color: var(--accent); color: var(--accent-dark); text-transform: none; }
+/* The quiet provenance, once per card instead of on every row. */
+.provsum {
+  font-size: 11px; color: var(--grey); font-family: var(--font-num);
+  border-top: 1px dashed var(--rule); padding-top: 5px;
+}
 
 .pf.ro { color: var(--grey); }
 .pf.ro .v { color: var(--ink); }
@@ -330,17 +384,14 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .pf.acc .l { color: var(--accent-dark); }
 .pf.miss .need { color: var(--warn); }
 
-/* Provenance, rendered and never re-derived (§6) — and weighted by how much
-   it is telling you. `run.toml` is where most values come from, so twenty
-   boxed tags saying so is twenty repetitions of "normal"; it reads as quiet
-   text. A box is kept for the three that are a *statement*: somebody typed
-   this, a loop owns it, a measurement produced it. */
+/* Provenance, rendered and never re-derived (§6) — and only where it is a
+   *statement*: somebody typed this, a loop owns it, a measurement produced
+   it. `run.toml` and `last-used` are counted once per card instead
+   (`card.js`, `provSummary`), because a tag on every row was twenty
+   repetitions of "normal" — and making it near-white left an illegible tag
+   still holding a column. */
 .src { display: flex; align-items: center; gap: 5px; justify-self: end; }
 .src .tag { text-transform: none; letter-spacing: 0; }
-.src-run\.toml, .src-last-used {
-  border-color: transparent; color: var(--rule); font-size: 10px;
-}
-.pf:hover .src-run\.toml, .pf:hover .src-last-used { color: var(--grey); }
 .src-inherited, .src-derived { border-color: var(--accent); color: var(--accent-dark); }
 .src-edited { border-color: var(--ink); color: var(--ink); }
 button.link {
@@ -349,21 +400,38 @@ button.link {
 }
 button.link:hover { color: var(--accent-dark); }
 
-/* -- the two small choosers ---------------------------------------------- */
+/* -- the two small choosers ----------------------------------------------
+   `<button>`s, not clickable spans: these are the polarity, the shutter and
+   the LED mode, and a span with an onclick cannot be tabbed to, carries no
+   role and is invisible to a screen reader. */
 .seg, .bool { display: inline-flex; border: 1px solid var(--rule); }
-.seg .sego, .bool span {
+.seg .opt, .bool .opt {
   padding: 0 7px; font-size: 11px; cursor: pointer; color: var(--grey);
-  font-family: var(--font-num);
+  font-family: var(--font-num); font-weight: 400; letter-spacing: 0;
+  border: 0; background: none; line-height: 1.5;
 }
-.seg .sego.on, .bool span.on { background: var(--ink); color: #fff; }
-.bool.acc span.on { background: var(--accent-dark); }
+.seg .opt.on, .bool .opt.on { background: var(--ink); color: #fff; }
+.seg .opt:hover, .bool .opt:hover { color: var(--ink); }
+.seg .opt:focus-visible, .bool .opt:focus-visible,
+.btng:focus-visible, .btnp:focus-visible, .btns:focus-visible,
+.btnd:focus-visible, .btnw:focus-visible, .pf .l.lh:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+/* §3: the accent is the swept quantity — so the axis chooser's selection is
+   the accent, and the polarity pair is ordinary ink. */
+.pf.acc .seg .opt.on { background: var(--accent); }
 .pf.pol .v { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pf.pol .eff { color: var(--accent-dark); }
 
-/* -- the range row: three parameters and a count that came from the service */
-.pf.range .rng { display: flex; align-items: baseline; gap: 4px; }
-.pf.range input.v { max-width: 5.5em; text-align: right; }
-.pf.range .pts { color: var(--ink); }
+/* -- the range row: three parameters and a count that came from the service
+   Its label is `sweep`, `axis`, `LED levels` — short, unlike a parameter
+   name — so the row gives the column back to the three fields and the count,
+   which is what has to stay on one line. */
+.pf.range { grid-template-columns: 7.5em minmax(0, 1fr) auto; }
+.pf.range .rng { display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
+.pf.range input.v { width: 4.5em; max-width: 4.5em; text-align: right; }
+.pf.range .rng i, .pf.range .tag { white-space: nowrap; }
+.pf.range .pts { color: var(--ink); white-space: nowrap; }
 .pf.voc .v { display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
 .pf.voc input.v { max-width: 6em; }
 /* The reason sits beside the field it is about, not instead of it. */
@@ -391,12 +459,19 @@ button.link:hover { color: var(--accent-dark); }
 .btng:hover { border-color: var(--ink); color: var(--ink); }
 .btng.on { background: var(--ink); color: #fff; border-color: var(--ink); }
 
-.btnp, .btns {
+.btnp, .btns, .btnd, .btnw {
   border: 1px solid var(--ink); background: var(--paper); color: var(--ink);
-  font-size: 11px; padding: 2px 9px; cursor: pointer;
+  font-size: 11px; padding: 2px 9px; cursor: pointer; white-space: nowrap;
+  font-family: var(--font-head); font-weight: 800; letter-spacing: -0.01em;
 }
 .btnp { background: var(--accent); border-color: var(--accent); color: #fff; }
-.btnp:disabled, .btns:disabled { opacity: .38; cursor: not-allowed; }
+/* The action that makes the bench safe, and the run that takes hours: §3's
+   loudness is for meaning, so neither is another verb in the row. */
+.btnd { border-color: var(--alert); color: var(--alert); }
+.btnd:hover { background: var(--alert); color: #fff; }
+.btnw { border-color: var(--warn); color: var(--warn); }
+.btnw:hover { background: var(--warn); color: #fff; }
+.btnp:disabled, .btns:disabled, .btnd:disabled, .btnw:disabled { opacity: .38; cursor: not-allowed; }
 
 /* The 422's own check list, beside the sentence that refused. */
 .strip .checks { display: inline-flex; gap: 5px; margin-left: 8px; }

@@ -1051,6 +1051,60 @@ never its V_oc and never a pipeline: the caption says the run goes at the
 bench's V_oc and temperature as they are, because a manual run has no loop to
 bind them.
 
+### After M6 · The Round 3 review, from Claude Design
+
+*2026-09-04.* The design pass M6 was owed came back as code rather than
+artboards: the Design session read the built console and returned six edited
+files under `ui/` with a hand-off note, each change commented in place with
+the `ui-rules` § it answers. Applied as they stood, with two corrections
+(below). What changed:
+
+- **The accent is the swept quantity** (§3): it moves to `axis_name` and the
+  axis range, and off the polarity pair, which is a knob and not the
+  experiment. The axis chooser's selection is the accent; the polarity
+  choosers are ink.
+- **Every field can be expanded, not only hovered** (§1): the field name is a
+  `<button aria-expanded>` that opens `doc`, then `doc_full`, under the row;
+  the `title` stays for the pointer. The choosers are `<button
+  aria-pressed>`s in a `role="group"` rather than clickable spans, so the
+  polarity, the shutter and the LED mode can be tabbed to and read out.
+- **An editable field carries a baseline**; a read-only one does not. A
+  missing V_oc is a blank, warn-bordered input with its reason on its own
+  line under the row, never inside the value column.
+- **Volts read to 3 significant figures, V_oc to 4** (§2), so `1.000` sits
+  under the rail's `1.000 V` and `0.4` and `1` do not share a column.
+- **Provenance once per card**: `run.toml`, `last-used` and `default` are
+  counted in one quiet line under the form; a tag stays only where it is a
+  statement (typed, a loop's, measured). The near-white per-row tags were an
+  illegible tag still holding a column.
+- **`start == stop` on the swept axis shows `repeat`** and a one-line note
+  (§4: the switch must be visible), in the form as well as in the chart.
+- **Loudness by meaning** (§3): `led-off` is the one action that makes the
+  bench safe and is drawn as such; a `temperature` run is minutes to hours
+  and must not look like a step that runs, so it is not the red primary;
+  `power` reads and touches nothing and gets no primary at all. A card with
+  actions and no run says *acts now · no run, no files* instead of the
+  service's `nothing to set`.
+- **The timing diagram's segment-by-segment sentence is gone** (§4: draw
+  the shot, do not describe it — the strip is to scale and labelled).
+- **The rail wraps to two rows of four below 1560 px** rather than
+  ellipsising; the chain strip and the card headers wrap rather than scroll,
+  so `R_sense`, the gain and the sign convention are never clipped.
+- **`ui/preview.html`**: the real shell and the real bench view over
+  `fixtures/modules_sim.json` and `hello_sim.json` with a stub API — the bench
+  tab with no service at all, beside `replay.html`, which is the store's
+  offline bench.
+
+Two corrections on the way in: the `repeat` tag fired on any range whose
+start equalled its stop, including a `jv_bace`'s LED levels, with a note
+about `n_loops` that is only true of the swept axis — it is now the axis
+row's alone; and the provenance line said *the rest are defaults* when the
+rest could be edited or inherited — it counts the defaults instead.
+
+Still open from that review, in its own words: the live power monitor
+(§8), the Cursor 1 alignment check (§12), a shortcut for the repeated dark
+J–V, and the timing diagram as a collapsible panel.
+
 ### Alongside · The rig tab
 
 Read-only reference, and `ch-rig` is a static schematic that ports as it
