@@ -89,9 +89,15 @@ class VisaTransport:
             return reply.strip()
 
     def close(self) -> None:
+        # Only the session. `pyvisa.ResourceManager()` hands every caller in
+        # the process the same cached instance, so closing it here closed the
+        # bench harness's and the service's scope, generator and Keithley
+        # sessions along with the 331 -- pass 2 of `bace.bench` reported all
+        # four "not reachable" two seconds after identifying them
+        # (2026-09-04). The console this was vendored from owned the only
+        # ResourceManager in its process; here it never does.
         try:
             self._inst.close()
-            self._rm.close()
         except Exception:  # pragma: no cover
             pass
 

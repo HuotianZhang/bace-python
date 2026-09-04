@@ -76,8 +76,11 @@ class Check:
         return self
 
     def skip(self, reason: str) -> "Check":
+        # A warn recorded before the skip is the cause, not noise: `_wrap`
+        # says why an instrument could not be opened, and the stage then
+        # skipped with a bare "not reachable" that hid it (2026-09-04).
         self.status = SKIPPED
-        self.detail = reason
+        self.detail = f"{reason} ({self.detail})" if self.detail else reason
         return self
 
 
