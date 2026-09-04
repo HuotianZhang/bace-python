@@ -762,13 +762,14 @@ the cost — with `views/pipeline.js` beside it, the split the rail set in M1.
 the run as a length of time, settle in grey and measuring in accent, one pair
 per temperature. Nothing in the service changed, as the table below predicted.
 
-Two fixtures were recorded for it, and both are answers rather than runs —
-`POST /pipelines/validate` touches nothing, so these are the only two in the
-set that can be recorded on a live bench at any time:
-`validate_txill_sim.json` is the canonical tree itself (9 × 5, 90 module runs,
-198 steps, 4500 shots) and `validate_bound_sim.json` the two shapes it has
-none of — a `temperature` **module**, and duplicate sibling modules, which the
-service numbers `bace` and `bace#2`.
+Two fixtures were recorded for it, and a third came out of the review below.
+All are answers rather than runs — `POST /pipelines/validate` touches nothing,
+so these are the only ones in the set that can be recorded on a live bench at
+any time: `validate_txill_sim.json` is the canonical tree itself (9 × 5, 90
+module runs, 198 steps, 4500 shots), `validate_bound_sim.json` the two shapes
+it has none of — a `temperature` **module**, and duplicate sibling modules,
+which the service numbers `bace` and `bace#2` — and `validate_nested_sim.json`
+a temperature loop inside a temperature loop.
 
 Four decisions, and the first is the shape of the whole screen:
 

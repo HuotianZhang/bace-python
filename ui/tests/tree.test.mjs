@@ -1,13 +1,22 @@
 // The pipeline tree and the schedule it becomes — `docs/ui-plan.md` M5 as
-// assertions, against two recorded `POST /pipelines/validate` answers.
+// assertions, against three recorded `POST /pipelines/validate` answers.
 //
-// The fixtures are the point. `validate_txill_sim.json` is the canonical tree
-// the milestone has to prove — 9 temperatures × 5 levels, 90 module runs,
-// 4500 shots — and `validate_bound_sim.json` is the two shapes it has none
-// of: a `temperature` **module**, whose setpoint binds the rest of the run
-// rather than the rest of one iteration, and duplicate sibling modules, which
-// the service spells `bace` and `bace#2` and which this file must match to
-// their tree nodes **without** spelling either.
+// The fixtures are the point:
+//
+//   * `validate_txill_sim.json` — the canonical tree the milestone has to
+//     prove: 9 temperatures × 5 levels, 90 module runs, 4500 shots, and a
+//     cost that is a floor because nothing has settled on this bench;
+//   * `validate_bound_sim.json` — the two shapes it has none of: a
+//     `temperature` **module**, whose setpoint binds the rest of the run
+//     rather than the rest of one iteration, and duplicate sibling modules,
+//     which the service spells `bace` and `bace#2` and which this file must
+//     match to their tree nodes **without** spelling either;
+//   * `validate_nested_sim.json` — a temperature loop inside a temperature
+//     loop, which is legal and which the time bar got wrong: drawn one block
+//     per outer iteration it read 62 s against a cost of 102 s.
+//
+// All three carry the same assertion, and it is the one that keeps the number
+// under the bar and the bar itself describing one run: they total the same.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
