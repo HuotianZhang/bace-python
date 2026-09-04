@@ -434,6 +434,18 @@ button.link:hover { color: var(--accent-dark); }
 .pf.range .pts { color: var(--ink); white-space: nowrap; }
 .pf.voc .v { display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
 .pf.voc input.v { max-width: 6em; }
+.pf.voc .v .det { flex-basis: 100%; margin-left: 0; font-size: 11px; color: var(--grey); overflow-wrap: anywhere; white-space: normal; }
+/* The V_oc row holds a value, a level and its unit on one line: the label
+   column gives way, as the range row's does, or the row overflows the form
+   column and the tag draws over the value. And a grid item may shrink below
+   its content, or a long provenance sentence widens the whole row. */
+.pf.voc { grid-template-columns: 6em minmax(0, 1fr) auto; }
+.pf.voc input.v { max-width: 5em; }
+.pf > .v { min-width: 0; }
+/* The four-way polarity choice is wider than the value column beside its
+   long label: the label gives way, and the choices may wrap rather than clip. */
+.pf.pol { grid-template-columns: 9.5em minmax(0, 1fr) auto; }
+.pf.pol .seg { flex-wrap: wrap; }
 /* The reason sits beside the field it is about, not instead of it. */
 .pf.voc .need { color: var(--warn); font-size: 11px; }
 

@@ -431,7 +431,7 @@ function vocRow(row, ctx, model) {
       h('span.l', 'V_oc'),
       h('span.v',
         bound
-          ? h('span', { text: fmt.volts(voc.value) }, h('i', { text: voc.detail || 'derived' }))
+          ? h('span', { text: fmt.volts(voc.value) })
           // Missing shows the field, not a sentence where the field should be:
           // the typed V_oc is the documented last resort and the *only* route
           // on a bench with no SourceMeter, so it has to look like something
@@ -440,7 +440,11 @@ function vocRow(row, ctx, model) {
           : input(voc, commit, false, { blank: missing }),
         h('i.at', '@'),
         input(row.led, (v) => ctx.edit(model.name, { led_v: v }), false),
-        h('i', 'V LED')),
+        h('i', 'V LED'),
+        // Where the V_oc came from -- "jv_bace (this session, 11:49)" -- is a
+        // sentence, and on the value's own line it ran under the tag. Its own
+        // line, after the level it was measured at.
+        bound ? h('i.det', { text: voc.detail || 'derived' }) : null),
       provenance(voc, ctx, model, !bound)),
     missing && row.need ? h('div.need1', h('span.ico', '⚠'), h('span', { text: row.need.text })) : null);
 }
