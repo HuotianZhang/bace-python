@@ -68,6 +68,7 @@ with a bench that answers nothing.
 from __future__ import annotations
 
 import collections
+import logging
 import threading
 import time
 from typing import Callable, Iterator
@@ -75,6 +76,8 @@ from typing import Callable, Iterator
 from ..experiment.events import (Event, NeedsOperator, OperatorResumed, Progress,
                                  RunAborted, RunFailed, RunStarted, StepDone)
 from ..experiment.jv import JVCurveDone, JVStarted
+
+log = logging.getLogger(__name__)
 
 
 class StopMode:
@@ -436,6 +439,12 @@ class RunWorker:
                 except Exception as exc:
                     job.error = _describe(exc)
                     outcome, reason = "failed", job.error
+                    # The wire carries the sentence; the console window gets
+                    # the traceback. Run 20260904_214634-024 failed with a
+                    # bare "VisaIOError: VI_ERROR_TMO" and nothing said which
+                    # instrument, which query, or which line.
+                    log.error("run %s failed in %s: %s", job.id,
+                              job.node_path or job.kind, job.error, exc_info=exc)
                     if not failed_reported:
                         self._emit(job, RunFailed(error=job.error,
                                                   where=job.node_path or job.kind))

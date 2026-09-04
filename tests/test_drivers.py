@@ -133,6 +133,29 @@ def test_sweep_unpacks_interleaved_voltage_and_current():
     assert any(":SOUR:SWE:POIN 3" in c for c in io.log)
 
 
+def test_the_sweep_timeout_covers_what_the_2400_actually_takes():
+    """Measured on the rig: 0.83 s per point at NPLC 1, averaging 10, 50 ms
+    source delay -- 36 points in 30 s (2026-09-04), 71 in 57 s (2026-09-02).
+    The budget must clear both with room, and it must be what the resource
+    holds while `:READ?` is waiting, then be put back."""
+    class Watch(FakeIO):
+        def query(self, cmd):
+            if cmd.startswith(":READ?"):
+                self.timeout_during_read = self.timeout
+            return super().query(cmd)
+
+    cfg = SourceMeterConfig(nplc=1.0, averaging=10)
+    io = Watch(reads=["0.0,-2.0E-4,0.5,-1.5E-4,1.0,1.0E-4"])
+    io.timeout = 20000
+    k = Keithley2400(io, config=cfg)
+    assert k.sweep_budget_s(36, settle_s=0.05) >= 1.5 * 36 * 0.83
+    assert k.sweep_budget_s(71, settle_s=0.05) >= 1.5 * 71 * 0.83
+    k.sweep(0.0, 1.0, 3, settle_s=0.05)
+    assert io.timeout_during_read == int(k.sweep_budget_s(3, 0.05) * 1000)
+    assert io.timeout == 20000, "restored after the sweep"
+    assert k.last_sweep_s >= 0.0
+
+
 def test_a_one_point_sweep_is_refused():
     with pytest.raises(ValueError, match="at least two points"):
         Keithley2400(FakeIO()).sweep(0.0, 1.0, 1)
