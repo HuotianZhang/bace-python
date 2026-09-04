@@ -984,8 +984,11 @@ def test_a_temperature_module_binds_the_rest_of_the_run_not_one_iteration(tmp_pa
     assert abs(settled_at - 250.0) <= 0.2 and settled_at != 250.0
 
     first = done["led=1.020V/jv_bace"].detail
-    assert "temperature_k" not in first, (
-        "before the module ran, the cryostat was where the session says it was")
+    # Before the module ran nobody had bound a temperature, so the node read
+    # the controller as it started (2026-09-04) and says it did -- `read`,
+    # not `settled`, and never the session's typed number.
+    assert (first["temperature_how"], first["temperature_source"]) == ("read", "simulated")
+    assert first["temperature_k"] != settled_at
 
     second = done["led=1.040V/jv_bace"].detail
     assert second["temperature_k"] == settled_at, (

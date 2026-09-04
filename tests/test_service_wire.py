@@ -186,6 +186,18 @@ def test_a_step_phase_is_live_only():
     roundtrip(frame)
 
 
+def test_a_jv_point_is_live_only_like_a_step_phase():
+    from bace.experiment.jv import JVPoint
+    ev = JVPoint(index=1, k=12, of=36, label="1.02 V", dark=False, led_level_v=1.02,
+                 direction="forward", voltage=0.24, current=-9.1e-5, density=-9.1)
+    ws, journal = W.payloads(env(ev))
+    assert journal is None and W.is_ephemeral(ev)
+    assert ws["data"]["k"] == 12 and ws["data"]["of"] == 36 and ws["data"]["density"] == -9.1
+    frame = W.ephemeral_frame("r-001", "jv_bace", ev, ts=5.0)
+    assert frame["seq"] is None and frame["type"] == "JVPoint"
+    roundtrip(frame)
+
+
 def test_an_empty_trace_is_a_warning_not_a_crash():
     v = W.shot_verdict(np.empty(0), _trace(2).y)
     assert v["level"] == "warn" and "empty" in v["text"]

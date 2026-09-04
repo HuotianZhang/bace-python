@@ -198,6 +198,7 @@ Wire format = `experiment.wire.envelope_to_wire(Envelope)`:
 |---|---|---|
 | `StepDone` | `light`, `dark`, `photo`, `photo_averaged` decimated to ≤ 1000 points (stride, first and last kept — the last kept sample is the record's final one, at `t0 + (n-1)*dt`, not one stride after its predecessor) | scalars only: index, loop, step, setpoint, axis_value, q, q_mean, q_std, intensity_w, clipped + `verdict` |
 | `StepPhase` | in full, **live only**: `seq` null (like the drop `Notice`), not in the `since=` ring | not written |
+| `JVPoint` | in full, **live only**, exactly as `StepPhase` — one per point of a sweep as it is read | not written |
 | `RunFinished` | `photo_averaged` omitted; `values`, `q_mean`, `q_std`, `q_all` in full | same minus `q_all` if > 10 000 cells |
 | `JVCurveDone` | in full (≤ a few hundred points) | metrics + label + n_points + the other scalars (index, dark, led_level_v, direction, intensity_w); no arrays |
 | `JVFinished` | in full | its curves reduced exactly as `JVCurveDone` — otherwise the arrays the table keeps out come back through the summary |
@@ -217,6 +218,24 @@ where inside the shot the run is, which a log and a replay do not want, so it
 is sent to the subscribers that are there with `seq: null` and never
 journaled, ringed or numbered. A client that dedupes on `seq` passes it
 through; a client that reconnects redraws from `StepStarted`/`StepDone`.
+
+**`JVPoint(index, k, of, label, dark, led_level_v, direction, voltage,
+current, density)`** (2026-09-04) is yielded by `run_jv` for every point of a
+sweep as the SourceMeter reads it — `k` of `of` on curve `index`, the curve's
+identity repeated, the point in the units `JVCurveDone` carries the arrays
+in (A, and mA/cm² when there is an area). The sweep is the host's since that
+day (`Keithley2400.sweep_points`: source, settle, read, one point at a time)
+rather than the 2400's own, which blocked the bus for the whole curve with
+nothing to show, nothing saved if it failed, and a stop that could not land
+until it was over. Ephemeral like `StepPhase`, for the same reason: 36–71 a
+curve, and `JVCurveDone` carries the whole curve, so a client that
+reconnects mid-sweep loses only the picture of it growing. The recorder folds
+them too: the files are rewritten as each curve finishes and, while a sweep
+is in flight, at most every 2 s with the partial curve in them — labelled
+`partial k of n`, `partial = true` and `points_planned` on its HDF5 group, no
+metrics — so a fault on the fourth curve keeps three and the points of the
+fourth. An abort now lands between two points; the curve in flight is never
+reported done.
 
 The journal stores enough to render the session log and the history queries,
 never the traces — the recorders (HDF5 `bace-run/2` + legacy `.dat`, unchanged)
@@ -743,6 +762,7 @@ same string however the 290 was arrived at. So every `RunMetadata`, every
 |---|---|---|
 | `typed` | `""` | `[sample]` in the recipe, or the console's metadata field. Nobody read an instrument. |
 | `setpoint` | `""` | A temperature loop asked for it and the settle never got one reading. **What was requested, not what was reached.** |
+| `read` | `instrument` \| `console` \| `simulated` | Nobody typed one and no temperature node bound one, so the module read the controller once as the node started (`modules._bind_temperature`, 2026-09-04): the bench as found. The recipes type nothing since that day; a bench with no controller stays *not recorded*. |
 | `settled` | `instrument` \| `console` \| `simulated` | The controller held it inside the band. `instrument` is this process on the bus, `console` the 331 console asked over HTTP; `simulated` means the stand-in, so a `--sim` file cannot be mistaken for a measured one. |
 | `operator` | `operator` | A person typed the number at the pause. |
 | `operator` | `instrument` \| `console` \| `simulated` | A person ended the pause without typing one; the number is the last reading polled while they decided. |

@@ -102,7 +102,9 @@ class RunMetadata:
     """Where `temperature_k` came from. `typed` -- `[sample]` in the recipe or
     the console's metadata field, nobody read an instrument; `setpoint` -- a
     temperature loop asked for it and the settle never got a reading, so this
-    is what was requested, not what was reached; `settled` -- the controller
+    is what was requested, not what was reached; `read` -- nobody asked for
+    a setpoint and the controller was read once as the node started (the
+    bench as found); `settled` -- the controller
     held it inside the band; `operator` -- a person resumed a pause (they
     typed the number when `temperature_source` is `operator`, otherwise it is
     the last reading polled while they were deciding). Empty in files written

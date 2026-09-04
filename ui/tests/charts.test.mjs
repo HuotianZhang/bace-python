@@ -108,6 +108,25 @@ test('the axis is mA/cm², and nothing is converted to get there', () => {
   assert.ok(Math.abs(drawn.at(0).y - light.density[nearest(light.voltage, 0)]) < 1e-12);
 });
 
+test('a sweep in flight is drawn dotted in its own colour, into the planned range, with no metrics', () => {
+  const light = JV.curves.find((c) => c.dark !== true);
+  const n = 5;
+  const partial = { ...light, partial: true, k: n, of: light.voltage.length,
+    voltage: light.voltage.slice(0, n), current: light.current.slice(0, n), density: light.density.slice(0, n) };
+  const done = JV.curves.filter((c) => c.dark === true);
+  const model = jvModel([...done, partial], { planned: [-0.2, 1.2] });
+  const live = model.panels[0].series.find((s) => s.key.endsWith('·partial'));
+  assert.ok(live, 'the partial is a series of its own');
+  assert.equal(live.dash, '2 3');
+  assert.match(live.label, /sweeping/);
+  assert.equal(model.panels[0].dots.length, 1, 'a dot on the last point read');
+  assert.ok(model.x.scale.domain[1] >= 1.2, 'the axis is the planned range, not the points so far');
+  assert.match(model.panels[0].note, /1 curve · sweeping .* point 5 of/);
+  assert.ok(!model.metrics.entries.some((e) => /sweeping/.test(e.label)), 'no metrics for half a curve');
+  const legend = model.legend.find((l) => /sweeping 5 of/.test(l.label));
+  assert.ok(legend, 'the legend says how far it got');
+});
+
 test('no pixel area means amps, not a density with an invented area', () => {
   const noArea = JV.curves.map((c) => ({ ...c, density: null }));
   assert.equal(currentOf(noArea).key, 'current');

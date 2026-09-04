@@ -26,6 +26,7 @@ relationship lives in someone's folder naming.
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -40,15 +41,63 @@ H_PARAMETERS = ("% LED Voltage/V ", "Voc/V", "Jsc/A", "Jsc/mA cm-2", "Pmax/W",
                 "Vmpp/V", "FF", "direction", "intensity/W")
 
 
+FLUSH_S = 2.0
+"""How often, at most, the recorder rewrites its files while a sweep is in
+flight -- so a curve interrupted by a fault, a stop or a pulled plug is on
+disk to within this many seconds of the last point read."""
+
+
+@dataclass
+class PartialCurve:
+    """The sweep in flight, accumulated from `JVPoint`s. Written the way a
+    curve is, labelled partial with how far it got, and with no metrics: a
+    V_oc interpolated on half a curve would be a number nobody measured."""
+
+    index: int
+    label: str
+    dark: bool | None
+    led_level_v: float | None
+    direction: str
+    of: int
+    voltage: list = field(default_factory=list)
+    current: list = field(default_factory=list)
+    density: list | None = None
+    intensity_w: float | None = None
+    illumination: dict | None = None
+    partial: bool = True
+
+    @property
+    def k(self) -> int:
+        return len(self.voltage)
+
+    @property
+    def metrics(self):
+        from ..experiment.jv import JVMetrics
+        return JVMetrics(voc=None, jsc=None, p_max=None, v_mpp=None, j_mpp=None,
+                         fill_factor=None)
+
+    def add(self, ev) -> None:
+        self.voltage.append(float(ev.voltage))
+        self.current.append(float(ev.current))
+        if ev.density is not None:
+            if self.density is None:
+                self.density = []
+            self.density.append(float(ev.density))
+
+
 def _label(curve) -> str:
-    """`dark fwd`, `1.02 V rev`, `as found unknown fwd`.
+    """`dark fwd`, `1.02 V rev`, `as found unknown fwd`; a sweep in flight
+    adds `partial 12 of 36`.
 
     `curve.dark is None` means the run never set the light and could not read
     it either, so the curve carries the label `run_jv` built from the
     read-back; only a curve known to be dark is renamed `dark`.
     """
     d = "fwd" if curve.direction == "forward" else "rev"
-    return f"{'dark' if curve.dark else curve.label} {d}"
+    tag = f"{'dark' if curve.dark else curve.label} {d}"
+    if getattr(curve, "partial", False):
+        tag += f" partial {curve.k} of {curve.of}"
+    return tag
 
 
 def render_curves(curves) -> str:
@@ -163,8 +212,14 @@ def write_hdf5(path: str, curves, *, metadata: dict, config: dict,
             sub = g.create_group(f"{c.index:02d}_{_label(c).replace(' ', '_')}")
             state = states[i] if i < len(states) else {}
             dark = getattr(c, "dark", None)
+            partial = bool(getattr(c, "partial", False))
             _set_attrs(sub, {
                 "label": c.label, "direction": c.direction,
+                # A sweep the run did not finish: the points it read, said
+                # to be that. `points_planned` is what the whole curve would
+                # have had; the datasets hold what there is.
+                "partial": partial,
+                **({"points_planned": int(c.of)} if partial else {}),
                 "illumination": ("unknown" if dark is None
                                  else "dark" if dark else "light"),
                 # `dark` only when the run knows. See the schema note above:
@@ -212,6 +267,10 @@ class JVRecorder:
     `RunRecorder.resolved`: a *reading*, kept apart from the *settings*."""
 
     curves: list = field(default_factory=list)
+    partial: PartialCurve | None = None
+    """The sweep in flight, from its `JVPoint`s; None between curves. Written
+    with the finished curves whenever the files are flushed, and dropped the
+    moment its `JVCurveDone` arrives."""
     curve_states: list = field(default_factory=list)
     """The `resolved` snapshot in force when each curve was taken, so a
     file with a dark and a light curve says "shut" for one and "open" for
@@ -219,6 +278,7 @@ class JVRecorder:
     written: list[str] = field(default_factory=list)
     _config: dict = field(default_factory=dict)
     _finished: bool = False
+    _flushed_at: float = 0.0
 
     def __enter__(self) -> "JVRecorder":
         return self
@@ -228,29 +288,63 @@ class JVRecorder:
 
     def handle(self, ev) -> None:
         from ..experiment.events import InstrumentState
-        from ..experiment.jv import JVCurveDone, JVStarted
+        from ..experiment.jv import JVCurveDone, JVPoint, JVStarted
         if isinstance(ev, JVStarted):
             self._config = ev.config.get("jv", {})
         elif isinstance(ev, InstrumentState):
             self.resolved.update(ev.values)
+        elif isinstance(ev, JVPoint):
+            p = self.partial
+            if p is None or p.index != ev.index or p.direction != ev.direction:
+                p = self.partial = PartialCurve(
+                    index=ev.index, label=ev.label, dark=ev.dark,
+                    led_level_v=ev.led_level_v, direction=ev.direction, of=int(ev.of))
+            p.add(ev)
+            # On disk as it goes (2026-09-04): a fault on the fourth curve
+            # used to keep three and lose every point of the fourth.
+            if time.monotonic() - self._flushed_at >= FLUSH_S:
+                self.flush()
         elif isinstance(ev, JVCurveDone):
             self.curves.append(ev)
             self.curve_states.append(dict(self.resolved))
+            self.partial = None
+            self.flush()
 
-    def finish(self) -> list[str]:
-        if self._finished or not self.curves:
-            self._finished = True
+    def _all(self) -> list:
+        out = list(self.curves)
+        if self.partial is not None and self.partial.k > 0:
+            out.append(self.partial)
+        return out
+
+    def flush(self) -> list[str]:
+        """Rewrite the files with every finished curve and the one in
+        flight. Cheap -- a J-V file is tens of kilobytes -- and idempotent:
+        the same paths every time, so `written` names each once."""
+        curves = self._all()
+        if not curves:
             return self.written
-        self._finished = True
         os.makedirs(self.folder, exist_ok=True)
-        self.written += JVWriter(self.folder, self.stamp).write(self.curves)
+        paths = JVWriter(self.folder, self.stamp).write(curves)
         if self.write_hdf5:
-            self.written.append(write_hdf5(
-                os.path.join(self.folder, f"jv{self.stamp}.h5"), self.curves,
+            states = list(self.curve_states)
+            if self.partial is not None and self.partial.k > 0:
+                states.append(dict(self.resolved))
+            paths.append(write_hdf5(
+                os.path.join(self.folder, f"jv{self.stamp}.h5"), curves,
                 metadata=self.metadata, config=self._config,
                 rig_config=self.rig_config, resolved=self.resolved,
-                curve_states=self.curve_states))
+                curve_states=states))
+        for path in paths:
+            if path not in self.written:
+                self.written.append(path)
+        self._flushed_at = time.monotonic()
         return self.written
+
+    def finish(self) -> list[str]:
+        if self._finished:
+            return self.written
+        self._finished = True
+        return self.flush()
 
 
 def record(events, recorder: JVRecorder):

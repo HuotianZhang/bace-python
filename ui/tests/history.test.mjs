@@ -82,6 +82,12 @@ test('the temperature row says how it knows: typed at the pause is not settled',
   assert.deepEqual(g.rows.map((r) => [r.how, r.source]), [['operator', 'operator'], ['operator', 'operator']]);
   assert.match(temperatureText(g.nodes[0]).text, /typed by the operator at the pause/);
   assert.equal(temperatureText({ temperature_k: 290, temperature_how: 'typed', temperature_source: '' }).level, 'warn');
+  // `read`: nobody asked for a setpoint, the 331 was read as the node started.
+  const read = temperatureText({ temperature_k: 220.4, temperature_how: 'read', temperature_source: 'instrument' });
+  assert.equal(read.level, 'ok');
+  assert.equal(read.measured, true);
+  assert.match(read.text, /read on the instrument as the node started/);
+  assert.equal(temperatureText({ temperature_k: 220.4, temperature_how: 'read', temperature_source: 'simulated' }).measured, false);
   assert.match(temperatureText({ temperature_k: 250, temperature_how: 'setpoint', temperature_source: '' }).text, /requested, not reached/);
   assert.match(temperatureText({ temperature_k: 250, temperature_how: 'settled', temperature_source: 'simulated' }).text, /not a measurement/);
   assert.equal(temperatureText({ temperature_k: 250, temperature_how: 'settled', temperature_source: 'instrument' }).measured, true);

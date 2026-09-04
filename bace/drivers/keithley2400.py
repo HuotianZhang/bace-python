@@ -214,50 +214,70 @@ class Keithley2400:
         return DCPoint(voc=voc, jsc=jsc, jsat=jsat, v_sat=v_sat)
 
     # -- J-V sweep --------------------------------------------------------
-    def sweep(self, start_v: float, stop_v: float, points: int, *,
-              settle_s: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
-        """A linear voltage sweep, returning (V, I).
+    def sweep_points(self, start_v: float, stop_v: float, points: int, *,
+                     settle_s: float = 0.0):
+        """A linear voltage sweep, one point at a time: source, settle, read,
+        yield `(v, i)`. The J-V experiment consumes this so a curve is on the
+        screen and on disk as it is measured, not after the last point.
 
-        Used by the J–V experiment, not by the transient one, so it is not part
-        of the `SourceMeter` protocol — the transient layer must not be able to
-        start a sweep by accident.
+        Until 2026-09-04 the sweep was the 2400's own (`:SOUR:VOLT:MODE SWE`,
+        one `:READ?` for every point), which blocked the bus for the whole
+        curve -- 30 s for 36 points, a minute for 71 -- with nothing to show,
+        nothing saved if it failed, and a stop that could not land until it
+        was over. Point by point costs the GPIB round trips, some 30 ms a
+        point against 0.8 s of measuring, and buys the stream, the partial
+        file, and an abort that lands between two points.
+
+        Used by the J-V experiment, not by the transient one, so it is not
+        part of the `SourceMeter` protocol -- the transient layer must not
+        be able to start a sweep by accident.
         """
         if points < 2:
             raise ValueError("a sweep needs at least two points")
         self._prepare()
         self._io.write(":SOUR:FUNC:MODE VOLT;")
-        self._io.write(":SOUR:VOLT:MODE SWE;")
-        self._io.write(f":SOUR:VOLT:STAR {start_v:g};:SOUR:VOLT:STOP {stop_v:g};")
-        self._io.write(f":SOUR:SWE:POIN {int(points):d};:SOUR:SWE:SPAC LIN;")
+        # The first point's level before the output comes on, so the device
+        # sees `start_v` and never a *RST 0 V on the way there.
+        self._io.write(f":SOUR:VOLT:LEV {start_v:g};")
         self._io.write(":SENS:FUNC 'CURR:DC';")
         self._io.write(f":SENS:CURR:PROT:LEV {self.config.current_compliance_a:g};")
         self._io.write(f":SENS:CURR:NPLC {self.config.nplc:g};")
         self._io.write(":FORM:ELEM VOLT,CURR;")
-        self._io.write(f":SOUR:DEL {settle_s:g};")
-        self._io.write(f":TRIG:COUN {int(points):d};")
-        # The whole sweep is ONE `:READ?`: the instrument steps, settles,
-        # integrates and averages every point before it answers, so the VISA
-        # timeout has to be sized from the sweep and restored after it. The
-        # session's blanket 20 s cut a 71-point sweep off on the rig
-        # (VI_ERROR_TMO, session 20260902_143927).
-        budget_ms = int(self.sweep_budget_s(points, settle_s) * 1000)
+        self._io.write(":TRIG:COUN 1;")
+        # One point is settle + averaging x four apertures (`sweep_budget_s`):
+        # under a second at the validated recipe, inside the session's 20 s.
+        # The budget still applies, for a recipe that asks for more.
+        budget_ms = int(self.sweep_budget_s(1, settle_s) * 1000)
         old_timeout = getattr(self._io, "timeout", None)
-        if old_timeout is not None and budget_ms > old_timeout:
+        raise_it = old_timeout is not None and budget_ms > old_timeout
+        if raise_it:
             self._io.timeout = budget_ms
         self.enable_output(True)
         started = time.monotonic()
         try:
-            raw = self._io.query(":READ?").strip()
+            for x in np.linspace(float(start_v), float(stop_v), int(points)):
+                self._io.write(f":SOUR:VOLT:LEV {x:g};")
+                if settle_s > 0:
+                    time.sleep(settle_s)
+                raw = self._io.query(":READ?").strip().split(",")
+                yield float(raw[0]), float(raw[1])
         finally:
             self.last_sweep_s = time.monotonic() - started
             self.disable_output()
-            if old_timeout is not None and budget_ms > old_timeout:
+            if raise_it:
                 self._io.timeout = old_timeout
-        flat = np.array([float(x) for x in raw.split(",")])
-        return flat[0::2], flat[1::2]
+
+    def sweep(self, start_v: float, stop_v: float, points: int, *,
+              settle_s: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
+        """`sweep_points`, collected: (V, I) as arrays."""
+        got = list(self.sweep_points(start_v, stop_v, points, settle_s=settle_s))
+        return (np.array([v for v, _ in got], dtype=float),
+                np.array([i for _, i in got], dtype=float))
 
     def sweep_budget_s(self, points: int, settle_s: float = 0.0) -> float:
-        """How long `sweep` lets one `:READ?` take before VISA gives up.
+        """How long `points` of a sweep take, with room: the VISA budget
+        `sweep_points` gives each of its reads (`points=1`), and the
+        whole-curve number a caller can plan on.
 
         Each averaged reading is *four* apertures, not one: `:FUNC:CONC ON`
         measures voltage and current, and the 2400 auto-zeroes each. So a

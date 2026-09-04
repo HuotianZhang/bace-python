@@ -475,6 +475,11 @@ export function temperatureText(node) {
       return { text: `${value} · typed into [sample], nobody read an instrument`, level: 'warn', measured: false };
     case 'setpoint':
       return { text: `${value} · requested, not reached: nothing read back`, level: 'warn', measured: false };
+    case 'read':
+      // Nobody asked for a setpoint: the controller was read once as the
+      // node started -- the bench as found, a measurement of it.
+      if (source === 'simulated') return { text: `${value} · read on the simulated 331 as the node started, not a measurement`, level: 'warn', measured: false };
+      return { text: `${value} · read on the ${source || 'controller'} as the node started; no setpoint was asked for`, level: 'ok', measured: true };
     case 'settled':
       if (source === 'simulated') return { text: `${value} · settled on the simulated 331, not a measurement`, level: 'warn', measured: false };
       return { text: `${value} · settled, read on the ${source || 'controller'}`, level: 'ok', measured: true };

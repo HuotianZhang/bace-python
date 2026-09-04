@@ -73,7 +73,10 @@ export function currentOf(curves) {
 }
 
 export function jvModel(curves, options = {}) {
-  const { width = 530, height = 260, log = null } = options;
+  // `planned` is the sweep's [start, stop]: with it the x axis is the range
+  // asked for, so a curve drawn point by point grows into a fixed frame
+  // instead of the frame growing with it.
+  const { width = 530, height = 260, log = null, planned = null } = options;
   const list = (curves || []).filter((c) => c && Array.isArray(c.voltage) && c.voltage.length);
   if (!list.length) {
     return { key: 'jv', absent: { text: 'no curves yet', detail: null }, panels: [], notes: [] };
@@ -105,7 +108,9 @@ export function jvModel(curves, options = {}) {
   const panel = frame.panels[0];
   const rect = panel.rect;
 
-  const xDomain = scale.extent([list.map((c) => c.voltage).flat()], { pad: 0.02 }) || [-1, 1];
+  const xDomain = scale.extent([list.map((c) => c.voltage).flat().concat(
+    Array.isArray(planned) && planned.length === 2 && planned.every(Number.isFinite) ? planned : [])],
+  { pad: 0.02 }) || [-1, 1];
   const X = scale.linear(xDomain, [rect.x, rect.x + rect.w]);
 
   let Y;
@@ -132,6 +137,7 @@ export function jvModel(curves, options = {}) {
   const series = [];
   const legend = [];
   const marks = [];
+  const dots = [];
   for (const curve of list) {
     const y = curve[quantity.key];
     if (!Array.isArray(y) || !y.length) continue;
@@ -139,20 +145,24 @@ export function jvModel(curves, options = {}) {
       ? 'ink'
       : ramp(levels.indexOf(curve.led_level_v ?? null), Math.max(1, levels.length));
     const label = curveLabel(curve);
+    // The sweep in flight (`JVPoint`s folded by the store): the same colour
+    // as the curve it will become, dotted so it reads as unfinished, and a
+    // dot on the last point read, which is where the instrument is now.
+    const partial = curve.partial === true;
     // The **key** is the identity, and forward and reverse at one level share
     // a label: keyed on that, the renderer built two crosshair dots with the
     // same `data-series`, `attachCursor`'s `find` updated only the first, and
     // it carried the reverse arm's value under the forward arm's colour.
     series.push({
-      key: `${label}·${curve.direction || 'forward'}`,
-      label,
+      key: `${label}·${curve.direction || 'forward'}${partial ? '·partial' : ''}`,
+      label: partial ? `${label} · sweeping` : label,
       colour,
       width: 1.5,
       // The return leg is a **second sweep**, not the continuation of the
       // first: it is measured after the forward one, on a device the forward
       // one has just been through. Drawn as one unbroken line the hysteresis
       // reads as noise.
-      dash: curve.direction === 'reverse' ? '4 2' : null,
+      dash: partial ? '2 3' : curve.direction === 'reverse' ? '4 2' : null,
       // `Math.abs(null)` is **0**, and 0 is finite: mapped straight, a sample
       // the instrument never returned became a point sitting on the log
       // floor with the curve drawn through it — a leakage measurement out of
@@ -167,9 +177,17 @@ export function jvModel(curves, options = {}) {
       format: quantity.format,
     });
     legend.push({
-      label: curve.direction === 'reverse' ? `${label} · reverse` : label,
-      colour, width: 1.6, dash: curve.direction === 'reverse' ? '4 2' : null,
+      label: partial ? `${label} · sweeping ${curve.k || y.length} of ${curve.of || '?'}`
+        : curve.direction === 'reverse' ? `${label} · reverse` : label,
+      colour, width: 1.6, dash: partial ? '2 3' : curve.direction === 'reverse' ? '4 2' : null,
     });
+    if (partial) {
+      const last = y.length - 1;
+      const yv = useLog ? Math.abs(y[last]) : y[last];
+      if (Number.isFinite(curve.voltage[last]) && Number.isFinite(yv)) {
+        dots.push({ x: X(curve.voltage[last]), y: Y(yv), colour, r: 3 });
+      }
+    }
     // Direct labels, on four curves or fewer: past that they collide with
     // each other and the legend is the honest place for identity. At the
     // sweep's **start**, where the curves are a whole J_sc apart — at the
@@ -203,12 +221,14 @@ export function jvModel(curves, options = {}) {
       label: `${useLog ? quantity.magnitude : quantity.label}  ·  V / V →`,
       note: sweepNote(list, xDomain),
       y: { scale: Y, ticks: axisTicks(Y, { count: 4 }) },
-      series, rules, marks,
+      series, rules, marks, dots,
     }],
     x: { scale: X, ticks: axisTicks(X, { count: 6 }), label: 'V / V', format: (v) => fmt.volts(v, { decimals: 3 }) },
     legend: legend.length > 1 ? legend : [],
     readout: '',
-    metrics: metricsOf(list, quantity),
+    // No metrics for the sweep in flight: a V_oc interpolated on half a
+    // curve is a number nobody measured.
+    metrics: metricsOf(list.filter((c) => c.partial !== true), quantity),
     notes: notes(list, quantity, { useLog, clamped, allDark, cropped: Y.cropped || 0 }),
   };
 }
@@ -274,7 +294,10 @@ export function curveLabel(curve) {
 
 function sweepNote(list, xDomain) {
   const from = Math.min(...list.map((c) => c.voltage[0]));
-  const parts = [`${list.length} curve${list.length === 1 ? '' : 's'}`];
+  const done = list.filter((c) => c.partial !== true);
+  const parts = [`${done.length} curve${done.length === 1 ? '' : 's'}`];
+  const live = list.find((c) => c.partial === true);
+  if (live) parts.push(`sweeping ${curveLabel(live)} · point ${live.k || live.voltage.length} of ${live.of || '?'}`);
   if (xDomain[0] < -1) parts.push(`sweep starts at ${fmt.volts(from, { decimals: 2 })}`);
   if (list.some((c) => c.direction === 'reverse')) parts.push('reverse arm dashed — a second sweep');
   return parts.join(' · ');

@@ -290,6 +290,27 @@ class JVCurveDone(Event):
 
 
 @dataclass(frozen=True)
+class JVPoint(Event):
+    """One point of the sweep in flight, as it is read: `k` of `of` on curve
+    `index`, with the curve's identity repeated so a consumer that missed
+    the start can still file it. Live only -- the service sends it to
+    whoever is listening and journals none of it; `JVCurveDone` carries the
+    whole curve, so nothing is lost to a client that reconnects mid-sweep,
+    only the picture of it growing."""
+
+    index: int
+    k: int
+    of: int
+    label: str
+    dark: bool | None
+    led_level_v: float | None
+    direction: Direction
+    voltage: float
+    current: float               # A, as the instrument reported it
+    density: float | None        # mA/cm2, only if a pixel area was given
+
+
+@dataclass(frozen=True)
 class JVFinished(Event):
     curves: tuple[JVCurveDone, ...]
     elapsed_s: float
@@ -306,8 +327,8 @@ def run_jv(rig: Rig, config: JVConfig = JVConfig(), *,
     """Sweep the SourceMeter, dark and/or at each LED level.
 
     Yields `JVStarted`, then per illumination an `InstrumentState` naming the
-    shutter position (when the rig has a shutter) and a `JVCurveDone` per
-    sweep, then `JVFinished`.
+    shutter position (when the rig has a shutter), a `JVPoint` per point as
+    it is read, and a `JVCurveDone` per sweep, then `JVFinished`.
 
     **Unwind what you turned on.** The `finally` disables the SourceMeter on
     every exit path -- finished, aborted, raised, or the consumer simply
@@ -414,8 +435,27 @@ def run_jv(rig: Rig, config: JVConfig = JVConfig(), *,
 
                 for direction in directions:
                     v = v_forward if direction == "forward" else v_forward[::-1]
-                    vm, im = rig.smu.sweep(float(v[0]), float(v[-1]), int(v.size),
-                                           settle_s=config.settle_s)
+                    # Point by point (`sweep_points`, 2026-09-04): each one
+                    # is on the stream as it is read, so the curve draws and
+                    # the recorder keeps it as it grows, and an abort lands
+                    # between two points instead of after the last.
+                    vs: list[float] = []
+                    cs: list[float] = []
+                    for k, (vk, ik) in enumerate(
+                            rig.smu.sweep_points(float(v[0]), float(v[-1]), int(v.size),
+                                                 settle_s=config.settle_s), start=1):
+                        vs.append(float(vk))
+                        cs.append(float(ik))
+                        dk = current_density(float(ik), config.pixel_area_cm2)
+                        yield JVPoint(index=index, k=k, of=int(v.size), label=label,
+                                      dark=dark, led_level_v=level, direction=direction,
+                                      voltage=float(vk), current=float(ik),
+                                      density=None if dk is None else float(dk))
+                        if abort is not None and abort():
+                            yield Notice("warning", f"J-V run aborted at point {k} of "
+                                                    f"{int(v.size)} of {label}")
+                            return
+                    vm, im = np.asarray(vs, dtype=float), np.asarray(cs, dtype=float)
                     density = current_density(im, config.pixel_area_cm2)
                     ev = JVCurveDone(index=index, label=label, dark=dark,
                                      led_level_v=level, direction=direction,

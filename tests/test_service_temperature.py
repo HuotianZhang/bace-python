@@ -357,6 +357,33 @@ def test_the_keys_a_detail_leaves_out_take_the_trees_defaults():
     assert settled.data["held_s"] == 60.0
 
 
+def test_a_node_nobody_gave_a_temperature_reads_the_331_once_and_says_so():
+    """The recipes typed 290 K until 2026-09-04, and a run at 220 K was filed
+    as `290 K · typed`. Nothing typed and a controller on the bench: the
+    node reads it as it starts, `how = "read"`, the source classified as
+    the settle classifies it, bound onto the context so the executor's
+    `NodeDone` agrees with the file."""
+    from bace.service.modules import _bind_temperature
+
+    rig = rig_with(Scripted([reading(220.4, setpoint=220.0)]))
+    c = ctx()
+    assert c.temperature() == (None, "", "")
+    assert _bind_temperature(c, rig) == (220.4, "read", "console")
+    assert c.temperature() == (220.4, "read", "console"), "bound, so NodeDone says the same"
+
+    # typed wins: nobody re-reads a number the operator chose
+    typed = replace(ctx(), metadata=replace(ctx().metadata, temperature_k=290.0,
+                                            temperature_how="typed"))
+    assert _bind_temperature(typed, rig) == (290.0, "typed", "")
+
+    # a controller that does not answer leaves it not recorded
+    silent = rig_with(Scripted([reading(float("nan"), connected=False)]))
+    assert _bind_temperature(ctx(), silent) == (None, "", "")
+
+    # no controller at all: the same
+    assert _bind_temperature(ctx(), rig_with(None)) == (None, "", "")
+
+
 def test_closing_the_331_transport_leaves_the_shared_resource_manager_open(monkeypatch):
     """`pyvisa.ResourceManager()` is one cached instance per process. The
     vendored transport used to close it with the 331's session, which on the
