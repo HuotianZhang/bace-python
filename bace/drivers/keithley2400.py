@@ -236,28 +236,45 @@ class Keithley2400:
         self._io.write(f":SOUR:DEL {settle_s:g};")
         self._io.write(f":TRIG:COUN {int(points):d};")
         # The whole sweep is ONE `:READ?`: the instrument steps, settles,
-        # integrates and averages every point before it answers. That is
-        # points x (source delay + averaging x NPLC / 50 Hz) plus stepping
-        # overhead -- with the validated recipe (71 points, 50 ms delay,
-        # averaging 10, NPLC 1) about 18 s, and the session's blanket
-        # 20 s VISA timeout cut it off on the rig (VI_ERROR_TMO, session
-        # 20260902_143927). So the timeout is sized from the sweep, with
-        # a factor two for auto-zero and stepping, and restored after.
-        per_point_s = (settle_s
-                       + max(1, int(self.config.averaging)) * self.config.nplc / 50.0)
-        budget_ms = int((10.0 + 2.0 * points * per_point_s) * 1000)
+        # integrates and averages every point before it answers, so the VISA
+        # timeout has to be sized from the sweep and restored after it. The
+        # session's blanket 20 s cut a 71-point sweep off on the rig
+        # (VI_ERROR_TMO, session 20260902_143927).
+        budget_ms = int(self.sweep_budget_s(points, settle_s) * 1000)
         old_timeout = getattr(self._io, "timeout", None)
         if old_timeout is not None and budget_ms > old_timeout:
             self._io.timeout = budget_ms
         self.enable_output(True)
+        started = time.monotonic()
         try:
             raw = self._io.query(":READ?").strip()
         finally:
+            self.last_sweep_s = time.monotonic() - started
             self.disable_output()
             if old_timeout is not None and budget_ms > old_timeout:
                 self._io.timeout = old_timeout
         flat = np.array([float(x) for x in raw.split(",")])
         return flat[0::2], flat[1::2]
+
+    def sweep_budget_s(self, points: int, settle_s: float = 0.0) -> float:
+        """How long `sweep` lets one `:READ?` take before VISA gives up.
+
+        Each averaged reading is *four* apertures, not one: `:FUNC:CONC ON`
+        measures voltage and current, and the 2400 auto-zeroes each. So a
+        point is `settle + averaging x 4 x NPLC / 50 Hz`, and the rig agrees:
+        0.83 s per point at NPLC 1, averaging 10, 50 ms delay (2026-09-04,
+        36-point sweeps in 30 s; 71-point in 57 s on 2026-09-02). The model
+        this replaced counted one aperture, which put a 36-point budget at
+        28 s -- and NI-488 has no 28 s: it rounds a GPIB timeout up to the
+        next of 10, 30, 100, 300 s, so three sweeps of ~30 s passed under
+        the 30 s it became and the fourth, a moment longer, did not (run
+        20260904_214634-024). Twice the model plus 15 s, so a sweep has to
+        be badly wrong before it is cut off; the worst case is a run that
+        waits a little longer for an instrument that is not answering.
+        """
+        per_point_s = (settle_s
+                       + max(1, int(self.config.averaging)) * 4.0 * self.config.nplc / 50.0)
+        return 15.0 + 2.0 * points * per_point_s
 
     def abort(self) -> None:
         self._io.write("ABOR;:TRIG:CLE;")
