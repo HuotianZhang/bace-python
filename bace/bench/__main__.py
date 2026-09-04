@@ -184,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
     # re-proves the *deployed* code, not only mine.
     checks.stage_offline(report, a.archive or _default_archive())
 
-    rig_config, run_config, smu_config, led_drive = _load_configs(
+    rig_config, run_config, smu_config, led_drive, pinned = _load_configs(
         report, a.rig, a.run)
 
     # -- instruments -----------------------------------------------------
@@ -201,7 +201,8 @@ def main(argv: list[str] | None = None) -> int:
         checks.stage_read(report, rm, rig_config)
     if a.configure:
         checks.stage_configure(report, rm, rig_config, run_config,
-                               led_drive=led_drive, force=a.force_configure)
+                               led_drive=led_drive, pinned=pinned,
+                               force=a.force_configure)
     if a.acquire:
         checks.stage_acquire(report, rm, rig_config, run_config, a.averages)
     if a.sync:
@@ -258,9 +259,12 @@ def _load_configs(report: Report, rig_path, run_path):
     led_drive = (1.020, 0.4)
     """(high, low) at the 33220A output. The 81150A is armed by this
     generator's Sync, so anything that sets one has to know the other."""
+    pinned = (0.9, -1.0, 88.0)
+    """(vpre, vcoll, delay_ns) at the device: the archive's point until
+    run.toml says otherwise."""
 
     def load(c):
-        nonlocal rig_config, run_config, smu_config, led_drive
+        nonlocal rig_config, run_config, smu_config, led_drive, pinned
         from bace.config import load_rig, load_run
         p_rig = rig_path or checks._find("rig.toml")
         p_run = run_path or checks._find("run.toml")
@@ -270,15 +274,18 @@ def _load_configs(report: Report, rig_path, run_path):
         else:
             c.warn("rig.toml not found; using built-in defaults")
         if p_run:
-            _, run_config, drive, smu_config, _, _ = load_run(p_run)
+            spec, run_config, drive, smu_config, _, _ = load_run(p_run)
             led_drive = (drive.level, drive.low_level)
+            pinned = (spec.vpre, spec.vcoll, spec.delay_ns)
+            c.data["pinned (vpre / vcoll / delay_ns)"] = (
+                f"{spec.vpre:g} V / {spec.vcoll:g} V / {spec.delay_ns:g} ns")
             c.data["run.toml"] = p_run
             c.data["LED high / low (V)"] = f"{drive.level:g} / {drive.low_level:g}"
         else:
             c.warn("run.toml not found; using built-in defaults")
 
     report.run("load configuration", "offline", load)
-    return rig_config, run_config, smu_config, led_drive
+    return rig_config, run_config, smu_config, led_drive, pinned
 
 
 if __name__ == "__main__":

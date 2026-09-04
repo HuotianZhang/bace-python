@@ -678,8 +678,14 @@ def _pythons_of_bitness(want: int) -> list[tuple[str, str, str]]:
 # ------------------------------------------------------------------- configure
 def stage_configure(report: Report, rm, rig_config, run_config, *,
                     led_drive: tuple[float, float] = (1.020, 0.4),
+                    pinned: tuple[float, float, float] = (0.9, -1.0, 88.0),
                     force: bool = False) -> None:
     """Send every configuration command. **No output is enabled here.**
+
+    `pinned` is the recipe's (vpre, vcoll, delay_ns) at the device -- the
+    levels a run's first step would set. Until 2026-09-04 the 81150A step
+    used the archive's 0.9 V / -1 V / 88 ns whatever run.toml said, so the
+    lab PC's report showed 88 ns beside a recipe that says 90.
 
     This is the stage that earns the whole harness: each recovered SCPI string
     is sent once and the error queue is read immediately, so the report comes
@@ -753,9 +759,14 @@ def stage_configure(report: Report, rm, rig_config, run_config, *,
             g.configure_trigger()
             g.configure_shape(run_config.pulse_frequency_hz,
                               duty_percent=run_config.duty_percent)
-            lv = pulse_levels(0.9, -1.0, rig_config.pulse_amp, 88.0,
+            vpre, vcoll, delay_ns = pinned
+            lv = pulse_levels(vpre, vcoll, rig_config.pulse_amp, delay_ns,
                               run_config.pulse_width_ns,
+                              invert=run_config.invert_polarity,
                               trigger_offset_s=rig_config.trigger_offset_s)
+            c.data["pinned (vpre / vcoll / delay_ns at the device)"] = (
+                f"{vpre:g} V / {vcoll:g} V / {delay_ns:g} ns"
+                + (", invert_polarity" if run_config.invert_polarity else ""))
             g.set_levels(lv.high_light, lv.low_light, delay_s=lv.delay_s,
                          width_s=lv.width_s)
             c.data["set high/low (V at generator)"] = f"{lv.high_light:g} / {lv.low_light:g}"
@@ -945,10 +956,16 @@ def stage_acquire(report: Report, rm, rig_config, run_config, averages: int) -> 
             c.data["trigger sits this far into the record (ns)"] = round(
                 -trace.t0 * 1e9, 1)
             if trace.t0 < 0:
-                # t0_int is measured from the first sample, but the trigger is
-                # ~200 ns in, so this is the number that decides whether the
-                # integral starts before the transient does.
-                after_trigger = (run_config.t0_int_s + trace.t0) * 1e9
+                # The trigger is ~200 ns into the record, so this is the
+                # number that decides whether the integral starts before the
+                # transient does. `t0_int_s` is in whatever `t0_int_reference`
+                # names; resolve it to record time first, as `charge` does --
+                # read as record time, a trigger-referenced 120.5 ns reported
+                # as -79 ns on the lab PC (2026-09-04).
+                from bace.experiment.transient import resolve_t0_int
+                t0_rec = resolve_t0_int(run_config, trace.t0)
+                c.data["t0_int in record time (ns)"] = round(t0_rec * 1e9, 1)
+                after_trigger = (t0_rec + trace.t0) * 1e9
                 c.data["t0_int, relative to the trigger (ns)"] = round(after_trigger, 1)
             expected_dt = (run_config.timebase_ns_per_div / 1e8) / max(trace.n, 1)
             c.data["dt expected (ns)"] = round(expected_dt * 1e9, 4)
