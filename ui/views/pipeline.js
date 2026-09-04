@@ -352,9 +352,25 @@ export default {
         h('span', { style: { flex: '1' } }),
         tags,
         h('span.rowact',
-          h('button.btng', { title: 'move up', onclick: () => change(tree.moveAt(typed, row.path, -1)) }, '↑'),
-          h('button.btng', { title: 'move down', onclick: () => change(tree.moveAt(typed, row.path, 1)) }, '↓'),
+          h('button.btng', { title: 'move up', onclick: () => moveNode(row.path, -1) }, '↑'),
+          h('button.btng', { title: 'move down', onclick: () => moveNode(row.path, 1) }, '↓'),
           h('button.btng', { title: 'remove this node and everything under it', onclick: () => change(tree.removeAt(typed, row.path), { select: null }) }, '✕')));
+    }
+
+    /**
+     * Reorder a node, and take the selection with it.
+     *
+     * A path is a list of child indices, so a move renumbers the node and
+     * every sibling it passed — and a selection left at the old index is now
+     * pointing at whichever node took that place. With two `bace` siblings,
+     * which the tree schema supports and the service numbers `bace` and
+     * `bace#2`, the form would quietly switch to the other one and the next
+     * override would land on the wrong node.
+     */
+    function moveNode(path, delta) {
+      const next = tree.moveAt(typed, path, delta);
+      if (next === typed) return;                    // a move off either end
+      change(next, { select: tree.remapPath(selected, path, delta) });
     }
 
     /** `as on the bench · n_loops 100` — the contract's own sentence for a node. */
@@ -413,7 +429,7 @@ export default {
             h('span.seg',
               ...['list', 'range'].map((f) => h('span.sego', {
                 class: form === f ? 'on' : '',
-                onclick: () => change(tree.setValueForm(typed, selected, f, row && row.resolved)),
+                onclick: () => switchForm(f, row),
               }, f))),
             form === 'list' ? listInput(node, spec) : null,
             form === 'range' ? spec.range.map((n, i) => h('input.v', {
@@ -433,6 +449,24 @@ export default {
       }
       for (const f of spec.fields) rows.push(field(loopSpec(node, row, f), ctx, { name: '' }, {}));
       return h('div.pr', rows);
+    }
+
+    /**
+     * Switch how a loop's values are written — and refuse rather than lose
+     * them. Only the service expands a range into levels, so a range typed a
+     * moment ago and not yet validated has no list anywhere; converting it
+     * would mean inventing one, and the honest answer is to say so and wait
+     * the quarter-second out.
+     */
+    function switchForm(form, row) {
+      const node = tree.nodeAt(typed, selected);
+      const resolved = row && row.resolved;
+      if (!tree.canSwitchForm(node, resolved)) {
+        notify('the range has not been checked yet, so there are no values to list. '
+          + 'The service is the only thing that expands a range — try again in a moment.', 'warn');
+        return;
+      }
+      change(tree.setValueForm(typed, selected, form, resolved));
     }
 
     /** A text input over the value list — `295, 290, 280` — parsed on commit. */
@@ -519,20 +553,49 @@ export default {
       if (!catalogue) {
         return h('p.absent', { text: `${node.module} is not in GET /modules — this tree cannot run here` });
       }
-      if (!row || !row.params) {
-        return h('p.absent', 'the schedule has not been asked for yet. Dry run resolves this node’s '
-          + 'parameters, including what the loops above it bind.');
-      }
       const overrides = node.params || {};
+      /**
+       * The node's resolved ParamSet, when the tree resolves at all.
+       *
+       * A tree the validator refuses answers `schedule: null` — one bad value
+       * and there is no schedule for any node in it. Drawn from the schedule
+       * alone the form would then vanish at exactly the moment it is needed:
+       * type `100.9` into `n_loops`, and the row that holds the typo, and the
+       * reset beside it, are gone with it. So the catalogue stands in, with
+       * this node's own overrides on top of it — every field still there and
+       * still editable, and only what the loops above would have bound is
+       * missing, which is what the note says.
+       */
+      const resolved = (row && row.params) || null;
       const entry = {
         ...catalogue,
         // The point count is read out of `estimate_text` and the catalogue's
         // is the *bench's*, computed from the bench's axis rather than this
         // node's. An absent count is better than one describing another form.
-        estimate_text: '', estimate_s: row.estimate_s, last: null, needs: [],
+        estimate_text: '', estimate_s: row ? row.estimate_s : null, last: null, needs: [],
         params: (catalogue.params || []).map((p) => {
-          const resolved = row.params[p.name];
-          return { ...p, ...(resolved || {}), node: p.name in overrides };
+          // A schedule's `ParamValue` carries `{value, source, detail}` and no
+          // `editable`, and the catalogue's is the answer for the *bench's*
+          // ParamSet — where `led_v` is a `run.toml` value and editable. So it
+          // has to be recomputed against this node's own source, by the
+          // service's own rule (`params.LOCKED`: inherited and derived are not
+          // editable on the wire, whatever the spec says). Without it the form
+          // offered an input on `led_v` inside an illumination loop, took the
+          // override, and the loop that owns it had `tree.owned-param` refuse
+          // the tree — an edit that could only ever end in an invalid.
+          const pv = resolved
+            ? (resolved[p.name] || {})
+            // No schedule: the value is what this node types, or the bench's.
+            : (p.name in overrides
+              ? { value: overrides[p.name], source: 'edited', detail: 'typed on this node' }
+              : {});
+          const source = pv.source || p.source;
+          return {
+            ...p,
+            ...pv,
+            editable: p.editable !== false && source !== 'inherited' && source !== 'derived',
+            node: p.name in overrides,
+          };
         }),
       };
       // `bench: null` on purpose: the read-back row on a bench card says what
@@ -540,16 +603,21 @@ export default {
       // illumination loop is not described by it.
       const model = cardModel(entry, { bench: null });
       const ctx = moduleCtx(catalogue);
+      const first = (row && row.first) || null;
       const where = [];
-      if (row.first && row.first.temperature && row.first.temperature.k !== null && row.first.temperature.k !== undefined) {
-        where.push(`T ${fmt.kelvin(row.first.temperature.k)}`);
+      if (first && first.temperature && first.temperature.k !== null && first.temperature.k !== undefined) {
+        where.push(`T ${fmt.kelvin(first.temperature.k)}`);
       }
-      if (row.first && row.first.led_v !== null && row.first.led_v !== undefined) where.push(`LED ${fmt.volts(row.first.led_v)}`);
+      if (first && first.led_v !== null && first.led_v !== undefined) where.push(`LED ${fmt.volts(first.led_v)}`);
       return h('div',
-        row.runs > 1
-          ? h('p.chart-note', { text: `resolved for the first of ${row.runs} runs${where.length ? ' — ' + where.join(' · ') : ''}. `
-            + 'The loops above bind a different value into each of the others.' })
-          : null,
+        !resolved
+          ? h('p.chart-note', 'the tree does not resolve yet, so this is the module as it stands on '
+            + 'the bench with this node’s own overrides on it — not what the loops above would bind. '
+            + 'The check list says what is wrong.')
+          : row && row.runs > 1
+            ? h('p.chart-note', { text: `resolved for the first of ${row.runs} runs${where.length ? ' — ' + where.join(' · ') : ''}. `
+              + 'The loops above bind a different value into each of the others.' })
+            : null,
         h('div.pr', model.above.map((r) => renderRow(r, model, ctx))),
         fold(model, ctx, open));
     }
@@ -576,9 +644,14 @@ export default {
      * A typed value as the tree should carry it. The service would coerce a
      * string — `ParamSpec.coerce` is what `PUT /modules/{m}/params` leans on —
      * but a tree is also what `POST /pipelines/save` writes to disk, and a
-     * recipe holding `"n_loops": "100"` is a file that reads wrong. A value
-     * that will not parse is left as typed, so the refusal is the service's
-     * own sentence about that parameter rather than this file's about JSON.
+     * recipe holding `"n_loops": "100"` is a file that reads wrong.
+     *
+     * **A value this cannot convert is left exactly as typed**, so the
+     * refusal is the service's own sentence about that parameter rather than
+     * this file's about JSON — and `100.9` in an `int` field is one of those.
+     * `ParamSpec._as_int` refuses a number that is not whole ("100.9 is not a
+     * whole number"); truncating it here would run the scan at 100 loops with
+     * nothing on screen saying the typo had been read as something else.
      */
     function coerce(spec, raw) {
       if (raw === null || typeof raw === 'boolean' || typeof raw === 'number') return raw;
@@ -586,7 +659,8 @@ export default {
       if (spec.type === 'int' || spec.type === 'float') {
         const value = Number(raw);
         if (!Number.isFinite(value)) return raw;
-        return spec.type === 'int' ? Math.trunc(value) : value;
+        if (spec.type === 'int' && !Number.isInteger(value)) return raw;
+        return value;
       }
       return raw;
     }
@@ -810,7 +884,11 @@ export default {
         if (!v.nodes.length) return h('p.absent', 'nothing scheduled yet.');
         return [
           h('div.schedbar',
-            h('span.cs', { text: showFlat ? 'every step, in order' : 'three scales — expand a temperature for its levels, a level for its modules' }),
+            h('span.cs', {
+              text: showFlat
+                ? `every step, in order — ${((v.answer && v.answer.schedule) || []).length}, loop boundaries included`
+                : 'three scales — expand a temperature for its levels, a level for its modules',
+            }),
             h('span', { style: { flex: '1' } }),
             h('button.btng', { onclick: () => { showFlat = !showFlat; render(); } }, showFlat ? 'nested' : 'flat')),
           showFlat ? flatSteps(v) : v.nodes.map((node) => schedNode(node)),
@@ -888,16 +966,24 @@ export default {
     }
 
     /**
-     * Every step, in order. Behind a switch because the canonical tree is 198
-     * of them and `step 3 of 198` is the number `ui-rules` §5 exists to
-     * refuse — but the flat list is what "in order" literally means, and a
-     * screen that only ever summarised would be hiding it.
+     * Every step, in order — the service's own list, not the module leaves of
+     * it.
+     *
+     * Behind a switch because the canonical tree is 198 of them and
+     * `step 3 of 198` is the number `ui-rules` §5 exists to refuse; but the
+     * flat list is what "in order" literally means, and the ninety leaves are
+     * not it. The hundred and eight it leaves out are the loop boundaries —
+     * which is where every settle and every LED level change happens, and so
+     * exactly what an operator opens this view to look at.
      */
     function flatSteps(v) {
-      return h('div.flatsteps', v.leaves.map((leaf, i) => h('div.fs',
+      const steps = (v.answer && v.answer.schedule) || [];
+      return h('div.flatsteps', steps.map((step, i) => h('div.fs' + (step.kind === 'module' ? '.mod' : ''),
         h('span.i', { text: String(i + 1) }),
-        h('span.p', { text: leaf.node_path }),
-        h('span.cs', { text: fmt.duration(leaf.estimate_s) }))));
+        h('span.k', { text: step.kind === 'loop-enter' ? 'enter' : step.kind === 'loop-exit' ? 'exit' : 'run' }),
+        h('span.p', { text: step.node_path }),
+        step.needs_operator ? h('span.mon-wait', { text: 'waits' }) : null,
+        h('span.cs', { text: fmt.duration(step.estimate_s) }))));
     }
 
     /**

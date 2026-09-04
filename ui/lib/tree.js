@@ -173,6 +173,32 @@ export function moveAt(tree, path, delta) {
 }
 
 /**
+ * Where a path ends up when the node at `path` moves `delta` places among its
+ * siblings — the companion `moveAt` needs, and the reason it needs one:
+ * a path is a list of child indices, so a move renumbers the moved node *and*
+ * every sibling it passed. A selection left at the old index is then pointing
+ * at whichever node took that place, and with two `bace` siblings — which the
+ * schema supports and the service numbers `bace` and `bace#2` — the next
+ * override lands on the wrong node with nothing on screen saying so.
+ */
+export function remapPath(sel, path, delta) {
+  if (!sel || !path.length) return sel;
+  const parent = path.slice(0, -1);
+  // Only a path among the moved node's own siblings is renumbered; anything
+  // elsewhere in the tree is untouched by the move.
+  if (sel.length <= parent.length) return sel;
+  if (sel.slice(0, parent.length).join(',') !== parent.join(',')) return sel;
+  const from = path[path.length - 1];
+  const to = from + delta;
+  const at = sel[parent.length];
+  let moved = at;
+  if (at === from) moved = to;
+  else if (from < to && at > from && at <= to) moved = at - 1;
+  else if (to < from && at >= to && at < from) moved = at + 1;
+  return [...parent, moved, ...sel.slice(parent.length + 1)];
+}
+
+/**
  * Set one of a module node's `params` overrides. `null` **removes** the key
  * rather than storing a null, which is the same meaning `PUT null` has on a
  * bench card: drop what was typed here and fall back to the layer below —
@@ -199,32 +225,47 @@ export function setField(tree, path, name, value) {
 
 /**
  * Switch a temperature or illumination loop between its list form and its
- * range form, keeping whichever the service last resolved as the starting
- * point — so a range becomes the levels it actually made, not the three
- * numbers that made them.
+ * range form, on the values it has — so a range becomes the levels it
+ * actually made, not the three numbers that made them.
+ *
+ * **Returns the tree unchanged when the conversion would have to invent
+ * something**, and the caller says so rather than performing it. That is one
+ * case, and it is a common one: a range typed a moment ago and not yet
+ * validated has no levels anywhere — only the service expands a range — so
+ * the first cut turned it into an empty list, and the inverse turned an
+ * unvalidated list into `0 → 0`. Either way the operator's setpoints were
+ * gone, silently, on a click meant to change how they are written.
  */
 export function setValueForm(tree, path, form, resolved) {
-  const spec = LOOPS[(nodeAt(tree, path) || {}).loop] || null;
+  const node = nodeAt(tree, path);
+  const spec = node && LOOPS[node.loop];
   if (!spec || !spec.list) return tree;
-  return updateAt(tree, path, (node) => {
-    const next = { ...node };
+  const values = loopValues(node, resolved);
+  if (!values || !values.length) return tree;
+  return updateAt(tree, path, (n) => {
+    const next = { ...n };
     for (const key of [spec.list, ...spec.range]) delete next[key];
     if (form === 'list') {
-      next[spec.list] = (resolved && resolved[spec.list]) || [];
+      next[spec.list] = values.slice();
       return next;
     }
-    const values = (resolved && resolved[spec.list]) || [];
-    const first = values.length ? values[0] : 0;
-    const last = values.length ? values[values.length - 1] : 0;
-    next[spec.range[0]] = first;
-    next[spec.range[1]] = last;
-    // The step the values already have, when there are two to read it off,
-    // and never a number this file invented from nothing.
+    next[spec.range[0]] = values[0];
+    next[spec.range[1]] = values[values.length - 1];
+    // The step the values already have, where there are two to read it off.
+    // A single value is a one-iteration loop whatever the step says
+    // (`range_values` returns `(start,)` when start == stop), so the spacing
+    // there is a placeholder and not a claim.
     next[spec.range[2]] = values.length > 1
       ? Math.abs(Number((values[1] - values[0]).toFixed(9)))
       : (spec.decimals === 3 ? 0.005 : 5);
     return next;
   });
+}
+
+/** Whether `setValueForm` can convert this loop without inventing values. */
+export function canSwitchForm(node, resolved) {
+  const values = node && LOOPS[node.loop] ? loopValues(node, resolved) : null;
+  return Boolean(values && values.length);
 }
 
 /** Which form a loop's values are typed in — the range wins if any of it is set. */
@@ -351,10 +392,17 @@ export function loopValues(node, resolved) {
   const spec = LOOPS[node.loop];
   if (!spec) return null;
   if (spec.count) {
-    const count = (resolved && resolved.count) ?? node.count;
+    const count = node.count ?? (resolved && resolved.count);
     return count === undefined || count === null ? null : Array.from({ length: count }, (_, i) => i + 1);
   }
-  const list = resolved ? resolved[spec.list] : (valueForm(node) === 'list' ? node[spec.list] : null);
+  // A typed list is its own answer — `pipeline._loop_values` returns it
+  // unchanged — so the node is authoritative for it, and an answer describing
+  // the list before the last edit cannot stand in front of what is on screen.
+  // A range is the other way round: only the service expands one, and until
+  // it has there is no count to show.
+  const list = valueForm(node) === 'list'
+    ? node[spec.list]
+    : (resolved ? resolved[spec.list] : null);
   return Array.isArray(list) ? list : null;
 }
 

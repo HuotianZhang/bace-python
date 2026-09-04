@@ -16,8 +16,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-  LOOPS, checkSummary, costModel, gridModel, insertAt, loopValues,
-  moveAt, newLoop, newModule, nodeAt, removeAt, sameTree, scheduleLeaves,
+  LOOPS, canSwitchForm, checkSummary, costModel, gridModel, insertAt, loopValues,
+  moveAt, newLoop, newModule, nodeAt, remapPath, removeAt, sameTree, scheduleLeaves,
   scheduleTree, setField, setParam, setValueForm, structureSummary, timeline,
   treeRows, valueForm,
 } from '../lib/tree.js';
@@ -227,6 +227,49 @@ test('the list/range switch keeps the values the service made, not the rule that
   assert.equal(nodeAt(back, [0]).led_stop_v, 1.03);
   assert.ok(Math.abs(nodeAt(back, [0]).led_step_v - 0.005) < 1e-9,
     'the step is read off the values, never invented');
+});
+
+test('a form switch never invents values, and never loses the ones typed', () => {
+  // Only the service expands a range, so a range typed a moment ago and not
+  // yet validated has no levels anywhere. Converting it would mean making
+  // some up; the first cut made an empty list, which lost the operator's
+  // sweep on a click meant to change how it is written.
+  const fresh = canonical();
+  assert.equal(canSwitchForm(nodeAt(fresh, [0]), null), false, 'a range with no answer');
+  assert.equal(setValueForm(fresh, [0], 'list', null), fresh, 'so the tree is left alone');
+
+  // The other direction needs nothing from the service: a typed list is its
+  // own answer (`pipeline._loop_values` returns it unchanged).
+  assert.equal(canSwitchForm(nodeAt(fresh, []), null), true);
+  const asRange = setValueForm(fresh, [], 'range', null);
+  assert.equal(asRange.start_k, 295);
+  assert.equal(asRange.stop_k, 220);
+  assert.equal(asRange.step_k, 5);
+  assert.ok(!('values_k' in asRange));
+});
+
+test('a typed list is authoritative over an answer describing the list before it', () => {
+  // The validate in flight still carries the old levels. A summary drawn from
+  // it would describe a loop the operator has already replaced.
+  const typed = setField(canonical(), [], 'values_k', [300, 290]);
+  const rows = treeRows(typed, TXILL.tree, scheduleTree(TXILL.schedule));
+  assert.deepEqual(rows[0].values, [300, 290], 'what is on screen is what will run');
+  assert.match(rows[0].summary, /^300\.0 → 290\.0 K · 2/);
+});
+
+test('a move takes the selection with it', () => {
+  // Two `bace` siblings is the case that makes this more than tidiness: the
+  // form would switch to the other one and the next override would land on
+  // the wrong node.
+  const path = [0, 1];
+  assert.deepEqual(remapPath([0, 1], path, -1), [0, 0], 'the moved node');
+  assert.deepEqual(remapPath([0, 0], path, -1), [0, 1], 'and the sibling it passed');
+  assert.deepEqual(remapPath([0, 1, 2], path, -1), [0, 0, 2], 'a selection inside the moved subtree');
+  assert.deepEqual(remapPath([1, 0], path, -1), [1, 0], 'and nothing elsewhere in the tree');
+  assert.deepEqual(remapPath([], path, -1), [], 'nor the root');
+  assert.deepEqual(remapPath([0, 3], [0, 0], 3), [0, 2], 'a move past several renumbers each of them');
+  assert.deepEqual(remapPath([0, 0], [0, 0], 3), [0, 3]);
+  assert.equal(remapPath(null, path, 1), null);
 });
 
 test('sameTree is what decides whether an answer still describes the screen', () => {

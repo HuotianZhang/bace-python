@@ -137,6 +137,16 @@ function display(spec) {
 }
 
 function input(spec, commit, segmented) {
+  // **Not editable is not an input, wherever the value is drawn.** `field`
+  // branches on this too, but the composite rows — the range, the V_oc row's
+  // `led_v`, the polarity pair — reach `input` directly, and the pipeline
+  // tab's node form is where that matters: `led_v` inside an illumination
+  // loop resolves `inherited`, which `params.LOCKED` makes non-editable on
+  // the wire whatever the spec says, and `ParamSet.set_edited` refuses. An
+  // input there offered an override that could only ever end in
+  // `tree.owned-param` refusing the tree. `ui-rules` §6: an inherited value
+  // reads as inherited, showing the value it will get.
+  if (spec.editable === false) return h('span.v', { text: display(spec) });
   if (spec.type === 'bool') {
     return h('span.bool',
       ...[true, false].map((v) => h('span', {

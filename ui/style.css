@@ -683,3 +683,5 @@ button.link:hover { color: var(--accent-dark); }
 .fs:nth-child(even) { background: #fbfafa; }
 .fs .i { color: var(--grey); min-width: 3.5ch; text-align: right; }
 .gridfill { display: flex; flex-direction: column; gap: 4px; }
+.fs .k { color: var(--grey); min-width: 5ch; }
+.fs.mod .p { color: var(--ink); font-weight: 500; }

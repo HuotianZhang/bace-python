@@ -877,6 +877,45 @@ frame moves any of the three, so the subscription returns without rendering.
 job on the worker and the worker is running the run, which is also why no
 validate is asked for during one.
 
+**What the review found.** Five, all real, and all in the editor rather than
+in what it draws — four of them ways the console could quietly change or lose
+what the operator typed:
+
+* **A fractional integer was truncated, not refused.** `100.9` in `n_loops`
+  became `100` on its way into the tree, where `ParamSpec._as_int` would have
+  refused it ("is not a whole number"). A typo read as a different experiment,
+  with nothing on screen saying so. A value the client cannot convert is now
+  left exactly as typed, and the refusal is the service's own sentence.
+* **Inherited and derived values were still inputs.** The schedule's
+  `ParamValue` carries `{value, source, detail}` and no `editable`, and the
+  catalogue's `editable` is the answer for the *bench's* ParamSet — where
+  `led_v` is a `run.toml` value and editable. So a `bace` inside an
+  illumination loop offered an input on the level the loop owns, took the
+  override, and `tree.owned-param` refused the whole tree: an edit that could
+  only ever end in an invalid. The rule is the service's own
+  (`params.LOCKED`), applied to the merged spec — and it belongs in `input()`
+  rather than in `field()`, because the composite rows (the range, the V_oc
+  row's `led_v`) reach `input` directly and ignored it.
+* **A moved node left the selection behind.** A path is a list of child
+  indices, so a move renumbers the node and every sibling it passed; the form
+  then showed whichever node took that index, and with two `bace` siblings the
+  next override would have landed on the wrong one.
+* **The "every step, in order" list was the ninety module leaves**, not the
+  198 steps — omitting exactly the loop boundaries where every settle and
+  every LED level change happens, which is what that view is opened for.
+* **Switching a range to a list before it had been validated emptied it.**
+  Only the service expands a range, so there were no levels anywhere to
+  convert; the switch invented an empty list and the sweep was gone. It
+  refuses and says why now, and a typed *list* is authoritative over an answer
+  describing the list before the last edit.
+
+And one the second of those uncovered: a tree the validator refuses answers
+`schedule: null`, so the node form — drawn from the schedule — vanished at
+exactly the moment it was needed, taking the row holding the typo and the
+reset beside it. The catalogue stands in when there is no schedule, with the
+node's own overrides on top and a note saying the loops' bindings are not
+shown.
+
 ### M6 · The results tab
 
 A stub until here. Preceded by a design pass, because R2·3 is a Round 2

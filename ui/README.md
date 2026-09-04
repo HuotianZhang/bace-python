@@ -239,11 +239,25 @@ checks and the schedule, each keyed apart and each redrawn once.
 A module node's form is the bench's own card: `cardModel` and the field
 component from `lib/card.js`, over the ParamSet the *schedule* resolved for
 that node — so `led_v` reads as inherited from the illumination loop and `voc`
-as derived from the `jv_bace` two nodes earlier. The one thing added is
-whether *this node* types an override, which is what decides whether a reset
-is offered: a bench edit and a node override both resolve as `edited`
-(`ParamSet.update_layer` merges into the same layer), and only one of them is
-the tree's to drop.
+as derived from the `jv_bace` two nodes earlier. Two things are added to each
+spec on the way in, and both are about what the node may take back:
+
+* **whether *this node* types the override**, which decides whether a reset is
+  offered: a bench edit and a node override both resolve as `edited`
+  (`ParamSet.update_layer` merges into the same layer), and only one of them
+  is the tree's to drop;
+* **whether it may be typed at all.** A schedule's `ParamValue` carries
+  `{value, source, detail}` and no `editable`, and the catalogue's `editable`
+  is the answer for the *bench's* ParamSet — so it is recomputed here by the
+  service's own rule (`params.LOCKED`: inherited and derived are never
+  editable, whatever the spec says). Without it a `bace` inside an
+  illumination loop offered an input on the level the loop owns.
+
+When the tree does not resolve at all — one bad value and `validate` answers
+`schedule: null` for every node in it — the catalogue stands in, with this
+node's own overrides on top. The form has to survive the typo that caused it:
+drawn from the schedule alone it vanished at exactly the moment it held the
+row to fix.
 
 ### What a run looks like while it runs
 
