@@ -91,7 +91,15 @@ function lastTag(last) {
 }
 
 // -- the rows -------------------------------------------------------------
-function renderRow(row, model, ctx) {
+/**
+ * One row of a card, whichever composite it is. Exported because the pipeline
+ * tab's node form is the same form: a module node is the bench's ParamSet
+ * with the node's overrides on top (`docs/service-contract.md` §7 — "as on
+ * the bench · only what differs is typed here"), so it goes through
+ * `cardModel` and this, and the two screens cannot drift about which fields
+ * matter or what a provenance looks like.
+ */
+export function renderRow(row, model, ctx) {
   switch (row.kind) {
     case 'range': return rangeRow(row, ctx, model);
     case 'voc': return vocRow(row, ctx, model);
@@ -106,7 +114,7 @@ function renderRow(row, model, ctx) {
  * wire and is rendered, the editability is the wire's, and `doc`/`doc_full`
  * are the engine's docstring rather than anything this file invents.
  */
-function field(spec, ctx, model, { segmented = false, accent = false } = {}) {
+export function field(spec, ctx, model, { segmented = false, accent = false } = {}) {
   const editable = spec.editable !== false;
   const cls = ['pf'];
   if (!editable) cls.push('ro');
@@ -167,11 +175,24 @@ function input(spec, commit, segmented) {
  */
 function provenance(spec, ctx, model, editable) {
   const label = spec.source === 'default' ? '' : spec.source;
+  // Who can take the value back. On a bench card that is whoever edited it,
+  // and `source === 'edited'` says so. On a pipeline node form it is not:
+  // the node's overrides and the bench card's edits **both** resolve as
+  // `edited` (`ParamSet.update_layer(Source.EDITED, node.params, "pipeline
+  // node")` merges into the same layer), so a reset offered on every edited
+  // row would, for a value the bench typed and this node did not, be a
+  // button that removes a key the node never had and changes nothing. The
+  // node form sets `spec.node` — is this override typed *here* — and that is
+  // the authority, because the tree is the client's own and needs no string
+  // parsed out of `detail` to know what is in it.
+  const resettable = spec.node === undefined ? spec.source === 'edited' : spec.node;
   return h('span.src',
     label ? h('span.tag.src-' + spec.source, { title: spec.detail || '', text: label }) : null,
-    spec.source === 'edited' && editable
+    resettable && editable
       ? h('button.link', {
-        title: 'PUT null — drop the edit and fall back to the layer below',
+        title: spec.node
+          ? 'drop this node’s override — the value falls back to the module as it stands on the bench'
+          : 'PUT null — drop the edit and fall back to the layer below',
         onclick: () => ctx.edit(model.name, { [spec.name]: null }),
       }, 'reset')
       : null);
@@ -347,7 +368,7 @@ function needsList(model) {
  * is the length of what is in it — the artboard's typed "17" was stale the
  * day the SMU fields landed.
  */
-function fold(model, ctx, open) {
+export function fold(model, ctx, open) {
   const total = foldCount(model);
   if (!total) return null;
   return h('div.fold',

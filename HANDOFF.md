@@ -2,9 +2,10 @@
 
 Converting `BACE_Mehrdad.vi` (LabVIEW, 907 VIs) to Python. The measurement half
 is written, tested and proven on the rig; the service over it is built and
-proven on the simulator. The UI is under way — `docs/ui-plan.md` M0 (the event
-layer and its fixtures) and M1 (the pinned rail and the chain strip) are done;
-M2, the generated module cards, is next.
+proven on the simulator. The UI is under way — `docs/ui-plan.md` M0 to M5 are
+done (the event layer and its fixtures, the pinned rail and the chain strip,
+the generated module cards, the charts, the run monitor, and the pipeline tab);
+M6, the results tab, is next, and is preceded by a design pass.
 
 Read `docs/bace-status.html` first — it is the full narrative with the evidence.
 This file is the operational summary.
@@ -156,7 +157,7 @@ Design rules that are load-bearing:
 
 ## 3. What is NOT built
 
-**`ui/`** — browser front end. **M0 to M3 are built** (`ui/README.md`,
+**`ui/`** — browser front end. **M0 to M5 are built** (`ui/README.md`,
 `docs/ui-plan.md`): the event layer with its recorded fixtures, the pinned rail
 and the chain strip, the six generated bench cards with the `edited` layer
 behind them, and the charts — the scale/axis foundation, the J–V, the transient
@@ -166,9 +167,13 @@ an impossible delay *before* the run — and, as of M4, the run monitor under th
 rail on every tab (the counters at three time scales, the shot's segment, the
 ETA, stop after-shot, abort, and the operator's answer to a temperature pause),
 the newest shot's verdict beside its trace, and Q per loop / Q(axis) with the
-zero-width-axis switch drawn rather than silent. Nothing in the service changed
-for any of it. **M5 is next** — the pipeline tab: the tree editor, the Dry run
-and the schedule. M5 and M6 are not built. **Explicit
+zero-width-axis switch drawn rather than silent. **M5, 2026-09-04**, is the
+pipeline tab: the tree editor, the schedule as "what it will do, in order" at
+three scales, the check list collapsed to its counts, and the cost with
+`lower_bound` rendered as "at least" and never as a finish time. The canonical
+9 T × 5 level tree was built through the console's own controls, dry-run,
+started, and stopped from the monitor. Nothing in the service changed for any
+of it. **M6 is not built** — the results tab, after a design pass. **Explicit
 instruction from the user, 2026-09-01:**
 
 > *"I do not want the same shape as JV console and the 331 controller. I want a

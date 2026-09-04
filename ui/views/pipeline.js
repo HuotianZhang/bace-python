@@ -1,21 +1,1025 @@
-// The pipeline tab — M5. The tree editor, Dry run against
-// `POST /pipelines/validate`, and the schedule as "what it will do, in order",
-// including a `temperature` module binding the **rest of the run** rather than
-// the rest of one iteration. The cost carries `lower_bound: true`, which
-// renders as "at least" and never as a promise.
+// The pipeline tab — `docs/ui-plan.md` M5, and R3·3.
+//
+// Two cards: the tree that gets posted, and what the service says it will do
+// with it. Everything on the right-hand side, and every number on the left
+// below the tree itself, comes from one `POST /pipelines/validate` — the
+// checks, the schedule in order, the counters, the cost and the folder. The
+// editor holds the tree; the service holds every conclusion about it.
+//
+// Four decisions, each of them a rule from somewhere:
+//
+//   * **The console validates on every commit, not only on Dry run.** The
+//     bench tab already does this per card (M2: a `jv` with `step_v = 0` left
+//     Start enabled and `/runs` answered 422), and a pipeline has more ways to
+//     be wrong than a card: a V_oc with no source in scope, an LED level under
+//     turn-on, a module inside an illumination loop typing `led_v`. So the
+//     check list, the cost and the counters are never older than the tree.
+//     Measured on the canonical 9 × 5 tree: 110 ms and 340 kB an answer,
+//     nearly all of it the schedule's 90 resolved ParamSets — so the calls are
+//     coalesced (`VALIDATE_MS`) and a commit that lands during one supersedes
+//     it rather than queueing behind it. **Dry run** is the same request made
+//     deliberately: it re-asks and opens the schedule, which is what a Dry run
+//     after a bench read-back is for.
+//   * **Nothing is counted here.** How many levels `1.010 → 1.030 step 0.005`
+//     makes is a rounding question the service settled once and this file must
+//     not answer a second time. Until a validate has answered, a range row
+//     says the range and no count.
+//   * **The schedule is drawn at three scales** (`ui-rules` §5), because the
+//     canonical tree is 198 steps and *step 3 of 198* is the number that
+//     paragraph exists to refuse. Which temperature, which level, how far into
+//     the scan — the same three the monitor draws during the run.
+//   * **A module node's form is the bench's form.** `cardModel` and the field
+//     component from `lib/card.js`, over the ParamSet the *schedule* resolved
+//     for that node — so `led_v` reads as inherited from the illumination
+//     loop, `voc` as derived from the `jv_bace` two nodes earlier, and which
+//     rows sit above the fold is the one table in `lib/fields.js` rather than
+//     a second opinion about what matters.
 
-import { h, fill } from '../lib/dom.js';
+import { h, fill, keyed } from '../lib/dom.js';
+import * as fmt from '../lib/format.js';
+import { cardModel } from '../lib/fields.js';
+import { renderRow, field, fold } from '../lib/card.js';
+import { chart } from '../lib/charts/frame.js';
+import { scheduleModel } from '../lib/charts/schedule.js';
+import * as tree from '../lib/tree.js';
+
+/**
+ * How long a burst of edits is collapsed into one validate.
+ *
+ * A commit is a `change` event or a click, so this is not a keystroke
+ * throttle — it is there for the clicks that come in threes (move a node up
+ * three places) and for an edit that lands while an answer is in flight. The
+ * same shape as `lib/watch.js`'s bench throttle and `lib/results.js`'s redraw
+ * one, and for the same reason: 110 ms of service time and a third of a
+ * megabyte, per answer.
+ */
+const VALIDATE_MS = 250;
 
 export default {
   route: 'pipeline',
   title: 'pipeline',
 
-  mount(container) {
+  mount(container, { store, api, notify }) {
+    // -- the state this view owns ------------------------------------------
+    /** The tree as typed. `null` is a pipeline with no nodes (`ui-rules` §9). */
+    let typed = null;
+    let name = '';
+    /** The last answer, and the tree it describes. */
+    let answer = null;
+    let answered = null;
+    let inflight = false;
+    let pending = null;
+    let timer = null;
+    let submitting = false;
+    /** Which node's form is open, as an index path; `null` is none. */
+    let selected = null;
+    /** Fold groups open on the node form, per node path. */
+    const opened = new Map();
+    /** Which schedule groups are expanded, by node path. */
+    let expanded = new Set();
+    let showAllChecks = false;
+    let showFlat = false;
+    let recipes = [];
+
+    const body = h('div.pipe');
     fill(container,
       h('h1', 'pipeline'),
-      h('p.lede', 'M5. The tree editor, the Dry run, and the schedule — with the three '
-        + 'counters at three scales, because "step 412 of 8400" is useless here.'),
-      h('div.card', h('p.absent', 'not built yet — the event layer it will run on is (M0).')));
-    return { dispose() {} };
+      h('p.lede', 'Compose the run from the same modules the bench tab fires one at a time. '
+        + 'Every count, cost and check below the tree is POST /pipelines/validate’s answer — '
+        + 'it touches nothing, and it is asked again on every edit.'),
+      body);
+
+    const structureEl = h('div.card.pipe-col');
+    const scheduleEl = h('div.card.pipe-col');
+    fill(body, structureEl, scheduleEl);
+
+    // Sections, keyed apart: an edit to the tree must not rebuild the schedule
+    // chart, and an answer arriving must not take the caret out of a field
+    // the operator is still typing in (`dom.keyed`, and M2's finding).
+    const headEl = h('div.ch');
+    const treeEl = h('div.tree');
+    const nodeEl = h('div.nodeform');
+    const valuesEl = h('div.vlists');
+    const costEl = h('div.costs');
+    const checksEl = h('div.checks');
+    const actionsEl = h('div.pipe-actions');
+    fill(structureEl, headEl,
+      h('div.cb', treeEl, nodeEl, valuesEl, h('div.hr'), costEl, h('div.hr'), checksEl, actionsEl));
+
+    const schedHeadEl = h('div.ch');
+    const chartEl = h('div.pipe-chart');
+    const stepsEl = h('div.sched');
+    const bindEl = h('div.binds');
+    const gridEl = h('div.gridfill');
+    const folderEl = h('p.chart-note');
+    fill(scheduleEl, schedHeadEl,
+      h('div.cb', chartEl, stepsEl, h('div.hr'), bindEl, h('div.hr'), gridEl, folderEl));
+
+    // -- validate ----------------------------------------------------------
+
+    /**
+     * Ask again. `now` skips the coalescing window — the Dry run button and
+     * a bench read-back, both of which are deliberate rather than incidental.
+     *
+     * A request in flight is never awaited by the next one: the tree may have
+     * moved on twice while the first answer was on the wire, and an answer is
+     * discarded unless it still describes the tree on screen. `answered` is
+     * that test, and it is why `Start` can be stale without being wrong.
+     */
+    function revalidate({ now = false } = {}) {
+      clearTimeout(timer);
+      if (!typed) { answer = null; answered = null; render(); return; }
+      pending = typed;
+      const fire = async () => {
+        if (inflight) return;                 // the answer will re-enter here
+        const asked = pending;
+        pending = null;
+        inflight = true;
+        render();
+        try {
+          const out = await api.validate(asked, name);
+          answer = out;
+          answered = asked;
+        } catch (error) {
+          // A validator that will not answer must not leave a stale `valid`
+          // on screen unlocking Start: what it would have said is unknown,
+          // not absent. The same rule `views/bench.js` applies per card.
+          answer = { valid: false, checks: [{ level: 'invalid', code: 'validate.unreachable',
+            text: error.text || String(error), node_path: '' }], schedule: [], counters: {}, cost: null };
+          answered = asked;
+        } finally {
+          inflight = false;
+        }
+        render();
+        if (pending) fire();
+      };
+      if (now) fire(); else timer = setTimeout(fire, VALIDATE_MS);
+    }
+
+    /** Every mutation goes through here, so nothing can change the tree quietly. */
+    function change(next, { select = undefined } = {}) {
+      typed = next;
+      if (select !== undefined) selected = select;
+      if (selected && !tree.nodeAt(typed, selected)) selected = null;
+      revalidate();
+      render();
+    }
+
+    // -- the model the whole view renders from -----------------------------
+
+    /**
+     * Everything derived from the tree and the answer, computed once per
+     * change of either.
+     *
+     * Not per render, because `render` runs on every store notify and the
+     * canonical tree is a 198-step schedule that nests into 9 groups, 45
+     * groups and 90 leaves — walked three more times for the timeline, the
+     * grid and the rows. That is M1's finding at pipeline scale: the work is
+     * pure and cheap *once*, and sixty times a second it is neither.
+     *
+     * The identities are the cache key rather than a stringify, because both
+     * are replaced wholesale by the two functions allowed to move them
+     * (`change` and `revalidate`) and never edited in place.
+     */
+    let memo = null;
+
+    function derived() {
+      if (memo && memo.typed === typed && memo.answer === answer) return memo;
+      const fresh = Boolean(answer) && tree.sameTree(typed, answered);
+      const nodes = tree.scheduleTree((fresh && answer.schedule) || []);
+      memo = {
+        typed,
+        answer,
+        fresh,
+        answered: fresh ? answer : null,
+        stale: Boolean(answer) && !fresh,
+        nodes,
+        rows: typed ? tree.treeRows(typed, fresh ? answer.tree : null, nodes) : [],
+        checks: tree.checkSummary((fresh && answer.checks) || []),
+        cost: tree.costModel(fresh && answer.cost),
+        counters: (fresh && answer.counters) || {},
+        blocks: tree.timeline(nodes),
+        grid: tree.gridModel(nodes),
+        leaves: tree.scheduleLeaves(nodes),
+      };
+      return memo;
+    }
+
+    function view() {
+      const state = store.getState();
+      const run = state.runs[state.activeRunId] || null;
+      const d = derived();
+      return {
+        ...d,
+        answer: d.answered,
+        state,
+        catalogue: state.modules.byName,
+        moduleNames: state.modules.order.filter((n) => !tree.NOT_A_NODE.has(n)),
+        busy: Boolean(run && !run.parked_at),
+      };
+    }
+
+    // -- the structure card ------------------------------------------------
+
+    function renderHead(v) {
+      const s = typed ? tree.structureSummary(typed) : { loops: 0, modules: 0 };
+      const runs = v.counters.modules;
+      keyed(headEl, JSON.stringify([s, runs, v.moduleNames, Boolean(typed), selected, recipes.length, inflight]), () => [
+        h('span.cn', 'structure'),
+        h('span.cs', {
+          text: `${s.loops} ${s.loops === 1 ? 'loop' : 'loops'} · ${s.modules} `
+            + `${s.modules === 1 ? 'module' : 'modules'}`
+            + (runs === undefined ? '' : ` · ${runs} runs`),
+        }),
+        inflight ? h('span.cs', { text: '· checking' }) : null,
+        h('span', { style: { flex: '1' } }),
+        addControls(v),
+      ]);
+    }
+
+    /**
+     * Where the next node lands: **inside the selected loop**, or beside the
+     * selected module.
+     *
+     * A module for a parent rather than the root, because adding a module
+     * selects it — so without this, composing `jv_bace` then `bace` inside an
+     * illumination loop put the second one at the root. Which the console
+     * then described perfectly: 45 J-Vs, 9 scans, and `⚠ V_oc` on every one
+     * of them, because a `bace` outside the loop has no `jv_bace` at its own
+     * drive level in scope. It was right, and it was not the tree anyone was
+     * building.
+     */
+    function addTarget() {
+      if (!typed || !selected) return null;
+      const at = tree.nodeAt(typed, selected);
+      if (at && at.kind === 'loop') return selected;
+      return selected.length ? selected.slice(0, -1) : null;
+    }
+
+    /**
+     * Add a loop or a module. Adding a loop to a tree whose root is a module
+     * **wraps** it, because "put this under a temperature sweep" is what an
+     * operator means by adding a loop above a single scan, and the contract
+     * allows either at the root.
+     */
+    function addControls(v) {
+      const into = addTarget();
+      const at = into ? tree.nodeAt(typed, into) : null;
+      const where = !typed ? 'as the root' : at ? `into ${label(at)}` : 'at the root';
+      const picker = h('select.v', { title: 'the module this node runs' },
+        ...v.moduleNames.map((n) => h('option', { value: n }, n)));
+      return h('span.addbar',
+        h('span.cs', { text: where }),
+        ...tree.LOOP_ORDER.map((kind) => h('button.btng', {
+          title: `a ${kind} loop — ${tree.LOOPS[kind].owns || 'repeats its children'}`,
+          onclick: () => addNode(tree.newLoop(kind), into),
+        }, `+ ${kind}`)),
+        picker,
+        h('button.btng', { onclick: () => addNode(tree.newModule(picker.value), into) }, '+ module'));
+    }
+
+    function addNode(node, into) {
+      if (!typed) return change(node, { select: [] });
+      if (into) {
+        const parent = tree.nodeAt(typed, into);
+        const index = (parent.children || []).length;
+        return change(tree.insertAt(typed, into, node), { select: [...into, index] });
+      }
+      if (typed.kind === 'module' && node.kind === 'loop') {
+        // Wrap: the module becomes the loop's only child, which is the tree
+        // the operator was describing.
+        return change({ ...node, children: [typed] }, { select: [] });
+      }
+      if (typed.kind !== 'loop') {
+        notify('the root is a single module. Add a loop first — it takes this module inside it — '
+          + 'or remove it and start again.', 'warn');
+        return undefined;
+      }
+      const index = (typed.children || []).length;
+      return change(tree.insertAt(typed, [], node), { select: [index] });
+    }
+
+    function renderTree(v) {
+      const key = JSON.stringify([typed, v.fresh && answer.tree, selected,
+        v.rows.map((r) => [r.runs, r.shots, r.needs_operator, r.relay_transition, r.estimate_s, r.measure_s])]);
+      keyed(treeEl, key, () => {
+        if (!typed) {
+          return h('p.absent', 'no nodes yet — a pipeline with nothing in it runs nothing. '
+            + 'Add a loop or a module above, or reopen one of the saved recipes below.');
+        }
+        return v.rows.map((row) => treeRow(row, v));
+      });
+    }
+
+    function treeRow(row, v) {
+      const on = selected && selected.join(',') === row.path.join(',');
+      const el = h('div.tr' + (on ? '.on' : ''), {
+        style: { marginLeft: `${row.depth * 22}px` },
+        onclick: (e) => { if (!e.target.closest('button')) { selected = on ? null : row.path; render(); } },
+      });
+      const tags = [];
+      if (row.kind === 'loop') {
+        if (row.owns) tags.push(h('span.inh', { text: `owns ${row.owns.split(' ')[0]}` }));
+        // `needs_operator` on a temperature step is the bench's answer, not
+        // the tree's: `ok` only when the read-back showed the 331 attached
+        // and answering (`temperature.not-wired`). It is drawn as the pause
+        // it will be, because a pause is hours and must not look like a step.
+        if (row.needs_operator) tags.push(h('span.tag.nb', { title: 'the 331 is not answering, so the run pauses here for a manual set', text: 'pauses' }));
+        if (row.measure_s) tags.push(h('span.cs', { text: fmt.duration(row.measure_s) }));
+      } else {
+        const entry = v.catalogue[row.module];
+        if (!entry) tags.push(h('span.tag.bad', { title: 'GET /modules does not list it', text: 'unknown module' }));
+        else if (entry.status !== 'built') tags.push(h('span.tag.nb', { text: entry.status }));
+        if (row.centre_on_voc) {
+          tags.push(h('span.inh', {
+            title: row.voc ? `${row.voc.how} ${row.voc.node_path || ''} at ${fmt.volts(row.voc.led_v)}` : 'no source in scope',
+            text: row.voc ? `↳ V_oc ← ${row.voc.how}` : '⚠ V_oc',
+          }));
+        }
+        if (row.relay_transition) {
+          tags.push(h('span.cs', { title: 'the router moves at this boundary; the interlock refuses while a source is live', text: `relay → ${row.relay}` }));
+        }
+        if (row.runs > 1) tags.push(h('span.cs', { text: `× ${row.runs}` }));
+        if (row.shots) tags.push(h('span.cs', { text: `${row.shots} shots` }));
+        if (row.estimate_s !== null && row.estimate_s !== undefined) {
+          tags.push(h('span.cs', { text: fmt.duration(row.estimate_s) }));
+        }
+      }
+      return fill(el,
+        h('span.nk' + (row.kind === 'module' ? '.mod' : ''), { text: row.kind === 'loop' ? '⟳' : '▪' }),
+        h('span.n', { text: row.kind === 'loop' ? row.loop : row.module }),
+        h('span.d', { text: row.kind === 'loop' ? row.summary : nodeSummary(row) }),
+        h('span', { style: { flex: '1' } }),
+        tags,
+        h('span.rowact',
+          h('button.btng', { title: 'move up', onclick: () => change(tree.moveAt(typed, row.path, -1)) }, '↑'),
+          h('button.btng', { title: 'move down', onclick: () => change(tree.moveAt(typed, row.path, 1)) }, '↓'),
+          h('button.btng', { title: 'remove this node and everything under it', onclick: () => change(tree.removeAt(typed, row.path), { select: null }) }, '✕')));
+    }
+
+    /** `as on the bench · n_loops 100` — the contract's own sentence for a node. */
+    function nodeSummary(row) {
+      if (!row.overrides.length) return 'as on the bench';
+      return 'as on the bench, except ' + row.overrides.map(([k, val]) => `${k} ${val}`).join(' · ');
+    }
+
+    function label(node) {
+      return node.kind === 'loop' ? `the ${node.loop} loop` : node.module;
+    }
+
+    // -- the selected node's form ------------------------------------------
+
+    function renderNode(v) {
+      const node = selected ? tree.nodeAt(typed, selected) : null;
+      const row = node ? v.rows.find((r) => r.path.join(',') === selected.join(',')) : null;
+      const path = selected ? selected.join(',') : '';
+      const open = openedFor(path);
+      keyed(nodeEl, JSON.stringify([path, node, row && row.params, row && row.detail, [...open].sort()]), () => {
+        if (!node) return null;
+        return h('div.nf',
+          h('div.nfh',
+            h('span.cn', { text: node.kind === 'loop' ? `${node.loop} loop` : node.module }),
+            h('span.cs', { text: node.kind === 'loop' ? 'the values it runs, and how it settles' : 'as on the bench · only what differs is typed here' }),
+            h('span', { style: { flex: '1' } }),
+            h('button.btng', { onclick: () => { selected = null; render(); } }, 'close')),
+          node.kind === 'loop' ? loopForm(node, row) : moduleForm(node, row, v, open));
+      });
+    }
+
+    function openedFor(path) {
+      if (!opened.has(path)) opened.set(path, new Set());
+      return opened.get(path);
+    }
+
+    /**
+     * A loop's own form. The values are a list or a range and the switch is
+     * explicit, because the two are not the same statement: a list is nine
+     * temperatures, a range is a rule that made them, and the operator has to
+     * be able to see which they typed.
+     */
+    function loopForm(node, row) {
+      const spec = tree.LOOPS[node.loop];
+      if (!spec) return h('p.absent', { text: `${node.loop} is not a loop this service knows` });
+      const ctx = loopCtx();
+      const rows = [];
+      if (spec.count) {
+        rows.push(field(loopSpec(node, row, { name: 'count', type: 'int', unit: '',
+          doc: 'how many times the children run. Nothing changes between iterations — it is the outer averaging loop.' }), ctx, { name: '' }, {}));
+      } else {
+        const form = tree.valueForm(node);
+        rows.push(h('div.pf.range',
+          h('span.l', 'values'),
+          h('span.v.rng',
+            h('span.seg',
+              ...['list', 'range'].map((f) => h('span.sego', {
+                class: form === f ? 'on' : '',
+                onclick: () => change(tree.setValueForm(typed, selected, f, row && row.resolved)),
+              }, f))),
+            form === 'list' ? listInput(node, spec) : null,
+            form === 'range' ? spec.range.map((n, i) => h('input.v', {
+              value: node[n] === undefined ? '' : String(node[n]),
+              title: n,
+              onchange: (e) => commitField(n, e.target.value),
+            })) : null,
+            form === 'range' && row && row.values
+              ? h('i.pts', { text: `${row.values.length} values` })
+              : null),
+          h('span.src')));
+        if (form === 'range') {
+          rows.push(h('p.chart-note', 'the count is the service’s: `range_values` rounds it, '
+            + 'because truncating drops the last level whenever floating point puts the ratio just '
+            + 'under the integer — which for 1.010 → 1.030 step 0.005 wrote a four-level loop as five.'));
+        }
+      }
+      for (const f of spec.fields) rows.push(field(loopSpec(node, row, f), ctx, { name: '' }, {}));
+      return h('div.pr', rows);
+    }
+
+    /** A text input over the value list — `295, 290, 280` — parsed on commit. */
+    function listInput(node, spec) {
+      const values = node[spec.list] || [];
+      return h('input.v.vlist', {
+        value: values.map((v) => Number(v)).join(', '),
+        title: `${spec.list} — the values, in the order they run`,
+        onchange: (e) => {
+          const raw = e.target.value.trim();
+          if (!raw) return commitField(spec.list, null);
+          const parsed = raw.split(/[\s,]+/).filter(Boolean).map(Number);
+          if (parsed.some((n) => !Number.isFinite(n))) {
+            notify(`${spec.list}: "${raw}" is not a list of numbers. Separate them with commas or spaces.`, 'warn');
+            return render();
+          }
+          return commitField(spec.list, parsed);
+        },
+      });
+    }
+
+    /**
+     * One loop field as the same spec shape a module parameter has, so it goes
+     * through the same component: value, provenance and the sentence under it.
+     * `node` says whether the *tree* types this one, which is what decides
+     * whether a reset is offered — the service's own filled-in default is not
+     * this node's to drop.
+     */
+    function loopSpec(node, row, f) {
+      const typedHere = node[f.name] !== undefined;
+      const fallback = row && row.detail ? row.detail[f.name] : undefined;
+      return {
+        ...f,
+        value: typedHere ? node[f.name] : (fallback === undefined ? null : fallback),
+        source: typedHere ? 'edited' : 'default',
+        detail: typedHere ? 'typed on this node' : 'the service’s default for this loop',
+        editable: true,
+        node: typedHere,
+        doc_full: f.doc,
+      };
+    }
+
+    function loopCtx() {
+      return {
+        edit: (_name, params) => {
+          for (const [key, raw] of Object.entries(params)) commitField(key, raw);
+        },
+      };
+    }
+
+    /**
+     * Loop fields are numbers on the wire, and the service refuses a string:
+     * `pipeline._number` wants a finite number, where a module parameter goes
+     * through `ParamSpec.coerce` and would have taken one. So the parse is
+     * here, and a value that will not parse is refused with a sentence rather
+     * than posted for the service to reject in a language about JSON.
+     */
+    function commitField(key, raw) {
+      if (raw === null || raw === '') return change(tree.setField(typed, selected, key, null));
+      if (Array.isArray(raw)) return change(tree.setField(typed, selected, key, raw));
+      const value = Number(raw);
+      if (!Number.isFinite(value)) {
+        notify(`${key}: "${raw}" is not a number.`, 'warn');
+        return render();
+      }
+      return change(tree.setField(typed, selected, key, value));
+    }
+
+    /**
+     * A module node's form: the bench's own card, over the ParamSet the
+     * *schedule* resolved for this node.
+     *
+     * The provenance is the schedule's and is rendered as it came — `led_v`
+     * inherited from the illumination loop, `voc` derived from the `jv_bace`
+     * two nodes earlier — which is the whole of `ui-rules` §6 and is only
+     * true because the value shown is the one that node will run with. The
+     * one thing added is `spec.node`: whether *this node* types the override,
+     * which decides whether a reset is offered, because a bench edit and a
+     * node override both resolve as `edited` and only one of them is the
+     * tree's to drop.
+     */
+    function moduleForm(node, row, v, open) {
+      const catalogue = v.catalogue[node.module];
+      if (!catalogue) {
+        return h('p.absent', { text: `${node.module} is not in GET /modules — this tree cannot run here` });
+      }
+      if (!row || !row.params) {
+        return h('p.absent', 'the schedule has not been asked for yet. Dry run resolves this node’s '
+          + 'parameters, including what the loops above it bind.');
+      }
+      const overrides = node.params || {};
+      const entry = {
+        ...catalogue,
+        // The point count is read out of `estimate_text` and the catalogue's
+        // is the *bench's*, computed from the bench's axis rather than this
+        // node's. An absent count is better than one describing another form.
+        estimate_text: '', estimate_s: row.estimate_s, last: null, needs: [],
+        params: (catalogue.params || []).map((p) => {
+          const resolved = row.params[p.name];
+          return { ...p, ...(resolved || {}), node: p.name in overrides };
+        }),
+      };
+      // `bench: null` on purpose: the read-back row on a bench card says what
+      // the light is doing *now*, and a node that runs in four hours inside an
+      // illumination loop is not described by it.
+      const model = cardModel(entry, { bench: null });
+      const ctx = moduleCtx(catalogue);
+      const where = [];
+      if (row.first && row.first.temperature && row.first.temperature.k !== null && row.first.temperature.k !== undefined) {
+        where.push(`T ${fmt.kelvin(row.first.temperature.k)}`);
+      }
+      if (row.first && row.first.led_v !== null && row.first.led_v !== undefined) where.push(`LED ${fmt.volts(row.first.led_v)}`);
+      return h('div',
+        row.runs > 1
+          ? h('p.chart-note', { text: `resolved for the first of ${row.runs} runs${where.length ? ' — ' + where.join(' · ') : ''}. `
+            + 'The loops above bind a different value into each of the others.' })
+          : null,
+        h('div.pr', model.above.map((r) => renderRow(r, model, ctx))),
+        fold(model, ctx, open));
+    }
+
+    function moduleCtx(catalogue) {
+      const specs = Object.fromEntries((catalogue.params || []).map((p) => [p.name, p]));
+      return {
+        toggle: (_name, group) => {
+          const set = openedFor(selected.join(','));
+          if (set.has(group)) set.delete(group); else set.add(group);
+          render();
+        },
+        edit: (_name, params) => {
+          let next = typed;
+          for (const [key, raw] of Object.entries(params)) {
+            next = tree.setParam(next, selected, key, coerce(specs[key], raw));
+          }
+          change(next);
+        },
+      };
+    }
+
+    /**
+     * A typed value as the tree should carry it. The service would coerce a
+     * string — `ParamSpec.coerce` is what `PUT /modules/{m}/params` leans on —
+     * but a tree is also what `POST /pipelines/save` writes to disk, and a
+     * recipe holding `"n_loops": "100"` is a file that reads wrong. A value
+     * that will not parse is left as typed, so the refusal is the service's
+     * own sentence about that parameter rather than this file's about JSON.
+     */
+    function coerce(spec, raw) {
+      if (raw === null || typeof raw === 'boolean' || typeof raw === 'number') return raw;
+      if (!spec) return raw;
+      if (spec.type === 'int' || spec.type === 'float') {
+        const value = Number(raw);
+        if (!Number.isFinite(value)) return raw;
+        return spec.type === 'int' ? Math.trunc(value) : value;
+      }
+      return raw;
+    }
+
+    // -- the value lists, the cost and the checks --------------------------
+
+    /**
+     * `temperature · 9 values · settle from the last run at each` — R3·3's
+     * own two tables. The settle under each temperature is the one the cost
+     * model found in the journal for *that setpoint*, and an em dash where it
+     * found none, which is the artboard's own rendering of the first one.
+     */
+    function renderValues(v) {
+      // Only the loops whose values *are* values: a `repeat` runs 1, 2, 3,
+      // and a table of the numbers one to nine is not information.
+      const loops = v.rows.filter((r) => r.kind === 'loop' && r.spec && r.spec.list
+        && r.values && r.values.length);
+      keyed(valuesEl, JSON.stringify(loops.map((r) => [r.loop, r.values, r.iterations.map((it) => it.settle_s)])), () => {
+        if (!loops.length) return null;
+        return loops.map((row) => {
+          const spec = row.spec;
+          const settles = row.loop === 'temperature' ? row.iterations.map((it) => it.settle_s) : null;
+          return h('div.vlist-block',
+            h('div.cs', {
+              text: `${row.loop} · ${row.values.length} values`
+                + (settles ? ' · settle measured on this bench at each' : spec && spec.owns ? ` · ${spec.owns}` : ''),
+            }),
+            h('div.lst', { style: { gridTemplateColumns: `repeat(${row.values.length}, auto)` } },
+              row.values.map((value) => h('span.h', {
+                text: spec && spec.count ? String(value) : Number(value).toFixed(spec ? spec.decimals : 2),
+              })),
+              settles
+                ? settles.map((s) => h('span', { text: s === null || s === undefined ? fmt.ABSENT : fmt.duration(s) }))
+                : null));
+        });
+      });
+    }
+
+    /**
+     * The three numbers of R3·3, with the one word that keeps them honest.
+     *
+     * `lower_bound` is set the moment any temperature has no measured settle
+     * behind it, which on a fresh device is all of them — so the total reads
+     * *at least*, `waiting for T` reads the em dash rather than the holds it
+     * does know about, and there is no finish time. A clock time under a
+     * number that is a floor is a promise the run cannot keep.
+     */
+    function renderCost(v) {
+      keyed(costEl, JSON.stringify([v.cost, v.counters]), () => {
+        if (!v.cost) return h('p.absent', 'no cost yet — the tree has not been checked.');
+        const c = v.cost;
+        const counters = v.counters;
+        return [
+          h('div.nums',
+            num('total', c.total_s, c.prefix),
+            num('measuring', c.measuring_s, ''),
+            num('waiting for T', c.waiting_s, c.waiting_s === null ? '' : c.prefix)),
+          h('div.cs', {
+            text: [
+              counters.temperatures ? `${counters.temperatures} temperatures` : null,
+              counters.levels ? `${counters.levels} levels` : null,
+              counters.modules ? `${counters.modules} module runs` : null,
+              counters.shots ? `${counters.shots} shots` : null,
+              c.t_shot_s ? `shot ${fmt.duration(c.t_shot_s)} (${c.t_shot_source})` : null,
+              c.finish_at ? `finish ${fmt.clock(c.finish_at)}` : null,
+            ].filter(Boolean).join(' · '),
+          }),
+          c.lower_bound
+            ? h('p.chart-note', {
+              text: c.unmeasured.length
+                ? `a floor, not an estimate: ${c.unmeasured.length} of ${c.per_temperature.length} `
+                  + 'temperatures have no settle measured on this bench, and a settle is 14 minutes to '
+                  + '2 hours. The journal fills them in as this bench measures them.'
+                : `a floor, not an estimate: ${c.unestimated} module runs cost nothing the catalogue can estimate.`,
+            })
+            : null,
+        ];
+      });
+    }
+
+    function num(label, seconds, prefix) {
+      return h('div.nm',
+        h('span.l', { text: label }),
+        h('span.big', { text: seconds === null || seconds === undefined ? fmt.ABSENT : (prefix ? prefix + ' ' : '') + fmt.duration(seconds) }));
+    }
+
+    /** `22 checks · 12 ok · 3 warn · show` — §11's answered question. */
+    function renderChecks(v) {
+      const c = v.checks;
+      keyed(checksEl, JSON.stringify([c, showAllChecks, v.stale, inflight]), () => {
+        if (!c.total) {
+          return h('p.absent', inflight ? 'checking …' : 'not checked yet — Dry run asks.');
+        }
+        const shown = showAllChecks ? c.ordered : c.notable;
+        return [
+          h('div.cksum',
+            h('span.m', { text: `${c.total} checks` }),
+            ...tree.LEVELS.filter((l) => c.counts[l]).map((l) => h('span.tag.' + tagClass(l), { text: `${c.counts[l]} ${l}` })),
+            v.stale ? h('span.cs', { text: '· the tree has changed since' }) : null,
+            h('span', { style: { flex: '1' } }),
+            h('button.btng', { onclick: () => { showAllChecks = !showAllChecks; render(); } },
+              showAllChecks ? 'collapse' : 'show')),
+          shown.length
+            ? h('div.cklist', shown.map((check) => h('div.warn1.' + check.level,
+              h('span.ico', { text: icon(check.level) }),
+              h('span.code', { text: check.code }),
+              h('span', { text: check.text }),
+              check.node_path ? h('span.cs', { text: check.node_path }) : null)))
+            : h('p.chart-note', 'nothing to report — every check is ok or info.'),
+        ];
+      });
+    }
+
+    const tagClass = (level) => (level === 'ok' ? 'ok' : level === 'warn' ? 'cost' : level === 'info' ? 'nb' : 'bad');
+    const icon = (level) => (level === 'crit' ? '⛔' : level === 'ok' ? '✓' : level === 'info' ? 'i' : '⚠');
+
+    // -- Start, Save, Dry run ----------------------------------------------
+
+    function renderActions(v) {
+      const c = v.cost;
+      const blocked = !v.answer || !v.answer.valid || v.busy || v.stale || inflight || !typed;
+      keyed(actionsEl, JSON.stringify([Boolean(typed), v.answer && v.answer.valid, v.busy, v.stale, inflight, c && c.total_s, name, recipes.map((r) => r.name)]), () => [
+        h('div.namerow',
+          h('span.l', 'name'),
+          h('input.v', {
+            value: name, placeholder: 'pipeline',
+            title: 'the folder stem: <out>/<name>_YYYYMMDD_HHMMSS',
+            onchange: (e) => { name = e.target.value.trim(); revalidate(); render(); },
+          }),
+          recipes.length
+            ? h('select.v', {
+              title: 'reopen a saved recipe',
+              onchange: (e) => {
+                const found = recipes.find((r) => r.name === e.target.value);
+                if (found && found.tree) { name = found.name; change(found.tree, { select: null }); }
+              },
+            }, h('option', { value: '' }, 'saved recipes …'),
+            ...recipes.map((r) => h('option', { value: r.name }, r.name)))
+            : null),
+        h('div.btnrow',
+          h('button.btnp', {
+            disabled: blocked || null,
+            title: blocked
+              ? (v.busy ? 'a run holds the worker; this would queue behind it'
+                : v.stale || inflight ? 'the tree has changed — checking it again'
+                  : !typed ? 'nothing to run'
+                    : 'the checks refuse this tree; the list above says why')
+              : 'POST /pipelines — validates again with a fresh chain read-back, then queues',
+            onclick: start,
+          }, c ? `Start · ${c.prefix ? c.prefix + ' ' : ''}${fmt.duration(c.total_s)}` : 'Start'),
+          h('button.btns', { disabled: !typed || null, onclick: save }, 'Save recipe'),
+          h('button.btns', {
+            disabled: !typed || null,
+            title: 'POST /pipelines/validate — touches nothing',
+            onclick: () => { showAllChecks = true; showFlat = false; revalidate({ now: true }); },
+          }, 'Dry run')),
+      ]);
+    }
+
+    /**
+     * One submission on the wire at a time. `busy` comes from the store, which
+     * only learns of a run when its `RunQueued` arrives — so two clicks inside
+     * that window both pass the check and the service, which queues every
+     * accepted POST, starts two pipelines. On a rig that is a night of the
+     * sample's life. A plain variable checked synchronously, as `views/bench.js`
+     * guards its Run: disabling the button re-renders, and a re-render between
+     * the mousedown and the mouseup eats the click.
+     */
+    async function start() {
+      if (submitting || !typed) return;
+      submitting = true;
+      try {
+        const out = await api.startPipeline(typed, name || undefined);
+        notify(`queued ${out.run_id} → ${out.folder}`, 'ok');
+      } catch (error) {
+        // 422 carries the checks, and a refused Start is exactly when the
+        // operator needs all of them rather than the first sentence.
+        notify(error.text || String(error), error.level || 'warn', error.checks || null);
+        if (error.checks) { answer = { ...(answer || {}), valid: false, checks: error.checks }; answered = typed; }
+      } finally {
+        submitting = false;
+        render();
+      }
+    }
+
+    async function save() {
+      const stem = name || (typed && typed.name) || '';
+      if (!stem) {
+        notify('a saved recipe needs a name — type one in the name field first.', 'warn');
+        return;
+      }
+      try {
+        const out = await api.savePipeline(typed, stem);
+        notify(`saved ${out.name} → ${out.path}`, 'ok');
+        await loadRecipes();
+      } catch (error) {
+        notify(error.text || String(error), 'warn');
+      }
+      render();
+    }
+
+    // -- what it will do, in order -----------------------------------------
+
+    function renderSchedule(v) {
+      keyed(schedHeadEl, JSON.stringify([v.counters, v.cost && v.cost.t_shot_source, v.stale]), () => [
+        h('span.cn', 'what it will do, in order'),
+        h('span.cs', {
+          text: v.cost
+            ? `shot time from the ${v.cost.t_shot_source === 'journal' ? 'journal' : 'default'} · `
+              + 'settle from what this bench has measured'
+            : 'from POST /pipelines/validate',
+        }),
+        v.stale ? h('span.tag.nb', { text: 'stale' }) : null,
+      ]);
+
+      keyed(chartEl, JSON.stringify([v.blocks, v.cost]),
+        () => chart(scheduleModel({ blocks: v.blocks, cost: v.cost })));
+
+      keyed(stepsEl, JSON.stringify([v.nodes.length, [...expanded].sort(), showFlat,
+        v.nodes.map((n) => n.node_path)]), () => {
+        if (!v.nodes.length) return h('p.absent', 'nothing scheduled yet.');
+        return [
+          h('div.schedbar',
+            h('span.cs', { text: showFlat ? 'every step, in order' : 'three scales — expand a temperature for its levels, a level for its modules' }),
+            h('span', { style: { flex: '1' } }),
+            h('button.btng', { onclick: () => { showFlat = !showFlat; render(); } }, showFlat ? 'nested' : 'flat')),
+          showFlat ? flatSteps(v) : v.nodes.map((node) => schedNode(node)),
+        ];
+      });
+
+      keyed(bindEl, JSON.stringify(bindings(v)), () => bindings(v).map((text) => h('span.inh', { text })));
+
+      const grid = v.grid;
+      keyed(gridEl, JSON.stringify([grid && grid.temperatures, grid && grid.levels, grid && grid.count]), () => {
+        if (!grid) return null;
+        return [
+          h('div.cs', { text: `the cells it fills · ${grid.count} module runs over ${grid.temperatures.length} × ${grid.levels.length}` }),
+          h('div.lst', { style: { gridTemplateColumns: `auto repeat(${grid.levels.length}, 1fr)` } },
+            h('span.h', 'T / K'),
+            grid.levels.map((led) => h('span.h', { text: Number(led).toFixed(3) })),
+            grid.temperatures.flatMap((t) => [
+              h('span', { style: { fontWeight: '500' }, text: t === null ? fmt.ABSENT : String(t) }),
+              ...grid.levels.map((led) => h('span', {
+                style: { color: 'var(--grey)' },
+                text: grid.cell(t, led).map((leaf) => leaf.module).join(' → ') || fmt.ABSENT,
+              })),
+            ])),
+        ];
+      });
+
+      const folder = v.answer && v.answer.folder_pattern;
+      keyed(folderEl, JSON.stringify([folder, v.counters.modules]), () => (folder
+        ? `writes ${v.counters.modules || 0} folders under ${folder}/ — the stamp is taken at Start, `
+          + 'so a Dry run cannot name it. A run that stops early says kept of requested.'
+        : ''));
+    }
+
+    /** One line of the nested schedule, at whichever of the three scales it is. */
+    function schedNode(node) {
+      if (node.kind === 'module') {
+        return h('div.sr.mod', { style: { marginLeft: `${node.depth * 16}px` } },
+          h('span.nk.mod', '▪'),
+          h('span.n', { text: node.module }),
+          node.led_v !== null && node.led_v !== undefined ? h('span.d', { text: fmt.volts(node.led_v) + ' LED' }) : null,
+          node.temperature && node.temperature.k !== null && node.temperature.k !== undefined
+            ? h('span.d', {
+              title: node.temperature.how === 'module'
+                ? `a temperature node set this and it binds the rest of the run (${node.temperature.node_path})`
+                : `the ${node.temperature.node_path} loop`,
+              text: fmt.kelvin(node.temperature.k) + (node.temperature.how === 'module' ? ' (bound)' : ''),
+            })
+            : null,
+          h('span', { style: { flex: '1' } }),
+          node.relay_transition ? h('span.cs', { text: `relay ${node.relay_from} → ${node.relay}` }) : null,
+          node.shots ? h('span.cs', { text: `${node.shots} shots` }) : null,
+          h('span.cs', { text: fmt.duration(node.estimate_s) }));
+      }
+      const open = expanded.has(node.node_path);
+      const spec = tree.LOOPS[node.loop];
+      return h('div',
+        h('div.sr' + (open ? '.on' : ''), {
+          style: { marginLeft: `${node.depth * 16}px` },
+          onclick: () => { if (open) expanded.delete(node.node_path); else expanded.add(node.node_path); render(); },
+        },
+          h('span.nk', { text: open ? '▾' : '▸' }),
+          h('span.n', { text: node.node_path.split('/').pop() }),
+          h('span.d', { text: `${(node.index ?? 0) + 1} of ${node.count}` }),
+          node.needs_operator
+            ? h('span.mon-wait', { title: 'the 331 is not answering — the run pauses here until someone sets the cryostat and resumes', text: 'waits for the operator' })
+            : null,
+          node.loop === 'temperature'
+            ? h('span.d', { text: `settle ${node.settle_s === null || node.settle_s === undefined ? fmt.ABSENT : fmt.duration(node.settle_s)}` })
+            : null,
+          h('span', { style: { flex: '1' } }),
+          h('span.cs', { text: `${node.modules} runs` }),
+          node.shots ? h('span.cs', { text: `${node.shots} shots` }) : null,
+          h('span.cs', { text: fmt.duration(node.measure_s) + (spec && node.loop === 'temperature' ? ' measuring' : '') })),
+        open ? node.children.map((child) => schedNode(child)) : null);
+    }
+
+    /**
+     * Every step, in order. Behind a switch because the canonical tree is 198
+     * of them and `step 3 of 198` is the number `ui-rules` §5 exists to
+     * refuse — but the flat list is what "in order" literally means, and a
+     * screen that only ever summarised would be hiding it.
+     */
+    function flatSteps(v) {
+      return h('div.flatsteps', v.leaves.map((leaf, i) => h('div.fs',
+        h('span.i', { text: String(i + 1) }),
+        h('span.p', { text: leaf.node_path }),
+        h('span.cs', { text: fmt.duration(leaf.estimate_s) }))));
+    }
+
+    /**
+     * The three bindings of the contract, said only where the tree has them.
+     * Read off the resolved params rather than assumed from the shape: an
+     * `led_v` is inherited because the service says `source: "inherited"`.
+     */
+    function bindings(v) {
+      const leaves = v.leaves;
+      const out = [];
+      if (leaves.some((l) => l.params.led_v && l.params.led_v.source === 'inherited')) {
+        out.push('led_v ← the illumination loop, which owns it');
+      }
+      const voc = leaves.filter((l) => l.voc && l.voc.how);
+      if (voc.length) {
+        out.push(`V_oc ← ${voc[0].voc.how} at the same led_v · ${voc.length} centred scans`);
+      }
+      const transitions = leaves.filter((l) => l.relay_transition).length;
+      if (transitions) out.push(`relay moves at ${transitions} jv ↔ bace boundaries`);
+      const bound = leaves.filter((l) => l.temperature && l.temperature.how === 'module');
+      if (bound.length) {
+        out.push(`a temperature node binds ${bound.length} later nodes — the rest of the run, not the rest of one iteration`);
+      }
+      return out;
+    }
+
+    // -- the loop --------------------------------------------------------
+
+    /**
+     * Renders held back while a click is in flight — the M2 finding, and it
+     * bites harder here: an answer arriving between the mousedown and the
+     * mouseup would replace the row the operator is clicking ✕ on, and the
+     * click would land on nothing.
+     */
+    let pressing = false;
+    let missed = false;
+    body.addEventListener('pointerdown', (e) => { if (e.target.closest('button')) pressing = true; });
+    for (const kind of ['click', 'pointercancel']) {
+      body.addEventListener(kind, () => {
+        pressing = false;
+        if (missed) { missed = false; render(); }
+      }, true);
+    }
+    body.addEventListener('pointerup', () => setTimeout(() => {
+      if (!pressing) return;
+      pressing = false;
+      if (missed) { missed = false; render(); }
+    }, 0));
+
+    function render() {
+      if (pressing) { missed = true; return; }
+      const v = view();
+      renderHead(v);
+      renderTree(v);
+      renderNode(v);
+      renderValues(v);
+      renderCost(v);
+      renderChecks(v);
+      renderActions(v);
+      renderSchedule(v);
+    }
+
+    async function loadRecipes() {
+      try {
+        const out = await api.savedPipelines();
+        recipes = out.recipes || [];
+      } catch { recipes = []; }
+    }
+
+    /**
+     * Reopen what this session last validated. `GET /pipelines/last` is the
+     * route's whole purpose ("so the UI can reopen it") and it is the
+     * difference between a reload during a four-hour sweep costing nothing
+     * and costing the tree.
+     */
+    async function boot() {
+      await loadRecipes();
+      try {
+        const last = await api.lastPipeline();
+        if (last && last.tree) {
+          typed = last.tree;
+          name = last.name || '';
+          // Open the first temperature so the schedule shows its levels: the
+          // one expansion that makes a nine-hour sweep legible at a glance.
+          expanded = new Set();
+        }
+      } catch {
+        // 404 is the ordinary case: nothing validated in this session yet.
+      }
+      if (typed) revalidate({ now: true });
+      render();
+    }
+
+    /**
+     * The bench snapshot moves several of the checks — an instrument that went
+     * away, the chain, whether the 331 answers — so a read-back re-asks, the
+     * way `views/bench.js` re-validates its cards on `read_at`.
+     *
+     * And **nothing else on the stream reaches this tab**. The store notifies
+     * once per animation frame for the length of a run, and this screen
+     * describes the *next* one: it reads whether the worker is held, the
+     * catalogue, and the read-back, and no shot, phase or progress frame moves
+     * any of the three. So a scan running under an open pipeline tab costs it
+     * exactly nothing — which is the same argument that put the timing diagram
+     * below the run in M4, applied to a whole view.
+     */
+    let validatedAt = null;
+    let storeKey = null;
+    const off = store.subscribe((state) => {
+      const at = (state.bench && state.bench.read_at) || null;
+      if (at !== validatedAt) {
+        validatedAt = at;
+        if (typed && answered) revalidate();
+      }
+      const run = state.runs[state.activeRunId] || null;
+      const key = `${Boolean(run && !run.parked_at)}|${state.modules.at}|${at}`;
+      if (key === storeKey) return;
+      storeKey = key;
+      render();
+    });
+
+    boot();
+    return { dispose() { off(); clearTimeout(timer); } };
   },
 };

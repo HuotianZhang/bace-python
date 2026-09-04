@@ -554,3 +554,132 @@ button.link:hover { color: var(--accent-dark); }
 .shot-verdict.alert { color: var(--alert); font-weight: 600; }
 .shot-trigger { font-family: var(--font-num); font-size: 10.5px; color: var(--grey); }
 .shot-trigger.auto { color: var(--warn); }
+
+/* -- the pipeline tab (M5, R3·3) -------------------------------------------
+   Two columns: the tree that gets posted, and what the service says it will
+   do with it. 640px is the artboard's own width for the left one — wide
+   enough for a four-deep tree with its tags, narrow enough that the schedule
+   beside it is the wider half, which is the right way round: the tree is
+   half a screen of typing and the schedule is four hours of bench time. */
+.pipe {
+  display: grid;
+  grid-template-columns: 640px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+.pipe-col { margin: 0; padding: 0; display: flex; flex-direction: column; min-width: 0; }
+.pipe-col > .cb { gap: 10px; }
+.hr { height: 1px; background: var(--rule); }
+.addbar { display: inline-flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.addbar select.v {
+  border: 1px solid var(--rule); background: var(--paper); padding: 2px 4px;
+  font-family: var(--font-num); font-size: 11px;
+}
+
+/* The tree. Depth is an indent rather than a rule, because a loop three deep
+   is normal here and three nested boxes would be all border and no tree. */
+.tree { display: flex; flex-direction: column; gap: 2px; }
+.tr {
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 6px; border: 1px solid var(--rule); background: var(--paper);
+  cursor: pointer; min-width: 0;
+}
+.tr:hover { background: var(--fill); }
+.tr.on { border-color: var(--ink); }
+.tr .nk {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; flex: 0 0 auto;
+  border: 1px solid var(--rule); color: var(--grey); font-size: 10px;
+}
+.tr .nk.mod { border-color: var(--ink); color: var(--ink); }
+.tr .n { font-family: var(--font-num); font-size: 12px; font-weight: 500; }
+.tr .d { color: var(--grey); font-family: var(--font-num); font-size: 11px; }
+.tr .rowact { display: inline-flex; gap: 2px; opacity: .25; }
+.tr:hover .rowact, .tr.on .rowact { opacity: 1; }
+.tr .rowact button.btng { padding: 0 5px; line-height: 16px; }
+
+/* A value the pipeline supplies, wherever it is named: the same arrow and the
+   same accent the inherited field rows carry (`.pf.inh`), so "this comes from
+   somewhere else" reads the same on the tree, in the schedule and in a form. */
+.inh {
+  font-family: var(--font-num); font-size: 10.5px; color: var(--accent-dark);
+  white-space: nowrap;
+}
+.binds { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+
+/* The selected node's form. */
+.nodeform:empty { display: none; }
+.nf { border: 1px solid var(--ink); }
+.nfh {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 8px; border-bottom: 1px solid var(--rule); background: var(--fill);
+}
+.nf > div:not(.nfh) { padding: 6px 8px; }
+.nf .pf.range .rng { flex-wrap: wrap; }
+.nf input.v.vlist { min-width: 22em; text-align: left; }
+
+/* The value lists — R3·3's two tables. `auto` columns, so nine temperatures
+   and their settles line up as a grid and never wrap mid-pair. */
+.vlists { display: flex; flex-direction: column; gap: 8px; }
+.vlist-block { display: flex; flex-direction: column; gap: 3px; }
+.lst {
+  display: grid; gap: 3px 14px;
+  font-family: var(--font-num); font-size: 11px; color: var(--grey);
+  overflow-x: auto;
+}
+.lst .h { color: var(--ink); font-weight: 500; }
+
+/* The three numbers. Big, because they are the reason this screen exists. */
+.nums { display: flex; gap: 32px; flex-wrap: wrap; }
+.nm { display: flex; flex-direction: column; gap: 1px; }
+.nm .l {
+  font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase;
+  color: var(--grey);
+}
+.nm .big {
+  font-family: var(--font-num); font-size: 24px; font-weight: 500; letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.cksum { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cksum .m { font-size: 13px; }
+.cklist { display: flex; flex-direction: column; gap: 3px; }
+.cklist .warn1.ok { color: var(--ok); }
+.cklist .warn1.info { color: var(--grey); }
+.cklist .cs { margin-left: auto; padding-left: 10px; }
+
+.pipe-actions { display: flex; flex-direction: column; gap: 8px; }
+.namerow { display: flex; align-items: center; gap: 8px; }
+.namerow .l { color: var(--grey); font-size: 12px; }
+.namerow input.v, .namerow select.v {
+  border: 1px solid var(--rule); background: var(--paper); padding: 3px 6px;
+  font-family: var(--font-num); font-size: 12px;
+}
+.namerow input.v { flex: 1 1 auto; min-width: 0; }
+.namerow input.v:focus, .namerow select.v:focus { border-color: var(--accent); outline: none; }
+.btnrow { display: flex; align-items: center; gap: 10px; }
+.btnrow .btnp { padding: 10px 16px; font-size: 14px; }
+
+/* The schedule at three scales. A row is a line, not a box: the canonical
+   tree has 45 leaves and 54 loop rows, and 99 boxes is a wall. */
+.sched { display: flex; flex-direction: column; gap: 1px; }
+.schedbar { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.sr {
+  display: flex; align-items: center; gap: 8px;
+  padding: 2px 6px; border-left: 2px solid transparent; cursor: pointer;
+  font-family: var(--font-num); font-size: 11.5px;
+}
+.sr:hover { background: var(--fill); }
+.sr.on { border-left-color: var(--ink); }
+.sr.mod { cursor: default; border-left-color: var(--rule); }
+.sr .nk { width: 12px; color: var(--grey); font-size: 10px; }
+.sr .n { font-weight: 500; }
+.sr .d { color: var(--grey); }
+.flatsteps { max-height: 320px; overflow: auto; border: 1px solid var(--rule); }
+.fs {
+  display: flex; gap: 10px; padding: 1px 8px;
+  font-family: var(--font-num); font-size: 11px;
+}
+.fs:nth-child(even) { background: #fbfafa; }
+.fs .i { color: var(--grey); min-width: 3.5ch; text-align: right; }
+.gridfill { display: flex; flex-direction: column; gap: 4px; }

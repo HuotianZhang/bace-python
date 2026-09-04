@@ -142,6 +142,56 @@ def test_the_transient_fixture_is_the_data_endpoints_shape():
     assert data["_fixture"]["from"].startswith("acceptance/"), "and it says where it came from"
 
 
+def test_the_validate_fixtures_are_the_tree_m5_has_to_prove():
+    """The canonical 9 T x 5 level tree, as `docs/ui-plan.md` M5 names it, and
+    the endpoint's whole answer for it.
+
+    `POST /pipelines/validate` touches nothing, so this is the one fixture in
+    the set that can be recorded on a live bench at any time -- and the one
+    the pipeline tab is entirely drawn from: the checks, the schedule in
+    order, the counters and the cost all come out of a single answer.
+    """
+    v = _fixture("validate_txill_sim.json")
+    assert v["valid"] is True
+    assert v["counters"] == {"temperatures": 9, "levels": 5, "modules": 90, "shots": 4500}
+    assert len(v["schedule"]) == 198, "9 x (enter + 5 x (enter + 2 modules + exit) + exit)"
+    assert len(v["node_paths"]) == 90
+    # The range the tree posted comes back as the levels it made: five, by the
+    # rounded count `pipeline.range_values` settled once. The console reads
+    # them off this rather than rounding a second time.
+    assert v["tree"]["children"][0]["levels_v"] == [1.01, 1.015, 1.02, 1.025, 1.03]
+    assert v["folder_pattern"].endswith("_YYYYMMDD_HHMMSS")
+    # And the cost is a floor, because no settle has been measured on this
+    # bench: the console renders "at least", and never a finish time.
+    assert v["cost"]["lower_bound"] is True
+    assert v["cost"]["finish_at"] is None
+    assert v["cost"]["waiting_s"] is None
+    assert all(t["settle_s"] is None for t in v["cost"]["per_temperature"])
+
+
+def test_the_bound_fixture_is_what_the_canonical_tree_has_none_of():
+    """A `temperature` **module**, and duplicate sibling modules.
+
+    The module's setpoint binds the rest of the run rather than the rest of
+    one iteration (`executor.ExecCtx`), and the resolver says nothing about it
+    -- `Step.detail.temperature_k` is the enclosing *loop's* setpoint and is
+    null on every one of these steps. That absence is the fixture's point:
+    `ui/lib/tree.js` re-walks the schedule with the executor's rule, and
+    `ui/tests/tree.test.mjs` pins the answer against this file.
+    """
+    v = _fixture("validate_bound_sim.json")
+    steps = [s for s in v["schedule"] if s["kind"] == "module"]
+    assert [s["node_path"] for s in steps] == [
+        "rep=1/temperature", "rep=1/bace", "rep=1/bace#2", "rep=1/wait",
+        "rep=2/temperature", "rep=2/bace", "rep=2/bace#2", "rep=2/wait",
+    ], "duplicate siblings are numbered by the service, and only by the service"
+    assert all(s["detail"]["temperature_k"] is None for s in steps)
+    assert steps[0]["params"]["setpoint_k"]["value"] == 250.0
+    # The counter-case for the cost: nothing settles, so nothing is unmeasured.
+    assert v["cost"]["lower_bound"] is False
+    assert v["cost"]["finish_at"] is not None
+
+
 def test_the_journals_have_no_seq_gaps():
     """`docs/ui-kickoff.md` says these carry "real seq gaps". They do not.
 
@@ -192,6 +242,6 @@ def test_the_console_suite_passes():
         ["node", "--test", "ui/tests/store.test.mjs", "ui/tests/stream.test.mjs",
          "ui/tests/format.test.mjs", "ui/tests/rail.test.mjs", "ui/tests/fields.test.mjs",
          "ui/tests/render.test.mjs", "ui/tests/scale.test.mjs", "ui/tests/charts.test.mjs",
-         "ui/tests/monitor.test.mjs"],
+         "ui/tests/monitor.test.mjs", "ui/tests/tree.test.mjs"],
         cwd=REPO, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-2000:]

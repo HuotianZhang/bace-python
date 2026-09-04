@@ -755,6 +755,128 @@ collapsed to `16 checks · 15 ok · 1 warn · show`, and the cost with
 submitted, and the three counters at three scales read correctly against a
 4.5-hour sweep's ETA.
 
+**Built 2026-09-04.** `lib/tree.js` is the model — the tree as typed, the edit
+operations, the flat schedule nested back into the shape it was a walk of, and
+the cost — with `views/pipeline.js` beside it, the split the rail set in M1.
+`lib/charts/schedule.js` is the fifth chart component, R3·3's `ch-schedule`:
+the run as a length of time, settle in grey and measuring in accent, one pair
+per temperature. Nothing in the service changed, as the table below predicted.
+
+Two fixtures were recorded for it, and both are answers rather than runs —
+`POST /pipelines/validate` touches nothing, so these are the only two in the
+set that can be recorded on a live bench at any time:
+`validate_txill_sim.json` is the canonical tree itself (9 × 5, 90 module runs,
+198 steps, 4500 shots) and `validate_bound_sim.json` the two shapes it has
+none of — a `temperature` **module**, and duplicate sibling modules, which the
+service numbers `bace` and `bace#2`.
+
+Four decisions, and the first is the shape of the whole screen:
+
+* **The console validates on every commit, not only on Dry run.** The bench
+  tab already does this per card, and a pipeline has more ways to be wrong
+  than a card has. So the check list, the cost, the counters and the schedule
+  are never older than the tree — and the corollary is that **nothing on this
+  screen is counted by the console**. How many levels `1.010 → 1.030 step
+  0.005` makes is a rounding question `pipeline.range_values` settled once
+  (rounded, never truncated: the LabVIEW truncation wrote a four-level loop as
+  five), and the editor reads the answer off the resolved tree that comes back
+  beside the schedule. Before the first answer a range row says the range and
+  no count. Measured at **110 ms and 340 kB** an answer on the canonical tree,
+  nearly all of it the schedule's 90 resolved ParamSets, so the calls are
+  coalesced and a commit landing during one supersedes it.
+  **Dry run** is the same request made deliberately — which is what it is for
+  after a bench read-back.
+* **The schedule is drawn at three scales, and flat behind a switch.** 198
+  steps is exactly the number `ui-rules` §5 exists to refuse; the nesting is
+  which temperature, which level, how far into the scan, the same three the
+  monitor draws during the run. The flat list is still there, because "in
+  order" literally means the list and a screen that only ever summarised would
+  be hiding it.
+* **A module node's form is the bench's form.** `cardModel` and the field
+  component from `lib/card.js`, over the ParamSet the *schedule* resolved for
+  that node — so `led_v` reads as inherited from the illumination loop and
+  `voc` as derived from the `jv_bace` two nodes earlier, and which rows sit
+  above the fold is the one table in `lib/fields.js` rather than a second
+  opinion about what matters. The one thing the node form does not show is the
+  point count in a range row: `estimate_text` is the *bench's*, computed from
+  the bench's axis, and no count is better than one describing another form.
+* **The tree is matched to its schedule entries by counting iterations.** A
+  module child takes one entry, a loop child takes the `count` consecutive
+  ones its own `detail` declares — so nothing in `ui/` reconstructs a node
+  path or a `#2` sibling token, which are the service's spelling and stay
+  there. `tree.test.mjs` proves it by rewriting every node path in the
+  recorded schedule and checking the rows land the same.
+
+**Six things the building found**, four of them only visible with the thing
+running:
+
+* **The temperature in force is not in the schedule.** `Step.detail.
+  temperature_k` is the enclosing *loop's* setpoint and is `null` under a
+  `temperature` module — the resolver knows about loops. So a schedule drawn
+  from the schedule alone shows a run with no temperature anywhere on it. The
+  console re-walks the steps with the executor's own rule instead (root **and**
+  every open scope, which is what makes it bind the next iteration of an
+  enclosing loop too), and the walk is asserted against the resolver's own
+  `detail.temperature_k` wherever a loop did set one.
+* **Adding a module selects it, so the next module went to the root.**
+  Composing `jv_bace` then `bace` inside an illumination loop put the second
+  one outside it — and the console described that perfectly: 45 J-Vs, 9 scans,
+  and `⚠ V_oc` on every one, because a `bace` outside the loop has no
+  `jv_bace` at its own drive level in scope. It was right, and it was not the
+  tree anyone was building. A node now lands inside the selected loop, or
+  beside the selected module.
+* **An illumination level's settle is *measuring* to the cost model**
+  (`pipeline.estimate` folds it in through `measured`), so a time bar summing
+  only the module estimates came out 90 s short of the total printed under it.
+  Both fixtures now assert that the bar and the cost total the same run.
+* **A bench edit and a node override both resolve as `edited`.**
+  `ParamSet.update_layer(Source.EDITED, node.params, "pipeline node")` merges
+  into the same layer, so a reset offered on every `edited` row would — for a
+  value the bench typed and this node did not — remove a key the node never
+  had and change nothing. Whether *this node* types it is the authority, and
+  the tree is the client's own, so nothing has to parse a `detail` string for
+  it.
+* **A stretch of measuring outside a temperature loop has no settle to be
+  unknown about.** The first cut hatched it and reported "1 of 1 temperatures
+  have no measured settle" for a tree with no temperature loop in it at all.
+* **Nine full-height blocks of accent read as nine alerts.** §3 reserves that
+  intensity for one thing on screen; the artboard gives the bar a quarter of
+  its height, and the caption in the panel's top corner — added before anyone
+  looked at it — printed over the last two setpoint labels.
+
+**Measured**, driving the console's own controls from headless Chromium
+against `--sim --fast`: the canonical tree built from an empty pipeline in
+nine clicks and four typed values, **13 validates** for the whole of it
+(one per commit), no console error; the counters reading `9 temperatures ·
+5 levels · 90 module runs · 4500 shots`, the cost `at least 84 min` with
+`waiting for T —`; Dry run; Start accepted, `POST /pipelines` queued, and the
+run paused at `T=295K` with the monitor's operator prompt open — then aborted
+from that same monitor. A `n_loops` override typed on the `bace` node read as
+`as on the bench, except n_loops 40`, its reset put it back, and `n_averages`
+— edited on the bench, not on the node — offered no reset at all.
+
+**And measured again with a scan running under it**, because this tab is the
+one that describes the *next* run while the bench works on this one — the
+argument that put the timing diagram below the run in M4, applied to a whole
+view. A 21 × 60 scan on the simulator, 1260 shots in 6.5 s, 8888 frames, with
+the canonical tree open:
+
+| | M5 |
+|---|---|
+| DOM mutations inside the pipeline tab, for the whole scan | **29** |
+| elements built, whole console (the rail, the chips, the monitor) | 6 262 |
+| `POST /pipelines/validate` during the scan | 0 |
+| JS heap at the end | 14.2 MB (M4's was 13.4) |
+| one commit — nine temperatures to seven — elements built | 515 |
+
+Twenty-nine is the Start button's own state changing as the worker is taken
+and given back. Nothing on the stream reaches this view: it reads whether the
+worker is held, the catalogue, and `read_at` — and no shot, phase or progress
+frame moves any of the three, so the subscription returns without rendering.
+`read_at` is stable through a scan by construction, because a read-back is a
+job on the worker and the worker is running the run, which is also why no
+validate is asked for during one.
+
 ### M6 · The results tab
 
 A stub until here. Preceded by a design pass, because R2·3 is a Round 2
@@ -829,9 +951,11 @@ that have not started. They are here so they are not rediscovered there:
 | M6 | a Round 3 design pass on results, with the user, in Claude Design |
 | M3 | ~~nothing — the chart foundation is new code with no service dependency~~ **built 2026-09-03**; nothing in the service changed |
 | M4 | ~~nothing~~ **built 2026-09-03**; nothing in the service changed. The simulator's lit-photocurrent magnitude is a defect in `--sim`, not on the path |
+| M5 | ~~nothing~~ **built 2026-09-04**; nothing in the service changed. One thing the schedule does not carry was found and worked around in the client rather than added to the wire: `Step.detail.temperature_k` is the enclosing loop's setpoint and is `null` under a `temperature` module, so the console applies the executor's binding rule itself |
 
-Nothing else in the service is on the critical path. The API is complete for
-M0–M5 as it stands.
+Nothing else in the service is on the critical path. The API was complete for
+M0–M5 as it stood, and M5 proved it: nine clicks and four typed values built
+the canonical tree against an unchanged service.
 
 ## What this plan deliberately does not decide
 

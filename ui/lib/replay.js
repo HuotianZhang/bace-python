@@ -24,7 +24,12 @@
 //     catalogue's own;
 //   * **`fixtures/bench_running_*.json`** is `GET /bench` taken *while a run
 //     held the worker*, which is the only place the `inferred` overlay exists:
-//     at rest every instrument on the rail is a read-back.
+//     at rest every instrument on the rail is a read-back;
+//   * **`fixtures/validate_*.json`** is `POST /pipelines/validate` — the
+//     checks, the schedule in order, the counters and the cost of a tree
+//     nobody ran. It is what M5's schedule and its time bar are drawn from,
+//     and the one endpoint in the set that can be recorded on a live bench at
+//     any time, because it touches nothing.
 //
 // The journals also do *not* exercise the reconnect path — their `seq` runs
 // 0…N with no gap, because that is what a journal is. Gaps and
@@ -64,6 +69,12 @@ export const FIXTURES = [
   { key: 'transient', kind: 'data',
     label: 'rig 15:37:22 — the transient run at full precision, as the data endpoint answers',
     url: 'fixtures/transient_20260902_153722.json' },
+  { key: 'validate-txill', kind: 'validate',
+    label: 'sim — POST /pipelines/validate on the canonical 9 T x 5 level tree',
+    url: 'fixtures/validate_txill_sim.json' },
+  { key: 'validate-bound', kind: 'validate',
+    label: 'sim — validate with a temperature module: the setpoint binds the rest of the run',
+    url: 'fixtures/validate_bound_sim.json' },
 ];
 
 /** Parse a JSONL body into frames, skipping blank lines. */
