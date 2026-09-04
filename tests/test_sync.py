@@ -247,11 +247,18 @@ def test_the_led_goes_to_pulse_at_the_runs_frequency_and_back_to_dc():
     assert led.state[":OUTP"] == "1"
 
 
-def test_the_81150a_stays_as_found_when_the_relay_cannot_be_proven_safe():
+def test_the_81150a_stays_as_found_when_the_relay_cannot_be_proven_safe(monkeypatch):
     """Its amplifier feeds the device whenever the relay is on that side, so
-    'I could not read the relay' has to mean 'I did not enable it'. There is no
-    DIO on the machine these tests run on, so the read fails — which is the
-    case that matters."""
+    'I could not read the relay' has to mean 'I did not enable it'. The read
+    is made to fail here rather than assumed to: on the lab PC DELIB loads
+    and the real relay answers, and this test then read the bench instead of
+    the case that matters."""
+    import bace.drivers.shutter as shutter_mod
+
+    def no_dio(*a, **k):
+        raise OSError("no DELIB this interpreter can load")
+
+    monkeypatch.setattr(shutter_mod, "Shutter", no_dio)
     rig, scope, rm, led, bias, smu = _rm(
         {"CHAN1": led_drive(), "CHAN3": arm_sync(1e-3)}, led_state=dict(_JV_STATE))
     report = Report()

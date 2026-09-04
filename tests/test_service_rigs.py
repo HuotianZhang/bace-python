@@ -378,6 +378,24 @@ def test_a_console_url_is_read_through_the_331_driver(monkeypatch):
 
 
 # -- build_real, with no VISA at all --------------------------------------------------
+def _no_meter(monkeypatch):
+    """Keep the real 1918-C out of the assembly. `build_real` opens the USB
+    device itself since 2026-09-03, so on a PC with the Newport driver and
+    the meter attached these tests would open it and write its units and
+    wavelength -- the lab PC did, 2026-09-04. Both routes are shut: the
+    console answers nothing, and the direct open fails the way a desk with
+    no driver fails."""
+    from bace.drivers import newport1918c
+
+    class NoMeter:
+        def __init__(self, *a, **k):
+            raise newport1918c.PowerMeterError(
+                "usbdll.dll not found (or none matching this 64-bit Python)")
+
+    monkeypatch.setattr(ConsolePowerMeter, "available", lambda self: False)
+    monkeypatch.setattr(newport1918c, "DirectPowerMeter", NoMeter)
+
+
 def _fake_visa(monkeypatch, rig: RigConfig, *, with_smu: bool):
     # `tests/` has no __init__.py, so pytest imports its modules by basename.
     from test_bench import FakeInstrument, FakeRM
@@ -392,7 +410,7 @@ def _fake_visa(monkeypatch, rig: RigConfig, *, with_smu: bool):
                         types.SimpleNamespace(ResourceManager=lambda: FakeRM(table)))
     monkeypatch.setattr(checks, "_dio_backend",
                         lambda rig_config: (None, "", "no DELIB this interpreter can load"))
-    monkeypatch.setattr(ConsolePowerMeter, "available", lambda self: False)
+    _no_meter(monkeypatch)
     return table
 
 
@@ -572,7 +590,7 @@ def test_build_real_reads_the_outputs_and_levels_from_the_instruments(monkeypatc
                         types.SimpleNamespace(ResourceManager=lambda: FakeRM(table)))
     monkeypatch.setattr(checks, "_dio_backend",
                         lambda rig_config: (None, "", "no DELIB this interpreter can load"))
-    monkeypatch.setattr(ConsolePowerMeter, "available", lambda self: False)
+    _no_meter(monkeypatch)
     b = Bench.build_real(rig, SourceMeterConfig(), run_config=RunConfig())
 
     assert b.rig.bias.output_enabled and b.rig.led.output_enabled and b.rig.smu.output_enabled, (
@@ -613,7 +631,7 @@ def test_a_bench_with_no_visa_comes_up_with_the_visa_roles_unavailable(monkeypat
     monkeypatch.setitem(sys.modules, "pyvisa", None)              # ImportError
     monkeypatch.setattr(checks, "_dio_backend",
                         lambda rig_config: (None, "", "no DELIB this interpreter can load"))
-    monkeypatch.setattr(ConsolePowerMeter, "available", lambda self: False)
+    _no_meter(monkeypatch)
     rig = RigConfig()
     b = Bench.build_real(rig, SourceMeterConfig(), run_config=RunConfig())
     assert set(b.unavailable) == {"scope", "bias", "led", "smu", "shutter", "relay",
@@ -668,7 +686,7 @@ def test_a_relay_on_module_zero_is_an_unavailable_router_not_a_traceback(monkeyp
     monkeypatch.setitem(sys.modules, "pyvisa",
                         types.SimpleNamespace(ResourceManager=lambda: FakeRM(table)))
     monkeypatch.setattr(checks, "_dio_backend", lambda rig_config: (Line, "direct", ""))
-    monkeypatch.setattr(ConsolePowerMeter, "available", lambda self: False)
+    _no_meter(monkeypatch)
     b = Bench.build_real(rig, SourceMeterConfig(), run_config=RunConfig())
     assert b.rig.router is None and "module 0 is the shutter" in b.unavailable["relay"]
     assert "shutter" not in b.unavailable
