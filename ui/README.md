@@ -212,7 +212,12 @@ selected node's numbers, flags, folder and provenance.
   `kept < requested` is a cell in the accent's dashed border, its Q the running
   mean over the shots that ran (a stopped node keeps its last `LoopDone`), the
   span line excluding it *and saying so*; a cell of the product that never ran
-  stays in the grid, hatched.
+  stays in the grid, hatched. The axes are what the run *asked for* — the
+  tree's lists and the schedule's steps — not only what ran, so a pipeline
+  stopped before any `bace` at its last temperature keeps that row, as
+  *requested, not reached*; a node is placed on the row of the setpoint it
+  ran under, and the row reads what was reached (`280.1 K · operator`) with
+  `asked 280.0 K` beside it.
 * **σ_Q = 0 is not recorded**, and the legend is R2·3's: `□ σ_Q not recorded
   · ● σ_Q measured`. A cell says `□` where a bare dot would claim a σ.
 * **Every flag states its reason**, in `ui-rules` §10's voice: *6 of 200 shots

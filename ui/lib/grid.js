@@ -86,11 +86,16 @@ export function renderGrid(grid, { selected = null, onSelect } = {}) {
   const head = h('tr', h('th.corner', h('span.cs', 'T / K ↓  ·  led_v →')),
     grid.cols.map((col) => h('th', { text: col.label })));
   const rows = grid.rows.map((row) => {
-    const t = temperatureText({ temperature_k: row.t, temperature_how: row.how, temperature_source: row.source });
+    const t = temperatureText({ temperature_k: row.t ?? row.asked, temperature_how: row.how, temperature_source: row.source });
     return h('tr',
       h('th', { title: t.text },
         h('span.num', { text: row.label }),
-        h('span', { class: `tlv ${t.level}`, text: row.how ? `· ${row.how}${row.source && row.source !== row.how ? '/' + row.source : ''}` : '' })),
+        h('span', { class: `tlv ${t.level}`, text: row.how ? `· ${row.how}${row.source && row.source !== row.how ? '/' + row.source : ''}` : '' }),
+        // What the tree asked for, when what was reached is not it: the
+        // row is the 280 K one, and it reads 280.1 K because that is what
+        // the operator typed at the pause.
+        row.t !== null && row.asked !== null && row.asked !== undefined && Math.abs(row.t - row.asked) > 0.05
+          ? h('span.tlv', { text: `· asked ${fmt.kelvin(row.asked)}` }) : null),
       grid.cols.map((col) => {
         const cell = grid.byKey[`${row.key}|${col.key}`];
         return h('td', renderCell(grid, cell, { selected, onSelect }));

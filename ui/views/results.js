@@ -120,6 +120,10 @@ export default {
       if (runId === selectedRun && record && record.run_id === runId) return;
       selectedRun = runId;
       rerunState = null;
+      // The previous run's grid and export button must not stay under the
+      // newly highlighted row while its record is asked for -- or for ever,
+      // if the request fails. Nothing on the right until the answer.
+      record = null;
       loadRecord(runId);
     }
 

@@ -508,3 +508,32 @@ def test_settle_history_counts_an_answered_timeout_pause_with_the_consoles_time_
     ])
     with Journal(out, "20260902_130000", header=HEADER) as j:
         assert j.settle_history() == {230.0: [2400.0]}, "1800 s of console plus 600 s of operator"
+
+
+def test_a_jv_stopped_between_its_curves_keeps_the_curve_it_measured(tmp_path):
+    """A stop asked for `after_shot` is honoured between J-V curves, and the
+    node ends without a `JVFinished` -- so the curves are folded as each
+    `JVCurveDone` arrives, and `JVFinished`, when it comes, replaces the
+    list with its own. Otherwise a node that kept one curve of two answered
+    `curves: None` and the results panel discarded a measurement."""
+    out = str(tmp_path)
+    run_id, t0 = "20260902_120000-001", T0
+    curve = {"index": 0, "label": "dark", "dark": True, "led_level_v": None, "direction": "up",
+             "intensity_w": None, "n_points": 15,
+             "metrics": {"voc": None, "jsc": -1e-9, "ff": None}}
+    lines = [
+        line(1, t0, "RunQueued", {"kind": "manual", "module": "jv", "tree": {"kind": "module", "module": "jv"},
+                                  "params": {}, "name": ""}, run_id),
+        line(2, t0 + 1, "RunStateChanged", {"state": "running", "reason": ""}, run_id),
+        line(3, t0 + 2, "JVCurveDone", curve, run_id, "jv"),
+        line(4, t0 + 3, "NodeDone", {"node_path": "jv", "outcome": "stopped",
+                                     "detail": {"module": "jv", "kept": 1, "requested": 2}}, run_id, "jv"),
+        line(5, t0 + 4, "RunStateChanged", {"state": "stopped", "reason": "requested"}, run_id),
+        line(6, t0 + 5, "RunStateChanged", {"state": "parked", "reason": "stopped"}, run_id),
+    ]
+    write_session(out, "20260902_120000", lines)
+    with Journal(out, "20260902_120000", header=HEADER) as j:
+        node = j.run_record(run_id)["nodes"]["jv"]
+    assert node["outcome"] == "stopped" and (node["kept"], node["requested"]) == (1, 2)
+    assert node["curves"] == [{"label": "dark", "dark": True, "led_level_v": None, "direction": "up",
+                               "n_points": 15, "metrics": curve["metrics"]}]

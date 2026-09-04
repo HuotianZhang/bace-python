@@ -578,6 +578,7 @@ class _Run:
                 self.light_curves += 1
                 self.voc_min = voc if self.voc_min is None else min(self.voc_min, voc)
                 self.voc_max = voc if self.voc_max is None else max(self.voc_max, voc)
+            add_curve(self._result(line), data)
         elif kind == "JVFinished":
             n = data.get("n_curves", len(data.get("curves") or []))
             self.outcome_text = f"{n} curve" + ("" if n == 1 else "s")
@@ -743,15 +744,23 @@ JV_CURVE_KEYS: tuple[str, ...] = ("label", "dark", "led_level_v", "direction", "
 
 def jv_result(data: dict) -> dict:
     """A `JVFinished`'s curves reduced to their labels and metrics -- the
-    interpolated numbers, which `ui-rules` §6 says to label derived."""
-    curves = []
-    for curve in data.get("curves") or []:
-        if not isinstance(curve, dict):
-            continue
-        entry = {key: curve.get(key) for key in JV_CURVE_KEYS}
-        entry["metrics"] = dict(curve["metrics"]) if isinstance(curve.get("metrics"), dict) else None
-        curves.append(entry)
-    return {"curves": curves}
+    interpolated numbers, which `ui-rules` §6 says to label derived. The
+    whole list, replacing the one `add_curve` built as they arrived."""
+    return {"curves": [_curve(c) for c in data.get("curves") or [] if isinstance(c, dict)]}
+
+
+def add_curve(result: dict, data: dict) -> None:
+    """One `JVCurveDone`, reduced, onto the node's list. A stop asked for
+    `after_shot` is honoured between curves and the node ends without a
+    `JVFinished`, so a J-V that kept one curve of two must still say so --
+    the same reason a stopped transient keeps its `LoopDone`."""
+    result.setdefault("curves", []).append(_curve(data))
+
+
+def _curve(curve: dict) -> dict:
+    entry = {key: curve.get(key) for key in JV_CURVE_KEYS}
+    entry["metrics"] = dict(curve["metrics"]) if isinstance(curve.get("metrics"), dict) else None
+    return entry
 
 
 def count_shot(result: dict, data: dict) -> None:

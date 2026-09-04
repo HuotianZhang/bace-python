@@ -229,26 +229,55 @@ export function gridModel(record) {
   const rowsBy = new Map();
   const colsBy = new Map();
   const byKey = {};
+  // The axes are what was *asked for*, not only what ran: a pipeline stopped
+  // before any bace at its last temperature has no node at that temperature,
+  // and a row that vanished would make the summary count no missing cell.
+  const asked = requestedAxes(record);
+  for (const t of asked.temperatures) {
+    // `t` is what was reached, and nothing has been: the setpoint is `asked`.
+    rowsBy.set(tKey(t), { key: tKey(t), t: null, asked: t, how: 'setpoint', source: '',
+      label: fmt.kelvin(t), ran: false });
+  }
+  for (const v of asked.levels) {
+    colsBy.set(ledKey(v), { key: ledKey(v), led_v: v, asked: v,
+      label: `led_v ${fmt.volts(v, { decimals: 3 })}`, ran: false });
+  }
   for (const node of nodes) {
-    const tk = tKey(node.temperature_k);
-    const lk = ledKey(node.led_v);
+    // Which row a node belongs to is the setpoint it ran *under* -- a node
+    // the operator resumed at 280.1 K is the 280 K row's, and the row then
+    // says what was reached and how. The step the service scheduled for
+    // this path says the setpoint; without a schedule (a journal record)
+    // the nearest asked temperature inside the loop's tolerance does.
+    const setpoint = asked.byPath[node.node_path];
+    const t = finite(node.temperature_k) ? node.temperature_k : null;
+    const askedT = finite(setpoint && setpoint.temperature_k) ? setpoint.temperature_k
+      : nearestWithin(asked.temperatures, t, asked.tolerance_k);
+    const tk = tKey(askedT !== null ? askedT : t);
     if (!rowsBy.has(tk)) {
-      rowsBy.set(tk, {
-        key: tk, t: finite(node.temperature_k) ? node.temperature_k : null,
-        how: node.temperature_how || '', source: node.temperature_source || '',
-        label: finite(node.temperature_k) ? fmt.kelvin(node.temperature_k) : 'T not recorded',
-      });
+      rowsBy.set(tk, { key: tk, t, asked: askedT, how: '', source: '', label: '', ran: false });
     }
+    const row = rowsBy.get(tk);
+    if (!row.ran) {
+      row.ran = true;
+      row.t = t;
+      row.how = node.temperature_how || '';
+      row.source = node.temperature_source || '';
+      row.label = t !== null ? fmt.kelvin(t) : 'T not recorded';
+    }
+    const askedV = finite(setpoint && setpoint.led_v) ? setpoint.led_v
+      : nearestWithin(asked.levels, node.led_v, LED_MATCH_V);
+    const lk = ledKey(askedV !== null ? askedV : node.led_v);
     if (!colsBy.has(lk)) {
-      colsBy.set(lk, { key: lk, led_v: finite(node.led_v) ? node.led_v : null,
-        label: finite(node.led_v) ? `led_v ${fmt.volts(node.led_v, { decimals: 3 })}` : 'led_v not recorded' });
+      colsBy.set(lk, { key: lk, led_v: finite(node.led_v) ? node.led_v : null, asked: askedV,
+        label: finite(node.led_v) ? `led_v ${fmt.volts(node.led_v, { decimals: 3 })}` : 'led_v not recorded', ran: false });
     }
+    colsBy.get(lk).ran = true;
     const key = `${tk}|${lk}`;
     const cell = byKey[key] || (byKey[key] = { key, row: tk, col: lk, nodes: [] });
     cell.nodes.push(node);
   }
-  const rows = [...rowsBy.values()].sort((a, b) => (b.t ?? -Infinity) - (a.t ?? -Infinity));
-  const cols = [...colsBy.values()].sort((a, b) => (a.led_v ?? Infinity) - (b.led_v ?? Infinity));
+  const rows = [...rowsBy.values()].sort((a, b) => (b.t ?? b.asked ?? -Infinity) - (a.t ?? a.asked ?? -Infinity));
+  const cols = [...colsBy.values()].sort((a, b) => (a.led_v ?? a.asked ?? Infinity) - (b.led_v ?? b.asked ?? Infinity));
   const cells = [];
   for (const row of rows) {
     for (const col of cols) {
@@ -263,6 +292,64 @@ export function gridModel(record) {
     }
   }
   return { shape: 'grid', rows, cols, cells, byKey, nodes };
+}
+
+/** The asked value nearest `value`, when one is within `tol`; else null. */
+function nearestWithin(values, value, tol) {
+  if (!finite(value)) return null;
+  let best = null;
+  for (const v of values) {
+    if (Math.abs(v - value) <= tol && (best === null || Math.abs(v - value) < Math.abs(best - value))) best = v;
+  }
+  return best;
+}
+
+/**
+ * The temperatures and LED levels the run asked for, from the tree it
+ * posted and the schedule the service resolved for it — so the grid's
+ * axes exist before, and survive without, a `bace` at every one of them.
+ *
+ * Nothing is counted here (`docs/ui-plan.md` M5): a range on the tree
+ * (`led_start_v … led_step_v`) is read off the schedule's steps, which
+ * carry the levels the service made of it; a journal record has no
+ * schedule, so for last week's run a range contributes nothing and the
+ * axes are the tree's explicit lists plus whatever ran. A temperature
+ * *module* is a setpoint too, but only its loop's or the session's typed
+ * value is bound on the steps' `detail`, so it is read off the tree.
+ */
+export function requestedAxes(record) {
+  const temperatures = new Set();
+  const levels = new Set();
+  const byPath = {};
+  let tolerance_k = 0.5;
+  const walk = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.kind === 'loop') {
+      for (const k of node.values_k || []) if (finite(k)) temperatures.add(k);
+      for (const v of node.levels_v || []) if (finite(v)) levels.add(v);
+      if (finite(node.tolerance_k)) tolerance_k = Math.max(tolerance_k, node.tolerance_k);
+    } else if (node.kind === 'module' && node.module === 'temperature') {
+      const k = node.params && node.params.setpoint_k;
+      if (finite(k)) temperatures.add(k);
+    }
+    for (const child of node.children || []) walk(child);
+  };
+  walk(record && record.tree);
+  const schedule = record && record.schedule;
+  const steps = Array.isArray(schedule) ? schedule : (schedule && schedule.steps) || [];
+  for (const step of steps) {
+    if (!step || step.kind !== 'module' || !GRID_MODULES.has(_moduleOf(step))) continue;
+    const detail = step.detail || {};
+    if (finite(detail.temperature_k)) temperatures.add(detail.temperature_k);
+    if (finite(detail.led_v)) levels.add(detail.led_v);
+    byPath[step.node_path] = { temperature_k: detail.temperature_k, led_v: detail.led_v };
+  }
+  return { temperatures: [...temperatures], levels: [...levels], byPath, tolerance_k };
+}
+
+function _moduleOf(step) {
+  if (step.module) return step.module;
+  return String(step.node_path || '').split('/').pop().split('#')[0];
 }
 
 /** One cell from its nodes: the newest node's numbers, and how many there were. */
@@ -538,7 +625,7 @@ export function csvOf(grid, record) {
     if (cell.missing) {
       const row = grid.rows.find((r) => r.key === cell.row);
       const col = grid.cols.find((c) => c.key === cell.col);
-      lines.push([record.run_id, '', row && row.t !== null ? row.t : '', '', '', col && col.led_v !== null ? col.led_v : '',
+      lines.push([record.run_id, '', row ? (row.t ?? row.asked ?? '') : '', row && row.t === null ? 'setpoint' : '', '', col ? (col.led_v ?? col.asked ?? '') : '',
         '', '', '', '', '', '', 'never run', ''].map(csvField).join(','));
       continue;
     }

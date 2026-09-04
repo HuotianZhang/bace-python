@@ -138,11 +138,44 @@ test('a cell the tree asked for and never ran stays in the grid as missing', () 
   assert.equal(g.cells.length, 4, 'the product of 2 T x 2 levels');
   const missing = g.cells.filter((c) => c.missing);
   assert.equal(missing.length, 1);
-  assert.equal(missing[0].row, '280.1');
+  assert.equal(missing[0].row, '280.0', 'rows are keyed by the setpoint the tree asked for');
   assert.equal(missing[0].col, '1.020');
   const s = summaryModel(g, { ...grid, nodes });
   assert.equal(s.missing, 1);
   assert.match(s.lines.find((l) => l.key === 'flags').text, /1 never run \(280.1 K · 1.020 V\)/);
+});
+
+test('a run stopped before its last temperature keeps that row, as never run', () => {
+  // Codex's finding on the first cut: the axes came from the bace nodes that
+  // ran, so a pipeline stopped before any bace at 280 K lost the whole row
+  // and the summary counted no missing cell.
+  const nodes = Object.fromEntries(Object.entries(grid.nodes).filter(([k]) => !k.startsWith('T=280K')));
+  const stopped = { ...grid, nodes };
+  const g = gridModel(stopped);
+  assert.deepEqual(g.rows.map((r) => r.label), ['280.0 K', '250.1 K']);
+  assert.equal(g.rows[0].ran, false);
+  assert.equal(g.rows[0].how, 'setpoint', 'requested, not reached');
+  assert.equal(g.cells.filter((c) => c.missing).length, 2);
+  const s = summaryModel(g, stopped);
+  assert.equal(s.missing, 2);
+  assert.match(s.lines.find((l) => l.key === 'flags').text, /2 never run \(280.0 K · 1.010 V, 280.0 K · 1.020 V\)/);
+  assert.ok(csvOf(g, stopped).includes(',280,setpoint,'), 'the csv carries the setpoint of a row nobody reached');
+  // Without a schedule -- a journal record -- the tree's own lists still say.
+  const journal = { ...stopped, schedule: undefined, from: 'journal' };
+  assert.deepEqual(gridModel(journal).rows.map((r) => r.label), ['280.0 K', '250.1 K']);
+});
+
+test('a node that reached 280.1 K sits on the 280 K row, and the row says both', () => {
+  const g = gridModel(grid);
+  assert.equal(g.rows.length, 2, 'not four: the reached values are not rows of their own');
+  const top = g.rows[0];
+  assert.equal(top.asked, 280);
+  assert.equal(top.t, 280.1);
+  assert.equal(top.label, '280.1 K');
+  assert.equal(top.how, 'operator');
+  // A journal record matches by the loop's tolerance instead of the schedule.
+  const journal = { ...grid, schedule: undefined };
+  assert.deepEqual(gridModel(journal).rows.map((r) => [r.asked, r.t]), [[280, 280.1], [250, 250.1]]);
 });
 
 // -- the summary strip ---------------------------------------------------------

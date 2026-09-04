@@ -85,8 +85,8 @@ from ..experiment.wire import to_wire
 from ..params import Source
 from . import pipeline
 from .executor import run_pipeline
-from .journal import (Journal, axis_result, count_shot, finished_result, jv_result, loop_result,
-                      node_record)
+from .journal import (Journal, add_curve, axis_result, count_shot, finished_result, jv_result,
+                      loop_result, node_record)
 from .live import LiveState
 from .modules import Catalogue, RunContext, VocSource, jsonable
 from .monitors import MAX_INTERVAL_S, MIN_INTERVAL_S, PowerMonitor, TemperatureMonitor
@@ -1424,6 +1424,8 @@ class Session:
                 rec.node_results.setdefault(node_path, {}).update(loop_result(data))
             elif isinstance(ev, E.RunFinished):
                 rec.node_results.setdefault(node_path, {}).update(finished_result(data))
+            elif isinstance(ev, JVCurveDone):
+                add_curve(rec.node_results.setdefault(node_path, {}), data)
             elif isinstance(ev, JVFinished):
                 rec.node_results.setdefault(node_path, {}).update(jv_result(data))
         if isinstance(ev, E.RunStateChanged):
