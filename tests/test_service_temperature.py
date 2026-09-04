@@ -355,3 +355,54 @@ def test_the_keys_a_detail_leaves_out_take_the_trees_defaults():
     assert settled.data["tolerance_k"] == TEMPERATURE_DEFAULTS["tolerance_k"] == 0.2
     assert settled.data["hold_s"] == TEMPERATURE_DEFAULTS["hold_s"] == 60.0
     assert settled.data["held_s"] == 60.0
+
+
+def test_closing_the_331_transport_leaves_the_shared_resource_manager_open(monkeypatch):
+    """`pyvisa.ResourceManager()` is one cached instance per process. The
+    vendored transport used to close it with the 331's session, which on the
+    lab PC (2026-09-04) closed the bench harness's scope, generator and
+    Keithley sessions too: pass 2 reported all four "not reachable" two
+    seconds after pass 1 had identified them. The service's failure path at
+    start-up did the same to the instruments it had just opened."""
+    import sys
+    import types
+
+    from bace.drivers.lakeshore331.config import Connection
+    from bace.drivers.lakeshore331.transport import VisaTransport
+
+    class Inst:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    class RM:
+        closed = False
+        opened: list = []
+
+        def open_resource(self, resource):
+            inst = Inst()
+            self.opened.append(inst)
+            return inst
+
+        def close(self):
+            self.closed = True
+
+    shared = RM()
+    monkeypatch.setitem(sys.modules, "pyvisa",
+                        types.SimpleNamespace(ResourceManager=lambda: shared))
+    t = VisaTransport(Connection(resource="GPIB0::7::INSTR"))
+    t.close()
+    assert shared.opened[0].closed, "the 331's own session is released"
+    assert not shared.closed, "the ResourceManager is everyone's and stays open"
+
+
+def test_a_bench_skip_keeps_the_reason_a_warn_recorded_first():
+    from bace.bench.report import SKIPPED, Check
+
+    c = Check(name="81150A state", stage="read")
+    c.warn("cannot open GPIB0::12::INSTR: VI_ERROR_INV_OBJECT")
+    c.skip("not reachable")
+    assert c.status == SKIPPED
+    assert c.detail == "not reachable (cannot open GPIB0::12::INSTR: VI_ERROR_INV_OBJECT)"
+    assert Check(name="x", stage="read").skip("plain").detail == "plain"
