@@ -268,3 +268,38 @@ def test_the_console_suite_passes():
          "ui/tests/monitor.test.mjs", "ui/tests/tree.test.mjs"],
         cwd=REPO, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-2000:]
+
+
+def test_the_results_fixtures_carry_the_identity_and_a_partial_cell():
+    """What the results tab draws from (`docs/ui-plan.md` M6), and the shape
+    `docs/naming-plan.md` rule 1 promised it: every row of `GET /runs` names
+    the device it ran on, every module node of `GET /runs/{id}` carries the
+    temperature triple, its LED level, its V_oc and what it measured -- and
+    the grid has a cell that was stopped early, because R2·3's "outlined,
+    never averaged in silently, never dropped" needs one to be drawn at all.
+    """
+    rows = _fixture("runs_sim.json")
+    assert rows and all(r["sample"]["sample"] == "s4" for r in rows), "the identity, per run"
+    assert {r["kind"] for r in rows} == {"manual", "pipeline"}
+
+    grid = _fixture("run_grid_sim.json")
+    assert grid["sample"]["sample"] == "s4" and grid["from"] == "session"
+    cells = {k: n for k, n in grid["nodes"].items() if n["module"] == "bace"}
+    assert len(cells) == 4, "2 T x 2 levels"
+    for node in grid["nodes"].values():
+        assert (node["temperature_how"], node["temperature_source"]) == ("operator", "operator"), (
+            "the recorder answered the pauses by hand, and every node says so")
+        assert node["led_v"] in (1.01, 1.02)
+    partial = [n for n in cells.values() if n["kept"] < n["requested"]]
+    assert len(partial) == 1 and partial[0]["outcome"] == "stopped"
+    assert partial[0]["q_mean"] and partial[0]["q_std"], (
+        "a stopped node keeps the statistics of the loops that ran (LoopDone), not nothing")
+    assert all(n["q_mean"] and n["values"] == [n["voc"]] for n in cells.values()), (
+        "one point per cell, at the V_oc it was centred on")
+
+    manual = _fixture("run_bace_sim.json")
+    node = manual["nodes"]["bace"]
+    assert (node["temperature_k"], node["temperature_how"], node["temperature_source"]) == (290.0, "typed", ""), (
+        "a manual run has no temperature node above it: the typed 290 K, said to be typed")
+    assert node["voc_how"] == "jv_bace" and node["offset_corrected"] is True
+    assert manual["params_as_executed"]["bace"]["voc"]["source"] == "derived"

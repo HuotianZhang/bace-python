@@ -78,14 +78,15 @@ from typing import Any, Callable, Mapping
 
 from ..drivers.keithley2400 import SourceMeterConfig
 from ..experiment import events as E
-from ..experiment.jv import JVCurveDone, JVStarted
+from ..experiment.jv import JVCurveDone, JVFinished, JVStarted
 from ..experiment.rig import RigConfig
 from ..experiment.transient import RunConfig
 from ..experiment.wire import to_wire
 from ..params import Source
 from . import pipeline
 from .executor import run_pipeline
-from .journal import Journal
+from .journal import (Journal, axis_result, count_shot, finished_result, jv_result, loop_result,
+                      node_record)
 from .live import LiveState
 from .modules import Catalogue, RunContext, VocSource, jsonable
 from .monitors import MAX_INTERVAL_S, MIN_INTERVAL_S, PowerMonitor, TemperatureMonitor
@@ -257,6 +258,14 @@ class RunRecord:
     chain_at_start: dict | None = None
     folders: list[str] = field(default_factory=list)
     error: str | None = None
+    sample: dict = field(default_factory=dict)
+    """The `[sample]` block the run was queued under -- its identity, kept on
+    the run and not only on the session (`docs/naming-plan.md` rule 1)."""
+    node_results: dict[str, dict] = field(default_factory=dict)
+    """Per module node, what it measured, folded from the *journal* payload
+    of its `RunFinished`, `JVFinished` and `StepDone` lines with the
+    journal's own reducers -- so `nodes` in `as_wire()` is the shape
+    `journal.node_record` gives a run of another session, byte for byte."""
     queued_at: float = field(default_factory=time.time)
     started_at: float | None = None
     finished_at: float | None = None
@@ -305,6 +314,21 @@ class RunRecord:
                     out.append(folder)
         return out
 
+    def nodes_wire(self) -> dict[str, dict]:
+        """Every module node that has ended, in the journal's `nodes` shape:
+        `GET /runs/{id}` answers the same for a run of this process and for
+        one read back from a file, and the results tab does not care which."""
+        out: dict[str, dict] = {}
+        for path, entry in self.node_outcomes.items():
+            detail = entry.get("detail") or {}
+            if not detail.get("module") or entry.get("outcome") is None:
+                continue
+            out[path] = node_record(path, entry.get("outcome"), detail,
+                                    self.node_results.get(path),
+                                    started_at=entry.get("started_at"),
+                                    finished_at=entry.get("finished_at"))
+        return out
+
     def as_wire(self) -> dict:
         return {
             "run_id": self.run_id, "kind": self.kind, "name": self.name,
@@ -314,6 +338,7 @@ class RunRecord:
             "params_as_executed": self.params_as_executed,
             "node_outcomes": jsonable(self.node_outcomes),
             "verdicts": list(self.verdicts), "chain_at_start": self.chain_at_start,
+            "sample": dict(self.sample), "nodes": self.nodes_wire(),
             "folder": self.folder, "folders": self.all_folders(), "error": self.error,
             "queued_at": self.queued_at, "started_at": self.started_at,
             "finished_at": self.finished_at, "kept": self.kept,
@@ -452,14 +477,18 @@ class Session:
             self.bench = Bench.build_real(rig_config, smu_config or SourceMeterConfig(),
                                           run_config=run_config_defaults or RunConfig(),
                                           rig_path=rig_path)
+        sample_table = sample if sample is not None else self.run_toml.get("sample", {})
         self.journal = Journal(self.out, self.session_id, header={
             "mode": mode, "rig_toml": rig_path, "run_toml": run_path, "out": self.out,
             "fingerprint": self.bench.fingerprint, "python": platform.python_version(),
             "version": _version(), "fast": self.fast,
             # The instrument writes the assembly made before any job: not a
             # run, not a by-hand action, so this is where they are recorded.
-            "startup_writes": list(self.bench.startup_writes)})
-        sample_table = sample if sample is not None else self.run_toml.get("sample", {})
+            "startup_writes": list(self.bench.startup_writes),
+            # The session's own context -- what a file with no runs in it can
+            # still say. Each run carries the block again (`RunQueued.sample`),
+            # because a resumed file keeps the header of whoever opened it.
+            "sample": dict(sample_table or {})})
         self.catalogue = Catalogue(rig_config=rig_config, run_toml=self.run_toml,
                                    history=self.journal, sample=sample_table)
         self.worker = RunWorker(on_event=self._on_event, on_state=self._on_state)
@@ -648,6 +677,7 @@ class Session:
                             schedule=v.schedule, module=module, out_folder=out_folder,
                             folder=folder, counters=dict(v.counters), cost=dict(v.cost),
                             queued_at=queued_at, session_voc=voc_at_submit,
+                            sample=dict(self.catalogue.sample),
                             live=LiveState(self.rig_config))
             rec.params_as_executed = {
                 s.node_path: {n: pv.as_dict() for n, pv in s.params.items()}
@@ -682,7 +712,8 @@ class Session:
             # counter, the same journal line, the same fan-out.
             self._ingest(run_id, "", E.RunQueued(
                 kind=kind, module=module, tree=rec.tree, params=jsonable(params),
-                resolved=jsonable(resolved), name=name, folder=folder), queued_at, None)
+                resolved=jsonable(resolved), name=name, folder=folder,
+                sample=dict(rec.sample)), queued_at, None)
             self._ingest(run_id, "", E.RunStateChanged("queued", "submitted"), time.time(), None)
         return run_id, v
 
@@ -1363,7 +1394,7 @@ class Session:
                                      "in_band": ev.in_band, "source": ev.source,
                                      "read_at": ts}
             if run_id is not None:
-                self._apply(run_id, node_path, ev, ts)
+                self._apply(run_id, node_path, ev, ts, line=jl)
             self._fan_out(ws)
 
     def _journal(self, line: dict) -> None:
@@ -1373,12 +1404,28 @@ class Session:
             self._error(f"seq {line.get('seq')} {line.get('type')}: journal: "
                         f"{type(exc).__name__}: {exc}")
 
-    def _apply(self, run_id: str, node_path: str, ev: E.Event, ts: float) -> None:
+    def _apply(self, run_id: str, node_path: str, ev: E.Event, ts: float,
+               line: dict | None = None) -> None:
         rec = self._records.get(run_id)
         if rec is None:
             return
         if rec.live is not None:
             rec.live.apply(ev, rec.schedule)
+        if line is not None and isinstance(line.get("data"), dict):
+            # The node's measurement, from the journal line rather than the
+            # event: the same dict the file gets, through the same reducers,
+            # so the record and the file agree on every number and its type.
+            data = line["data"]
+            if isinstance(ev, E.StepDone):
+                count_shot(rec.node_results.setdefault(node_path, {}), data)
+            elif isinstance(ev, E.AxisResolved):
+                rec.node_results.setdefault(node_path, {}).update(axis_result(data))
+            elif isinstance(ev, E.LoopDone):
+                rec.node_results.setdefault(node_path, {}).update(loop_result(data))
+            elif isinstance(ev, E.RunFinished):
+                rec.node_results.setdefault(node_path, {}).update(finished_result(data))
+            elif isinstance(ev, JVFinished):
+                rec.node_results.setdefault(node_path, {}).update(jv_result(data))
         if isinstance(ev, E.RunStateChanged):
             self._apply_state(rec, ev.state, ts)
         elif isinstance(ev, E.NodeStarted):

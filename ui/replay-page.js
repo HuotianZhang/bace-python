@@ -26,6 +26,9 @@ import { loopsModel } from './lib/charts/loops.js';
 import { scheduleModel } from './lib/charts/schedule.js';
 import { costModel, scheduleTree, timeline } from './lib/tree.js';
 import { pulseDelayS, runFor, shotBlock, valuesOf } from './lib/results.js';
+import { gridModel, summaryModel, runGroups, moduleNodes, GRID_MODULES } from './lib/history.js';
+import { gridChartModel } from './lib/charts/grid.js';
+import { renderGroups, renderRunHead, renderGrid, renderSummary, renderNodes, renderNodePanel } from './lib/grid.js';
 
 const store = createStore({ schedule: (fn) => requestAnimationFrame(fn) });
 const loaded = [];
@@ -34,6 +37,10 @@ let paced = null;
 const controls = h('div.card');
 const summary = h('div');
 const charts = h('div.card');
+const resultsEl = h('div.card');
+/** The results tab's selection, offline: which record, which node. */
+let openRecord = null;
+let openNode = null;
 /** The two endpoint fixtures, which are payloads rather than frames. */
 const payloads = {};
 // The real rail and the real strip, off the same store: M1 is developed and
@@ -57,7 +64,7 @@ app.replaceChildren(
       + 'every run semantic and cannot draw a curve — the payload policy keeps the scalars '
       + 'and drops the traces. The recorded streams carry the traces, decimated as the wire '
       + 'sends them, and the StepPhase frames that are live-only and exist nowhere else.'),
-    controls, charts, summary),
+    controls, charts, resultsEl, summary),
   stripEl);
 
 function renderControls(status) {
@@ -110,6 +117,16 @@ async function load(entry, { pace }) {
       renderControls(`${entry.url} — ${frames.counters.modules} module runs, `
         + `${(frames.schedule || []).length} steps, ${frames.checks.length} checks, `
         + `cost ${frames.cost.lower_bound ? 'a floor' : 'known'}`);
+    } else if (entry.kind === 'index' || entry.kind === 'record') {
+      // `GET /runs` and `GET /runs/{id}`: what the results tab (M6) reads,
+      // and nothing a store folds -- the grid is drawn from the record's
+      // `nodes`, the same shape from this process and from a journal file.
+      payloads[entry.key] = frames;
+      if (entry.kind === 'record') { openRecord = entry.key; openNode = null; }
+      renderResults();
+      renderControls(entry.kind === 'index'
+        ? `${entry.url} — ${frames.length} rows, ${new Set(frames.map((r) => r.session_id)).size} session(s)`
+        : `${entry.url} — ${Object.keys(frames.nodes || {}).length} nodes, ${frames.state}`);
     } else if (entry.kind === 'data') {
       // `GET /runs/{id}/data`: full precision, and the only place the running
       // integral and the J–V arrays exist offline. The journals cannot draw a
@@ -200,6 +217,54 @@ function renderCharts() {
       payloads['validate-txill'] || payloads['validate-bound'] || payloads['validate-nested']
         ? null : h('p.absent', 'load a validate fixture for the schedule bar'),
     ];
+  });
+}
+
+/**
+ * The results tab, off the two endpoint fixtures — M6's grid, summary,
+ * node list and panel, drawn by the same functions the tab uses. Re-queue
+ * says what it would have posted, since nothing here can answer it.
+ */
+function renderResults() {
+  const rows = payloads['runs-index'];
+  const record = openRecord ? payloads[openRecord] : null;
+  const key = [rows ? rows.length : 0, openRecord, openNode].join('|');
+  keyed(resultsEl, key, () => {
+    const kids = [h('h2', 'results · M6'),
+      h('p.chart-note', 'GET /runs, grouped by session, and one GET /runs/{id}: the T x LED grid with '
+        + 'the partial cell outlined and the never-run cell hatched, the summary strip, and every '
+        + 'flag with its reason — no folder name parsed, no HDF5 opened')];
+    if (rows) {
+      kids.push(h('h3', 'runs'), renderGroups(runGroups(rows), {
+        selected: record ? record.run_id : null,
+        onSelect: (id) => renderControls(`offline: the tab would GET /runs/${id}`),
+      }));
+    }
+    if (!record) {
+      kids.push(h('p.absent', 'load a GET /runs/{id} record for the grid'));
+      return kids;
+    }
+    const grid = gridModel(record);
+    const summary = summaryModel(grid, record);
+    const nodes = moduleNodes(record);
+    if (!nodes.some((n) => n.node_path === openNode)) {
+      const cell = nodes.find((n) => GRID_MODULES.has(n.module));
+      openNode = (cell || nodes[0] || {}).node_path ?? null;
+    }
+    const node = nodes.find((n) => n.node_path === openNode) || null;
+    const select = (path) => { openNode = path; renderResults(); };
+    kids.push(renderRunHead(record, grid, summary),
+      h('div.rbody',
+        h('div.rleft',
+          renderGrid(grid, { selected: openNode, onSelect: select }),
+          grid.shape === 'grid' ? renderSummary(summary) : null,
+          grid.shape === 'grid' && summary.present > 1 ? chart(gridChartModel(grid, { by: 'led' })) : null,
+          h('h3', 'nodes, in the order they ran'),
+          renderNodes(record, { selected: openNode, onSelect: select })),
+        h('div.rright', renderNodePanel(record, node, grid, {
+          onRerun: (n) => renderControls(`offline: the tab would POST /runs {module: ${n.module}, params: this node's overrides}`),
+        }))));
+    return kids;
   });
 }
 

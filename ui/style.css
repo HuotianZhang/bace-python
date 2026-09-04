@@ -685,3 +685,138 @@ button.link:hover { color: var(--accent-dark); }
 .gridfill { display: flex; flex-direction: column; gap: 4px; }
 .fs .k { color: var(--grey); min-width: 5ch; }
 .fs.mod .p { color: var(--ink); font-weight: 500; }
+
+/* -- the results tab (M6, R2·3) --------------------------------------------
+   Two columns: the runs the journal knows, and the one that is open. 380px
+   for the list — a row is a label, a state, a stamp and a count, and the
+   folder is not in it — and the rest for the grid, which is nine rows by
+   five columns on the canonical tree and must not wrap. */
+.results {
+  display: grid;
+  grid-template-columns: 380px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+.results .card { margin: 0; padding: 0; display: flex; flex-direction: column; min-width: 0; }
+.results .ch .spacer { flex: 1 1 auto; }
+.results .cs.right { margin-left: auto; }
+
+/* The run list, grouped by session. A row is a button because it is one. */
+.hist .cb { gap: 10px; max-height: calc(100vh - 220px); overflow: auto; }
+.hgroup { display: flex; flex-direction: column; gap: 2px; }
+.hgh {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  padding: 2px 0 4px; border-bottom: 1px solid var(--rule);
+  font-size: 11px;
+}
+.hrow {
+  display: flex; flex-direction: column; gap: 1px; align-items: stretch;
+  text-align: left; width: 100%;
+  padding: 4px 8px; border: 1px solid var(--rule); background: var(--paper);
+  font-family: var(--font-body); font-weight: 400; font-size: 12px; letter-spacing: 0;
+  cursor: pointer;
+}
+.hrow:hover { background: var(--fill); }
+.hrow.on { border-color: var(--ink); box-shadow: inset 2px 0 0 var(--ink); }
+.hr1, .hr2 { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.hr2 { font-size: 11px; color: var(--grey); }
+.hr3 { font-size: 11px; }
+.hname { font-family: var(--font-head); font-weight: 600; font-size: 12px; }
+/* A state reads at its loudness (§3): a failure is the one alert on the list. */
+.tag.st { text-transform: none; letter-spacing: 0; font-family: var(--font-num); }
+.tag.st.ok { border-color: var(--ok); color: var(--ok); }
+.tag.st.warn { border-color: var(--warn); color: var(--warn); }
+.tag.st.crit { border-color: var(--alert); color: var(--alert); font-weight: 600; }
+.tag.st.live { border-color: var(--accent); color: var(--accent); }
+
+/* The open run. */
+.open .rhd .ch { border-bottom: 0; }
+.rhead { padding: 8px 10px; border-bottom: 1px solid var(--rule); display: flex; flex-direction: column; gap: 3px; }
+.rh1, .rh2 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.rh2 { font-size: 12px; }
+.rname { font-family: var(--font-head); font-weight: 800; font-size: 14px; }
+.rcomment { margin: 2px 0 0; font-size: 12px; }
+.rbody { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 14px; align-items: start; }
+.rleft { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.rright { min-width: 0; position: sticky; top: 0; }
+.rleft h3, .rright h3 { font-size: 11px; margin: 6px 0 2px; text-transform: uppercase; letter-spacing: .08em; color: var(--grey); }
+
+/* The grid. Every cell of the product is a cell; the three states are three
+   borders, so they read with the colour turned off. */
+.qgrid-wrap { display: flex; flex-direction: column; gap: 6px; overflow-x: auto; }
+table.qgrid { border-collapse: separate; border-spacing: 3px; }
+table.qgrid th {
+  font-weight: 400; color: var(--grey); font-size: 11px; text-align: left; white-space: nowrap;
+  padding: 2px 6px; vertical-align: middle;
+}
+table.qgrid th.corner { color: var(--grey); }
+table.qgrid thead th { text-align: center; font-family: var(--font-num); }
+table.qgrid tbody th .num { color: var(--ink); font-size: 12px; margin-right: 4px; }
+table.qgrid td { padding: 0; }
+.tlv { font-size: 10px; font-family: var(--font-num); }
+.tlv.warn { color: var(--warn); }
+.tlv.ok { color: var(--ok); }
+.cell {
+  display: flex; flex-direction: column; gap: 1px; align-items: flex-start;
+  min-width: 118px; padding: 4px 7px;
+  border: 1px solid var(--rule); background: var(--paper);
+  font-family: var(--font-num); font-weight: 400; letter-spacing: 0; text-align: left;
+  cursor: pointer;
+}
+.cell:hover { background: var(--fill); }
+.cell.on { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+/* Partial: outlined in the accent, never averaged in, never dropped. */
+.cell.partial { border: 1.5px dashed var(--accent-dark); }
+.cell.failed { border-color: var(--alert); }
+.cell.missing {
+  cursor: default; min-height: 44px; justify-content: center;
+  background: repeating-linear-gradient(45deg, var(--paper), var(--paper) 4px, var(--fill) 4px, var(--fill) 8px);
+  border-color: var(--rule);
+}
+.cell .cq { font-size: 12.5px; font-weight: 500; }
+.cell .cv { font-size: 10.5px; color: var(--grey); }
+.cell .ck { font-size: 10px; color: var(--accent-dark); }
+.cell .ck.cs { color: var(--grey); }
+.mk { display: inline-block; width: 9px; height: 9px; border: 1px solid var(--ink); background: var(--ink); }
+.mk.hollow { background: var(--paper); }
+.mk.partial { background: var(--paper); border: 1.5px dashed var(--accent-dark); }
+.mk.missing { background: repeating-linear-gradient(45deg, var(--paper), var(--paper) 2px, var(--rule) 2px, var(--rule) 4px); border-color: var(--rule); }
+
+/* The summary strip: four sentences about the whole run. */
+.rsum { display: flex; flex-direction: column; gap: 3px; border-top: 1px solid var(--rule); padding-top: 6px; }
+.rsl { display: grid; grid-template-columns: 8em 1fr; gap: 8px; font-size: 12px; }
+.rsk { color: var(--grey); font-size: 11px; }
+.rsv { font-family: var(--font-num); font-size: 11.5px; }
+.rsv.warn { color: var(--warn); }
+
+/* The node list: every module node, the J-Vs included. */
+.nlist { display: flex; flex-direction: column; gap: 2px; }
+.nrow {
+  display: flex; flex-direction: column; gap: 1px; align-items: stretch; text-align: left;
+  padding: 3px 8px; border: 1px solid var(--rule); background: var(--paper);
+  font-family: var(--font-body); font-weight: 400; font-size: 12px; letter-spacing: 0; cursor: pointer;
+}
+.nrow:hover { background: var(--fill); }
+.nrow.on { border-color: var(--ink); box-shadow: inset 2px 0 0 var(--ink); }
+.nrow.partial { border-left: 3px dashed var(--accent-dark); }
+.nr1, .nr2 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.nr2 { font-size: 11px; }
+.nr2 .warn { color: var(--warn); }
+.nr2 .ok { color: var(--ok); }
+.np { font-weight: 500; }
+
+/* The selected node. */
+.npanel { border: 1px solid var(--ink); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.nph { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.nnum td .num { font-size: 12.5px; }
+.nnum td.cs, .nprov td { font-size: 11.5px; }
+.nprov .warn { color: var(--warn); }
+.nprov .ok { color: var(--ok); }
+.flags { display: flex; flex-direction: column; gap: 4px; }
+.flags .warn1 { align-items: baseline; }
+.flags .warn1.info { color: var(--grey); }
+.flags .warn1 .code { flex: 0 0 13em; overflow-wrap: break-word; }
+.flags .warn1 > span:last-child { min-width: 0; }
+/* The folder, whole. Long names are real and must not truncate (§1). */
+.path { margin: 0; font-size: 11px; overflow-wrap: anywhere; user-select: all; }
+.rchart { border-top: 1px solid var(--rule); padding-top: 6px; }

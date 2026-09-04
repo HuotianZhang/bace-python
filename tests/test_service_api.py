@@ -421,6 +421,62 @@ def test_a_manual_run_streams_over_the_websocket_and_lands_in_the_record(service
     assert [f["type"] for f in replay["events"]] == types
 
 
+def test_the_identity_travels_with_the_run_and_both_endpoints_agree_on_the_nodes(service):
+    """`docs/naming-plan.md` rule 1, on the wire. Every row of `GET /runs`
+    carries the `[sample]` block it was queued under; `GET /runs/{id}` carries
+    it too, and its `nodes` -- each module node with its temperature triple,
+    its LED level, its V_oc and what it measured -- are the same shape whether
+    the record comes from this process or from the journal file, because both
+    are built by `journal.node_record`. The results tab reads these and
+    nothing else."""
+    client, session = service
+    r = client.post("/runs", json={"module": "jv_bace", "params": {"step_v": 0.05}})
+    assert r.status_code == 202, r.text
+    first = r.json()["run_id"]
+    wait_run(session, first)
+    r = client.post("/runs", json=bace(2))
+    assert r.status_code == 202, r.text
+    second = r.json()["run_id"]
+    wait_run(session, second)
+
+    identity = {"sample": "s4", "material": "SIM", "pixel": "a", "temperature_k": 290.0}
+    rows = client.get("/runs").json()
+    assert [row["sample"] for row in rows] == [identity, identity]
+    assert client.get("/runs", params={"session": "all"}).json()[0]["sample"] == identity
+
+    rec = client.get(f"/runs/{second}").json()
+    assert rec["from"] == "session" and rec["sample"] == identity
+    node = rec["nodes"]["bace"]
+    # No temperature node above it: the session's typed 290 K, said to be typed.
+    assert (node["temperature_k"], node["temperature_how"], node["temperature_source"]) == \
+        (290.0, "typed", "")
+    assert node["module"] == "bace" and node["outcome"] == "ok"
+    assert (node["kept"], node["requested"], node["shots"]) == (2, 2, 2)
+    assert node["voc_how"] == "jv_bace" and node["voc_led_v"] == 1.02 and node["led_v"] == 1.02
+    assert node["offset_corrected"] is True
+    assert len(node["values"]) == 1 and len(node["q_mean"]) == 1 and len(node["q_std"]) == 1
+    assert node["values"][0] == node["voc"], "a bace at V_oc: the one axis point is the V_oc"
+    assert node["shots_flagged"] == 0 and node["intensity_recorded"] == 2
+
+    jv = client.get(f"/runs/{first}").json()["nodes"]["jv_bace"]
+    assert jv["temperature_how"] == "typed" and jv["offset_corrected"] is None, (
+        "a J-V has no baseline to subtract, and says nothing rather than False")
+    assert len(jv["curves"]) == 2 and {c["dark"] for c in jv["curves"]} == {True, False}
+    assert all(set(c) == {"label", "dark", "led_level_v", "direction", "n_points", "metrics"}
+               for c in jv["curves"]), "the metrics, never the sweep"
+
+    # Byte for byte what a later process reads back from the file.
+    for run_id in (first, second):
+        from_file = session.journal.run_record(run_id)
+        assert from_file["nodes"] == client.get(f"/runs/{run_id}").json()["nodes"], run_id
+        assert from_file["sample"] == identity
+
+    # The header says it too: what a file with no runs in it can still say.
+    with open(session.journal.path, encoding="utf-8") as fh:
+        head = json.loads(fh.readline())
+    assert head["type"] == "SessionStarted" and head["data"]["sample"] == identity
+
+
 def test_bace_is_refused_without_a_voc_source_and_centres_on_the_sessions(service):
     client, session = service
     r = client.post("/runs", json=bace(2))

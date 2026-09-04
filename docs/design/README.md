@@ -61,12 +61,18 @@ flag list where every flag states its reason; `where it is` with the full path
 and file list; the provenance summary `resolved from: run.toml 17 · last-used 2
 · inherited 2 (led_v, V_oc) · edited 1`; and `Re-queue this cell`.
 
-**Two things to decide before treating it as a specification.** It names a
-`flags.json` in the run folder, and the service writes HDF5 + the legacy `.dat`
-+ the journal — so either the contract gains the file or the view reads the
-journal. And its `saturation` line uses the pre-correction wording: the service
-reports a shared extreme but **judges it as nothing**, so the line may read the
-same only if it no longer means the same.
+**Two things to decide before treating it as a specification — decided in
+M6, 2026-09-04.** It names a `flags.json` in the run folder, and the service
+writes HDF5 + the legacy `.dat` + the journal: the view reads the record
+(`GET /runs/{id}`, whose `nodes` now carry the temperature triple, the V_oc
+with its level, the counts and the per-point statistics), and the flags are
+built from it — the run's verdicts where they apply, the node's outcome and
+counts, the temperature and V_oc provenance, the meter's silence — each a
+sentence with its reason. And its `saturation` line used the pre-correction
+wording: the service reports a shared extreme but **judges it as nothing**,
+so the built line is the digitiser's own judgment — *N of M shots flagged*, or
+*no shot flagged, M of M judged* — and says nothing about an extreme it
+judged as nothing. `ui/lib/history.js` carries both decisions in its header.
 
 ## What has been corrected here, and what has not
 

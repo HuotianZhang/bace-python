@@ -1,0 +1,111 @@
+[
+ {
+  "run_id": "20260904_073846-003",
+  "session_id": "20260904_073846",
+  "kind": "pipeline",
+  "name": "ui-fixture-results-grid",
+  "module": null,
+  "sample": {
+   "sample": "s4",
+   "material": "SIM",
+   "pixel": "a",
+   "operator": "fixture",
+   "comment": "recorded off --sim for the results tab",
+   "temperature_k": 290.0
+  },
+  "tree_summary": "T\u00d72/led\u00d72/jv_bace+bace",
+  "node_count": 2,
+  "state": "stopped",
+  "parked": true,
+  "queued_at": 1788507530.8307018,
+  "started_at": 1788507530.8328075,
+  "finished_at": 1788507533.5801995,
+  "kept": 614,
+  "requested": 808,
+  "outcome_text": "8/8 module runs \u00b7 614/808 shots \u00b7 stopped",
+  "folder": "/tmp/claude-0/-home-user-bace-python/eb056df8-84c6-5aca-9e1a-8716aba55d5e/scratchpad/svc/runs/ui-fixture-results-grid_20260904_073850",
+  "folders": [
+   "/tmp/claude-0/-home-user-bace-python/eb056df8-84c6-5aca-9e1a-8716aba55d5e/scratchpad/svc/runs/ui-fixture-results-grid_20260904_073850/s4_SIM_a_250.1K_1010mVLED_recorded-off-sim-for-the-results-tab_20260904_073851",
+   "/tmp/claude-0/-home-user-bace-python/eb056df8-84c6-5aca-9e1a-8716aba55d5e/scratchpad/svc/runs/ui-fixture-results-grid_20260904_073850/s4_SIM_a_250.1K_1010mVLED_888mVVOC_offsetcorr_recorded-off-sim-for-the-results-tab_20260904_073851",
+   "/tmp/claude-0/-home-user-bace-python/eb056df8-84c6-5aca-9e1a-8716aba55d5e/scratchpad/svc/runs/ui-fixture-results-grid_20260904_073850/s4_SIM_a_250.1K_1020mVLED_recorded-off-sim-for-the-results-tab_20260904_073851",
+   "/tmp/claude-0/-home-user-bace-python/eb056df8-84c6-5aca-9e1a-8716aba55d5e/scratchpad/svc/runs/ui-fixture-results-grid_20260904_073850/s4_SIM_a_250.1K_1020mVLED_903mVVOC_offsetcorr_recorded-off-sim-for-the-results-tab_20260904_073851",
+   "/tmp/claude-0/-home-user-bace-python/eb056df8-84c6-5aca-9e1a-8716aba55d5e/scratchpad/svc/runs/ui-fixture-results-grid_20260904_073850/s4_SIM_a_280.1K_1010mVLED_recorded-off-sim-for-the-results-tab_20260904_073852",
+   "/tmp/claude-0/-home-user-bace-python/eb056df8-84c6-5aca-9e1a-8716aba55d5e/scratchpad/svc/runs/ui-fixture-results-grid_20260904_073850/s4_SIM_a_280.1K_1010mVLED_887mVVOC_offsetcorr_recorded-off-sim-for-the-results-tab_20260904_073852",
+   "/tmp/claude-0/-home-user-bace-python/eb056df8-84c6-5aca-9e1a-8716aba55d5e/scratchpad/svc/runs/ui-fixture-results-grid_20260904_073850/s4_SIM_a_280.1K_1020mVLED_recorded-off-sim-for-the-results-tab_20260904_073853",
+   "/tmp/claude-0/-home-user-bace-python/eb056df8-84c6-5aca-9e1a-8716aba55d5e/scratchpad/svc/runs/ui-fixture-results-grid_20260904_073850/s4_SIM_a_280.1K_1020mVLED_903mVVOC_offsetcorr_recorded-off-sim-for-the-results-tab_20260904_073853"
+  ],
+  "error": null,
+  "voc_min": 0.8871970546224496,
+  "voc_max": 0.9026302571272389,
+  "light_curves": 4,
+  "node_count_done": 8
+ },
+ {
+  "run_id": "20260904_073846-002",
+  "session_id": "20260904_073846",
+  "kind": "manual",
+  "name": "ui-fixture-results-manual",
+  "module": "bace",
+  "sample": {
+   "sample": "s4",
+   "material": "SIM",
+   "pixel": "a",
+   "operator": "fixture",
+   "comment": "recorded off --sim for the results tab",
+   "temperature_k": 290.0
+  },
+  "tree_summary": "bace",
+  "node_count": 1,
+  "state": "done",
+  "parked": true,
+  "queued_at": 1788507530.7670093,
+  "started_at": 1788507530.7796314,
+  "finished_at": 1788507530.8221269,
+  "kept": 5,
+  "requested": 5,
+  "outcome_text": "Q -1.395e-12 \u00b1 9.6e-12 C \u00b7 5/5",
+  "folder": "/tmp/claude-0/-home-user-bace-python/eb056df8-84c6-5aca-9e1a-8716aba55d5e/scratchpad/svc/runs/s4_SIM_a_290K_1000mVLED_32mVVOC_offsetcorr_recorded-off-sim-for-the-results-tab_20260904_073850",
+  "folders": [
+   "/tmp/claude-0/-home-user-bace-python/eb056df8-84c6-5aca-9e1a-8716aba55d5e/scratchpad/svc/runs/s4_SIM_a_290K_1000mVLED_32mVVOC_offsetcorr_recorded-off-sim-for-the-results-tab_20260904_073850"
+  ],
+  "error": null,
+  "voc_min": null,
+  "voc_max": null,
+  "light_curves": 0,
+  "node_count_done": 1
+ },
+ {
+  "run_id": "20260904_073846-001",
+  "session_id": "20260904_073846",
+  "kind": "manual",
+  "name": "",
+  "module": "jv_bace",
+  "sample": {
+   "sample": "s4",
+   "material": "SIM",
+   "pixel": "a",
+   "operator": "fixture",
+   "comment": "recorded off --sim for the results tab",
+   "temperature_k": 290.0
+  },
+  "tree_summary": "jv_bace",
+  "node_count": 1,
+  "state": "done",
+  "parked": true,
+  "queued_at": 1788507530.7354865,
+  "started_at": 1788507530.737254,
+  "finished_at": 1788507530.779579,
+  "kept": 2,
+  "requested": 2,
+  "outcome_text": "2 curves \u00b7 V_oc 0.032 V",
+  "folder": "/tmp/claude-0/-home-user-bace-python/eb056df8-84c6-5aca-9e1a-8716aba55d5e/scratchpad/svc/runs/s4_SIM_a_290K_1000mVLED_recorded-off-sim-for-the-results-tab_20260904_073850",
+  "folders": [
+   "/tmp/claude-0/-home-user-bace-python/eb056df8-84c6-5aca-9e1a-8716aba55d5e/scratchpad/svc/runs/s4_SIM_a_290K_1000mVLED_recorded-off-sim-for-the-results-tab_20260904_073850"
+  ],
+  "error": null,
+  "voc_min": 0.0319185230720556,
+  "voc_max": 0.0319185230720556,
+  "light_curves": 1,
+  "node_count_done": 1
+ }
+]

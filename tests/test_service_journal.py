@@ -12,7 +12,7 @@ import os
 
 import pytest
 
-from bace.service.journal import MAX_HISTORY_FILES, Journal, run_queued
+from bace.service.journal import MAX_HISTORY_FILES, Journal, node_record, run_queued
 
 T0 = 1_788_390_000.0
 HEADER = {"mode": "sim", "rig_toml": "rig.toml", "run_toml": "run.toml", "out": "runs",
@@ -182,7 +182,7 @@ def test_run_queued_is_the_line_the_queries_key_on():
     assert d["data"] == {"kind": "manual", "module": "bace",
                          "tree": {"kind": "module", "module": "bace"},
                          "params": {"n_loops": 20}, "name": "quick",
-                         "resolved": None, "folder": None}, (
+                         "resolved": None, "folder": None, "sample": None}, (
         "the experiment.events.RunQueued dataclass, every field, as the one event path writes it")
     json.dumps(d)
     assert run_queued(seq=1, ts=None, run_id="r", kind="pipeline", module=None,
@@ -454,14 +454,26 @@ def test_run_record_finds_a_run_in_any_session_file_with_its_nodes(tmp_path):
         rec = j.run_record("20260901_100000-001")
         assert rec is not None and rec["state"] == "done" and rec["session_id"] == "20260901_100000"
         assert rec["tree"] == {"kind": "module", "module": "bace", "params": {"n_loops": 7}}
-        assert rec["nodes"] == {"bace": {
+        node = rec["nodes"]["bace"]
+        assert {k: node[k] for k in ("module", "outcome", "kept", "requested", "voc", "voc_how",
+                                     "led_v", "temperature_k", "temperature_how",
+                                     "temperature_source", "summary", "folder")} == {
             "module": "bace", "outcome": "ok", "kept": 4, "requested": 20, "voc": 0.906,
             "voc_how": "jv_bace", "led_v": 1.02, "temperature_k": 250.1,
             # Beside the number, as voc_how sits beside the V_oc: 250.1 K
             # that the console settled at is not 250.1 K that a loop asked for.
             "temperature_how": "settled", "temperature_source": "console",
-            "summary": "Q 1e-10 C · 4/20", "folder": "runs/s4_290K_20260902_120000",
-            "finished_at": rec["nodes"]["bace"]["finished_at"]}}
+            "summary": "Q 1e-10 C · 4/20", "folder": "runs/s4_290K_20260902_120000"}
+        assert node["finished_at"] is not None and node["node_path"] == "bace"
+        # What the node measured travels with it, so a results grid needs no
+        # HDF5: the axis from RunFinished, and the shots counted.
+        assert node["values"] == [0.906] and node["q_mean"] == [-3.52e-10]
+        assert node["q_std"] == [1.8e-12] and node["shots"] == 4
+        assert node["intensity_recorded"] == 0 and node["shots_flagged"] == 0
+        assert rec["verdicts"] == []
+        assert list(rec["nodes"]["bace"]) == list(node_record("", None, {}, None,
+                                                              started_at=None, finished_at=None)), (
+            "one key order from both sources -- the session's record builds through the same function")
         assert rec["node_count_done"] == 1
         assert j.run_record("20260902_120000-001")["nodes"] == {}, "a NodeDone naming no module"
         assert j.run_record("20260902_120000-009") is None

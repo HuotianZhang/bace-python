@@ -35,10 +35,13 @@ repo root for the offline bench at `/ui/replay.html`, which needs
 | `lib/charts/loops.js` | the M4 component: Q per loop, or Q(axis), with the switch between them in the caption — `ui-rules` §4's zero-width axis is a repeat, and the chart says so rather than drawing a curve through it |
 | `lib/charts/schedule.js` | the M5 component: the run as a length of time, settle in grey and measuring in accent, one pair per temperature. A settle nobody has measured is hatched and takes no time on the axis, and there is no clock under a total that is a floor |
 | `lib/tree.js` | the pipeline tree (M5): the tree as typed, the edit operations, the flat schedule nested back into the shape it was a walk of, what the cryostat will be at on every node, and the cost with `lower_bound` carried as the word "at least" |
+| `lib/history.js` | the results tab's models (M6): the run list grouped by session, the T × LED grid with its partial and never-run cells, the summary strip, the temperature triple and the V_oc in words, every flag with its reason, the provenance line, the CSV |
+| `lib/grid.js` | the results tab's DOM, beside those models — the same split the rail has |
+| `lib/charts/grid.js` | the M6 component: Q(led_v) per temperature, or Q(T) per level, the partial cell hollow in the accent |
 | `lib/results.js` | what goes in a card's result slot, and the key it is rebuilt on: the chart moves with every shot, the form does not. Since M4 the newest shot's own line comes first — Q, mean and σ at its point, the peaks, the digitiser's verdict and which `trigger_sweep` was in force |
 | `lib/monitor.js` | the run monitor (M4): `monitorModel(state)` is a pure function of the store — the loops at their three time scales, the shot, its segment from `StepPhase`, the ETA counting down, which of stop / abort / cancel apply, and the prompt a `NeedsOperator` opens — with the DOM beside it, under the rail on every tab |
 | `lib/replay.js`, `replay.html` | the offline bench: fixtures fed into the same store the socket feeds |
-| `views/` | bench is M2's six generated cards with M3's charts in three of them; pipeline is M5's editor and schedule; results is a stub that says which milestone fills it, and rig is the read-back |
+| `views/` | bench is M2's six generated cards with M3's charts in three of them; pipeline is M5's editor and schedule; results is M6's grid, drawn from `GET /runs` and `GET /runs/{id}` and nothing else; rig is the read-back |
 | `fonts/` | IBM Plex Sans and Mono, Archivo — 24 woff2, 387 KB, lifted out of the Round 3 mockup by `tools/extract_ui_fonts.py`. Nothing is fetched from a network at runtime |
 | `fixtures/` | see below |
 | `tests/` | `node --test ui/tests/…` — and `tests/test_ui.py` runs them from the Python suite, skipping where there is no Node |
@@ -85,6 +88,9 @@ shape `GET /runs/{id}/data` answers, because a browser cannot open HDF5.
 | `stream_stopped_sim.jsonl` | a 20-loop scan stopped `after_shot` at loop 13 — 60 requested, 39 kept: the one `RunAborted`, `stopping`, `stopped`, and a node that ended `stopped` in the set |
 | `validate_txill_sim.json` | `POST /pipelines/validate` on the canonical 9 T × 5 level tree — 90 module runs, 198 steps, 4500 shots, and a cost that is a floor because no settle has been measured on this bench. The whole pipeline tab is drawn from one of these |
 | `validate_bound_sim.json` | the same endpoint on the two shapes the canonical tree has none of: a `temperature` **module**, whose setpoint binds the rest of the run, and duplicate sibling modules (`bace`, `bace#2`). Its cost is the counter-case — nothing settles, so nothing is a floor |
+| `runs_sim.json` | `GET /runs?session=all`: three rows, each with the `[sample]` block it was queued under — the identity per run, never a folder name parsed (`docs/naming-plan.md` rule 1) |
+| `run_grid_sim.json` | `GET /runs/{id}` of `T [250, 280] × led [1.010, 1.020] × (jv_bace + bace)`, stopped six shots into its last cell: three complete cells and one **partial** one, the temperature triple `operator/operator` on every node, and the partial node still carrying the running statistics of the loops that ran. Recorded over HTTP alone, polling the record for the moment to ask for the stop — under `--fast` a twenty-shot cell is over before a stop can land |
+| `run_bace_sim.json` | `GET /runs/{id}` of a manual `bace` at the V_oc a `jv_bace` measured: one cell, `290.0 K · typed`, and `params_as_executed` for the provenance line |
 | `validate_nested_sim.json` | a temperature loop **inside** a temperature loop, with a module either side of the inner one. Legal, pathological, and the case the time bar got wrong: `pipeline.estimate` counts every temperature's settle and hold once however deep, and a bar drawn one block per *outer* iteration read 62 s against a cost of 102 s |
 
 Everything with `_sim` in its name came off `--sim`, and says so in its name on
@@ -179,8 +185,59 @@ and the timing diagram, each in the card that owns it.
 beside its trace, and Q per loop / Q(axis).
 
 **M5 is built**: the pipeline tab — the tree editor, the schedule at three
-scales, and the cost. **M6 is next**, and is preceded by a design pass: R2·3
-is a Round 2 artboard and Round 3 left the results tab empty.
+scales, and the cost.
+
+**M6 is built**: the results tab — R2·3 as it stands, in Round 3's shell,
+drawn from the record and from nothing else.
+
+### What the results tab is, and what it never re-derives
+
+Two columns: the runs the journal knows (`GET /runs?session=all`, grouped by
+session, newest first, each row carrying the device it ran on) and the one
+that is open (`GET /runs/{id}`): its identity, its T × LED grid of Q at
+V_pre = V_oc with the V_oc beneath each cell, R2·3's summary strip, Q(led_v)
+per T or its transpose, every module node in the order it ran, and the
+selected node's numbers, flags, folder and provenance.
+
+* **Nothing here is computed from a folder name, and no HDF5 is opened.** The
+  record carries what a grid needs, because M6 is what `docs/naming-plan.md`
+  rule 1 was written for: the `[sample]` block per run, the temperature triple
+  and the LED level per node, and per node what it measured — its axis with
+  `q_mean`/`q_std` per point, a J-V's curves as their metrics, how many of its
+  shots carried an intensity or a digitiser verdict. `journal.node_record`
+  builds that shape, and the session's `RunRecord.as_wire` builds its `nodes`
+  through the same function, so the tab does not know which side of a restart
+  a run is on.
+* **The partial cell is outlined, never averaged in silently, never dropped.**
+  `kept < requested` is a cell in the accent's dashed border, its Q the running
+  mean over the shots that ran (a stopped node keeps its last `LoopDone`), the
+  span line excluding it *and saying so*; a cell of the product that never ran
+  stays in the grid, hatched.
+* **σ_Q = 0 is not recorded**, and the legend is R2·3's: `□ σ_Q not recorded
+  · ● σ_Q measured`. A cell says `□` where a bare dot would claim a σ.
+* **Every flag states its reason**, in `ui-rules` §10's voice: *6 of 200 shots
+  kept · stopped after a shot · the statistics are over the shots that ran*;
+  *intensity null on every shot · the meter did not answer; watts not
+  recorded, mW/cm² never inferred*; *V_oc from jv_bace at 1.010 V — this cell
+  pulsed at 1.020 V · a V_oc from a different illumination is worse than none*.
+  The run's own verdicts appear where they apply — the whole run's on every
+  node, a loop's on the nodes beneath it — and there is no `flags.json`,
+  because the service never wrote one.
+* **The temperature row says how it knows.** `how` and `source` both, as
+  `docs/ui-kickoff.md` asks: *typed by the operator at the pause* is not
+  *settled*, and a `simulated` source never reads as a measurement.
+* **The list moves when a run parks, and not before.** A run in flight is the
+  monitor's; its row reads its state off the stream, and the index and the
+  open record are re-read at `parked`, when the journal's summary of it is
+  complete. Measured in headless Chromium through a `jv_bace` and a
+  twenty-loop `bace` on `--sim --fast`: the list rebuilt a handful of times,
+  at each park and as the running row's state moved; the open grid, its chart
+  and its panel not at all.
+
+The two things R2·3 draws that the tab deliberately does not: a folder is
+shown whole and selectable rather than opened, and "Re-queue this cell" is one
+*manual* run of the node's module with its overrides and the loop's level,
+never its V_oc and never a pipeline — the caption says why.
 
 ### What the pipeline tab is, and what it never counts
 

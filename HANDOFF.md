@@ -2,10 +2,11 @@
 
 Converting `BACE_Mehrdad.vi` (LabVIEW, 907 VIs) to Python. The measurement half
 is written, tested and proven on the rig; the service over it is built and
-proven on the simulator. The UI is under way — `docs/ui-plan.md` M0 to M5 are
+proven on the simulator. The UI is under way — `docs/ui-plan.md` M0 to M6 are
 done (the event layer and its fixtures, the pinned rail and the chain strip,
-the generated module cards, the charts, the run monitor, and the pipeline tab);
-M6, the results tab, is next, and is preceded by a design pass.
+the generated module cards, the charts, the run monitor, the pipeline tab, and
+the results tab — R2·3 as it stands, drawn from the record); the design
+iteration on results with the user is still to be had, on the built tab.
 
 Read `docs/bace-status.html` first — it is the full narrative with the evidence.
 This file is the operational summary.
@@ -173,8 +174,12 @@ three scales, the check list collapsed to its counts, and the cost with
 `lower_bound` rendered as "at least" and never as a finish time. The canonical
 9 T × 5 level tree was built through the console's own controls, dry-run,
 started, and stopped from the monitor. Nothing in the service changed for any
-of it. **M6 is not built** — the results tab, after a design pass. **Explicit
-instruction from the user, 2026-09-01:**
+of it. **M6, 2026-09-04**, is the results tab: R2·3 as it stands in Round 3's
+shell, drawn from `GET /runs` and `GET /runs/{id}` and from nothing else —
+which needed `docs/naming-plan.md` rule 1 in the service (the identity on
+every run, the temperature triple and what was measured on every node). The
+iteration with the user did not happen in that session; the built tab is what
+to iterate on. **Explicit instruction from the user, 2026-09-01:**
 
 > *"I do not want the same shape as JV console and the 331 controller. I want a
 > suitable shape for this measurement itself (the ui should be demonstrated and
@@ -186,7 +191,8 @@ dark trace, their difference and one charge. Draft it in **Claude Design** and
 iterate with the user there. The Round 3 canvas (`docs/bace-console-round3.html`,
 four tabs: bench, pipeline, results, rig) is where that stands, and the service
 was built to serve it; `python -m bace.service --ui DIR` serves what gets built.
-The results tab is not designed on either side.
+The results tab: R2·3 was its design all along (`docs/design/README.md`),
+and it is built.
 
 **Temperature** — wired since this handover was written (superseded here by
 `docs/service-contract.md` section 7). The Lake Shore 331 is at

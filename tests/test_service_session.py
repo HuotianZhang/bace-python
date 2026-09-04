@@ -96,7 +96,11 @@ def test_a_manual_jv_goes_through_the_worker_the_journal_and_the_registry(tmp_pa
                                               "params": {"step_v": 0.1}},
                                      "params": frames[0]["data"]["params"],
                                      "resolved": frames[0]["data"]["resolved"],
-                                     "folder": None}
+                                     "folder": None,
+                                     # The identity travels with the run, not
+                                     # only in the header (naming-plan rule 1).
+                                     "sample": {"sample": "s4", "material": "SIM",
+                                                "pixel": "a", "temperature_k": 290.0}}
         # params is what last_used_params hands back: what the operator
         # chose, not every resolved default. step_v was typed; smu_nplc came
         # from run.toml and keeps its own provenance next time.
