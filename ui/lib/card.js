@@ -195,10 +195,17 @@ function provenance(spec, ctx, model, editable) {
   // node form sets `spec.node` — is this override typed *here* — and that is
   // the authority, because the tree is the client's own and needs no string
   // parsed out of `detail` to know what is in it.
-  const resettable = spec.node === undefined ? spec.source === 'edited' : spec.node;
+  //
+  // **And the reset is not gated on `editable`.** Removing a key the node
+  // types is not typing into it: a module that types `led_v` inside an
+  // illumination loop resolves `inherited` — non-editable — *and* is refused
+  // by `tree.owned-param`, so gating the two together left the operator with
+  // an override that blocks Start and no way to drop it but deleting the
+  // node. The value stays read-only; the way out stays open.
+  const resettable = spec.node === undefined ? (spec.source === 'edited' && editable) : spec.node;
   return h('span.src',
     label ? h('span.tag.src-' + spec.source, { title: spec.detail || '', text: label }) : null,
-    resettable && editable
+    resettable
       ? h('button.link', {
         title: spec.node
           ? 'drop this node’s override — the value falls back to the module as it stands on the bench'

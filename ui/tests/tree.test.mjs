@@ -16,7 +16,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-  LOOPS, canSwitchForm, checkSummary, costModel, gridModel, insertAt, loopValues,
+  LOOPS, canSwitchForm, checkSummary, costModel, gridModel, insertAt, loopCount,
+  loopSummary, loopValues,
   moveAt, newLoop, newModule, nodeAt, remapPath, removeAt, sameTree, scheduleLeaves,
   scheduleTree, setField, setParam, setValueForm, structureSummary, timeline,
   treeRows, valueForm,
@@ -368,10 +369,26 @@ test('the timeline is one block per temperature, or one block for a run without 
   assert.deepEqual(blocks.map((b) => b.setpoint_k), [295, 290, 280, 270, 260, 250, 240, 230, 220]);
   assert.ok(blocks.every((b) => b.settle_s === null && b.needs_operator));
 
+  // Outside a temperature loop the blocks follow what a `temperature` module
+  // binds: the module itself runs before the cryostat is anywhere in
+  // particular, and everything after it is at 250 K. One block for the lot
+  // would have labelled that first minute 250 K too.
   const bound = timeline(scheduleTree(BOUND.schedule));
-  assert.equal(bound.length, 1);
-  assert.equal(bound[0].setpoint_k, 250, 'at whatever the temperature module put it at');
-  assert.equal(bound[0].modules, 8);
+  assert.deepEqual(bound.map((b) => b.setpoint_k), [null, 250]);
+  assert.deepEqual(bound.map((b) => b.modules), [1, 7]);
+  assert.ok(bound.every((b) => b.settles === false), 'neither is a temperature loop');
+});
+
+test('a repeat is a count, and the count is never expanded into values', () => {
+  // `count` is typed into a text field, so `4294967296` is a plausible slip —
+  // and building `1 … 4294967296` threw `RangeError` on the render *before*
+  // the validate that would have refused it, while anything merely large
+  // froze the tab allocating it.
+  const huge = { ...newLoop('repeat'), count: 4294967296 };
+  assert.equal(loopValues(huge, null), null, 'a repeat has no values, only a count');
+  assert.equal(loopCount(huge, null), 4294967296);
+  assert.equal(loopSummary(huge, null), '4294967296 times');
+  assert.equal(loopSummary({ ...newLoop('repeat'), count: undefined }, null), 'count not set');
 });
 
 // -- the checks -------------------------------------------------------------

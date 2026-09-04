@@ -432,10 +432,13 @@ function walkRows(node, resolved, entries, path, depth, out) {
 export function loopValues(node, resolved) {
   const spec = LOOPS[node.loop];
   if (!spec) return null;
-  if (spec.count) {
-    const count = node.count ?? (resolved && resolved.count);
-    return count === undefined || count === null ? null : Array.from({ length: count }, (_, i) => i + 1);
-  }
+  // A repeat has no values, only a count. `1, 2, 3 …` is not information —
+  // and building it was a hazard: the count is typed into a text field, so
+  // `4294967296` (a plausible slip) threw `RangeError: Invalid array length`
+  // on the render *before* the validate that would have refused it, and
+  // anything merely large froze the tab allocating it. `loopCount` is what
+  // the summary needs.
+  if (spec.count) return null;
   // A typed list is its own answer — `pipeline._loop_values` returns it
   // unchanged — so the node is authoritative for it, and an answer describing
   // the list before the last edit cannot stand in front of what is on screen.
@@ -447,12 +450,21 @@ export function loopValues(node, resolved) {
   return Array.isArray(list) ? list : null;
 }
 
+/** How many times a `repeat` runs, from the tree or from the answer. */
+export function loopCount(node, resolved) {
+  const count = node.count ?? (resolved && resolved.count);
+  return count === undefined || count === null ? null : count;
+}
+
 /** `295 → 220 K · 9 · tol 0.2` — the row's one line, R3·3's own wording. */
 export function loopSummary(node, resolved) {
   const spec = LOOPS[node.loop];
   if (!spec) return String(node.loop || '');
+  if (spec.count) {
+    const count = loopCount(node, resolved);
+    return count === null ? 'count not set' : `${count} times`;
+  }
   const values = loopValues(node, resolved);
-  if (spec.count) return values ? `${values.length} times` : 'count not set';
   const form = valueForm(node);
   const dp = spec.decimals;
   const parts = [];
@@ -627,17 +639,22 @@ export function timeline(nodes) {
   const visit = (list) => {
     for (const node of list) {
       if (node.kind === 'module') {
+        // Outside a temperature loop, what the cryostat is at is whatever a
+        // `temperature` module last bound — and when that changes, so does
+        // the block. Overwriting one block's setpoint instead put a run's
+        // whole measuring under its *last* temperature: three scans at
+        // ambient, 250 K and 200 K drawn as one block of 18 shots at 200 K.
+        if (!current) {
+          const k = node.temperature && node.temperature.k !== null
+            && node.temperature.k !== undefined ? node.temperature.k : null;
+          if (carry && carry.setpoint_k !== k) flush();
+          into().setpoint_k = k;
+        }
         const block = into();
         block.measure_s += node.estimate_s || 0;
         block.modules += 1;
         block.shots += node.shots || 0;
         block.needs_operator = block.needs_operator || node.needs_operator;
-        // Whatever the cryostat is at while this runs — a `temperature`
-        // module's binding, where there is one and no loop has said already.
-        if (!current && node.temperature && node.temperature.k !== null
-            && node.temperature.k !== undefined) {
-          block.setpoint_k = node.temperature.k;
-        }
         continue;
       }
       if (node.loop === 'temperature') {

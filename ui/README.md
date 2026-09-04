@@ -226,6 +226,11 @@ Three more things it is careful about:
   canonical temperature list steps 5 K once and 10 K after, so as
   `295 → 220 step 5` it is sixteen temperatures where the list is nine, and
   the switch refuses with that number in its sentence.
+* **Removing a key the node types is not typing into it.** A module that
+  types `led_v` inside an illumination loop resolves `inherited` — read-only —
+  *and* is refused by `tree.owned-param`; the reset is offered anyway, or a
+  saved recipe with that in it would block Start with no way out but deleting
+  the node.
 * **What is on screen while a validate is in flight is a moment old, and says
   so.** Blanked instead, the schedule read *"no nodes yet"* on a tree with
   four nodes in it for the third of a second after every commit. `stale` marks

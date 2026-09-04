@@ -951,6 +951,31 @@ and stay fresh-only: they match a node to its schedule entries by counting
 iterations, so zipped against a schedule for a differently shaped tree they
 would put one node's shots on another node's row.
 
+**A third round found three more**, two of them consequences of the round
+before:
+
+* **An override on a value the loop owns could not be taken back.** A module
+  that types `led_v` inside an illumination loop resolves `inherited` — which
+  the round above had just made non-editable — *and* is refused by
+  `tree.owned-param`, and the reset was gated on the same flag as the input.
+  So an operator opening a saved recipe with that in it had a value blocking
+  Start and no way to drop it but deleting the node. Removing a key the node
+  types is not typing into it: the value stays read-only, the way out stays
+  open.
+* **A `repeat` count was expanded into its indices.** `1, 2, 3 …` is not
+  information, and building it was a hazard: the count is typed into a text
+  field, so `4294967296` — a plausible slip — threw `RangeError: Invalid
+  array length` on the render *before* the validate that would have refused
+  it, and anything merely large froze the tab allocating it. A repeat has a
+  count and no values now.
+* **Outside a temperature loop, one block took the last binding for all of
+  it.** A run that measures, sets 250 K, measures, sets 200 K and measures
+  again was drawn as a single block of eighteen shots at 200 K — three of
+  them taken at ambient and six at 250. The block changes when the binding
+  does, which also splits the `bound` fixture correctly: the `temperature`
+  module's own minute runs before the cryostat is anywhere in particular, and
+  is no longer labelled with where it is about to go.
+
 ### M6 · The results tab
 
 A stub until here. Preceded by a design pass, because R2·3 is a Round 2
