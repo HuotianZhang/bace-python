@@ -28,6 +28,15 @@
 //     canonical tree is 198 steps and *step 3 of 198* is the number that
 //     paragraph exists to refuse. Which temperature, which level, how far into
 //     the scan — the same three the monitor draws during the run.
+//   * **The tree is the one thing here that can be lost, so it can be taken
+//     back.** Every value on a bench card is the service's, and the way back
+//     from an edit is the `↺` beside the row; the tree is the client's own
+//     until Start, and three of its controls destroyed work in one click with
+//     nothing offering it back — `✕` takes a node *and everything under it*,
+//     the recipe picker replaces the whole tree, `↺ bench` drops every
+//     override a node types. `change` is already the one funnel every mutation
+//     goes through, so the history hangs off it and covers all of them,
+//     including the two that are not buttons on this screen.
 //   * **A module node's form is the bench's form.** `cardModel` and the field
 //     component from `lib/card.js`, over the ParamSet the *schedule* resolved
 //     for that node — so `led_v` reads as inherited from the illumination
@@ -43,6 +52,7 @@ import { chart } from '../lib/charts/frame.js';
 import { scheduleModel } from '../lib/charts/schedule.js';
 import * as tree from '../lib/tree.js';
 import { drift, recorded, restore } from '../lib/recipe.js';
+import { createHistory } from '../lib/undo.js';
 import { benchHash } from '../lib/route.js';
 
 /**
@@ -81,6 +91,19 @@ export default {
     let expanded = new Set();
     let showAllChecks = false;
     let showFlat = false;
+    /**
+     * A Save that would write over an existing recipe, armed.
+     *
+     * The console arms every action that costs the *sample* something — Park
+     * on a busy bench, Abort — and armed nothing that costs the operator their
+     * own work. A recipe is the only thing this screen writes to disk, the
+     * service overwrites `<out>/recipes/<name>.json` without asking
+     * (`app.py: save_pipeline`), and unlike an edit to the tree it is outside
+     * the undo history: the file that was there is gone. So it arms, and
+     * disarms itself six seconds later, exactly as Park does.
+     */
+    let saveArmed = null;
+    let saveArmedTimer = null;
     let recipes = [];
     /**
      * The recipe the tree was reopened from, until the operator dismisses
@@ -91,6 +114,16 @@ export default {
      * as it is, which is what it always did; now it is visible.
      */
     let loaded = null;
+    /**
+     * The way back — `lib/undo.js`. It holds whole snapshots rather than
+     * inverse operations because the states are small JSON and the operations
+     * are not all invertible: `↺ bench` drops an unknown number of overrides
+     * and `open recipe` replaces everything, and an inverse for each is a
+     * second implementation of the tree that can disagree with the first.
+     */
+    const history = createHistory();
+    /** Everything a mutation can move, so undo restores the screen and not only the tree. */
+    const snapshot = () => ({ typed, name, selected, loaded });
 
     const body = h('div.pipe');
     fill(container,
@@ -164,14 +197,64 @@ export default {
       if (now) fire(); else timer = setTimeout(fire, VALIDATE_MS);
     }
 
-    /** Every mutation goes through here, so nothing can change the tree quietly. */
-    function change(next, { select = undefined } = {}) {
+    /**
+     * Every mutation goes through here, so nothing can change the tree quietly
+     * — and, since 2026-09-05, so nothing can change it irrecoverably either.
+     *
+     * `label` names the action for the Undo button, because "undo" alone asks
+     * the operator to remember what they last did; after four clicks and a
+     * look away, they do not. A mutation that leaves the tree byte-identical
+     * records nothing: a `change` from a field re-committed at the same value
+     * is not a step back anybody wants to take.
+     */
+    function change(next, { select = undefined, label = '', before = null } = {}) {
+      // `before` is for the one caller that has to move `name` and `loaded`
+      // before it can call this — the recipe picker — and would otherwise
+      // record a snapshot already carrying the new recipe's name.
+      if (!tree.sameTree(typed, next)) history.push(before || snapshot(), label);
       typed = next;
       if (select !== undefined) selected = select;
       if (selected && !tree.nodeAt(typed, selected)) selected = null;
       revalidate();
       render();
     }
+
+    /**
+     * Take one step back, or forward. The whole snapshot goes back — the
+     * selection and the recipe the tree was opened from with it — because a
+     * `✕` that cleared the selection and an `open recipe` that replaced the
+     * name both have to undo to the screen the operator was looking at, not
+     * only to the tree they had.
+     */
+    function step(direction) {
+      const entry = direction === 'redo' ? history.redo(snapshot()) : history.undo(snapshot());
+      if (!entry) return;
+      ({ typed, name, selected, loaded } = entry.state);
+      if (selected && !tree.nodeAt(typed, selected)) selected = null;
+      notify(`${direction === 'redo' ? 'redone' : 'undone'}${entry.label ? ' · ' + entry.label : ''}`, 'ok');
+      revalidate();
+      render();
+    }
+
+    /**
+     * Ctrl/⌘-Z, and Ctrl/⌘-Shift-Z to put it back.
+     *
+     * Not while the caret is in a field: there the browser's own undo is the
+     * one the operator means, and stealing it would take back the whole node
+     * instead of the digit they mistyped. On `window` rather than on the view,
+     * so it works with nothing focused — which after a `✕` is exactly where
+     * the focus is.
+     */
+    function onKey(e) {
+      if (e.key !== 'z' && e.key !== 'Z') return;
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const el = e.target;
+      const tag = el && el.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (el && el.isContentEditable)) return;
+      e.preventDefault();
+      step(e.shiftKey ? 'redo' : 'undo');
+    }
+    window.addEventListener('keydown', onKey);
 
     // -- the model the whole view renders from -----------------------------
 
@@ -305,23 +388,23 @@ export default {
         h('span.cs', { text: where }),
         ...tree.LOOP_ORDER.map((kind) => h('button.btng', {
           title: `a ${kind} loop — ${tree.LOOPS[kind].owns || 'repeats its children'}`,
-          onclick: () => addNode(tree.newLoop(kind), into),
+          onclick: () => addNode(tree.newLoop(kind), into, `add the ${kind} loop`),
         }, `+ ${kind}`)),
         picker,
-        h('button.btng', { onclick: () => addNode(tree.newModule(picker.value), into) }, '+ module'));
+        h('button.btng', { onclick: () => addNode(tree.newModule(picker.value), into, `add ${picker.value}`) }, '+ module'));
     }
 
-    function addNode(node, into) {
-      if (!typed) return change(node, { select: [] });
+    function addNode(node, into, label = 'add a node') {
+      if (!typed) return change(node, { select: [], label });
       if (into) {
         const parent = tree.nodeAt(typed, into);
         const index = (parent.children || []).length;
-        return change(tree.insertAt(typed, into, node), { select: [...into, index] });
+        return change(tree.insertAt(typed, into, node), { select: [...into, index], label });
       }
       if (typed.kind === 'module' && node.kind === 'loop') {
         // Wrap: the module becomes the loop's only child, which is the tree
         // the operator was describing.
-        return change({ ...node, children: [typed] }, { select: [] });
+        return change({ ...node, children: [typed] }, { select: [], label });
       }
       if (typed.kind !== 'loop') {
         notify('the root is a single module. Add a loop first — it takes this module inside it — '
@@ -329,7 +412,7 @@ export default {
         return undefined;
       }
       const index = (typed.children || []).length;
-      return change(tree.insertAt(typed, [], node), { select: [index] });
+      return change(tree.insertAt(typed, [], node), { select: [index], label });
     }
 
     function renderTree(v) {
@@ -389,7 +472,11 @@ export default {
         h('span.rowact',
           h('button.btng', { title: 'move up', onclick: () => moveNode(row.path, -1) }, '↑'),
           h('button.btng', { title: 'move down', onclick: () => moveNode(row.path, 1) }, '↓'),
-          h('button.btng', { title: 'remove this node and everything under it', onclick: () => change(tree.removeAt(typed, row.path), { select: null }) }, '✕')));
+          h('button.btng', {
+            title: 'remove this node and everything under it — Undo, or Ctrl-Z, takes it back',
+            onclick: () => change(tree.removeAt(typed, row.path),
+              { select: null, label: `remove ${row.kind === 'loop' ? 'the ' + row.loop + ' loop' : row.module}` }),
+          }, '✕')));
     }
 
     /**
@@ -405,7 +492,9 @@ export default {
     function moveNode(path, delta) {
       const next = tree.moveAt(typed, path, delta);
       if (next === typed) return;                    // a move off either end
-      change(next, { select: tree.remapPath(selected, path, delta) });
+      const at = tree.nodeAt(typed, path);
+      change(next, { select: tree.remapPath(selected, path, delta),
+        label: `move ${at ? label(at) : 'a node'} ${delta < 0 ? 'up' : 'down'}` });
     }
 
     /** The `↺` a differing node carries in the tree, with the list on hover. */
@@ -447,7 +536,8 @@ export default {
             node.kind === 'module' && Object.keys(node.params || {}).length
               ? h('button.btng.undo', {
                 title: 'drop every override this node types — back to the module as it stands on the bench',
-                onclick: () => change(tree.clearParams(typed, selected)),
+                onclick: () => change(tree.clearParams(typed, selected),
+                  { label: `drop ${node.module}’s overrides` }),
               }, '↺ bench')
               : null,
             h('button.btng', { onclick: () => { selected = null; render(); } }, 'close')),
@@ -521,7 +611,7 @@ export default {
         notify(can.why, 'warn');
         return;
       }
-      change(tree.setValueForm(typed, selected, form, resolved));
+      change(tree.setValueForm(typed, selected, form, resolved), { label: `values as a ${form}` });
     }
 
     /** A text input over the value list — `295, 290, 280` — parsed on commit. */
@@ -580,14 +670,14 @@ export default {
      * than posted for the service to reject in a language about JSON.
      */
     function commitField(key, raw) {
-      if (raw === null || raw === '') return change(tree.setField(typed, selected, key, null));
-      if (Array.isArray(raw)) return change(tree.setField(typed, selected, key, raw));
+      if (raw === null || raw === '') return change(tree.setField(typed, selected, key, null), { label: `clear ${key}` });
+      if (Array.isArray(raw)) return change(tree.setField(typed, selected, key, raw), { label: `set ${key}` });
       const value = Number(raw);
       if (!Number.isFinite(value)) {
         notify(`${key}: "${raw}" is not a number.`, 'warn');
         return render();
       }
-      return change(tree.setField(typed, selected, key, value));
+      return change(tree.setField(typed, selected, key, value), { label: `set ${key}` });
     }
 
     /**
@@ -695,7 +785,7 @@ export default {
           for (const [key, raw] of Object.entries(params)) {
             next = tree.setParam(next, selected, key, coerce(specs[key], raw));
           }
-          change(next);
+          change(next, { label: `set ${Object.keys(params).join(', ')}` });
         },
       };
     }
@@ -843,7 +933,10 @@ export default {
       const c = v.cost;
       const blocked = !v.answer || !v.answer.valid || v.busy || v.stale || inflight || !typed;
       const moved = loaded ? drift(loaded, store.getState().modules.byName, { tree: typed, rows: v.rows }) : [];
-      keyed(actionsEl, JSON.stringify([Boolean(typed), v.answer && v.answer.valid, v.busy, v.stale, inflight, c && c.total_s, name, recipes.map((r) => r.name), loaded && loaded.name, moved]), () => [
+      const stem = name || (typed && typed.name) || '';
+      const overwrites = recipes.some((r) => r.name === stem);
+      const armed = Boolean(stem) && saveArmed === stem;
+      keyed(actionsEl, JSON.stringify([Boolean(typed), v.answer && v.answer.valid, v.busy, v.stale, inflight, c && c.total_s, name, recipes.map((r) => r.name), loaded && loaded.name, moved, history.depth, history.canRedo, history.undoLabel, history.redoLabel, saveArmed, overwrites]), () => [
         h('div.namerow',
           h('span.l', 'name'),
           h('input.v', {
@@ -856,13 +949,40 @@ export default {
               title: 'reopen a saved recipe',
               onchange: (e) => {
                 const found = recipes.find((r) => r.name === e.target.value);
-                if (found && found.tree) { name = found.name; loaded = found; change(found.tree, { select: null }); }
+                if (found && found.tree) {
+                  // Opening a recipe replaces the whole tree, and the one it
+                  // replaces may be half an hour of composing that was never
+                  // saved. Undo takes the snapshot back whole — the name and
+                  // the recipe it was opened from with it — which is why the
+                  // picker still acts on one click rather than asking first.
+                  const was = snapshot();
+                  name = found.name;
+                  loaded = found;
+                  change(found.tree, { select: null, label: `open ${found.name}`, before: was });
+                }
               },
             }, h('option', { value: '' }, 'saved recipes …'),
             ...recipes.map((r) => h('option', { value: r.name }, r.name)))
             : null),
         recipeNote(v),
         h('div.btnrow',
+          // The way back, beside the ways forward. Named rather than counted:
+          // `undo · remove the temperature loop` is answerable without
+          // remembering, which after four clicks and a look away is the whole
+          // point of it.
+          h('button.btng', {
+            disabled: !history.canUndo || null,
+            title: history.canUndo
+              ? `Ctrl-Z — takes back: ${history.undoLabel || 'the last change'}`
+              : 'nothing to take back on this tree',
+            onclick: () => step('undo'),
+          }, history.canUndo && history.undoLabel ? `↶ undo · ${history.undoLabel}` : '↶ undo'),
+          history.canRedo
+            ? h('button.btng', {
+              title: `Ctrl-Shift-Z — puts back: ${history.redoLabel || 'the last undo'}`,
+              onclick: () => step('redo'),
+            }, '↷ redo')
+            : null,
           h('button.btnp', {
             disabled: blocked || null,
             title: blocked
@@ -873,7 +993,14 @@ export default {
               : 'checks the structure once more against the bench as it is now, then queues the run',
             onclick: start,
           }, c ? `Start · ${c.prefix ? c.prefix + ' ' : ''}${fmt.duration(c.total_s)}` : 'Start'),
-          h('button.btns', { disabled: !typed || null, onclick: save }, 'Save recipe'),
+          h('button', {
+            class: armed ? 'btns armed' : 'btns',
+            disabled: !typed || null,
+            title: overwrites
+              ? `${stem} already exists — POST /pipelines/save writes over it, and the file it replaces is not in the undo history`
+              : 'POST /pipelines/save — writes the tree and the bench values it was saved with',
+            onclick: save,
+          }, armed ? `overwrite ${stem}?` : 'Save recipe'),
           h('button.btns', {
             disabled: !typed || null,
             title: 'checks the structure without touching the bench',
@@ -964,12 +1091,41 @@ export default {
       render();
     }
 
+    /**
+     * Armed is a confirmation, not a mode — the same six seconds Park uses.
+     *
+     * Armed **for one name**, not a flag: a name changed between the two
+     * clicks would otherwise carry the arming to a different file and
+     * overwrite that one with no confirmation at all. The rule
+     * `monitor.scopedTo` applies to an armed Abort, for the same reason.
+     */
+    function armSave(stem) {
+      saveArmed = stem;
+      clearTimeout(saveArmedTimer);
+      saveArmedTimer = stem ? setTimeout(() => { saveArmed = null; render(); }, 6000) : null;
+    }
+
     async function save() {
       const stem = name || (typed && typed.name) || '';
       if (!stem) {
         notify('a saved recipe needs a name — type one in the name field first.', 'warn');
         return;
       }
+      // A name that is already a file: say what it will replace, and take the
+      // second click for it. `recipes` is `GET /pipelines/saved`, re-read after
+      // every save, so this is the service's list rather than a guess.
+      if (saveArmed !== stem && recipes.some((r) => r.name === stem)) {
+        armSave(stem);
+        const was = recipes.find((r) => r.name === stem);
+        notify(`${stem} already exists${was && was.saved_at ? ` — saved ${fmt.clock(was.saved_at)}` : ''}. `
+          + 'Click again to write over it, or type another name.', 'warn');
+        // `notify` draws the strip and nothing else; the button has to say
+        // what the second click will do, or the arming is invisible where the
+        // finger already is.
+        render();
+        return;
+      }
+      armSave(null);
       try {
         const out = await api.savePipeline(typed, stem);
         notify(`saved ${out.name} → ${out.path}`, 'ok');
@@ -1237,6 +1393,13 @@ export default {
     });
 
     boot();
-    return { dispose() { off(); clearTimeout(timer); } };
+    return {
+      dispose() {
+        off();
+        clearTimeout(timer);
+        clearTimeout(saveArmedTimer);
+        window.removeEventListener('keydown', onKey);
+      },
+    };
   },
 };

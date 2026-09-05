@@ -384,3 +384,27 @@ class TemperatureRead(Event):
     setpoint_k: float | None
     in_band: bool | None
     source: str
+
+
+@dataclass(frozen=True)
+class SampleNamed(Event):
+    """The session's `[sample]` block was set from outside the file it was
+    opened with -- `PUT /session/sample`, which is the console's identity
+    field. A session-level event: `run_id` is None and `node_path` is "".
+
+    `before` and `after` are the whole block either side, `changed` the keys
+    that actually moved.
+
+    **It applies to runs queued after it and to no others.** Every run takes
+    its own copy of the block when it is queued (`RunQueued.sample`, and the
+    `RunMetadata` its files are written from), so a run already going keeps
+    the identity it started under rather than being relabelled halfway. That
+    is the reason this is an event at all: a journal that has to be read
+    years later must be able to say which runs in a file were measured under
+    which name, and a block that simply changed would leave no trace of ever
+    having been anything else.
+    """
+
+    before: dict
+    after: dict
+    changed: list

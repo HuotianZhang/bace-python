@@ -82,6 +82,65 @@ h1, h2, h3, .wordmark, button {
 .chip.state { background: #fff; color: var(--ink); border-color: #fff; }
 .chip.state.running, .chip.state.preflight { background: var(--accent); border-color: var(--accent); color: #fff; }
 .chip.state.stopping, .chip.state.paused { background: var(--warn); border-color: var(--warn); color: #fff; }
+/* The identity is a control: it is the only chip that acts, so it is the only
+   one with a pointer, and it inverts while its panel is open. */
+button.chip.ident { background: none; cursor: pointer; font: inherit; font-family: var(--font-num); font-size: 11px; }
+button.chip.ident:hover { border-color: #fff; color: #fff; }
+button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); }
+
+/* -- what is mounted: the [sample] block, under the bar --------------------
+   Session-level, like the bar it hangs from, and shut unless it is asked for.
+   The operator is typing a folder name here, so the name it will produce is
+   the last line of the panel rather than something to be inferred. */
+.ident {
+  border-bottom: 1px solid var(--rule); background: var(--fill);
+  padding: 8px 12px; flex: 0 0 auto;
+}
+.ident .id-head { display: flex; align-items: baseline; gap: 10px; padding-bottom: 6px; }
+.ident .id-head .cn {
+  font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase; color: var(--grey);
+}
+.ident .id-head .cs { font-size: 11px; color: var(--grey); }
+.ident .id-status { font-family: var(--font-num); font-size: 11px; }
+.ident .id-status.ok { color: var(--ok); }
+.ident .id-status.bad { color: var(--alert); }
+/* A comment is a sentence and the three name fields are tokens, so they do not
+   want the same width. */
+.ident .id-rows { display: grid; grid-template-columns: repeat(3, 1fr) 1fr 1.6fr; gap: 10px; }
+.ident .id-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 6px; align-items: center; }
+.ident .id-row .l { grid-column: 1 / -1; font-size: 12px; color: var(--grey); display: flex; gap: 6px; align-items: baseline; }
+.ident .id-row .l i { font-size: 9px; letter-spacing: .06em; text-transform: uppercase; color: var(--grey); opacity: .8; }
+.ident .id-row input.v {
+  width: 100%; min-width: 0; padding: 4px 6px; border: 1px solid var(--rule);
+  background: var(--paper); font-family: var(--font-num); font-size: 12px; color: var(--ink);
+}
+.ident .id-row input.v:focus { border-color: var(--accent); outline: none; }
+.ident .id-row .src { display: flex; align-items: center; min-width: 14px; }
+/* The card's `.doc` is what opens when an operator asks for the explanation,
+   and its accent rule is that answer. Here every row carries its sentence all
+   the time, so five accent rules would be saturation meaning nothing
+   (`ui-rules` §3) — it is a caption, and reads like one. */
+.ident .id-row .doc {
+  grid-column: 1 / -1; margin: 0; padding: 3px 0 0; max-width: none;
+  border-left: 0; background: none;
+  font-size: 10px; color: var(--grey); line-height: 1.35;
+}
+/* Two levels, because they are not the same thing: `warn` is a folder name
+   nobody wants to read, `bad` is one the service will refuse (`ui-rules` §3 —
+   alert is for the thing that stops you). */
+.ident .id-row.warn input.v { border-color: var(--warn); }
+.ident .id-row.bad input.v { border-color: var(--alert); }
+.ident .id-warn { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; color: var(--warn); }
+.ident .id-warn.refused { color: var(--alert); }
+.ident .id-warn button.link {
+  border: 0; background: none; padding: 0; font: inherit; color: inherit;
+  text-decoration: underline; cursor: pointer;
+}
+.ident .id-foot { display: flex; align-items: baseline; gap: 8px; padding-top: 8px; }
+.ident .id-foot .l { font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase; color: var(--grey); }
+.ident .id-foot .cs { font-size: 10px; color: var(--grey); }
+.ident .id-stem { font-family: var(--font-num); font-size: 12px; color: var(--ink); }
+.ident .id-stem.absent { color: var(--alert); }
 
 /* -- the rail: fixed, everything else scrolls (§1) -------------------------
    Eight live values, from `docs/design/BenchRail.dc.html`. The relay is first
@@ -205,6 +264,13 @@ h1, h2, h3, .wordmark, button {
 /* Park while a run is active aborts it and cancels the queue, so the second
    click is a different button from the first. */
 .strip button.armed { background: var(--alert); border-color: var(--alert); color: #fff; }
+/* The way to be rid of a sentence that has been read. Quiet until it is
+   wanted: it sits inside the status and is the only thing there that acts. */
+.strip .st.status button.stx {
+  border: 0; background: none; padding: 0 0 0 2px; margin: 0;
+  font: inherit; line-height: 1; color: var(--grey); cursor: pointer;
+}
+.strip .st.status button.stx:hover { color: var(--ink); }
 
 /* -- the tabs, inside the bar --------------------------------------------- */
 .tabs { display: flex; gap: 2px; align-items: stretch; }
@@ -847,6 +913,10 @@ button.link:hover { color: var(--accent-dark); }
 .namerow input.v { flex: 1 1 auto; min-width: 0; }
 .namerow input.v:focus, .namerow select.v:focus { border-color: var(--accent); outline: none; }
 .btnrow { display: flex; align-items: center; gap: 10px; }
+/* Undo sits to the left of the three that go forward, and carries the name of
+   what it takes back — so it is the widest of the small buttons and must be
+   allowed to shrink rather than push Start off the row. */
+.btnrow .btng { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .btnrow .btnp { padding: 10px 16px; font-size: 14px; }
 
 /* The schedule at three scales. A row is a line, not a box: the canonical

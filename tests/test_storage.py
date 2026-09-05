@@ -258,6 +258,33 @@ def test_folder_name_matches_the_archive_convention():
         "s4_PTQ10IT4F_pxa_290K_1020mVLED_906mVVOC_offsetcorr_20260807_111521")
 
 
+@pytest.mark.parametrize("field, typed, filed", [
+    # `naming-plan.md` §2's table, which was written as the list of what these
+    # three fields could do to a path and is now the list of what they cannot.
+    ("sample", "a_b", "a-b"),                       # `_` separates fields; a name may not forge one
+    ("sample", "s4 pixel a", "s4-pixel-a"),         # the 2026-09-01 bug: a space in a directory name
+    ("material", "PTQ10:IT-4F", "PTQ10IT-4F"),      # the contract's own example; `:` fails on the lab PC
+    ("sample", "a/b", "ab"),                        # two directories, not one
+    ("sample", "../../etc", "etc"),                 # and not a walk out of `runs/`
+    ("pixel", "px" + chr(92) + "a", "pxa"),
+    ("sample", "///", ""),                          # reduced to nothing: the field leaves the name
+    ("material", "PTQ10IT4F-batch-2026-08-A", "PTQ10IT4F-batch-2026-08"),   # NAME_MAX = 24
+    ("sample", "样品四号", "样品四号"),                # not-ASCII is not the same as not-safe
+])
+def test_an_identity_field_is_one_path_segment(field, typed, filed):
+    """Until 2026-09-05 these three went into the name as typed, which
+    `docs/naming-plan.md` §2 carried as a live defect: on the lab PC a colon
+    fails at folder creation, on Linux and the simulator it succeeds, so no
+    test caught it. They are slugged now, at `NAME_MAX = 24`."""
+    import datetime
+    m = RunMetadata(temperature_k=290, started=datetime.datetime(2026, 8, 7, 11, 15, 21),
+                    **{field: typed})
+    name = m.folder_name()
+    assert m.identity_in_name()[("sample", "material", "pixel").index(field)] == filed
+    assert name == (f"{filed}_" if filed else "") + "290K_offsetcorr_20260807_111521"
+    assert m.as_dict()[field] == typed, "the name is reduced; the record is not"
+
+
 def test_temperature_provenance_stays_out_of_the_name():
     """`290K` in a folder name says nothing about where 290 came from, and the
     name cannot be made to: it is the 2026-08-07 convention, and every

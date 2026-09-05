@@ -29,6 +29,17 @@ import * as fmt from './format.js';
 /** The relay's three nodes, left to right, as `design/BenchRail.dc.html` draws them. */
 export const RELAY_NODES = ['2400', 'device', 'amp'];
 
+/**
+ * How many monitor intervals may pass with no reading before the temperature
+ * on the rail stops being presented as current. The 331's monitor reads only
+ * while it can hold the worker's bus lock (`service/monitors.py`), so a
+ * pipeline run holding the bus for an hour leaves the card's reading exactly
+ * that old — the service counts those ticks as `skipped`, and the contract
+ * (§8) says to render *why* rather than an old number as if it were now.
+ * Three, so one missed tick is not an announcement.
+ */
+const TEMPERATURE_STALE_TICKS = 3;
+
 /** Which chain checks speak about which rail cell. The chain owns `expected`. */
 const CHAIN_CELL = {
   led_polarity: 'led',
@@ -61,8 +72,55 @@ export function railModel(state) {
     ledCell(instruments.led, chain, is('led')),
     vocCell(instruments.voc),
     powerCell(instruments.power),
-    temperatureCell(instruments.temperature, session),
+    temperatureCell(temperatureNow(state), session),
   ];
+}
+
+/**
+ * The temperature the rail draws: the read-back's block with the newest
+ * `TemperatureRead` the stream carried laid over it, plus what the monitor
+ * is doing.
+ *
+ * The overlay is the one the service already makes on its own snapshot
+ * (`session._temperature_block`), made again here because `/bench` is fetched
+ * at boot and after an action while readings arrive every few seconds in
+ * between. Without it the rail would show the boot read-back all day — the
+ * monitor's readings would reach the journal and the chart and not the one
+ * number the operator looks at.
+ *
+ * `wired` is never overlaid, and an unwired bench is never overlaid at all: a
+ * reading does not make the 331 wired, and the value an operator types at a
+ * pause arrives as a `TemperatureRead` too (`source: "operator"`, service
+ * `temperature.py`) — on a bench with no controller that number is a typed
+ * one and the cell has to keep saying so.
+ *
+ * Age is measured on the service's clock and never on the browser's: the
+ * newest frame's `ts` against the newest reading's, both off the same stream.
+ * So a console on another machine, or one whose clock is minutes out, reads
+ * what the lab PC reads, and an idle bench — no frames at all, so no clock
+ * moving — never drifts into looking stale for want of a run.
+ */
+export function temperatureNow(state) {
+  const bench = state.bench || {};
+  const block = (bench.instruments || {}).temperature || null;
+  const live = state.temperature || null;
+  const monitor = (state.monitors || []).find((m) => m.name === 'temperature') || null;
+  let t = block;
+  const readAt = bench.read_at;
+  if (t && t.wired && live && (!(readAt > 0) || live.ts >= readAt)) {
+    t = { ...t, kelvin: live.kelvin, in_band: live.in_band, source: live.source, read_at: live.ts };
+    if (live.setpoint_k !== null && live.setpoint_k !== undefined) t.setpoint_k = live.setpoint_k;
+  }
+  // `monitors` is the service's list of what is *running*; the block's
+  // `monitor` is the same answer taken at the read-back. Either says yes.
+  const running = Boolean((monitor && monitor.running) || (t && t.monitor));
+  const interval = monitor ? monitor.interval_s : null;
+  const at = t ? t.read_at : null;
+  const now = state.lastFrame ? state.lastFrame.ts : null;
+  const stale = Boolean(running && interval > 0 && at > 0 && now > 0
+    && now - at > TEMPERATURE_STALE_TICKS * interval);
+  return { ...(t || {}), running, stale, interval,
+           skipped: monitor ? monitor.skipped : null };
 }
 
 function chainByKey(bench) {
@@ -274,6 +332,14 @@ function powerCell(power) {
  * number is the one *typed* into the session — it goes into every folder name,
  * and nobody measured it. That is provenance, not decoration, so it reads as
  * a claim rather than as a reading.
+ *
+ * The 331 is watched from the moment the service is up (the session's
+ * `temperature_monitor_s`), so on a wired bench this cell is a live reading
+ * and the sub-line says at what cadence. Two things it must not do with that:
+ * call a reading current when the monitor has been unable to read for several
+ * intervals — a run holding the bus is the ordinary way that happens — and
+ * keep the band verdict of one that is. `in_band` is a statement about *now*,
+ * so a stale reading has no level at all.
  */
 function temperatureCell(temperature, session) {
   const t = temperature || {};
@@ -282,10 +348,20 @@ function temperatureCell(temperature, session) {
     if (t.setpoint_k !== null && t.setpoint_k !== undefined) parts.push(`set ${fmt.kelvin(t.setpoint_k, { unit: false })}`);
     if (t.source) parts.push(t.source);
     if (t.ramping) parts.push('ramping');
+    if (t.stale) parts.push(t.skipped ? `stale · ${t.skipped} ticks skipped` : 'stale');
+    // The cadence and not the count of readings: both are the service's, but
+    // `readings` is only as new as the last snapshot, and a counter standing
+    // still beside a number that moves says the wrong thing about which of
+    // them is live. `every 5 s` is what the operator is actually asking.
+    else if (t.running) parts.push(t.interval > 0 ? `every ${+t.interval} s` : 'monitored');
+    // Not the default: somebody stopped the monitor, or the service was
+    // started with --no-temperature-monitor. The number is then as old as
+    // the last read-back, which the operator has to be told.
+    else parts.push('read-back only');
     return {
       key: 'temperature', label: 'T', value: fmt.kelvin(t.kelvin),
       sub: parts.join(' · ') || null,
-      level: t.in_band === false ? 'warn' : t.in_band === true ? 'ok' : null,
+      level: t.stale ? null : t.in_band === false ? 'warn' : t.in_band === true ? 'ok' : null,
       inferred: false,
     };
   }
@@ -393,10 +469,11 @@ function relayEl(cell) {
 
 /**
  * The strip, into a container. `onFix(name)` and `onPark()` are the only two
- * things it can do, and both are explicit: nothing here touches the bench on
- * its own.
+ * things it can do to the bench, and both are explicit: nothing here touches
+ * it on its own. `onDismiss()` touches nothing at all — it clears the sentence
+ * the last action left.
  */
-export function renderChainStrip(el, state, { onFix, onPark, status, parkArmed } = {}) {
+export function renderChainStrip(el, state, { onFix, onPark, onDismiss, status, parkArmed } = {}) {
   const model = chainModel(state);
   const rig = (state.bench && state.bench.rig && state.bench.rig.values) || {};
   // The model plus the two things the strip holds that the store does not: the
@@ -430,7 +507,18 @@ export function renderChainStrip(el, state, { onFix, onPark, status, parkArmed }
       // told what to do and given no way to do it.
       status.offer
         ? h('button.btns', { onclick: () => onFix && onFix(status.offer, { label: status.offer }) }, status.offer)
-        : null) : null,
+        : null,
+      // A way to be rid of it. The strip is the console's one place for a
+      // sentence, and a sentence has no clock on it: an `ok` from a queue
+      // three hours ago and a refusal that was fixed twenty minutes ago both
+      // sat here reading as news, and the operator could only replace them by
+      // provoking another. Nothing dismisses itself — a refusal that vanished
+      // on a timer is the failure mode this replaces, not a version of it.
+      h('button.stx', {
+        title: 'clear this message',
+        'aria-label': 'clear this message',
+        onclick: () => onDismiss && onDismiss(),
+      }, '✕')) : null,
     // Bench properties, not per-run choices, and multiplicative: they leave no
     // trace in the data, so `ui-rules` §6 restates them beside it.
     h('span.st.quiet', { text: rigText(rig) }),

@@ -83,13 +83,15 @@ from ..experiment.rig import RigConfig
 from ..experiment.transient import RunConfig
 from ..experiment.wire import to_wire
 from ..params import Source
+from ..storage.naming import RunMetadata
 from . import pipeline
 from .executor import run_pipeline
 from .journal import (Journal, add_curve, axis_result, count_shot, finished_result, jv_result,
                       loop_result, node_record)
 from .live import LiveState
-from .modules import Catalogue, RunContext, VocSource, jsonable
-from .monitors import MAX_INTERVAL_S, MIN_INTERVAL_S, PowerMonitor, TemperatureMonitor
+from .modules import Catalogue, RunContext, VocSource, coerce_sample, jsonable
+from .monitors import (MAX_INTERVAL_S, MIN_INTERVAL_S, TEMPERATURE_MONITOR_S,
+                       PowerMonitor, TemperatureMonitor)
 from .pipeline import VOC_PARAM, Module, Schedule, Step, Validation
 from .rigs import ACTIONS, Bench, BenchActionRefused, Unavailable, action_before
 from .wire import STEPDONE_ARRAYS, ephemeral_frame, is_ephemeral, make_envelope, payloads
@@ -463,7 +465,8 @@ class Session:
                  sample: Mapping[str, Any] | None = None,
                  rig_path: str | None = None, run_path: str | None = None,
                  session_id: str | None = None, seed: int = 0,
-                 power_monitor_s: float | None = None):
+                 power_monitor_s: float | None = None,
+                 temperature_monitor_s: float | None = TEMPERATURE_MONITOR_S):
         if mode not in ("sim", "rig"):
             raise ValueError(f"mode must be 'sim' or 'rig', not {mode!r}")
         self.rig_config = rig_config
@@ -472,6 +475,34 @@ class Session:
         (`--power-monitor`), so the meter is watched from the moment the
         service is up and not from the moment somebody opens a console. None
         leaves it to `POST /monitors/power`."""
+        self.temperature_monitor_s = (None if temperature_monitor_s is None
+                                      else float(temperature_monitor_s))
+        """The interval the temperature monitor is started at in `start()`,
+        and the one observer on this bench that runs without being asked
+        for. A cryostat drifts whether or not a run is going and whether or
+        not a console is open, so the 331 is read from the moment the
+        service is up: the card's number is then a reading of a known age
+        rather than the read-back of whenever somebody last pressed
+        something, and a `TemperatureRead` is in the journal for the hours
+        between runs. None is `--no-temperature-monitor`: nothing is
+        started and `POST /monitors/temperature` is the only way in, as it
+        was before.
+
+        The power meter is the other way round (`power_monitor_s` defaults
+        to None, `--power-monitor` turns it on): its console holds the
+        wish, and a meter under a dark box logs nothing anybody wants. What
+        makes the difference safe is the bus rule, not the instrument --
+        see `start_temperature_monitor`: on GPIB this monitor reads only
+        while holding the worker's lock and skips the tick otherwise, so
+        "always on" never means "beside an acquisition".
+
+        What it costs, said plainly: one frame every `interval_s` in the
+        journal and in the ring -- at 5 s, some 17 000 lines and a few
+        megabytes for a day the bench spent idle, and the ring's 5000
+        envelopes are then about seven hours of that idleness rather than
+        the last several runs. Both are the price of being able to say what
+        the cryostat did overnight; `--no-temperature-monitor` is the way
+        out for a bench where that is not worth it."""
         self.run_toml: dict = dict(run_toml or {})
         self.out = str(out)
         self.mode = mode
@@ -505,6 +536,10 @@ class Session:
             "sample": dict(sample_table or {})})
         self.catalogue = Catalogue(rig_config=rig_config, run_toml=self.run_toml,
                                    history=self.journal, sample=sample_table)
+        self._sample_file: dict = dict(self.catalogue.sample)
+        """The `[sample]` block this session opened with, kept so a `null`
+        through `set_sample` has a layer to fall back to -- the same way back
+        a parameter's `↺` has, for the one block that has no `ParamSet`."""
         self.worker = RunWorker(on_event=self._on_event, on_state=self._on_state)
 
         self._lock = threading.RLock()
@@ -561,6 +596,18 @@ class Session:
                 self.start_power_monitor(self.power_monitor_s)
             except (ValueError, Conflict) as exc:
                 self._error(f"--power-monitor: {exc}")
+        if self.temperature_monitor_s is not None and not self.temperature_monitor_running:
+            try:
+                self.start_temperature_monitor(self.temperature_monitor_s)
+            except (ValueError, Conflict) as exc:
+                # A bench with no 331 is the ordinary case here rather than
+                # start-up trouble: this monitor is the default and not
+                # something a flag asked for, and the read-back's
+                # `unavailable["temperature"]` already says on the card why
+                # there is no reading. So it is logged and *not* counted
+                # among the session's errors -- otherwise every bench
+                # without a cryostat would come up reporting one.
+                log.info("the temperature monitor was not started: %s", exc)
         return self
 
     def attach_loop(self, loop: asyncio.AbstractEventLoop | None = None) -> None:
@@ -610,10 +657,105 @@ class Session:
         return {"id": self.session_id, "mode": self.mode, "fast": self.fast,
                 "started": datetime.fromtimestamp(self.started_at).isoformat(timespec="seconds"),
                 "started_at": self.started_at, "sample": dict(self.catalogue.sample),
+                # What a `null` through `PUT /session/sample` puts a key back
+                # to. On the wire so the console can offer the way back beside
+                # a typed field, the way a parameter row offers its `↺`: this
+                # block is the only thing in the session with two layers and
+                # no `ParamSet` to render them.
+                "sample_file": dict(self._sample_file),
+                # The three identity fields as a folder name carries them:
+                # `slug`ged to `NAME_MAX`, which is where `PTQ10:IT-4F`
+                # becomes `PTQ10IT-4F`. The console shows what a value will be
+                # filed as while it is being typed, and reducing it a second
+                # time in the browser would be a second answer to that.
+                "sample_in_name": dict(zip(("sample", "material", "pixel"),
+                                           self._metadata_for_name().identity_in_name())),
                 "out": self.out, "rig_toml": self.rig_path, "run_toml": self.run_path,
                 "fingerprint": self.bench.fingerprint, "journal": self.journal.path,
                 "errors": len(self.errors),
                 "last_error": self.errors[-1] if self.errors else None}
+
+    def _metadata_for_name(self) -> RunMetadata:
+        """The session's identity as `storage.naming` sees it -- for
+        `sample_in_name` only, so the reduction the console shows is the one
+        `folder_name()` will actually perform."""
+        s = self.catalogue.sample
+        return RunMetadata(sample=str(s.get("sample", "")), material=str(s.get("material", "")),
+                           pixel=str(s.get("pixel", "")))
+
+    def set_sample(self, values: Mapping[str, Any]) -> dict:
+        """`PUT /session/sample` -- name the device from the console.
+
+        Until this existed the only way to say what was mounted was to edit
+        `run.toml` and restart the process that owns every instrument, so a
+        session opened on a fresh checkout filed every run of that day under
+        a name with no device in it. The folder name is the record
+        (`docs/naming-plan.md`), and renaming afterwards is the hazard that
+        file is about, so this is the one thing on the screen whose cost was
+        permanent.
+
+        **A merge, not a replacement.** A key the body does not carry is left
+        alone, and an explicit `None` puts that key back to what `run.toml`
+        opened with -- the same "the way back is a `null`" the parameter
+        layers use, and the reason the console can offer four fields without
+        silently dropping a `temperature_k` somebody typed into the file.
+
+        **Nothing here is refused for being an awkward name.** Since
+        2026-09-05 `folder_name()` reduces all three identity fields with
+        `slug()`, so a colon, a path separator and a `..` are all handled
+        where the name is built rather than at this door -- and the value
+        stays verbatim in the metadata, which for `material = "PTQ10:IT-4F"`
+        is the difference between recording the material and recording a
+        transcription of it. `sample_in_name` in the answer is what the folder
+        will carry, so the console can say so as it is typed.
+
+        **It binds the runs queued after it and no others.** Every run takes
+        its own copy at submit (`RunRecord.sample`, `RunQueued.sample`) and
+        is written from that copy, so a sweep already going keeps the
+        identity it started under. Which is why this is allowed while a run
+        is active rather than refused: an operator who notices at hour one
+        that the device is unnamed should not have to choose between
+        abandoning the run and mislabelling everything after it. What it
+        cannot do is repair the run in flight, and the answer says so.
+
+        Returns `{"session", "changed", "run_active"}`. Raises `ValueError`
+        for an unknown key or an unparsable `temperature_k` (422).
+        """
+        patch = dict(values or {})
+        # Checked before anything moves, and through the one function that
+        # owns the sentence: an unknown key or an unparsable `temperature_k`
+        # must not leave the block half applied. Its return is discarded --
+        # `None` means "back to the file" here and `coerce_sample` drops it.
+        coerce_sample(patch)
+        with self._lock:
+            before = dict(self.catalogue.sample)
+            merged = dict(before)
+            for key, value in patch.items():
+                if value is None:
+                    # Back to the file. Absent there means absent here: the
+                    # key goes, rather than becoming an empty string that
+                    # reads as "named, with nothing".
+                    if key in self._sample_file:
+                        merged[key] = self._sample_file[key]
+                    else:
+                        merged.pop(key, None)
+                else:
+                    merged[key] = value
+            after = coerce_sample(merged)
+            changed = sorted(k for k in set(before) | set(after)
+                             if before.get(k) != after.get(k))
+            if changed:
+                # Replaced, never mutated in place: `base_metadata` and the
+                # submit path read this dict from other threads, and a reader
+                # holding the old object gets a whole old block rather than
+                # half of each.
+                self.catalogue.sample = after
+            active = self.run_active()
+        if changed:
+            self._dispatch(None, E.SampleNamed(before=before, after=dict(after),
+                                               changed=list(changed)), node_path="")
+        return {"session": self.session_info(), "changed": list(changed),
+                "run_active": active}
 
     def hello(self) -> dict:
         """The first WebSocket frame's `data`."""
@@ -803,7 +945,12 @@ class Session:
         def factory(step: Step) -> RunContext:
             ctx = RunContext(run_id=rec.run_id, node_path=step.node_path,
                              out_folder=rec.out_folder,
-                             metadata=self.catalogue.base_metadata(),
+                             # The block this run was *queued* with, not the
+                             # session's now: `set_sample` can move the second
+                             # while a four-hour sweep is running, and a run
+                             # whose folders were half under each name would
+                             # contradict its own `RunQueued.sample`.
+                             metadata=self.catalogue.base_metadata(rec.sample),
                              sleep=sleep, abort=job.abort_check,
                              resolved=self._resolved(step),
                              on_data=self._data_sink(rec.run_id),
@@ -1688,12 +1835,17 @@ class Session:
         m = self._temperature_monitor
         return m is not None and m.running
 
-    def start_temperature_monitor(self, interval_s: float = 5.0) -> dict:
+    def start_temperature_monitor(self, interval_s: float = TEMPERATURE_MONITOR_S) -> dict:
         """`POST /monitors/temperature`: the 331 read every `interval_s`
         beside whatever the worker is doing -- through the attached driver's
         lock when this process owns the GPIB session, over HTTP when a
         console does. One at most (409); `ValueError` when no 331 is on the
-        bench at all or the interval is out of range."""
+        bench at all or the interval is out of range.
+
+        `start()` has already called this on a bench that has a 331
+        (`temperature_monitor_s`), so the route is what changes the interval
+        -- `DELETE` then `POST` -- or starts the monitor again after a
+        console stopped it, rather than what first turns it on."""
         interval_s = float(interval_s)
         if not MIN_INTERVAL_S <= interval_s <= MAX_INTERVAL_S:
             raise ValueError(f"interval_s must be between {MIN_INTERVAL_S:g} and "

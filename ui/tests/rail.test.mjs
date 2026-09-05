@@ -137,6 +137,70 @@ test('a temperature nobody measured reads as typed, not as a reading', () => {
   assert.equal(drifting.level, 'warn');
 });
 
+test('the monitor\'s readings move the rail, and a monitor that cannot read says so', () => {
+  // The 331 is watched from start-up, so the number on the rail is a reading
+  // and not the boot read-back: `/bench` is fetched twice a session and
+  // `TemperatureRead` arrives every few seconds in between.
+  const store = createStore({ schedule: () => {} });
+  store.applyBench({
+    read_at: 1000,
+    instruments: { temperature: { wired: true, kelvin: 261.4, setpoint_k: 250.0, in_band: false, source: 'instrument', monitor: true, reads: 4 } },
+    monitors: [{ name: 'temperature', running: true, interval_s: 5, readings: 4, skipped: 0 }],
+  });
+  const read = (ts, kelvin, in_band) => store.applyFrame({
+    seq: ts, ts, run_id: null, node_path: '', type: 'TemperatureRead',
+    data: { kelvin, setpoint_k: 250.0, in_band, source: 'instrument' } });
+
+  read(1005, 250.2, true);
+  const live = cell(railModel(store.getState()), 'temperature');
+  assert.equal(live.value, '250.2 K', 'the reading, not the read-back');
+  assert.equal(live.level, 'ok');
+  assert.match(live.sub, /every 5 s/, 'the cadence, not a count that is only as new as the snapshot');
+
+  // The monitor reads only while it can hold the worker's bus lock, and a
+  // pipeline run holds it for the whole subtree. Frames keep coming; readings
+  // do not. An old number drawn as `ok` would be the console telling the
+  // operator the cryostat is in band when nothing has looked for a minute.
+  store.applyFrame({ seq: 2000, ts: 1200, run_id: 'r1', node_path: 'bace', type: 'StepPhase',
+                     data: { phase: 'acquire light', k: 3 } });
+  store.applyMonitors([{ name: 'temperature', running: true, interval_s: 5, readings: 5, skipped: 38 }]);
+  const stale = cell(railModel(store.getState()), 'temperature');
+  assert.equal(stale.value, '250.2 K', 'the last reading is still the last reading');
+  assert.equal(stale.level, null, 'nothing has read the 331 for 190 s: `in band` is not a claim about now');
+  assert.match(stale.sub, /stale · 38 ticks skipped/);
+
+  // A newer reading — the settle's own poll, or the bus coming free — ends it.
+  read(1210, 249.9, true);
+  assert.equal(cell(railModel(store.getState()), 'temperature').level, 'ok');
+});
+
+test('a typed temperature stays typed, whatever arrives on the stream', () => {
+  // The operator's answer to a pause is a `TemperatureRead` too
+  // (`source: "operator"`). On a bench with no 331 it is still a number
+  // somebody typed, and the rail must not promote it to a reading.
+  const store = createStore({ schedule: () => {} });
+  store.applyHello(HELLO);
+  store.applyBench({ read_at: 1000, instruments: { temperature: { wired: false } } }, { readBack: true });
+  store.applyFrame({ seq: 1, ts: 1100, run_id: 'r1', node_path: 'T=290K', type: 'TemperatureRead',
+                     data: { kelvin: 291.7, setpoint_k: null, in_band: null, source: 'operator' } });
+  const t = cell(railModel(store.getState()), 'temperature');
+  assert.equal(t.value, '290.0 K', 'the session\'s typed number');
+  assert.equal(t.sub, 'typed · not wired');
+  assert.equal(t.level, 'typed');
+});
+
+test('a wired bench nobody is monitoring says the number is a read-back', () => {
+  // `--no-temperature-monitor`, or a console that stopped it: the number is
+  // as old as the last read-back and there is nothing to make it newer.
+  const t = cell(railModel(stateFrom({
+    read_at: 1000,
+    instruments: { temperature: { wired: true, kelvin: 250.1, setpoint_k: 250.0, in_band: true, source: 'instrument', monitor: false, reads: 0 } },
+  })), 'temperature');
+  assert.equal(t.value, '250.1 K');
+  assert.match(t.sub, /read-back only/);
+  assert.equal(t.level, 'ok', 'a read-back is a reading; it is only its age that is not said');
+});
+
 test('a power console that will not answer is a warning, not a zero', () => {
   const model = railModel(stateFrom({ instruments: { power: { available: false, reason: ':8918 silent' } } }));
   const power = cell(model, 'power');
