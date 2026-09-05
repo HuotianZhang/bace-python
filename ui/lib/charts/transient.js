@@ -29,7 +29,7 @@
 
 import * as scale from '../scale.js';
 import * as fmt from '../format.js';
-import { layout, axisTicks } from './frame.js';
+import { layout, axisTicks, heightFor, headLines, HEAD_LINE, ASPECT, MARGIN } from './frame.js';
 
 /**
  * Where the integration window starts, **in record time** — the service's own
@@ -199,9 +199,22 @@ const MA = 1e3;
  * panel, see `frame.js` — and every absence stated rather than drawn as a
  * value.
  */
+/** The plot's own width, which is what a label has to fit inside. */
+const plotWidth = (width) => width - MARGIN.left - MARGIN.right;
+
+/**
+ * The panels an unrun slot stands for: the two every shot has. The running
+ * integral is not among them — whether there is one depends on a window this
+ * shot has not resolved yet.
+ */
+const ABSENT_PANELS = [
+  { key: 'traces', weight: 1.25, label: 'light and dark  ·  I / mA' },
+  { key: 'photo', weight: 1, label: 'photocurrent = light − dark  ·  I / mA' },
+];
+
 export function transientModel(input, options = {}) {
   const {
-    width = 560, height = 300, columns = null,
+    width = 560, height = null, columns = null,
     t0_int_s = null, t_int_width_s = null, pulse_delay_s = 0,
     offset_corrected = null, dark_reference = null,
   } = options;
@@ -217,11 +230,8 @@ export function transientModel(input, options = {}) {
         ...set.absent,
         frame: {
           width,
-          height,
-          panels: [
-            { key: 'traces', weight: 1.25, label: 'light and dark  ·  I / mA' },
-            { key: 'photo', weight: 1, label: 'photocurrent = light − dark  ·  I / mA' },
-          ],
+          height: height ?? heightFor(width, ABSENT_PANELS, { aspect: ASPECT.trace }),
+          panels: ABSENT_PANELS,
           xLabel: 't / ns  →  record time',
         },
       },
@@ -252,7 +262,18 @@ export function transientModel(input, options = {}) {
   if (hasCumulative || derived) {
     panels.push({ key: 'charge', weight: 0.8, label: 'running integral  ·  Q / C' });
   }
-  const frame = layout({ width, height, panels });
+  // Every panel here carries a caption and a label that names what the curve
+  // *is*, and both live above the plot. How many lines that takes depends on
+  // the width, so the room for it is worked out rather than guessed: reserve
+  // the tallest header in `top`, and the same again in the gap between panels.
+  const head = Math.max(...panels.map((p) => headLines(p.label + (p.suffix || ''), plotWidth(width), true)));
+  const margin = { top: 5 + head * HEAD_LINE, gap: MARGIN.gap + (head - 1) * HEAD_LINE };
+  // The height is the aspect's, not a number chosen here: three panels of a
+  // quantity against time, each at `ASPECT.trace` for its weight.
+  const frame = layout({
+    width, panels, margin,
+    height: height ?? heightFor(width, panels, { margin, aspect: ASPECT.trace }),
+  });
   const plot = frame.panels[0].rect;
   const cols = columns || Math.round(plot.w);
 

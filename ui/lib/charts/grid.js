@@ -14,7 +14,7 @@
 
 import * as scale from '../scale.js';
 import * as fmt from '../format.js';
-import { layout, axisTicks } from './frame.js';
+import { layout, axisTicks, heightFor, ASPECT } from './frame.js';
 import { ramp } from './jv.js';
 import { chargeUnit } from './loops.js';
 import { cellName } from '../history.js';
@@ -25,7 +25,7 @@ const finite = (v) => typeof v === 'number' && Number.isFinite(v);
  * `by: 'led'` puts led_v on x with a series per temperature; `by: 'T'` the
  * other way round. Either is the same cells read along the other axis.
  */
-export function gridChartModel(grid, { by = 'led', width = 620, height = 220 } = {}) {
+export function gridChartModel(grid, { by = 'led', width = 620, height = null } = {}) {
   const present = (grid && grid.cells ? grid.cells : []).filter((c) => !c.missing && finite(c.q));
   if (!present.length) {
     return { key: 'grid-chart', absent: { text: 'nothing to plot', detail: 'a bace node with a Q gives the grid a point' }, panels: [], notes: [] };
@@ -40,7 +40,12 @@ export function gridChartModel(grid, { by = 'led', width = 620, height = 220 } =
   if (xs.length === 0) {
     return { key: 'grid-chart', absent: { text: `no ${by === 'T' ? 'temperature' : 'LED level'} recorded on any cell`, detail: null }, panels: [], notes: [] };
   }
-  const frame = layout({ width, height, panels: [{ key: 'q', weight: 1 }], margin: { left: 64 } });
+  // Q against temperature or LED level — a quantity against a quantity.
+  const qPanel = [{ key: 'q', weight: 1 }];
+  const frame = layout({
+    width, panels: qPanel, margin: { left: 64 },
+    height: height ?? heightFor(width, qPanel, { margin: { left: 64 }, aspect: ASPECT.curve }),
+  });
   const panel = frame.panels[0];
   const { rect } = panel;
   const xd = xs.length === 1 ? [xs[0] - 1, xs[0] + 1] : scale.extent([xs], { pad: 0.1 });

@@ -222,7 +222,9 @@ export function renderPowerPanel(el, state, ui, handlers = {}) {
   chartEl.hidden = !shape.chart;
   if (shape.chart) {
     keyed(chartEl, key.chart,
-      () => chart(powerModel(state.powerLog || [], { seconds: model.window.seconds, fromZero: model.fromZero })));
+      () => chart((w) => powerModel(state.powerLog || [], {
+        width: w, seconds: model.window.seconds, fromZero: model.fromZero,
+      })));
   } else if (chartEl.__key !== undefined) {
     // Emptied, not merely hidden: `app.js`'s Export SVG serialises whatever
     // `svg` sits under `.pw-chart`, and one left there is the trace from

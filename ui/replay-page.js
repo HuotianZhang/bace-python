@@ -184,10 +184,13 @@ function renderCharts() {
     const source = payloads.transient || shot;
     return [
       h('h2', 'charts · M3'),
+      // The `load a fixture` lines below are the harness's own state, not a
+      // bench's: the console's framed empty slot says what the *rig* has not
+      // done yet, which is not what an unloaded fixture means here.
       h('p.chart-note', 'the timing diagram is a function of the form and draws with no run at all; '
         + 'the transient and the J–V need arrays, which a journal does not carry'),
       timing ? h('h3', 'the shot this form describes') : h('p.absent', 'load the modules fixture for the timing diagram'),
-      timing ? chart(timing) : null,
+      timing ? chart((w) => timingModel(values || {}, { rig, chain, width: w })) : null,
       timing && timing.alerts.length
         ? h('div.alerts', timing.alerts.map((a) => h('div.warn1.' + a.level,
           h('span.code', { text: a.level }), h('span', { text: a.text }))))
@@ -196,21 +199,23 @@ function renderCharts() {
       bace && bace.node.lastShot ? shotBlock(bace.node.lastShot, bace, (bace.record.config && bace.record.config.run) || {}) : null,
       h('h3', 'the transient'),
       source
-        ? chart(transientModel(source, values ? {
+        ? chart((w) => transientModel(source, values ? {
+          width: w,
           t0_int_s: values.t0_int_s, t_int_width_s: values.t_int_width_s,
           pulse_delay_s: pulseDelayS(shot, values, rig),
           offset_corrected: values.offset_correct, dark_reference: values.dark_reference,
-        } : {}))
+        } : { width: w }))
         : h('p.absent', 'load the rig transient fixture, or replay a recorded stream'),
       h('h3', 'Q per loop, or Q(axis) · M4'),
-      bace ? chart(loopsModel(bace)) : h('p.absent', 'replay a recorded bace stream — the stopped one shows kept of requested'),
+      bace ? chart((w) => loopsModel(bace, { width: w })) : h('p.absent', 'replay a recorded bace stream — the stopped one shows kept of requested'),
       h('h3', 'the J–V'),
-      curves.length ? chart(jvModel(curves)) : h('p.absent', 'load the J-V fixture, or replay the jv stream'),
+      curves.length ? chart((w) => jvModel(curves, { width: w })) : h('p.absent', 'load the J-V fixture, or replay the jv stream'),
       h('h3', 'the run as a length of time · M5'),
       h('p.chart-note', 'a settle nobody has measured is hatched and takes no time on the axis, '
         + 'and there is no clock under a total that is a floor — `cost.finish_at` is null exactly '
         + 'when `lower_bound` is set'),
-      ...['validate-txill', 'validate-bound', 'validate-nested'].filter((k) => payloads[k]).map((k) => chart(scheduleModel({
+      ...['validate-txill', 'validate-bound', 'validate-nested'].filter((k) => payloads[k]).map((k) => chart((w) => scheduleModel({
+        width: w,
         blocks: timeline(scheduleTree(payloads[k].schedule)),
         cost: costModel(payloads[k].cost),
       }))),
@@ -258,7 +263,8 @@ function renderResults() {
         h('div.rleft',
           renderGrid(grid, { selected: openNode, onSelect: select }),
           grid.shape === 'grid' ? renderSummary(summary) : null,
-          grid.shape === 'grid' && summary.present > 1 ? chart(gridChartModel(grid, { by: 'led' })) : null,
+          grid.shape === 'grid' && summary.present > 1
+            ? chart((w) => gridChartModel(grid, { by: 'led', width: w })) : null,
           h('h3', 'nodes, in the order they ran'),
           renderNodes(record, { selected: openNode, onSelect: select })),
         h('div.rright', renderNodePanel(record, node, grid, {

@@ -24,7 +24,7 @@
 
 import * as scale from '../scale.js';
 import * as fmt from '../format.js';
-import { layout, axisTicks } from './frame.js';
+import { layout, axisTicks, heightFor, ASPECT } from './frame.js';
 
 /**
  * The illumination ramp: dim → bright, light → dark, one hue.
@@ -76,7 +76,12 @@ export function jvModel(curves, options = {}) {
   // `planned` is the sweep's [start, stop]: with it the x axis is the range
   // asked for, so a curve drawn point by point grows into a fixed frame
   // instead of the frame growing with it.
-  const { width = 530, height = 260, log = null, planned = null } = options;
+  const { width = 530, height = null, log = null, planned = null } = options;
+  // A J–V is read for its shape — the power quadrant's corner, where the
+  // reverse arm flattens — so it takes `curve`, not a trace's length.
+  const panelSpec = [{ key: 'jv', weight: 1 }];
+  const jvMargin = { left: 58, bottom: 28, top: 18 };
+  const jvHeight = height ?? heightFor(width, panelSpec, { margin: jvMargin, aspect: ASPECT.curve });
   const list = (curves || []).filter((c) => c && Array.isArray(c.voltage) && c.voltage.length);
   if (!list.length) {
     return {
@@ -90,9 +95,9 @@ export function jvModel(curves, options = {}) {
         detail: null,
         frame: {
           width,
-          height,
+          height: jvHeight,
           panels: [{ key: 'jv', weight: 1, label: 'I  ·  V' }],
-          margin: { left: 58, bottom: 28, top: 18 },
+          margin: jvMargin,
           xLabel: 'V / V',
         },
       },
@@ -121,9 +126,7 @@ export function jvModel(curves, options = {}) {
   const levels = [...new Set(light.map((c) => c.led_level_v ?? null))]
     .sort((a, b) => (a ?? 0) - (b ?? 0));
 
-  const frame = layout({
-    width, height, panels: [{ key: 'jv', weight: 1 }], margin: { left: 58, bottom: 28, top: 18 },
-  });
+  const frame = layout({ width, height: jvHeight, panels: panelSpec, margin: jvMargin });
   const panel = frame.panels[0];
   const rect = panel.rect;
 

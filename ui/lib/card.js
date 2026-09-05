@@ -23,6 +23,7 @@
 import { h, fill } from './dom.js';
 import * as fmt from './format.js';
 import { cardModel, foldCount } from './fields.js';
+import { icon } from './icons.js';
 
 /**
  * One card. `ctx` carries `{api, store, onError}`; `open` is the per-card
@@ -195,7 +196,9 @@ export function field(spec, ctx, model, { segmented = false, accent = false, lab
     label(spec, ctx, model, text),
     input(spec, commit, segmented),
     spec.inert
-      ? h('span.src', h('span.tag.off', { title: spec.inert, text: 'not read' }))
+      // `blank` is the pack's glyph for *there is no value here*, beside the
+      // words rather than instead of them (`ui-rules` §2).
+      ? h('span.src', h('span.tag.off', { title: spec.inert }, icon('blank'), h('span', { text: 'not read' })))
       : provenance(spec, ctx, model, editable)), docLine(spec, ctx, model));
 }
 
@@ -497,7 +500,7 @@ function vocRow(row, ctx, model) {
         // line, after the level it was measured at.
         bound ? h('i.det', { text: voc.detail || 'derived' }) : null),
       provenance(voc, ctx, model, !bound)),
-    missing && row.need ? h('div.need1', h('span.ico', '⚠'), h('span', { text: row.need.text })) : null);
+    missing && row.need ? h('div.need1', icon('warn', { cls: 'ico' }), h('span', { text: row.need.text })) : null);
 }
 
 /**
@@ -565,7 +568,7 @@ function needsList(model) {
   const rest = model.needs.filter((n) => n.code !== 'voc');
   if (!rest.length) return null;
   return h('div.needs', rest.map((n) => h('div.warn1',
-    h('span.ico', '⚠'), h('span', { text: n.text }))));
+    icon('warn', { cls: 'ico' }), h('span', { text: n.text }))));
 }
 
 /**
@@ -611,7 +614,7 @@ function startBlockers(checks, model) {
 
 function blockedNote(blocked) {
   return h('div.blocked', blocked.map((c) => h('div.warn1.' + c.level,
-    h('span.ico', c.level === 'crit' ? '⛔' : '⚠'),
+    icon(c.level === 'crit' ? 'crit' : 'warn', { cls: 'ico' }),
     h('span.code', { text: c.code }),
     h('span', { text: c.text }))));
 }

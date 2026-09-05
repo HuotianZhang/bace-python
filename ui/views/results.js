@@ -207,14 +207,13 @@ export default {
       keyed(sumEl, recordKey, () => (grid.shape === 'grid' ? renderSummary(summary) : []));
       keyed(chartEl, `${recordKey}|${chartBy}`, () => {
         if (grid.shape !== 'grid' || summary.present < 2) return [];
-        const model = gridChartModel(grid, { by: chartBy });
         return [
           h('div.schedbar',
             h('span.cs', 'plot'),
             h('span.filt', { role: 'group', 'aria-label': 'plot' },
               h('button.opt', { type: 'button', 'aria-pressed': chartBy === 'led' ? 'true' : 'false', class: chartBy === 'led' ? 'on' : '', onclick: () => { chartBy = 'led'; render(store.getState()); } }, 'Q(led_v) per T'),
               h('button.opt', { type: 'button', 'aria-pressed': chartBy === 'T' ? 'true' : 'false', class: chartBy === 'T' ? 'on' : '', onclick: () => { chartBy = 'T'; render(store.getState()); } }, 'Q(T) per led_v'))),
-          chart(model),
+          chart((w) => gridChartModel(grid, { by: chartBy, width: w })),
         ];
       });
       keyed(nodesEl, `${recordKey}|${selectedNode}`, () => renderNodes(record, { selected: selectedNode, onSelect: selectNode }));

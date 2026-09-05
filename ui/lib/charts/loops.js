@@ -34,7 +34,7 @@
 
 import * as scale from '../scale.js';
 import * as fmt from '../format.js';
-import { layout, axisTicks } from './frame.js';
+import { layout, axisTicks, heightFor, ASPECT } from './frame.js';
 
 /** The unit each swept quantity is read in — `ui-rules` §2's slash convention. */
 export const AXIS_UNITS = { vpre: 'V', vcoll: 'V', delay_ns: 'ns' };
@@ -137,7 +137,10 @@ function ending(record, node) {
  * `results.runFor` answers it.
  */
 export function loopsModel(found, options = {}) {
-  const { width = 560, height = 190 } = options;
+  const { width = 560, height = null } = options;
+  // Q against the swept axis: a quantity against a quantity, so `curve`.
+  const qPanel = [{ key: 'q', weight: 1 }];
+  const qHeight = height ?? heightFor(width, qPanel, { margin: { left: 60 }, aspect: ASPECT.curve });
   const node = found && found.node;
   const record = found && found.record;
   if (!node) {
@@ -149,7 +152,7 @@ export function loopsModel(found, options = {}) {
       absent: {
         text: 'no run yet — Q lands here, per loop or along the axis',
         detail: null,
-        frame: { width, height, panels: [{ key: 'q', weight: 1, label: 'Q / C' }], margin: { left: 60 } },
+        frame: { width, height: qHeight, panels: [{ key: 'q', weight: 1, label: 'Q / C' }], margin: { left: 60 } },
       },
       panels: [],
       notes: [],
@@ -177,7 +180,7 @@ export function loopsModel(found, options = {}) {
   const kept = finite(node.kept) ? Math.max(node.kept, shots.length) : shots.length;
   const loopsDone = Math.max((node.loops || []).length, Math.floor(kept / points));
   const ended = ending(record, node);
-  const frame = layout({ width, height, panels: [{ key: 'q', weight: 1 }], margin: { left: 60 } });
+  const frame = layout({ width, height: qHeight, panels: qPanel, margin: { left: 60 } });
   const panel = frame.panels[0];
   const common = { key: 'loops', width: frame.width, height: frame.height, margin: frame.margin };
   const counts = { points, kept, requestedShots, loopsDone, loopsRequested, ended };

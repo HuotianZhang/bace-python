@@ -16,7 +16,7 @@
 
 import * as scale from '../scale.js';
 import * as fmt from '../format.js';
-import { layout, axisTicks } from './frame.js';
+import { layout, axisTicks, heightFor, ASPECT } from './frame.js';
 
 /** The windows the panel offers. `seconds: null` is the whole log. */
 export const WINDOWS = [
@@ -98,7 +98,7 @@ export function wattsUnit(points) {
  * flat line.
  */
 export function powerModel(points, {
-  seconds = null, now, width = 1400, height = 150, fromZero = false, columns = null,
+  seconds = null, now, width = 1400, height = null, fromZero = false, columns = null,
 } = {}) {
   const at = now !== undefined ? now : Date.now() / 1000;
   const inWindow = windowPoints(points, { seconds, now: at });
@@ -118,7 +118,13 @@ export function powerModel(points, {
   const { factor, prefix } = wattsUnit(inWindow);
   const stats = powerStats(inWindow);
 
-  const frame = layout({ width, height, panels: [{ key: 'power', weight: 1 }], margin: { left: 60 } });
+  // The meter's whole window at a glance: a `strip`, where the excursions
+  // and the ends carry the meaning and the middle is a baseline.
+  const pPanel = [{ key: 'power', weight: 1 }];
+  const frame = layout({
+    width, panels: pPanel, margin: { left: 60 },
+    height: height ?? heightFor(width, pPanel, { margin: { left: 60 }, aspect: ASPECT.strip }),
+  });
   const panel = frame.panels[0];
   const rect = panel.rect;
   const X = scale.linear([-span / div, 0], [rect.x, rect.x + rect.w]);
