@@ -120,6 +120,14 @@ override dropped, the node is the bench's module again. This is the rule a
 Figma instance follows — show the overrides, the rest is the main component —
 and it needs no word explaining it.
 
+The other Figma gesture, *go to main component*, is the `→ bench` link in
+the node form's header: `#/bench?module=bace` opens the bench tab, scrolls
+that module's card into view and pings it once (an accent outline, gone in
+under two seconds). The bench view answers the query on mount and, when it
+is already up, on the hash changing — no remount, no lost fold state. The
+ping is view state rather than a class on one element, because the checks
+land a beat after the catalogue and rebuild the card under it.
+
 ### A recipe records the bench it was saved on
 
 The same dependency, on disk. A recipe file used to hold the tree alone —

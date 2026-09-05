@@ -22,7 +22,7 @@ export default {
   route: 'bench',
   title: 'bench',
 
-  mount(container, { store, api, notify, park }) {
+  mount(container, { store, api, notify, park, query = {} }) {
     // The Instruments panel first — the switches — then the module cards.
     // Two zones, because they are two different things: a switch acts on the
     // bench the moment it is clicked, a card's Run posts a job the worker
@@ -31,6 +31,38 @@ export default {
     const panel = h('div.instruments');
     const body = h('div.cards');
     fill(container, panel, body);
+
+    /**
+     * A card asked for by name — `#/bench?module=bace`, the pipeline tab's
+     * "→ bench" on a node form: the module every node of it starts from.
+     * Kept until the card exists (the catalogue may not have answered yet),
+     * then scrolled into view and pinged once. The Figma gesture: an
+     * instance has "go to main component", and so does a node.
+     */
+    let wanted = query.module || null;
+    /** The card lit right now, by name: a re-render replaces the element
+     *  (the checks land a beat after the catalogue), so the ping is state
+     *  the render re-applies, not a class on one element. */
+    let ping = null;
+    function focus(next) {
+      wanted = (next && next.module) || null;
+      settle();
+    }
+    function settle() {
+      if (!wanted) return;
+      const card = body.querySelector(`[data-module="${wanted}"]`);
+      if (!card) return;
+      const name = wanted;
+      wanted = null;
+      card.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      ping = { name, until: Date.now() + 1600 };
+      card.classList.add('pinged');
+      setTimeout(() => {
+        ping = null;
+        const now = held.get(name);
+        if (now) now.el.classList.remove('pinged');
+      }, 1600);
+    }
 
     /** Which fold groups are open, per card. Kept here so a re-render — and
      *  every edit is one — does not shut a fold the operator just opened. */
@@ -369,11 +401,13 @@ export default {
           continue;
         }
         const card = moduleCard(entry, c, open);
+        if (ping && ping.name === name && Date.now() < ping.until) card.classList.add('pinged');
         if (was && was.el.parentNode === body) body.replaceChild(card, was.el);
         else body.append(card);
         held.set(name, { key, el: card });
         renderResult(name);
       }
+      settle();
 
       // Several of the checks are about the bench rather than the values —
       // an instrument that went away, the chain, a V_oc that has just been
@@ -434,6 +468,6 @@ export default {
 
     const off = store.subscribe(render);
     render();
-    return { dispose() { off(); charts.dispose(); } };
+    return { dispose() { off(); charts.dispose(); }, focus };
   },
 };
