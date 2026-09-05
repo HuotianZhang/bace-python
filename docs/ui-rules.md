@@ -36,9 +36,13 @@ The bench rail is fixed; everything else may scroll — with one exception, and
 it is the shape any other should take: the pipeline's action row is pinned to
 the foot of its own panel (`.pipe-actions-bar`), because the canonical
 structure is taller than the port and Start would otherwise sit below the fold.
-What it pins is a control, not a reading. The panel under it still scrolls,
-nothing the run recorded is behind it, and the row says what it will do — the
-name field scrolls away, so Save carries the stem it is about to write.
+What it pins is a control, not a reading, and that is the whole of the rule:
+the name field and the recipe picker ride with the buttons because they are
+acted on there; the drift note stays in the flow because it is something to
+read. The panel under it still scrolls and nothing the run recorded is behind
+it. A button label carries what cannot be got otherwise — undo names what it
+takes back, Start names its cost — and never a value that is on screen in a
+field beside it.
 
 Long names are real and must not truncate into ambiguity:
 

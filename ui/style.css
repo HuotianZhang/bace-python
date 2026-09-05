@@ -923,7 +923,10 @@ button.link:hover { color: var(--accent-dark); }
 .cklist .warn1.info { color: var(--grey); }
 .cklist .cs { margin-left: auto; padding-left: 10px; }
 
-.pipe-actions { display: flex; flex-direction: column; gap: 8px; }
+/* The drift note, alone in the flow now that the name row is in the bar. It is
+   null unless a recipe is open and the bench has moved under it (`recipeNote`),
+   so it collapses the way an unselected node form does. */
+.pipe-note:empty { display: none; }
 /* Start is the reason the tab exists, so it does not scroll away: the button
    row is pinned to the foot of the structure card and the tree, the costs and
    the check list pass under it. The row only — the name field and the recipe
@@ -938,6 +941,7 @@ button.link:hover { color: var(--accent-dark); }
    margins are `.cb`'s own padding, so the bar reaches both card edges. */
 .pipe-actions-bar {
   position: sticky; bottom: calc(-1 * var(--view-pad-b)); z-index: 2;
+  display: flex; flex-direction: column; gap: 8px;
   margin: 0 -10px -10px; padding: 8px 10px 10px;
   background: var(--paper); border-top: 1px solid var(--rule);
 }
@@ -967,8 +971,6 @@ button.link:hover { color: var(--accent-dark); }
    what it takes back — so it is the widest of the small buttons and must be
    allowed to shrink rather than push Start off the row. */
 .btnrow .btng { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Save carries the stem it will write, and a stem has no length limit. */
-.btnrow .btns { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .btnrow .btnp { padding: 10px 16px; font-size: 14px; }
 
 /* The schedule at three scales. A row is a line, not a box: the canonical
