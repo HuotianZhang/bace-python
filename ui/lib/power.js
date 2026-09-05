@@ -161,7 +161,7 @@ function switchRow(model, { onToggle, onInterval }) {
       : 'POST /monitors/power — a thread in the service reads the meter at this interval, whether or not this page is open';
   return [
     h('label.pw-switch', { title }, box, h('span', 'power monitor')),
-    h('span.seg', { role: 'group', 'aria-label': 'interval' }, INTERVALS.map((s) => h('button.opt', {
+    h('span.filt', { role: 'group', 'aria-label': 'interval' }, INTERVALS.map((s) => h('button.opt', {
       class: s === model.interval_s ? 'on' : '',
       title: `read the meter every ${s} s`,
       onclick: () => onInterval && onInterval(s),
@@ -203,13 +203,13 @@ function statsEl(model) {
 
 function controls(model, { onWindow, onChart, onZero, onClear, onExportCsv, onExportSvg }) {
   return [
-    h('span.seg', { role: 'group', 'aria-label': 'window' }, WINDOWS.map((w) => h('button.opt', {
+    h('span.filt', { role: 'group', 'aria-label': 'window' }, WINDOWS.map((w) => h('button.opt', {
       class: w.key === model.window.key ? 'on' : '',
       onclick: () => onWindow && onWindow(w.key),
     }, w.label))),
-    h('button.btng', { class: model.fromZero ? 'on' : '', title: 'pin the y axis to zero, so an LED that is off reads as off',
+    h('button.filt', { type: 'button', 'aria-pressed': model.fromZero ? 'true' : 'false', class: model.fromZero ? 'on' : '', title: 'pin the y axis to zero, so an LED that is off reads as off',
       onclick: () => onZero && onZero(!model.fromZero) }, 'from 0'),
-    h('button.btng', { class: model.chart ? 'on' : '', title: 'show or hide the trace',
+    h('button.filt', { type: 'button', 'aria-expanded': model.chart ? 'true' : 'false', class: model.chart ? 'on' : '', title: 'show or hide the trace',
       onclick: () => onChart && onChart(!model.chart) }, model.chart ? 'trace ▾' : 'trace ▸'),
     h('button.btns', { title: 'GET /monitors/power/history.csv — every reading the service holds, not only what this page saw',
       disabled: !model.count || null, onclick: () => onExportCsv && onExportCsv() }, 'Export CSV'),

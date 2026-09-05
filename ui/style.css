@@ -304,19 +304,31 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 }
 .irow:last-child { border-bottom: 0; }
 .irow .n { font-family: var(--font-head); font-weight: 800; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+/* -- the instrument switch -------------------------------------------------
+   One of three control families (`docs/ui-rules.md` §13). A position here is
+   a *bench action*: clicking it moves the shutter, drives the LED, throws
+   the relay — now, not on the next Run. So it must never read as a setting:
+   larger hit target, ink border, and a lit position that is a fill with the
+   accent under it rather than the settings' white-on-ink. */
 .sw { display: inline-flex; border: 1px solid var(--ink); }
 .sw .p {
-  padding: 3px 12px; font-size: 12px; color: var(--grey); cursor: pointer;
+  padding: 6px 16px; font-size: 13px; color: var(--grey); cursor: pointer;
   font-family: var(--font-num); font-weight: 400; letter-spacing: 0; line-height: 1.4;
   border: 0; border-right: 1px solid var(--rule); background: var(--paper);
+  box-shadow: inset 0 -3px 0 transparent;
 }
 .sw .p:last-child { border-right: 0; }
 .sw .p:hover { color: var(--ink); }
-.sw .p.on { background: var(--ink); color: #fff; }
+.sw .p.on {
+  background: var(--fill); color: var(--ink); font-weight: 600;
+  box-shadow: inset 0 -3px 0 var(--accent);
+}
 .sw .p:disabled { cursor: not-allowed; opacity: .45; }
-/* Inferred, not read: the same dashed rule the rail uses. */
+.sw .p:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Inferred, not read: the same dashed rule the rail uses, and the underline
+   goes grey — the position is a guess, not a read-back. */
 .irow.inferred .sw { border-style: dashed; }
-.irow.inferred .sw .p.on { background: var(--grey); }
+.irow.inferred .sw .p.on { box-shadow: inset 0 -3px 0 var(--grey); }
 .vals { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
 .vals label { display: inline-flex; align-items: baseline; gap: 4px; }
 .vals input.v {
@@ -470,10 +482,12 @@ button.link {
 }
 button.link:hover { color: var(--accent-dark); }
 
-/* -- the two small choosers ----------------------------------------------
-   `<button>`s, not clickable spans: these are the polarity, the shutter and
-   the LED mode, and a span with an onclick cannot be tabbed to, carries no
-   role and is invisible to a screen reader. */
+/* -- the two small choosers: a *setting* -----------------------------------
+   The second control family (`docs/ui-rules.md` §13): a value a later Run
+   reads. Grey border, the chosen option white on ink. Nothing on the bench
+   moves when one is clicked.
+   `<button>`s, not clickable spans: a span with an onclick cannot be tabbed
+   to, carries no role and is invisible to a screen reader. */
 .seg, .bool { display: inline-flex; border: 1px solid var(--rule); }
 .seg .opt, .bool .opt {
   padding: 0 7px; font-size: 11px; cursor: pointer; color: var(--grey);
@@ -493,6 +507,24 @@ button.link:hover { color: var(--accent-dark); }
 /* §3: the accent is the swept quantity — so the axis chooser's selection is
    the accent, and the polarity pair is ordinary ink. */
 .pf.acc .seg .opt.on { background: var(--accent); }
+
+/* -- the view filter ------------------------------------------------------
+   The third family: what is *drawn* — a monitor's interval, its window,
+   which way round a grid is charted. Nothing about the bench or the recipe
+   changes, so the chosen option gets no fill and no border, only weight and
+   a rule under it. `.filt` groups options; a lone `button.filt` is a toggle. */
+.filt { display: inline-flex; gap: 1px; align-items: baseline; }
+.filt .opt, button.filt {
+  padding: 0 5px; font-size: 11px; cursor: pointer; color: var(--grey);
+  font-family: var(--font-num); font-weight: 400; letter-spacing: 0;
+  border: 0; background: none; line-height: 1.5;
+  border-bottom: 1.5px solid transparent;
+}
+.filt .opt.on, button.filt.on { color: var(--ink); font-weight: 600; border-bottom-color: var(--ink); }
+.filt .opt:not(.on):hover, button.filt:not(.on):hover { color: var(--ink); }
+.filt .opt:focus-visible, button.filt:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.filt .opt:disabled, button.filt:disabled { cursor: not-allowed; opacity: .45; }
+
 .pf.pol .v { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pf.pol .eff { color: var(--accent-dark); }
 
@@ -1070,7 +1102,7 @@ table.qgrid td { padding: 0; }
 .pw-stats-box { gap: 12px; color: var(--ink); }
 .pw-stats-box i { font-style: normal; color: var(--grey); }
 .pw-controls { gap: 6px; }
-.power .seg .opt { line-height: 1.7; }
+.power .filt .opt, .power button.filt { line-height: 1.7; }
 .pw-status.ok { color: var(--ok); }
 .pw-status.bad { color: var(--alert); }
 .pw-chart { padding: 0 12px 6px; }

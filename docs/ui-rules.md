@@ -322,3 +322,23 @@ A manual verification performed on **every single run**, by eye, for years.
 Nothing in `bace-python` does it. It is the strongest candidate in the whole
 design pack for something the new console should check itself — and the
 integration window is already drawn, so the comparison is on screen anyway.
+
+---
+
+## 13 · Three control families, one look each
+
+A dark "selected" chip used to carry three meanings. It now carries one.
+Before drawing a new control, ask what a click *does*, and pick the family
+that answers:
+
+| a click… | family | in `style.css` | looks like |
+|---|---|---|---|
+| **changes a value a later Run reads** — a setting | `.seg` (enums), `.bool` | grey border, the chosen option white on ink; the swept axis's chooser is white on the accent | `true \| false`, `vpre \| vcoll \| delay_ns`, `auto \| NORM \| INV \| leave` |
+| **acts on the bench the moment it lands** — an instrument switch | `.sw` | ink border, a larger hit target, the lit position filled grey with the accent under it; dashed and grey-underlined when the position is inferred, not read back | Instruments: `open \| shut`, `off \| DC \| pulse`, `amplifier \| sourcemeter` |
+| **changes only what is drawn** — a view filter | `.filt` (a group of `.opt`s), or a lone `button.filt` toggle | no border, no fill; the chosen option is bold with a rule under it | the power monitor's `0.2 s … 5 s`, `1 min … all`, `from 0`, `trace ▾`; the results grid's `Q(led_v) per T \| Q(T) per led_v` |
+
+The rule is about consequence, not shape. A pair of options that flips a
+relay is a switch even though it has two positions like a boolean; a chip
+that only re-plots is a filter even though it looks like an enum. A control
+that does not fit is a sign the action itself is unclear — settle that
+first.
