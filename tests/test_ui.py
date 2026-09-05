@@ -16,6 +16,7 @@ not in this file. They are `ui/tests/live.test.mjs`, run against one:
 """
 from __future__ import annotations
 
+import glob
 import json
 import os
 import re
@@ -251,24 +252,59 @@ def test_every_offline_fixture_is_registered_and_present():
     assert on_disk <= registered, f"recorded but not loadable offline: {sorted(on_disk - registered)}"
 
 
+#: Suites that cannot run here, with the reason. `live.test.mjs` drives a real
+#: service (`python -m bace.service --sim --fast --port 8900`) and is the file
+#: at the top of this module's docstring.
+NOT_IN_THIS_SUITE = {"live.test.mjs"}
+
+
+def _console_suites():
+    """Every `ui/tests/*.test.mjs` but the ones that cannot run from here.
+
+    **Found rather than listed.** This was a hardcoded list of paths, and a
+    list is a thing to remember: `fields.test.mjs` sat unrun after M2, and by
+    2026-09-05 seven more had joined it — `undo`, `identity`, `title`,
+    `history`, `instruments`, `recipe` and `route` — three of them the tests
+    for undo, written the same day and never once run by this suite. A suite
+    that is written now runs, because nothing has to be edited for it to.
+    """
+    names = sorted(
+        os.path.basename(p)
+        for p in glob.glob(os.path.join(UI, "tests", "*.test.mjs"))
+    )
+    return [n for n in names if n not in NOT_IN_THIS_SUITE]
+
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="no Node on this machine (the lab PC has none)")
 def test_the_console_suite_passes():
     """`node --test ui/tests/` — the fold, the socket, the numbers, the rail,
-    the card rows, the scales and the charts, the run monitor, and what the
-    shell does per frame rather than what it draws.
+    the card rows, the scales and the charts, the run monitor, the undo stack,
+    and what the shell does per frame rather than what it draws.
 
-    Every suite in `ui/tests/` but `live.test.mjs`, which needs a service. A
-    suite that is written and not listed here does not run in CI or on the lab
-    PC, which is how `fields.test.mjs` sat unrun after M2.
+    Every suite in `ui/tests/` but `live.test.mjs`, which needs a service —
+    and now that is true by construction rather than by anyone remembering it.
     """
+    suites = _console_suites()
+    assert suites, f"no suites found under {os.path.join(UI, 'tests')} — the glob is wrong, not the console"
     result = subprocess.run(
-        ["node", "--test", "ui/tests/store.test.mjs", "ui/tests/stream.test.mjs",
-         "ui/tests/format.test.mjs", "ui/tests/rail.test.mjs", "ui/tests/fields.test.mjs",
-         "ui/tests/render.test.mjs", "ui/tests/scale.test.mjs", "ui/tests/charts.test.mjs",
-         "ui/tests/monitor.test.mjs", "ui/tests/tree.test.mjs", "ui/tests/rig.test.mjs",
-         "ui/tests/power.test.mjs"],
+        ["node", "--test", *[os.path.join("ui", "tests", n) for n in suites]],
         cwd=REPO, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-2000:]
+
+
+def test_every_console_suite_is_reached_by_the_one_that_runs_them():
+    """The guard the hardcoded list did not have.
+
+    `_console_suites` cannot silently skip a file — but it can be given an
+    exclusion that outlives its reason, which is the same failure wearing a
+    different hat. So every name in `NOT_IN_THIS_SUITE` has to still exist,
+    and the whole directory has to be accounted for one way or the other.
+    """
+    on_disk = {os.path.basename(p) for p in glob.glob(os.path.join(UI, "tests", "*.test.mjs"))}
+    assert on_disk, "the console has no tests, which is not a thing this repo means"
+    stale = NOT_IN_THIS_SUITE - on_disk
+    assert not stale, f"excluded but no longer written: {sorted(stale)}"
+    assert on_disk == set(_console_suites()) | NOT_IN_THIS_SUITE
 
 
 def test_the_results_fixtures_carry_the_identity_and_a_partial_cell():
