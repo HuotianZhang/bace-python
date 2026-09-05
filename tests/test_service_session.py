@@ -23,6 +23,7 @@ from bace.experiment.rig import RigConfig
 from bace.params import ParamValue, Source, run_toml_layer
 from bace.service.rigs import BenchActionRefused
 from bace.service import session as S
+from bace.service.monitors import TEMPERATURE_MONITOR_S
 from bace.service.session import (EPHEMERAL_BACKLOG, RING_TRACES_KEPT, Busy, Conflict,
                                   DataUnavailable, NodeRequired, NotPaused, Session,
                                   SubmitRefused, UnknownRun, tree_for_module)
@@ -1037,9 +1038,13 @@ def test_the_temperature_monitor_reads_the_331_beside_the_bench(tmp_path):
     with make_session(tmp_path) as s:
         with pytest.raises(ValueError, match="no 331 on this bench"):
             s.start_temperature_monitor(0.05)
+    # `temperature_monitor_s=None` so this test owns the monitor: on the
+    # default the 331 is already being read when the setpoint below is
+    # written, and the readings counted here would start before it.
     wired = Session(RigConfig(temperature_console="http://127.0.0.1:8331"),
                     run_toml_layer(RECIPE), out=str(tmp_path / "runs"),
-                    mode="sim", fast=True, seed=5, session_id="20260902_214500")
+                    mode="sim", fast=True, seed=5, session_id="20260902_214500",
+                    temperature_monitor_s=None)
     with wired as s:
         assert s.bench.rig.temperature is s.bench.sim.temperature
         s.bench.sim.temperature.set_setpoint(250.0)
@@ -1067,6 +1072,48 @@ def test_the_temperature_monitor_reads_the_331_beside_the_bench(tmp_path):
         assert s.stop_temperature_monitor() is True
         assert s.bench_snapshot()["instruments"]["temperature"]["monitor"] is False
         assert any(l["type"] == "TemperatureRead" for l in journal_lines(s))
+
+
+def test_the_331_is_read_from_start_up_without_anybody_asking(tmp_path):
+    """The temperature monitor is the default (`temperature_monitor_s`,
+    `--temperature-monitor SECONDS`): a bench with a 331 is reading it before
+    any console connects, so the card's number is a reading with an age
+    instead of the read-back of whenever somebody last pressed something, and
+    the hours between runs are in the journal.
+
+    A bench with *no* 331 starts nothing and complains about nothing: that is
+    the ordinary bench here, not start-up trouble, and the read-back's
+    `unavailable` block already says why the card is empty.
+    """
+    wired = Session(RigConfig(temperature_console="http://127.0.0.1:8331"),
+                    run_toml_layer(RECIPE), out=str(tmp_path / "runs"),
+                    mode="sim", fast=True, seed=5, session_id="20260902_215500")
+    with wired as s:
+        assert s.temperature_monitor_running
+        assert [(m["name"], m["interval_s"]) for m in s.monitors()] == [
+            ("temperature", TEMPERATURE_MONITOR_S)]
+        # Nobody has connected, nobody has pressed read-back: the first
+        # reading is on the stream and in the journal all the same.
+        wait_until(lambda: any(f["type"] == "TemperatureRead" for f in s.events_since(0)))
+        t = s.bench_snapshot()["instruments"]["temperature"]
+        assert t["monitor"] is True and t["reads"] >= 1
+        assert t["kelvin"] is not None and t["read_at"] is not None
+        assert any(l["type"] == "TemperatureRead" for l in journal_lines(s))
+        with pytest.raises(Conflict):
+            s.start_temperature_monitor(0.5)
+
+    # No 331 on this bench: nothing started, and nothing counted as an error.
+    with make_session(tmp_path) as s:
+        assert not s.temperature_monitor_running and s.monitors() == []
+        assert s.errors == []
+
+    off = Session(RigConfig(temperature_console="http://127.0.0.1:8331"),
+                  run_toml_layer(RECIPE), out=str(tmp_path / "runs"),
+                  mode="sim", fast=True, seed=5, session_id="20260902_215600",
+                  temperature_monitor_s=None)
+    with off as s:                                   # --no-temperature-monitor
+        assert not s.temperature_monitor_running and s.monitors() == []
+        assert not any(f["type"] == "TemperatureRead" for f in s.events_since(0))
 
 
 def test_a_power_monitor_asked_for_at_start_is_running_before_anyone_connects(tmp_path):

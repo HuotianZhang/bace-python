@@ -37,6 +37,7 @@ from ..drivers.keithley2400 import SourceMeterConfig
 from ..experiment.rig import RigConfig
 from ..experiment.transient import RunConfig
 from ..params import run_toml_layer
+from .monitors import MAX_INTERVAL_S, MIN_INTERVAL_S, TEMPERATURE_MONITOR_S
 from .session import Session
 
 DEFAULT_HOST = "127.0.0.1"
@@ -85,6 +86,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                     help="start the 1918-C monitor at this interval as the service comes "
                          "up, so the meter is watched whether or not a console is open "
                          "(the console's own switch starts and stops it too)")
+    ap.add_argument("--temperature-monitor", type=float, default=TEMPERATURE_MONITOR_S,
+                    metavar="SECONDS",
+                    help=f"how often the 331 is read beside the bench (default: "
+                         f"{TEMPERATURE_MONITOR_S:g} s). The temperature monitor is on "
+                         f"unless --no-temperature-monitor says otherwise; on a bench "
+                         f"with no 331 nothing is started and the card says why")
+    ap.add_argument("--no-temperature-monitor", action="store_true",
+                    help="do not read the 331 unless a run or POST /monitors/temperature "
+                         "asks: the card then shows the last read-back and its age")
     return ap.parse_args(argv)
 
 
@@ -131,7 +141,10 @@ def build_session(a: argparse.Namespace, *, warn: Callable[[str], Any] = print) 
                    mode="sim" if a.sim else "rig", fast=a.fast,
                    smu_config=cfg["smu_config"], run_config_defaults=cfg["run_config"],
                    rig_path=cfg["rig_path"], run_path=cfg["run_path"], seed=a.seed,
-                   power_monitor_s=getattr(a, "power_monitor", None))
+                   power_monitor_s=getattr(a, "power_monitor", None),
+                   temperature_monitor_s=(None if getattr(a, "no_temperature_monitor", False)
+                                          else getattr(a, "temperature_monitor",
+                                                       TEMPERATURE_MONITOR_S)))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -158,6 +171,10 @@ def main(argv: list[str] | None = None) -> int:
     if a.power_monitor is not None and not 0.01 <= a.power_monitor <= 3600:
         print(f"--power-monitor {a.power_monitor:g}: the interval is in seconds, between "
               "0.01 and 3600")
+        return 2
+    if not MIN_INTERVAL_S <= a.temperature_monitor <= MAX_INTERVAL_S:
+        print(f"--temperature-monitor {a.temperature_monitor:g}: the interval is in "
+              f"seconds, between {MIN_INTERVAL_S:g} and {MAX_INTERVAL_S:g}")
         return 2
     if not is_loopback(a.host):
         print(f"--host {a.host!r} is not a loopback address. The service has no "

@@ -1035,7 +1035,17 @@ a reading that is *not* averaged under a pulse is one instant of it.
 
 `POST /monitors/temperature {"interval_s": 5.0}` is the same shape for the
 331; 422 only when the bench has no 331 at all (neither `[temperature]
-address` nor `console`). Every reading is a
+address` nor `console`). **This one is on by default** (2026-09-05): a bench
+that has a 331 starts reading it in `Session.start`, at
+`TEMPERATURE_MONITOR_S = 5 s`, before any console connects -- a cryostat
+drifts whether or not a run is going, and the card's number should be a
+reading of a known age rather than the read-back of whenever somebody last
+pressed something. `--temperature-monitor SECONDS` changes the interval and
+`--no-temperature-monitor` turns it off; the route is then how a console
+changes the interval (`DELETE` then `POST`) or starts it again, not how it is
+first switched on. A bench with no 331 starts nothing and records no
+start-up error: that is the ordinary bench, and `unavailable["temperature"]`
+already says why the card is empty. Every reading is a
 `TemperatureRead(source="instrument"|"console"|"simulated")` on the stream
 and in the journal, the `/bench` temperature block follows it (`kelvin`,
 `read_at`, `monitor: true`, `reads`), and a silent instrument is one
