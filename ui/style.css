@@ -120,7 +120,12 @@ h1, h2, h3, .wordmark, button {
   display: flex; align-items: center; gap: 5px;
   font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase;
   color: var(--grey);
+  min-width: 0;
 }
+/* The eight cell glyphs sit a shade above the 9 px label's cap height, so the
+   row reads as one line rather than as a mark and a caption. */
+.rail .brl .icon { margin-top: -1px; }
+.rail .lv-alert .brl .icon { color: rgba(255,255,255,.85); }
 .rail .brv {
   font-family: var(--font-num); font-weight: 500; font-size: 17px; line-height: 1.15;
   letter-spacing: -.01em;
@@ -606,6 +611,14 @@ button.link:hover { color: var(--accent-dark); }
 .chart-notes { display: flex; flex-direction: column; gap: 2px; }
 .chart-note { font-size: 11px; color: var(--grey); }
 .chart-absent { border: 1px dashed var(--rule); padding: 10px; }
+/* A slot that draws the chart's own footprint owns its frame already, so the
+   box around it would be a second, looser edge around a dashed one. */
+.chart-absent.framed { border: 0; padding: 0; }
+
+/* The design pack's icons (`lib/icons.js`). `currentColor` does the colour, so
+   there is nothing here but the box and the baseline: an icon sits on the text
+   it labels, never on its own line. */
+.icon { flex: none; vertical-align: -0.12em; }
 
 /* The timing diagram's fold on the bace card: one line shut, the drawing and
    its alerts open. The count keeps the worst level's colour either way. */

@@ -12,7 +12,9 @@ import { createStore, currentRun } from '../lib/store.js';
 import { transientModel, traceSet, sampleTime, windowRecordS } from '../lib/charts/transient.js';
 import { jvModel, currentOf, ramp, RAMP } from '../lib/charts/jv.js';
 import { timingModel, shotSegments, cyclePlan, biasLevels, timingAlerts, recordPlan } from '../lib/charts/timing.js';
-import { runFor } from '../lib/results.js';
+import { runFor, shotRows } from '../lib/results.js';
+import { axisTicks, layout } from '../lib/charts/frame.js';
+import * as scale from '../lib/scale.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = (name) => JSON.parse(readFileSync(join(here, '../fixtures', name), 'utf8'));
@@ -92,8 +94,69 @@ test('the running integral is the service\'s where there is one, and says so whe
 });
 
 test('σ_Q of zero is read as an absence, not as a zero', () => {
-  const model = transientModel({ ...liveRun().lastShot, q_std: 0 });
-  assert.match(model.readout, /σ_Q not recorded/);
+  // The statement moved off the chart's readout row and onto the shot block,
+  // which can say *which* point the σ belongs to. The readout row is the
+  // crosshair's, and printing Q / mean / σ there as well said them twice.
+  const rows = shotRows({ ...liveRun().lastShot, q_std: 0 });
+  const sigma = rows.find(([label]) => label.startsWith('σ'));
+  assert.ok(sigma, 'the shot block states σ');
+  assert.match(sigma[1], /σ_Q not recorded/);
+  assert.equal(transientModel({ ...liveRun().lastShot, q_std: 0 }).readout, '',
+    'the chart no longer restates what the shot block already said');
+});
+
+test('the settings under the transient became labels on the panel they define', () => {
+  const shot = liveRun().lastShot;
+  const model = transientModel(shot, {
+    t0_int_s: 1.205e-7, t0_int_reference: 'trigger',
+    dark_reference: 'translated', offset_corrected: true,
+  });
+  // `dark_reference` is what the photocurrent *is*, and the offset correction
+  // is what the light and dark baselines have had done to them: both belong on
+  // their panel, not in a note below the axis.
+  assert.match(model.panels[0].label, /offset corrected/);
+  assert.match(model.panels[1].label, /dark translated to zero/);
+  assert.ok(!model.notes.some((n) => /dark_reference|offset corrected/.test(n)),
+    model.notes.join(' | '));
+  // And the two "the running integral is …" notes were the charge panel's own
+  // label, printed again a few pixels below it.
+  assert.ok(!model.notes.some((n) => /running integral/.test(n)), model.notes.join(' | '));
+  // Where the window came from now sits beside the window it dates.
+  const marks = model.panels[0].marks || [];
+  assert.ok(marks.some((m) => /t0_int_reference|trigger/.test(m.text)), JSON.stringify(marks));
+});
+
+test('a tick position is formatted, not computed — a renderer must coerce before it adds', () => {
+  // `scale.fixed()` returns a **String**, so `frame.js`'s label baseline was
+  // written as `tick.y + 3` and concatenated: a tick at y "124" put its label
+  // at y "1243". Where the tick rounds to a fraction the extra digit lands
+  // after the decimal point ("190.8" → "190.83") and every label in the
+  // console sat 3 px high, on its own gridline; where it rounds to an integer,
+  // as the power chart's do, five labels left a 150-unit viewBox and overprinted
+  // the stats line beneath it.
+  const { panels } = layout({ width: 1400, height: 150, panels: [{ key: 'p' }], margin: { left: 60 } });
+  const { rect } = panels[0];
+  const Y = scale.linear([-1, 1], [rect.y + rect.h, rect.y]);
+  const ticks = axisTicks(Y, { count: 4 });
+  assert.ok(ticks.length, 'there are ticks to place');
+  for (const tick of ticks) {
+    assert.equal(typeof tick.y, 'string', 'fixed() formats; it does not compute');
+    const baseline = Number(tick.y) + 3;
+    assert.ok(baseline >= rect.y && baseline <= rect.y + rect.h + 3,
+      `label baseline ${baseline} must sit in the panel [${rect.y}, ${rect.y + rect.h}]`);
+  }
+});
+
+test('an unrun slot carries the frame of the chart that will fill it', () => {
+  // `ui-rules` §4 and R3·1: the card has one geometry either side of a run.
+  const t = transientModel(null);
+  assert.ok(t.absent.frame, 'the transient slot is a frame, not a sentence');
+  assert.deepEqual(t.absent.frame.panels.map((p) => p.key), ['traces', 'photo']);
+  assert.match(t.absent.frame.xLabel, /t \/ ns/);
+
+  const j = jvModel([]);
+  assert.ok(j.absent.frame, 'the J–V slot too');
+  assert.match(j.absent.frame.xLabel, /V \/ V/);
 });
 
 // -- the J–V --------------------------------------------------------------

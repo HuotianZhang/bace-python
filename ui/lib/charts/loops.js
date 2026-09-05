@@ -140,7 +140,21 @@ export function loopsModel(found, options = {}) {
   const { width = 560, height = 190 } = options;
   const node = found && found.node;
   const record = found && found.record;
-  if (!node) return { key: 'loops', absent: { text: 'no run yet', detail: null }, panels: [], notes: [] };
+  if (!node) {
+    return {
+      key: 'loops',
+      // Named `Q`, not `Q(axis)` or `Q per loop`: which of the two this panel
+      // becomes is `ui-rules` §4's visible switch, and it is decided by the
+      // axis the run resolves — not by this slot, which stands for both.
+      absent: {
+        text: 'no run yet — Q lands here, per loop or along the axis',
+        detail: null,
+        frame: { width, height, panels: [{ key: 'q', weight: 1, label: 'Q / C' }], margin: { left: 60 } },
+      },
+      panels: [],
+      notes: [],
+    };
+  }
   const repeat = isRepeat(node);
   const shots = node.shots || [];
   if (repeat === null) {

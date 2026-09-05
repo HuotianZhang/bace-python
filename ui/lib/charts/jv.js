@@ -79,7 +79,26 @@ export function jvModel(curves, options = {}) {
   const { width = 530, height = 260, log = null, planned = null } = options;
   const list = (curves || []).filter((c) => c && Array.isArray(c.voltage) && c.voltage.length);
   if (!list.length) {
-    return { key: 'jv', absent: { text: 'no curves yet', detail: null }, panels: [], notes: [] };
+    return {
+      key: 'jv',
+      // The slot holds the sweep's own shape before the sweep: one panel over
+      // the voltage axis, so the card does not change geometry when the first
+      // point lands. The y label is generic because whether it is A or
+      // mA cm⁻² depends on a pixel area this run has not declared yet.
+      absent: {
+        text: 'no curves yet — a sweep draws here point by point',
+        detail: null,
+        frame: {
+          width,
+          height,
+          panels: [{ key: 'jv', weight: 1, label: 'I  ·  V' }],
+          margin: { left: 58, bottom: 28, top: 18 },
+          xLabel: 'V / V',
+        },
+      },
+      panels: [],
+      notes: [],
+    };
   }
   const quantity = currentOf(list);
   const values = list.map((c) => c[quantity.key]);
