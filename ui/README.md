@@ -38,11 +38,12 @@ repo root for the offline bench at `/ui/replay.html`, which needs
 | `lib/history.js` | the results tab's models (M6): the run list grouped by session, the T × LED grid with its partial and never-run cells, the summary strip, the temperature triple and the V_oc in words, every flag with its reason, the provenance line, the CSV |
 | `lib/grid.js` | the results tab's DOM, beside those models — the same split the rail has |
 | `lib/charts/grid.js` | the M6 component: Q(led_v) per temperature, or Q(T) per level, the partial cell hollow in the accent |
+| `lib/charts/rig.js` | the rig tab's two drawings, the design pack's `ch-rig` and `ch-timing` ported as they stand: the chain, and one shot at three scales with the timing measured on 2026-09-01. Pure markup functions, so the port is tested without a browser |
 | `lib/results.js` | what goes in a card's result slot, and the key it is rebuilt on: the chart moves with every shot, the form does not. Since M4 the newest shot's own line comes first — Q, mean and σ at its point, the peaks, the digitiser's verdict and which `trigger_sweep` was in force |
 | `lib/monitor.js` | the run monitor (M4): `monitorModel(state)` is a pure function of the store — the loops at their three time scales, the shot, its segment from `StepPhase`, the ETA counting down, which of stop / abort / cancel apply, and the prompt a `NeedsOperator` opens — with the DOM beside it, under the rail on every tab |
 | `lib/replay.js`, `replay.html` | the offline bench: fixtures fed into the same store the socket feeds |
-| `preview.html` | the bench tab itself with no service: the real shell and `views/bench.js` over the modules and Hello fixtures with a stub API, from the Round 3 review |
-| `views/` | bench is M2's six generated cards with M3's charts in three of them; pipeline is M5's editor and schedule; results is M6's grid, drawn from `GET /runs` and `GET /runs/{id}` and nothing else; rig is the read-back |
+| `preview.html` | the bench tab itself with no service: the real shell and `views/bench.js` over the modules and Hello fixtures with a stub API, from the Round 3 review. `#/rig` mounts the rig tab instead, whose drawings need no service either |
+| `views/` | bench is M2's six generated cards with M3's charts in three of them; pipeline is M5's editor and schedule; results is M6's grid, drawn from `GET /runs` and `GET /runs/{id}` and nothing else; rig is R3·4: the chain, one shot at three scales with the swept axis taken from the `bace` card, and the read-back under them |
 | `fonts/` | IBM Plex Sans and Mono, Archivo — 24 woff2, 387 KB, lifted out of the Round 3 mockup by `tools/extract_ui_fonts.py`. Nothing is fetched from a network at runtime |
 | `fixtures/` | see below |
 | `tests/` | `node --test ui/tests/…` — and `tests/test_ui.py` runs them from the Python suite, skipping where there is no Node |

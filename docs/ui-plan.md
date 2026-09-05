@@ -1111,6 +1111,19 @@ Read-only reference, and `ch-rig` is a static schematic that ports as it
 stands — the one place "reusable as they stand" is true. Drop it in whenever a
 phase runs short.
 
+**Landed 2026-09-05.** No phase ran short, so it waited until the user asked
+where the diagram had gone. `lib/charts/rig.js` carries `ch-rig` *and* R3·4's
+`ch-timing` — the one shot at three scales with the chain timing measured on
+2026-09-01 — as pure markup functions with the design's own geometry, and
+`views/rig.js` puts them side by side over the read-back, as the artboard
+does. The only live thing in either is the swept axis, taken from the `bace`
+card so the accent follows the operator's choice. The timing diagram that
+*follows the form* stays on the `bace` card (M3's decision above, confirmed
+2026-09-03); the rig tab is what to read it against when it looks wrong. The
+two are not the same drawing: one is the rig day, baked in, the other is the
+code's arithmetic over what is typed — and the reference is the one with the
+measured edges on it (−380, 0, +60, +122, t0_int +118.5 ns).
+
 ---
 
 ### What M0 taught the phases after it

@@ -20,6 +20,7 @@ import * as fmt from './lib/format.js';
 import { renderRail, renderChainStrip } from './lib/rail.js';
 import { renderMonitor } from './lib/monitor.js';
 import bench from './views/bench.js';
+import rig from './views/rig.js';
 
 const store = createStore({ schedule: (fn) => requestAnimationFrame(fn) });
 
@@ -35,8 +36,14 @@ document.getElementById('app').replaceChildren(
   h('div.bar', h('span.wordmark', 'bace'), tabsEl, h('span.spacer'), chipsEl),
   railEl, monitorEl, viewEl, stripEl, barEl);
 
-fill(tabsEl, ['bench', 'pipeline', 'results', 'rig'].map((name) => h('a', {
-  href: '#/' + name, class: name === 'bench' ? 'on' : '', text: name })));
+// Two of the four tabs are drawable with no service: the bench, and the rig
+// tab whose drawings are static. The other two need `GET /runs`.
+const route = () => (location.hash === '#/rig' ? 'rig' : 'bench');
+function renderTabs() {
+  fill(tabsEl, ['bench', 'pipeline', 'results', 'rig'].map((name) => h('a', {
+    href: '#/' + name, class: name === route() ? 'on' : '', text: name })));
+}
+renderTabs();
 
 const api = {
   validate: async () => ({ checks: [] }),
@@ -77,7 +84,15 @@ store.subscribe((state) => {
 const hello = await (await fetch('fixtures/hello_sim.json')).json();
 store.applyHello(hello);
 store.applyModules(await (await fetch('fixtures/modules_sim.json')).json());
-bench.mount(viewEl, { store, api, stream: { state: {} }, fmt, notify });
+let mounted = null;
+function mountView() {
+  if (mounted) mounted.dispose();
+  const view = route() === 'rig' ? rig : bench;
+  mounted = view.mount(viewEl, { store, api, stream: { state: {} }, fmt, notify });
+  renderTabs();
+}
+window.addEventListener('hashchange', mountView);
+mountView();
 </script>
 </body>
 </html>

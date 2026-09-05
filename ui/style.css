@@ -907,3 +907,18 @@ table.qgrid td { padding: 0; }
 /* The folder, whole. Long names are real and must not truncate (§1). */
 .path { margin: 0; font-size: 11px; overflow-wrap: anywhere; user-select: all; }
 .rchart { border-top: 1px solid var(--rule); padding-top: 6px; }
+
+/* -- the rig tab (R3·4): the chain beside one shot at three scales --------- */
+.rig {
+  display: grid;
+  grid-template-columns: minmax(0, 940px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  margin: 0 0 12px;
+}
+@media (max-width: 1500px) {
+  .rig { grid-template-columns: minmax(0, 1fr); }
+}
+.rig .cb { gap: 10px; }
+.rig .cs .accent { color: var(--accent-dark); font-family: var(--font-num); }
+.rig-readback .card { margin: 0; }
