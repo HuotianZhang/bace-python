@@ -120,6 +120,27 @@ override dropped, the node is the bench's module again. This is the rule a
 Figma instance follows — show the overrides, the rest is the main component —
 and it needs no word explaining it.
 
+### A recipe records the bench it was saved on
+
+The same dependency, on disk. A recipe file used to hold the tree alone —
+the overrides — so the same recipe ran differently after a bench edit, with
+no diff in the file. `POST /pipelines/save` now writes the bench values of
+every module in the tree beside it, value and source. When a recipe is
+reopened, the pipeline tab compares them with the bench and, where the
+bench has moved on a parameter some node still takes from it, puts a note
+under the name row:
+
+    the bench has moved since demo was saved — its nodes will run with the bench, not the file:
+    [↺ bench to recipe]  [keep bench]
+    bace.vpre   saved 0.000   bench 0.800  V
+
+`↺ bench to recipe` is the ordinary `PUT`, one per module, so every card and
+node form moves with it and the note goes away because there is nothing
+left to say. `keep bench` dismisses it. A parameter every node of the
+module overrides, or a loop binds, is not listed: no node reads the bench
+for it. A recipe saved before the bench was recorded says so once instead.
+`lib/recipe.js`, held down by `tests/recipe.test.mjs`.
+
 ## jv_bace · 22 parameters → 11 above, 11 folded
 
 Unchanged by the split, and deliberately: `jv_bace` sweeps illumination *as*
