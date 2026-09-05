@@ -606,7 +606,7 @@ export default {
     function moduleForm(node, row, v, open) {
       const catalogue = v.catalogue[node.module];
       if (!catalogue) {
-        return h('p.absent', { text: `this service has no module named ${node.module} — this tree cannot run here` });
+        return h('p.absent', { text: `this service has no module named ${node.module} — this structure cannot run here` });
       }
       const overrides = node.params || {};
       /**
@@ -671,7 +671,7 @@ export default {
       if (first && first.led_v !== null && first.led_v !== undefined) where.push(`LED ${fmt.volts(first.led_v)}`);
       return h('div',
         !resolved
-          ? h('p.chart-note', 'the tree does not resolve yet, so this is the module as it stands on '
+          ? h('p.chart-note', 'the structure does not resolve yet, so this is the module as it stands on '
             + 'the bench with this node’s own overrides on it — not what the loops above would bind. '
             + 'The check list says what is wrong.')
           : row && row.runs > 1
@@ -770,7 +770,7 @@ export default {
      */
     function renderCost(v) {
       keyed(costEl, JSON.stringify([v.cost, v.counters]), () => {
-        if (!v.cost) return h('p.absent', 'no cost yet — the tree has not been checked.');
+        if (!v.cost) return h('p.absent', 'no cost yet — the structure has not been checked.');
         const c = v.cost;
         const counters = v.counters;
         return [
@@ -819,7 +819,7 @@ export default {
           h('div.cksum',
             h('span.m', { text: `${c.total} checks` }),
             ...tree.LEVELS.filter((l) => c.counts[l]).map((l) => h('span.tag.' + tagClass(l), { text: `${c.counts[l]} ${l}` })),
-            v.stale ? h('span.cs', { text: '· the tree has changed since' }) : null,
+            v.stale ? h('span.cs', { text: '· the structure has changed since' }) : null,
             h('span', { style: { flex: '1' } }),
             h('button.btng', { onclick: () => { showAllChecks = !showAllChecks; render(); } },
               showAllChecks ? 'collapse' : 'show')),
@@ -867,16 +867,16 @@ export default {
             disabled: blocked || null,
             title: blocked
               ? (v.busy ? 'a run holds the worker; this would queue behind it'
-                : v.stale || inflight ? 'the tree has changed — checking it again'
+                : v.stale || inflight ? 'the structure has changed — checking it again'
                   : !typed ? 'nothing to run'
-                    : 'the checks refuse this tree; the list above says why')
-              : 'checks the tree once more against the bench as it is now, then queues the run',
+                    : 'the checks refuse this structure; the list above says why')
+              : 'checks the structure once more against the bench as it is now, then queues the run',
             onclick: start,
           }, c ? `Start · ${c.prefix ? c.prefix + ' ' : ''}${fmt.duration(c.total_s)}` : 'Start'),
           h('button.btns', { disabled: !typed || null, onclick: save }, 'Save recipe'),
           h('button.btns', {
             disabled: !typed || null,
-            title: 'checks the tree without touching the bench',
+            title: 'checks the structure without touching the bench',
             onclick: () => { showAllChecks = true; showFlat = false; revalidate({ now: true }); },
           }, 'Dry run')),
       ]);
@@ -992,7 +992,7 @@ export default {
           text: v.cost
             ? `shot time from the ${v.cost.t_shot_source === 'journal' ? 'journal' : 'default'} · `
               + 'settle from what this bench has measured'
-            : 'from the last check of the tree',
+            : 'from the last check of the structure',
         }),
         v.stale ? h('span.tag.nb', { text: 'stale' }) : null,
       ]);
