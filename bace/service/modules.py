@@ -125,6 +125,34 @@ SAMPLE_KEYS: frozenset[str] = frozenset(
 reads from it. Not module parameters: they describe the session."""
 
 
+def coerce_sample(values: Mapping[str, Any]) -> dict:
+    """One `[sample]` block, checked and typed, or `ValueError`.
+
+    Shared by the catalogue (which validates what the file opened with) and
+    `Session.set_sample` (what the console types into it), so the refusal is
+    one sentence in one place. Everything but `temperature_k` is a string;
+    that one is a float or absent, because it reaches `RunMetadata` as a
+    number and `"290"` filed as a temperature would be a string in the HDF5
+    attribute a reader compares against 290.0.
+    """
+    unknown = sorted(set(values) - SAMPLE_KEYS)
+    if unknown:
+        raise ValueError(f"[sample]: unknown key(s) {', '.join(unknown)}; "
+                         f"accepted: {', '.join(sorted(SAMPLE_KEYS))}")
+    out: dict[str, Any] = {}
+    for key, value in values.items():
+        if value is None:
+            continue
+        if key == "temperature_k":
+            try:
+                out[key] = float(value)
+            except (TypeError, ValueError):
+                raise ValueError(f"[sample] temperature_k: {value!r} is not a number") from None
+        else:
+            out[key] = str(value)
+    return out
+
+
 def _read_led_state(led) -> dict[str, str]:
     """The LED generator as it answers: `output`, `mode`, `frequency_hz`,
     `high_v`, `low_v`, `polarity`, `sync_output` -- strings, `?` for what it
@@ -712,11 +740,10 @@ class Catalogue:
         self.rig_config = rig_config
         self.run_toml: dict = dict(run_toml or {})
         self.history = history
-        self.sample: dict = dict(sample or {})
-        unknown = sorted(set(self.sample) - SAMPLE_KEYS)
-        if unknown:
-            raise ModuleError(f"[sample]: unknown key(s) {', '.join(unknown)}; "
-                              f"accepted: {', '.join(sorted(SAMPLE_KEYS))}")
+        try:
+            self.sample: dict = coerce_sample(sample or {})
+        except ValueError as exc:
+            raise ModuleError(str(exc)) from None
         jv_table = self.run_toml.get("jv", {})
         unknown = sorted(set(jv_table) - _JV_TABLE_KEYS) if isinstance(jv_table, Mapping) else []
         if unknown:
@@ -802,10 +829,17 @@ class Catalogue:
                                f"{RETIRED[name]}") from None
             raise KeyError(name) from None
 
-    def base_metadata(self) -> RunMetadata:
+    def base_metadata(self, sample: Mapping[str, Any] | None = None) -> RunMetadata:
         """The session's `RunMetadata` from `[sample]`; a module fills in the
-        LED level, the V_oc and the temperature it ran at."""
-        s = self.sample
+        LED level, the V_oc and the temperature it ran at.
+
+        `sample` overrides the block: a run passes **the copy it was queued
+        with** (`RunRecord.sample`), so an identity typed into the console
+        halfway through a four-hour sweep does not relabel the nodes it has
+        left to run. Without it, `RunQueued.sample` said one thing and the
+        folder names said another, inside one run.
+        """
+        s = self.sample if sample is None else sample
         # The session's own number is typed -- in `[sample]` or in the console's
         # metadata field, which is the same slot. A temperature node replaces it
         # for its subtree, and `how`/`source` with it.

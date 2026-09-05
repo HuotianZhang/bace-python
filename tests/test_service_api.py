@@ -287,6 +287,142 @@ def test_a_refused_action_is_a_409_with_the_text_and_nothing_moves(service):
     assert r.status_code == 202 and r.json()["result"]["parked"] is True
 
 
+# -- /session/sample -----------------------------------------------------------------------
+# Naming the device from the console. Until `PUT /session/sample` existed the
+# only way to say what was mounted was to edit `run.toml` and restart the
+# process that owns every instrument, so a session opened on a fresh checkout
+# filed every run of that day under a name with no device in it -- and the
+# folder name is the record (`docs/naming-plan.md`), which is why this was the
+# one finding in `docs/ux-screening.md` whose cost was permanent.
+
+def test_the_sample_block_is_merged_and_a_null_puts_a_key_back_to_the_file(service):
+    client, session = service
+    r = client.put("/session/sample", json={"sample": "s7", "operator": "hz"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["session"]["sample"]["sample"] == "s7"
+    assert body["session"]["sample"]["operator"] == "hz"
+    assert body["changed"] == ["operator", "sample"]
+    assert body["run_active"] is None
+    # A merge: what the body did not carry is what the file opened with.
+    assert body["session"]["sample"]["material"] == "SIM"
+    assert body["session"]["sample"]["pixel"] == "a"
+    assert body["session"]["sample"]["temperature_k"] == 290.0
+    assert client.get("/session").json()["sample"]["sample"] == "s7"
+    assert client.get("/bench").json()["session"]["sample"]["sample"] == "s7"
+
+    # `null` is the way back, as it is for a parameter -- to the layer below,
+    # which for this block is the file the session opened with.
+    r = client.put("/session/sample", json={"sample": None})
+    assert r.status_code == 200 and r.json()["session"]["sample"]["sample"] == "s4"
+    # And a key the file never had goes away rather than becoming "".
+    assert client.put("/session/sample", json={"operator": None}).json()["session"]["sample"] \
+        .get("operator") is None
+
+
+def test_naming_the_sample_is_an_event_and_a_journal_line(service):
+    client, session = service
+    before = session.last_seq
+    client.put("/session/sample", json={"material": "PTQ10IT4F"})
+    named = [f for f in frames(client, since=before) if f["type"] == "SampleNamed"]
+    assert len(named) == 1, "one event, on the one path every frame takes"
+    ev = named[0]
+    assert ev["run_id"] is None and ev["node_path"] == "", "a session-level event"
+    assert ev["data"]["changed"] == ["material"]
+    assert ev["data"]["before"]["material"] == "SIM"
+    assert ev["data"]["after"]["material"] == "PTQ10IT4F"
+    # In the file too: a journal read years later has to be able to say which
+    # runs in it were measured under which name.
+    assert any(line.get("type") == "SampleNamed" for line in journal_lines(session))
+
+    # Nothing moved, nothing said. A no-op that writes a line is noise in the
+    # one file an operator reads to reconstruct a day.
+    at = session.last_seq
+    r = client.put("/session/sample", json={"material": "PTQ10IT4F"})
+    assert r.status_code == 200 and r.json()["changed"] == []
+    assert session.last_seq == at
+
+
+def test_an_unnamed_key_is_refused_with_what_is_accepted(service):
+    client, _ = service
+    r = client.put("/session/sample", json={"device": "s7"})
+    assert r.status_code == 422
+    body = r.json()
+    assert "device" in body["error"] and body["param"] == "sample"
+    assert "material" in body["accepted"]
+    r = client.put("/session/sample", json={"temperature_k": "warm"})
+    assert r.status_code == 422 and "not a number" in r.json()["error"]
+
+
+def test_an_awkward_name_is_reduced_where_the_name_is_built_and_kept_where_it_matters(service):
+    """`docs/naming-plan.md` §2's live defect, closed at its source.
+
+    `sample`, `material` and `pixel` reached `folder_name()` raw until
+    2026-09-05 — only the comment was slugged — so `material = "PTQ10:IT-4F"`
+    (the contract's own §4 example) built a path segment with a colon in it,
+    which fails on the lab PC and passes here, and `sample = "a/b"` was two
+    directories. All three are slugged now, at `NAME_MAX`, and every value is
+    still verbatim in the record: for a material whose real name has a colon
+    in it, that is the difference between recording it and recording somebody's
+    transcription of it.
+
+    So nothing is refused for being an awkward name. What the route owes the
+    console instead is `sample_in_name` — what the folder will actually carry —
+    so the reduction is visible while it is typed rather than in a listing
+    afterwards.
+    """
+    client, session = service
+    for value, filed in (("a/b", "ab"), ("../../etc", "etc"), ("s4 pixel a", "s4-pixel-a"),
+                         ("a_b", "a-b"), ("PTQ10IT4F-batch-2026-08-A", "PTQ10IT4F-batch-2026-08")):
+        r = client.put("/session/sample", json={"sample": value})
+        assert r.status_code == 200, r.text
+        block = r.json()["session"]
+        assert block["sample"]["sample"] == value, "verbatim in the record"
+        assert block["sample_in_name"]["sample"] == filed, f"{value!r} is filed as {filed!r}"
+
+    r = client.put("/session/sample", json={"material": "PTQ10:IT-4F"})
+    assert r.json()["session"]["sample_in_name"]["material"] == "PTQ10IT-4F"
+
+    # A field that reduces to nothing leaves the name, as an empty one does.
+    r = client.put("/session/sample", json={"sample": "///"})
+    assert r.json()["session"]["sample_in_name"]["sample"] == ""
+
+    # And what the console previews is what the run writes.
+    client.put("/session/sample", json={"sample": "s4", "material": "PTQ10:IT-4F", "pixel": "px a"})
+    run_id = client.post("/runs", json={"module": "jv", "params": {"step_v": 0.4}}).json()["run_id"]
+    wait_run(session, run_id)
+    folder = next(n["folder"] for n in client.get(f"/runs/{run_id}").json()["nodes"].values())
+    assert os.path.basename(folder).startswith("s4_PTQ10IT-4F_px-a_")
+    assert ":" not in os.path.basename(folder), "a colon is not a Windows path segment"
+
+
+def test_a_run_keeps_the_identity_it_was_queued_under(service):
+    client, session = service
+    # Queued under s4; renamed while it is going; the run's own record, its
+    # `RunQueued` and the files it writes all stay s4, and only what is
+    # queued afterwards is s7. A run half under each name would contradict
+    # its own `RunQueued.sample`.
+    r = client.post("/runs", json=bace(n_loops=1, voc=0.9))
+    assert r.status_code == 202, r.text
+    run_id = r.json()["run_id"]
+    answer = client.put("/session/sample", json={"sample": "s7"}).json()
+    assert answer["run_active"] in (run_id, None), "said whether a run is holding the bench"
+    wait_run(session, run_id)
+
+    record = client.get(f"/runs/{run_id}").json()
+    assert record["sample"]["sample"] == "s4", "the block it was queued under"
+    queued = [f for f in frames(client, run_id=run_id) if f["type"] == "RunQueued"]
+    assert queued[0]["data"]["sample"]["sample"] == "s4"
+    folders = [n["folder"] for n in record["nodes"].values() if n.get("folder")]
+    assert folders and all(os.path.basename(f).startswith("s4_") for f in folders), \
+        "the files carry the queued identity, not the session's now"
+    assert not any("s7" in os.path.basename(f) for f in folders)
+
+    # The next run is the new one.
+    after = client.post("/runs", json=bace(n_loops=1, voc=0.9)).json()["run_id"]
+    assert session.run_record(after)["sample"]["sample"] == "s7"
+
+
 # -- /modules ------------------------------------------------------------------------------
 def test_modules_show_provenance_and_needs(service):
     client, session = service

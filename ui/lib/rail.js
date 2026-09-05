@@ -469,10 +469,11 @@ function relayEl(cell) {
 
 /**
  * The strip, into a container. `onFix(name)` and `onPark()` are the only two
- * things it can do, and both are explicit: nothing here touches the bench on
- * its own.
+ * things it can do to the bench, and both are explicit: nothing here touches
+ * it on its own. `onDismiss()` touches nothing at all — it clears the sentence
+ * the last action left.
  */
-export function renderChainStrip(el, state, { onFix, onPark, status, parkArmed } = {}) {
+export function renderChainStrip(el, state, { onFix, onPark, onDismiss, status, parkArmed } = {}) {
   const model = chainModel(state);
   const rig = (state.bench && state.bench.rig && state.bench.rig.values) || {};
   // The model plus the two things the strip holds that the store does not: the
@@ -506,7 +507,18 @@ export function renderChainStrip(el, state, { onFix, onPark, status, parkArmed }
       // told what to do and given no way to do it.
       status.offer
         ? h('button.btns', { onclick: () => onFix && onFix(status.offer, { label: status.offer }) }, status.offer)
-        : null) : null,
+        : null,
+      // A way to be rid of it. The strip is the console's one place for a
+      // sentence, and a sentence has no clock on it: an `ok` from a queue
+      // three hours ago and a refusal that was fixed twenty minutes ago both
+      // sat here reading as news, and the operator could only replace them by
+      // provoking another. Nothing dismisses itself — a refusal that vanished
+      // on a timer is the failure mode this replaces, not a version of it.
+      h('button.stx', {
+        title: 'clear this message',
+        'aria-label': 'clear this message',
+        onclick: () => onDismiss && onDismiss(),
+      }, '✕')) : null,
     // Bench properties, not per-run choices, and multiplicative: they leave no
     // trace in the data, so `ui-rules` §6 restates them beside it.
     h('span.st.quiet', { text: rigText(rig) }),
