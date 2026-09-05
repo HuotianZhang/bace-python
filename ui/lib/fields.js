@@ -112,35 +112,19 @@ export const LAYOUT = {
   },
 
   light: {
-    // Every field, unconditionally — unlike every other card, and for a
-    // reason the browser found: the buttons below *act on these values*.
-    // `DC` sends `led_v`, `Pulse` sends all four, and a button that drives the
-    // lamp from a number the operator cannot see is worse than a field they
-    // do not need. (The pipeline node form, M5, can hide by `led_mode`: there
-    // the node is what runs, and what it does not read it does not read.)
+    // The `light` node's form. There is no light *card* any more: on the
+    // bench the shutter and the LED are two rows of the Instruments panel
+    // (`lib/instruments.js`), switches whose lit position is the read-back.
+    // A node is different: it runs later, inside a tree, and reads all
+    // seven — `shutter` and `led_mode` to know what to do, the levels to do
+    // it at, `settle_s` to know how long to hold before the next step.
+    // `node: true` marks the three no switch sends, which the node form
+    // always shows: they are what the node *is*.
     above: [
-      { kind: 'segmented', name: 'shutter' },
-      { kind: 'segmented', name: 'led_mode' },
-      'led_v', 'led_low_v', 'pulse_frequency_hz', 'duty_percent', 'settle_s',
-    ],
-    readback: 'illumination',
-    // Not a Run. A run whose only module is `light` is refused
-    // (`light.undone-by-park`): every run ends parked, so it would set a light
-    // and hand it straight back. The manual form is the bench action, which
-    // does not go through the worker. One action per click, as M1's strip does.
-    actions: [
-      { label: 'Open', action: 'shutter-open' },
-      { label: 'Shut', action: 'shutter-shut' },
-      { label: 'DC', action: 'set-led-dc', args: (v) => ({ level: v.led_v }) },
-      {
-        label: 'Pulse',
-        action: 'set-led-pulse',
-        args: (v) => ({
-          level: v.led_v, low: v.led_low_v,
-          frequency_hz: v.pulse_frequency_hz, duty_percent: v.duty_percent,
-        }),
-      },
-      { label: 'LED off', action: 'led-off' },
+      { kind: 'segmented', name: 'shutter', node: true },
+      { kind: 'segmented', name: 'led_mode', node: true },
+      'led_v', 'led_low_v', 'pulse_frequency_hz', 'duty_percent',
+      { kind: 'field', name: 'settle_s', node: true },
     ],
   },
 
@@ -155,8 +139,24 @@ export const LAYOUT = {
   },
 };
 
-/** Which modules get a bench card, in the order the artboard lays them out. */
-export const BENCH_CARDS = ['jv', 'jv_bace', 'bace', 'light', 'power', 'temperature'];
+/**
+ * Which modules get a bench card, in the order the artboard lays them out.
+ * `light` is not one: the shutter and the LED are rows of the Instruments
+ * panel above the cards, and the `light` *node* is edited where it runs,
+ * on the pipeline tab.
+ */
+export const BENCH_CARDS = ['jv', 'jv_bace', 'bace', 'power', 'temperature'];
+
+/**
+ * Whether a card's primary control is a Run — the only kind of card that has
+ * a Start to gate, and so the only kind sent to `POST /pipelines/validate`.
+ * A module with no Run (`light`) validated as its own one-node tree is the
+ * light-only run the service refuses by design (`light.undone-by-park`).
+ */
+export function cardRuns(name) {
+  const layout = LAYOUT[name];
+  return Boolean(layout && [].concat(layout.run || []).length);
+}
 
 /** An enum small enough to be a segmented control rather than a select. */
 export const SEGMENTED_MAX = 4;
@@ -170,6 +170,13 @@ function isBound(wire) {
  * One card, as rows. `entry` is a `GET /modules` entry (or the one a `PUT`
  * answers with — same shape, which is why an edit re-renders from the
  * response). `bench` is the `/bench` snapshot, for the read-back rows.
+ * `form` is which form this is: `'bench'` (the card) or `'node'` (the
+ * pipeline editor). **A node form shows only what differs from the bench**:
+ * a value a loop binds or a run derives, a value this node overrides, and
+ * the rows marked `node: true` in the layout (what a node is, with no bench
+ * counterpart). Everything else folds, under `same as bench` — the node is
+ * the module as it stands on the bench, and the form says so by being
+ * small. A bench card never shows a `node: true` row at all.
  *
  * Returns `{name, title, status, kind, estimate, needs, chips, above, fold,
  * run, actions, hidden}`. `hidden` is the parameters the run will not read in
@@ -177,7 +184,7 @@ function isBound(wire) {
  * 3 not applicable" and mean both halves. `above + fold + hidden` is always
  * every parameter the module has.
  */
-export function cardModel(entry, { bench = null } = {}) {
+export function cardModel(entry, { bench = null, form = 'bench' } = {}) {
   const layout = LAYOUT[entry.name] || { above: (entry.params || []).map((p) => p.name) };
   const wire = Object.fromEntries((entry.params || []).map((p) => [p.name, p]));
   const values = Object.fromEntries((entry.params || []).map((p) => [p.name, p.value]));
@@ -186,10 +193,18 @@ export function cardModel(entry, { bench = null } = {}) {
   const hidden = new Set();
   const above = [];
 
+  // What a node form keeps above the fold: the differences.
+  const differs = (n) => Boolean(wire[n] && (wire[n].node || isBound(wire[n])));
+
   for (const spec of layout.above || []) {
     const row = normalise(spec);
     const names = rowNames(row);
     if (!names.every((n) => n in wire)) continue;
+    if (row.node && form !== 'node') {
+      names.forEach((n) => hidden.add(n));
+      continue;
+    }
+    if (form === 'node' && !row.node && !names.some(differs)) continue;
     if (row.when && !row.when(values, wire)) {
       if (row.otherwise !== 'fold') names.forEach((n) => hidden.add(n));
       continue;
@@ -205,6 +220,7 @@ export function cardModel(entry, { bench = null } = {}) {
   const fold = foldGroups(entry, used, hidden);
   return {
     name: entry.name,
+    form,
     title: entry.title || entry.name,
     status: entry.status,
     kind: entry.kind,

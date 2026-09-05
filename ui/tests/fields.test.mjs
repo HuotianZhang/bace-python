@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { cardModel, foldCount, points, effectivePolarity, driveLevel, BENCH_CARDS } from '../lib/fields.js';
+import { cardModel, foldCount, points, effectivePolarity, driveLevel, cardRuns, BENCH_CARDS } from '../lib/fields.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const CATALOGUE = JSON.parse(fs.readFileSync(path.join(here, '..', 'fixtures', 'modules_sim.json'), 'utf8'));
@@ -200,26 +200,46 @@ test('jv_bace shows the LED range, or the inherited level instead of it', () => 
   assert.ok(!above(bound).includes('led_start_v'));
 });
 
-test('light shows every field, because its buttons act on them', () => {
-  // The one card that hides nothing, and the browser is what said so: `DC`
-  // sends `led_v` and `Pulse` sends all four, so a button driving the lamp
-  // from a number the operator cannot see is worse than a field they do not
-  // need right now.
-  const model = cardModel(entry('light'));
-  assert.deepEqual(above(model), ['shutter', 'led_mode', 'led_v', 'led_low_v',
-    'pulse_frequency_hz', 'duty_percent', 'settle_s']);
-  assert.equal(foldCount(model), 0);
-  assert.deepEqual(model.hidden, []);
+test('light has no bench card: the shutter and the LED are switches, the node is a node', () => {
+  // The seven `light` parameters are read by a *node*, and a node is edited
+  // where it runs. On the bench the two instruments are rows of the
+  // Instruments panel (`lib/instruments.js`), not a card.
+  assert.ok(!BENCH_CARDS.includes('light'));
+  assert.equal(cardRuns('light'), false);
+  for (const name of BENCH_CARDS) assert.ok(cardRuns(name), `${name} runs`);
 
-  // Not a Run: a light-only run is `invalid` (`light.undone-by-park`) because
-  // the park that ends every run would undo it. One action per click.
-  assert.deepEqual(model.run, []);
-  assert.deepEqual(model.actions.map((a) => a.action),
-    ['shutter-open', 'shutter-shut', 'set-led-dc', 'set-led-pulse', 'led-off']);
-  const dc = cardModel(entry('light', { led_v: 1.02 }));
-  assert.deepEqual(dc.actions.find((a) => a.action === 'set-led-dc').args, { level: 1.02 });
-  assert.deepEqual(dc.actions.find((a) => a.action === 'set-led-pulse').args,
-    { level: 1.02, low: 0.4, frequency_hz: 500, duty_percent: 50 });
+  // A node form shows all seven when nothing is bound: the three `node: true`
+  // rows always, and — in a node with no schedule and no overrides — the
+  // four levels fold as `same as bench`.
+  const node = cardModel(entry('light'), { form: 'node' });
+  assert.deepEqual(above(node), ['shutter', 'led_mode', 'settle_s']);
+  assert.equal(foldCount(node), 4);
+  assert.equal(node.form, 'node');
+  assert.deepEqual(node.hidden, []);
+});
+
+test('a node form shows only what differs from the bench', () => {
+  // The Figma rule: an instance shows its overrides, and everything else is
+  // the main component. `spec.node` is this node's override, `inherited` and
+  // `derived` are what the tree binds; all three stay above the fold, and
+  // the rest — the module as it stands on the bench — folds under one
+  // sentence rather than being drawn a second time.
+  const plain = cardModel(entry('bace'), { form: 'node' });
+  assert.deepEqual(above(plain).filter((n) => n !== 'output_polarity' && n !== 'inverted_output'), []);
+  const withDiff = cardModel(entry('bace', {
+    vcoll: { value: -0.3, source: 'edited', node: true },
+    led_v: { value: 1.01, source: 'inherited', detail: 'illumination loop', editable: false },
+  }), { form: 'node' });
+  const rows = above(withDiff);
+  assert.ok(rows.includes('vcoll'), 'this node’s override stays above');
+  assert.ok(rows.includes('led_v'), 'the loop’s binding stays above');
+  assert.ok(!rows.includes('n_loops'), 'a value the bench owns folds');
+  assert.equal(foldCount(withDiff) + rows.length + withDiff.hidden.length,
+    byName.bace.params.length, 'above + fold + hidden is still every parameter');
+  // The bench card is unchanged by any of this.
+  const bench = cardModel(entry('bace'));
+  assert.equal(bench.form, 'bench');
+  assert.ok(above(bench).includes('n_loops'));
 });
 
 test('the point count is read out of the service estimate, never recomputed', () => {

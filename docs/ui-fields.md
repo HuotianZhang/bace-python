@@ -67,42 +67,58 @@ only that row says which. When it reads `unknown ⚠` the run will still go —
 `jv` is refusable by nothing but a missing SourceMeter — and the file will say
 `unknown` too.
 
-## light · 7 parameters → all 7 above, nothing folded and nothing hidden
+## Instruments · the panel above the cards, and no `light` card
 
-Not on the R3 artboard: it did not exist. The card is the bench's two light
-switches, and it is the answer to "how do I make it dark" that the artboard
-left to a side effect of `jv_dark`.
+The bench tab is two zones, and the shape of each says what it does:
 
-| # | field | render | note |
-|---|---|---|---|
-| 1 | `shutter` | **segmented**, 3 choices | `open` · `shut` · `leave`. The shutter is the light switch: it decides whether light reaches the sample, whatever the generator is doing |
-| 2 | `led_mode` | **segmented**, 4 choices | `dc` · `pulse` · `off` · `leave`. Prefer the shutter over `off` — a cycled generator loses its thermal steady state and the next module waits for it again (operator instruction, 2026-09-02) |
-| 3 | `led_v` | float, V | the DC level, or the pulse high level — the same number `bace` must pulse at |
-| 4 | `led_low_v` | float, V | `pulse` only — but always shown, see below |
-| 5 | `pulse_frequency_hz` `duty_percent` | float | `pulse` only — but always shown |
-| 6 | `settle_s` | float, s | |
-| — | illumination | **bench read-back** | the same row `jv` carries, and the same function behind it. What the node reports having achieved, not what it asked for |
+- **Instruments** — one row per instrument an operator switches by hand:
+  `Shutter` `open | shut`, `LED · 33220A` `off | DC | pulse`, `Relay`
+  `amplifier | sourcemeter`, and `Park`. A switch's lit position is the
+  instrument's read-back, never the last click; clicking another position
+  posts that one bench action (`POST /bench/actions/*`, the same the chain
+  strip posts), and the snapshot in the answer is what moves the switch. A
+  refused action leaves it where the bench is. `how: "inferred"` draws the
+  whole switch dashed, as the rail does. Nothing here is a run.
+- **Modules** — the five cards with a Run button.
 
-**This is the one card that hides nothing, and the browser is what said so.**
-The first build hid `led_v` unless `led_mode` was `dc` or `pulse` — correct for
-the *node* form, where what the node does not read it does not read. On the
-bench card it was wrong: the **DC** button sends `led_v` and **Pulse** sends
-all four, so the card was driving the lamp from a number the operator could not
-see. A button that acts on a field is a reason to show the field.
+The `light` card is gone. It had five buttons, seven fields and a permanent
+red verdict, and the operator could not tell which fields a button read,
+whether `DC` opened the shutter, or whether `Off` used the form. Now:
 
-**The card's buttons are bench actions, not a Run.** This is the one card
-whose primary control does not post to `/runs`: a run whose only module is
-`light` is `invalid` (`light.undone-by-park`), because every run ends parked —
-outputs off, shutter shut — so it would set a light and hand it straight back.
-The manual form is `POST /bench/actions/{shutter-open, shutter-shut,
-set-led-dc, set-led-pulse, led-off}`, which do not go through the worker. So
-the card offers **Open · Shut** and **DC · Pulse · Off** as action buttons,
-each one action per click, the way M1's chain strip already does it.
+| the LED switch | sends | leaves alone |
+|---|---|---|
+| `off` | nothing — output off | the shutter |
+| `DC` | `led_v`, output on | the shutter |
+| `pulse` | `led_v` `led_low_v` `pulse_frequency_hz` `duty_percent`, output on | the shutter |
 
-The module still exists as a *node*: in a pipeline it goes before the step
-that needs the light, and there park at the end of the run is exactly where
-the bench should end up. So the same card feeds the pipeline tab's node
-editor (M5) with the same fields and a different verb.
+The four levels sit beside the switch, editable, and are the `light` module's
+own parameters through the ordinary `PUT` — so a `light` node in a tree
+starts from what the switch was last set to. The ones the lit position does
+not send are drawn dim. `lib/instruments.js` is the model and the renderer;
+`tests/instruments.test.mjs` holds the read-back rule down.
+
+`shutter`, `led_mode` and `settle_s` — what a *node* reads to know what to
+do and how long to hold — have no place on the bench: clicking `open` already
+is `shutter = open`. They are edited where the node runs, on the pipeline tab.
+
+### A node form shows only what differs from the bench
+
+The other half of the same confusion: a card's values are also where every
+pipeline node of that module starts, and a node form that drew all fifty of
+them again read as a second, independent copy. So the pipeline tab's node
+form (`cardModel(entry, {form: 'node'})`) keeps above the fold only
+
+- what a loop binds or a run derives (`↳`, accent — as before),
+- what **this node** overrides (the value in ink, `↺` beside it, no tag), and
+- the rows a node has and a card does not (`light`'s `shutter`, `led_mode`,
+  `settle_s`),
+
+and folds everything else as `N more · same as bench`, in the service's
+groups. A node with nothing typed on it is one or two rows and a fold. The
+header carries `↺ bench` while there is anything to take back: every
+override dropped, the node is the bench's module again. This is the rule a
+Figma instance follows — show the overrides, the rest is the main component —
+and it needs no word explaining it.
 
 ## jv_bace · 22 parameters → 11 above, 11 folded
 

@@ -73,7 +73,9 @@ function show() {
   if (mounted && mounted.dispose) mounted.dispose();
   viewEl.scrollTop = 0;
   mountedRoute = name;
-  mounted = BY_ROUTE[name].mount(viewEl, { store, api, stream, fmt, notify });
+  // `park` is the strip's: the bench tab's Instruments panel offers the same
+  // button, and a busy bench arms it there exactly as it does on the strip.
+  mounted = BY_ROUTE[name].mount(viewEl, { store, api, stream, fmt, notify, park });
   renderTabs();
 }
 
