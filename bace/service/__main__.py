@@ -81,6 +81,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--ui", default=None,
                     help="a directory of static files to serve at /ui")
     ap.add_argument("--seed", type=int, default=0, help="the simulator's seed (--sim)")
+    ap.add_argument("--power-monitor", type=float, default=None, metavar="SECONDS",
+                    help="start the 1918-C monitor at this interval as the service comes "
+                         "up, so the meter is watched whether or not a console is open "
+                         "(the console's own switch starts and stops it too)")
     return ap.parse_args(argv)
 
 
@@ -126,7 +130,8 @@ def build_session(a: argparse.Namespace, *, warn: Callable[[str], Any] = print) 
     return Session(cfg["rig_config"], cfg["run_toml"], out=a.out,
                    mode="sim" if a.sim else "rig", fast=a.fast,
                    smu_config=cfg["smu_config"], run_config_defaults=cfg["run_config"],
-                   rig_path=cfg["rig_path"], run_path=cfg["run_path"], seed=a.seed)
+                   rig_path=cfg["rig_path"], run_path=cfg["run_path"], seed=a.seed,
+                   power_monitor_s=getattr(a, "power_monitor", None))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -149,6 +154,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if a.ui is not None and not os.path.isdir(a.ui):
         print(f"--ui: {a.ui!r} is not a directory")
+        return 2
+    if a.power_monitor is not None and not 0.01 <= a.power_monitor <= 3600:
+        print(f"--power-monitor {a.power_monitor:g}: the interval is in seconds, between "
+              "0.01 and 3600")
         return 2
     if not is_loopback(a.host):
         print(f"--host {a.host!r} is not a loopback address. The service has no "

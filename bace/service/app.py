@@ -556,6 +556,24 @@ def create_app(session: Session, *, ui_dir: str | None = None,
             return _error(404, "no power monitor is running")
         return {"stopped": True, "monitors": session.monitors()}
 
+    @app.get("/monitors/power/history")
+    async def power_history(since: float | None = Query(None), limit: int | None = Query(None)):
+        """Every power-monitor reading the session holds, oldest first: `[ts, watts, trustworthy]` rows."""
+        return session.power_history(since=since, limit=limit)
+
+    @app.get("/monitors/power/history.csv")
+    async def power_history_csv():
+        """The same readings as a CSV download, for a spreadsheet."""
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        return Response(session.power_history_csv(), media_type="text/csv",
+                        headers={"Content-Disposition":
+                                 f'attachment; filename="power_{session.session_id}_{stamp}.csv"'})
+
+    @app.delete("/monitors/power/history")
+    async def clear_power_history():
+        """Forget the readings held in memory; the journal keeps them."""
+        return {"cleared": session.clear_power_history()}
+
     @app.post("/monitors/temperature", status_code=202)
     async def start_temperature_monitor(body: MonitorRequest | None = Body(default=None)):
         """Start the temperature monitor (the 331 console over HTTP, beside a run). One at most."""

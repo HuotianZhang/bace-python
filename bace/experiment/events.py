@@ -360,6 +360,11 @@ class PowerReading(Event):
     trustworthy: bool
     wavelength_nm: float | None
     source: str
+    averaged: bool | None = None
+    """True when the meter was averaging (DC-continuous, 5 Hz analog filter),
+    so the number is the time average of a pulsed LED -- half the DC level
+    at 50 % duty -- and not one instant of it. None when the driver cannot
+    say (a console that has no filter route)."""
 
 
 @dataclass(frozen=True)

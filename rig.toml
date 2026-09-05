@@ -78,6 +78,15 @@ threshold_v = 1.0               # generator voltage at which the LED lights,
 # asks it over HTTP instead -- the escape hatch, not the normal path.
 [power_meter]
 console = ""                    # "http://127.0.0.1:8918" only if that console runs
+averaging = true                # DC-continuous mode + the 5 Hz analog filter at
+                                # open, so a reading is the time average of the
+                                # light. The LED is pulsed at 500 Hz, 50 % duty:
+                                # unfiltered, the meter shows one instant of that
+                                # square wave (full, nothing, or a flicker); the
+                                # average -- half the DC level -- is the power.
+                                # false leaves it unfiltered (mode is set anyway).
+digital_filter = 100            # PM:DIGITALFILTER samples on top of the analog
+                                # filter; light smoothing only, 0 disables it.
 wavelength_nm = 530.0           # responsivity is wavelength dependent; a meter
                                 # left at the wrong value returns a plausible
                                 # number that is wrong by tens of percent

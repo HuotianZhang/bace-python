@@ -168,7 +168,15 @@ an impossible delay *before* the run — and, as of M4, the run monitor under th
 rail on every tab (the counters at three time scales, the shot's segment, the
 ETA, stop after-shot, abort, and the operator's answer to a temperature pause),
 the newest shot's verdict beside its trace, and Q per loop / Q(axis) with the
-zero-width-axis switch drawn rather than silent. **M5, 2026-09-04**, is the
+zero-width-axis switch drawn rather than silent — and, **2026-09-05**, the
+power panel under the rail: the 1918-C monitor's switch (kept running in the
+service, remembered by the console, `--power-monitor` from boot), the
+reading, the live trace with its statistics, and CSV / SVG export
+(`ui/lib/power.js`). The same day the meter itself was put in DC-continuous
+mode with its 5 Hz analog filter at open (`[power_meter] averaging`,
+`DirectPowerMeter.set_averaging`): the LED is pulsed at 50 % duty, an
+unfiltered meter showed one instant of that square wave, and the average —
+half the DC level — is the power. **M5, 2026-09-04**, is the
 pipeline tab: the tree editor, the schedule as "what it will do, in order" at
 three scales, the check list collapsed to its counts, and the cost with
 `lower_bound` rendered as "at least" and never as a finish time. The canonical

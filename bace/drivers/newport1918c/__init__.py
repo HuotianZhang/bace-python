@@ -18,6 +18,7 @@ that and says what it actually means.
 """
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 from .console import (DEFAULT_CONSOLE, WATTS, ConsolePowerMeter,
@@ -38,6 +39,8 @@ def open_power_meter(rig_config: Any, *, simulate: bool = False):
     """
     console = getattr(rig_config, "power_meter_console", "") or ""
     wavelength = getattr(rig_config, "power_meter_wavelength_nm", None)
+    averaging = bool(getattr(rig_config, "power_meter_averaging", True))
+    digital = int(getattr(rig_config, "power_meter_digital_filter", 100))
     if console:
         meter = ConsolePowerMeter(console, timeout_s=5.0)
         if not meter.available():
@@ -62,6 +65,19 @@ def open_power_meter(rig_config: Any, *, simulate: bool = False):
         meter.set_units_watts()
         if wavelength is not None:
             meter.set_wavelength(wavelength)
+        # Then the averaging (2026-09-05): a pulsed LED is a 500 Hz square
+        # wave at the detector, and a meter that samples it at one instant
+        # shows a phase, not a power. `[power_meter] averaging = false` is
+        # the opt-out; the mode is written either way.
+        took = meter.set_averaging(averaging, digital_samples=digital)
+        if console and took is False:
+            warnings.warn(
+                f"the 1918-C console at {console} has no /api/filter route, so the "
+                "meter's averaging could not be set from here. Under a pulsed LED "
+                "its readings are one instant of the square wave; set DC-continuous "
+                "mode and the 5 Hz analog filter in that console, or clear "
+                "[power_meter] console so the service owns the meter and sets them.",
+                stacklevel=2)
     except BaseException:
         close = getattr(meter, "close", None)
         if close is not None:

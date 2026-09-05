@@ -160,6 +160,14 @@ DATA_RUNS_KEPT = 20
 memory. Beyond that the answer is the folder path and the HDF5."""
 
 WORKER_JOIN_S = 60.0
+
+POWER_HISTORY_MAX = 200_000
+"""How many power-monitor readings the session keeps for `GET
+/monitors/power/history` and its CSV: 55 hours at 1 Hz, 11 at 0.2 s. Kept
+on the session rather than on the monitor so stopping and restarting the
+monitor -- a changed interval, say -- does not lose the night's trace. The
+ring keeps the last 5000 envelopes of everything and the journal keeps all
+of them on disk; this is the one that a console can draw from at once."""
 """How much longer `close()` waits for the worker after `shutdown()` gave
 up. A job inside a blocking VISA call ends when the call times out (the
 resources are opened with 20 s, an acquisition waits up to 30 s), and the
@@ -454,10 +462,16 @@ class Session:
                  run_config_defaults: RunConfig | None = None,
                  sample: Mapping[str, Any] | None = None,
                  rig_path: str | None = None, run_path: str | None = None,
-                 session_id: str | None = None, seed: int = 0):
+                 session_id: str | None = None, seed: int = 0,
+                 power_monitor_s: float | None = None):
         if mode not in ("sim", "rig"):
             raise ValueError(f"mode must be 'sim' or 'rig', not {mode!r}")
         self.rig_config = rig_config
+        self.power_monitor_s = None if power_monitor_s is None else float(power_monitor_s)
+        """An interval to start the power monitor at in `start()`
+        (`--power-monitor`), so the meter is watched from the moment the
+        service is up and not from the moment somebody opens a console. None
+        leaves it to `POST /monitors/power`."""
         self.run_toml: dict = dict(run_toml or {})
         self.out = str(out)
         self.mode = mode
@@ -514,6 +528,10 @@ class Session:
         self.session_voc: VocSource | None = None
         self._monitor: PowerMonitor | None = None
         self._temperature_monitor: TemperatureMonitor | None = None
+        self._power_history: collections.deque[tuple] = collections.deque(maxlen=POWER_HISTORY_MAX)
+        """`(ts, watts, trustworthy, wavelength_nm, source, averaged)` per
+        monitor reading, newest last; `ts` is the frame's own `ts`, so a
+        console can merge this with the stream without a duplicate."""
         self._loop: asyncio.AbstractEventLoop | None = None
         self._loop_thread: threading.Thread | None = None
         self.last_validated: dict | None = None
@@ -535,6 +553,14 @@ class Session:
         if loop is not None:
             self.attach_loop(loop)
         self.worker.start()
+        if self.power_monitor_s is not None and not self.monitor_running:
+            # A bench with no meter is not a reason to refuse to start: the
+            # flag asked for a monitor, and the answer "there is none" goes
+            # where every other start-up trouble goes.
+            try:
+                self.start_power_monitor(self.power_monitor_s)
+            except (ValueError, Conflict) as exc:
+                self._error(f"--power-monitor: {exc}")
         return self
 
     def attach_loop(self, loop: asyncio.AbstractEventLoop | None = None) -> None:
@@ -1571,12 +1597,24 @@ class Session:
             raise ValueError("no power meter on this bench: "
                              + self.bench.unavailable.get("power", "the 1918-C console "
                                                                    "is not answering"))
-        monitor = PowerMonitor(meter, emit=lambda ev: self._dispatch(None, ev, node_path=""),
-                               interval_s=interval_s,
+        monitor = PowerMonitor(meter, emit=self._on_power_reading, interval_s=interval_s,
                                console=self.rig_config.power_meter_console)
         self._monitor = monitor
         monitor.start()
         return monitor.info()
+
+    def _on_power_reading(self, ev: E.Event) -> None:
+        """The monitor's sink: the reading goes into the history under the
+        same `ts` its frame will carry, then down the one event path. One
+        clock for both, or a console merging `/monitors/power/history` with
+        the stream would hold every reading twice, a few microseconds
+        apart."""
+        when = time.time()
+        if isinstance(ev, E.PowerReading):
+            with self._lock:
+                self._power_history.append((when, float(ev.watts), bool(ev.trustworthy),
+                                            ev.wavelength_nm, ev.source, ev.averaged))
+        self._dispatch(None, ev, node_path="", ts=when)
 
     def stop_power_monitor(self) -> bool:
         """`DELETE /monitors/power`. False when none was running."""
@@ -1585,6 +1623,64 @@ class Session:
             return False
         monitor.stop()
         return True
+
+    # -- the power history ------------------------------------------------------------
+    def power_history(self, *, since: float | None = None,
+                      limit: int | None = None) -> dict:
+        """`GET /monitors/power/history`: every monitor reading the session
+        still holds, oldest first, as `[ts, watts, trustworthy]` rows --
+        after `since` when given, the newest `limit` when given. The
+        wavelength, source and averaging travel once, off the newest
+        reading, because they are the meter's settings and not the
+        sample's."""
+        with self._lock:
+            rows = list(self._power_history)
+        total = len(rows)
+        if since is not None:
+            rows = [r for r in rows if r[0] > float(since)]
+        if limit is not None and limit >= 0:
+            rows = rows[-int(limit):] if limit else []
+        newest = rows[-1] if rows else None
+        monitor = self._monitor
+        running = monitor is not None and monitor.running
+        return {
+            "points": [[r[0], r[1], r[2]] for r in rows],
+            "count": len(rows), "total": total, "kept_max": POWER_HISTORY_MAX,
+            "first_ts": rows[0][0] if rows else None,
+            "last_ts": newest[0] if newest else None,
+            "wavelength_nm": newest[3] if newest else None,
+            "source": newest[4] if newest else None,
+            "averaged": newest[5] if newest else None,
+            "running": running,
+            "interval_s": monitor.interval_s if running else None,
+        }
+
+    def clear_power_history(self) -> int:
+        """`DELETE /monitors/power/history`: forget the readings held; the
+        journal on disk keeps them. Returns how many were dropped."""
+        with self._lock:
+            n = len(self._power_history)
+            self._power_history.clear()
+        return n
+
+    def power_history_csv(self) -> str:
+        """The history as a file a spreadsheet opens: one row per reading,
+        the wall clock in ISO form beside the unix seconds the stream uses,
+        watts in full precision, and what the meter said about each."""
+        import csv
+        import io
+        with self._lock:
+            rows = list(self._power_history)
+        out = io.StringIO()
+        w = csv.writer(out, lineterminator="\n")
+        w.writerow(["time_iso", "unix_s", "watts", "trustworthy", "wavelength_nm",
+                    "source", "averaged"])
+        for ts, watts, ok, nm, source, averaged in rows:
+            w.writerow([datetime.fromtimestamp(ts).isoformat(timespec="milliseconds"),
+                        f"{ts:.3f}", repr(float(watts)), int(bool(ok)),
+                        "" if nm is None else f"{nm:g}", source or "",
+                        "" if averaged is None else int(bool(averaged))])
+        return out.getvalue()
 
     # -- the temperature monitor ----------------------------------------------------
     @property

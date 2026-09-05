@@ -255,6 +255,11 @@ function powerCell(power) {
   }
   const parts = [];
   if (p.wavelength_nm) parts.push(`${p.wavelength_nm} nm`);
+  // The meter's averaging is what makes a pulsed LED read as a power (its
+  // mean, half the DC level at 50 % duty) rather than one instant of the
+  // square wave; a meter that is *not* averaging is worth a word.
+  if (p.averaged === true) parts.push('avg');
+  if (p.averaged === false) parts.push('not averaged');
   if (p.monitor) parts.push('monitored');
   return {
     key: 'power', label: 'optical power', value: fmt.intensity(p.watts),

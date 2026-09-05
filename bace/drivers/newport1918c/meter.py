@@ -282,6 +282,8 @@ class SimulatedTransport:
         self.auto = 0
         self.filt = 0
         self.digital = 0
+        self.mode = 0
+        self.analog = 0
         self._t0 = time.time()
         self._ds = {"size": 0, "int": 10, "start": None, "collected": 0, "served": 0}
         self._zero = 0.0
@@ -314,6 +316,10 @@ class SimulatedTransport:
                 self.digital = int(command.split()[-1])
             elif upper.startswith("PM:FILT "):
                 self.filt = int(command.split()[-1])
+            elif upper.startswith("PM:ANALOGFILTER "):
+                self.analog = int(command.split()[-1])
+            elif upper.startswith("PM:MODE "):
+                self.mode = int(command.split()[-1])
             elif upper.startswith("PM:ZEROSTO"):
                 self._zero = self._power()
             elif upper.startswith("PM:DS:SIZE"):
@@ -356,6 +362,8 @@ class SimulatedTransport:
             "PM:MAX:POWER": "0.000838",
             "PM:FILT": str(self.filt),
             "PM:DIGITALFILTER": str(self.digital),
+            "PM:ANALOGFILTER": str(self.analog),
+            "PM:MODE": str(self.mode),
             "ERRSTR": "0,No Error",
         }
         if upper in table:
@@ -477,7 +485,18 @@ class PowerMeter:
     def settings(self) -> dict:
         units = self._query_number("PM:UNITS?")
         filt = self._query_number("PM:FILT?")
+        mode = self._query_number("PM:MODE?")
+        analog = self._query_number("PM:ANALOGFILTER?")
         return {
+            # ADDED 2026-09-05 (see set_mode below): which of the eight
+            # measurement modes the meter is in, and which analog filter --
+            # the two settings that decide whether a pulsed LED reads as its
+            # average or as garbage.
+            "mode": mode,
+            "modeName": MODE_NAMES.get(int(mode), "?") if mode is not None else "?",
+            "analogFilter": analog,
+            "analogFilterName": (ANALOG_FILTER_NAMES.get(int(analog), "?")
+                                 if analog is not None else "?"),
             "wavelength": self._query_number("PM:Lambda?"),
             "units": units,
             "unitsName": UNITS_NAMES.get(int(units), "?") if units is not None else "?",
@@ -520,6 +539,25 @@ class PowerMeter:
         self.write("PM:FILT %d" % int(filt))
         if digital is not None:
             self.write("PM:DIGITALFILTER %d" % int(digital))
+
+    # DIVERGES from the console project, 2026-09-05: the two writes below did
+    # not exist there. The BACE rig pulses its LED at 500 Hz, 50 % duty, and a
+    # meter in a mode other than DC-continuous -- or in DC-continuous with no
+    # filter -- samples the square wave at one instant and shows whatever
+    # phase it landed in. Only the *average* of the pulsed light is a power
+    # (half the DC level at 50 % duty), and that is what the analog 5 Hz
+    # filter delivers. MODE_NAMES and ANALOG_FILTER_NAMES were already in
+    # this file; the commands they name were never sent.
+
+    def set_mode(self, code: int) -> None:
+        """PM:MODE -- 0 is DC continuous, the only mode a monitor wants.
+        See MODE_NAMES for the other seven."""
+        self.write("PM:MODE %d" % int(code))
+
+    def set_analog_filter(self, code: int) -> None:
+        """PM:ANALOGFILTER -- see ANALOG_FILTER_NAMES; 4 is the 5 Hz filter
+        that turns a 500 Hz pulse train into its mean."""
+        self.write("PM:ANALOGFILTER %d" % int(code))
 
     def zero(self) -> None:
         """Store the dark offset. The beam must be blocked when this runs."""

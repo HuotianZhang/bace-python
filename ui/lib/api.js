@@ -97,6 +97,11 @@ export function createApi({ base = '', fetch: fetchImpl = globalThis.fetch } = {
     monitors: () => call('GET', '/monitors'),
     startMonitor: (kind, interval_s) => call('POST', `/monitors/${kind}`, { interval_s }),
     stopMonitor: (kind) => call('DELETE', `/monitors/${kind}`),
+    /** The power monitor's readings the service holds, `[ts, watts, trustworthy]` rows. */
+    powerHistory: (since, limit) => call('GET', '/monitors/power/history', undefined, { since, limit }),
+    clearPowerHistory: () => call('DELETE', '/monitors/power/history'),
+    /** The same readings as a CSV file — a URL, for a download link. */
+    powerHistoryCsv: () => `${root}/monitors/power/history.csv`,
 
     /** The ring over HTTP, for a client without a socket. */
     events: (since = 0) => call('GET', '/events', undefined, { since }),

@@ -662,15 +662,32 @@ class SimulatedPowerMeter:
         self.w_per_unit = w_per_unit
         self.noise = float(noise)
         self.wavelength_nm = 530.0
+        self.averaged = True
+        """Whether the stand-in plays a meter with its 5 Hz analog filter
+        on, as `DirectPowerMeter.set_averaging` leaves the real one. Under a
+        pulsed LED the filtered meter reads the duty-weighted mean; an
+        unfiltered one reads whichever phase of the square wave it sampled
+        -- the flicker the operator saw on the rig, kept here so a test can
+        show why the filter exists. `set_averaging` flips it."""
 
     def set_wavelength(self, nm: float) -> None:
         self.wavelength_nm = float(nm)
+
+    def set_averaging(self, on: bool = True, **_: object) -> dict:
+        self.averaged = bool(on)
+        return {"mode": 0, "analog_filter": 4 if on else 0}
 
     def read_power(self) -> float:
         b = self.bench
         base = b.device.led_current(b.led_drive_v) * self.w_per_unit
         if not b.shutter_open:
             base *= 1e-4
+        if b.led_mode == "PULSE":
+            # The detector sees a square wave: `led_duty` of each cycle lit.
+            if self.averaged:
+                base *= b.led_duty
+            else:
+                base *= 1.0 if b.rng.random() < b.led_duty else 1e-4
         return float(base * (1.0 + b.rng.normal(0.0, self.noise)))
 
     def read_statistics(self, n: int) -> tuple[float, float]:

@@ -68,6 +68,33 @@ const RUN_SCOPED = new Set([
   'JVFinished', 'SeriesPointDone', 'NeedsOperator', 'OperatorResumed',
 ]);
 
+/**
+ * How many power-monitor readings the console keeps for the trace: 5.5 h at
+ * 1 Hz, 66 min at 0.2 s. Older ones are the service's (`GET
+ * /monitors/power/history` holds 200 000) and the journal's on disk.
+ */
+export const POWER_LOG_MAX = 20000;
+
+/**
+ * Put one reading into a log sorted by `ts`, or refuse it when that `ts` is
+ * already there. The stream and `GET /monitors/power/history` deliver the
+ * same readings under the same `ts` (the service stamps both from one clock),
+ * and a console that folds both must hold each once.
+ */
+export function insertReading(log, entry) {
+  const last = log.length ? log[log.length - 1] : null;
+  if (!last || entry.ts > last.ts) { log.push(entry); return true; }
+  let lo = 0;
+  let hi = log.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (log[mid].ts < entry.ts) lo = mid + 1; else hi = mid;
+  }
+  if (lo < log.length && log[lo].ts === entry.ts) return false;
+  log.splice(lo, 0, entry);
+  return true;
+}
+
 export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } = {}) {
   let state = emptyState();
   const listeners = new Set();
@@ -146,6 +173,9 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
       state.bench = bench;
       state.session = bench.session || state.session;
       state.readAt = bench.read_at || null;
+      // The observers, on every snapshot: the power panel's switch shows
+      // whether the monitor *is* running, which is the service's to say.
+      if (Array.isArray(bench.monitors)) state.monitors = bench.monitors;
       // The read-back's verdicts are on the snapshot and nowhere else: a socket
       // opened after them replays nothing, so a console that only folded
       // `Verdict` frames would show a clean bench with a warning on it.
@@ -193,6 +223,34 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
           state.activeRunId = null;
         }
       }
+      notify();
+    },
+
+    /** `GET /monitors`, or the one entry `POST /monitors/{kind}` answers with. */
+    applyMonitors(list) {
+      if (!Array.isArray(list)) return;
+      state.monitors = list;
+      notify();
+    },
+
+    /**
+     * `GET /monitors/power/history`: the readings the service holds, merged
+     * into the log by `ts` — the trace is whole after a reload, and a
+     * reading the stream already delivered is not held twice.
+     */
+    applyPowerHistory(body) {
+      const points = (body && body.points) || [];
+      for (const row of points) {
+        if (!Array.isArray(row) || !Number.isFinite(row[0]) || !Number.isFinite(row[1])) continue;
+        insertReading(state.powerLog, { ts: row[0], watts: row[1], trustworthy: row[2] !== false });
+      }
+      trimPowerLog(state);
+      notify();
+    },
+
+    /** The trace forgotten here, as `DELETE /monitors/power/history` forgot it there. */
+    clearPowerLog() {
+      state.powerLog = [];
       notify();
     },
 
@@ -616,7 +674,15 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
 
       case 'PowerReading':
         state.power = { watts: data.watts, trustworthy: data.trustworthy,
-                        wavelength_nm: data.wavelength_nm, source: data.source, ts: frame.ts };
+                        wavelength_nm: data.wavelength_nm, source: data.source,
+                        averaged: data.averaged ?? null, ts: frame.ts };
+        // Into the trace, in `ts` order: a replay after a reconnect can hand
+        // back a reading older than the newest one held, and the history
+        // fetched on connect may already have it.
+        if (Number.isFinite(frame.ts) && Number.isFinite(data.watts)) {
+          insertReading(state.powerLog, { ts: frame.ts, watts: data.watts, trustworthy: data.trustworthy !== false });
+          trimPowerLog(state);
+        }
         break;
 
       case 'TemperatureRead':
@@ -846,12 +912,19 @@ export function emptyState() {
     verdicts: [],
     actions: [],
     power: null,
+    powerLog: [],
+    monitors: [],
     temperature: null,
     notices: [],
     log: [],
     logged: 0,
     lastFrame: null,
   };
+}
+
+function trimPowerLog(state) {
+  const log = state.powerLog;
+  if (log.length > POWER_LOG_MAX) log.splice(0, log.length - POWER_LOG_MAX);
 }
 
 /** The run a view should be showing: the live one, else the newest. */
