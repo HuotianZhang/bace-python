@@ -143,9 +143,16 @@ export default {
     const valuesEl = h('div.vlists');
     const costEl = h('div.costs');
     const checksEl = h('div.checks');
-    const actionsEl = h('div.pipe-actions');
+    // The drift note stays in the flow; it is a reading, and `docs/ui-rules.md`
+    // lets the bar pin a control and not a reading.
+    const noteEl = h('div.pipe-note');
+    // The action row: what the run will be called, and the buttons that act on
+    // it. It is the card body's own child rather than a nested box because a
+    // sticky box may only travel inside its containing block, and this one has
+    // to rise the whole panel.
+    const actionsBarEl = h('div.pipe-actions-bar');
     fill(structureEl, headEl,
-      h('div.cb', treeEl, nodeEl, valuesEl, h('div.hr'), costEl, h('div.hr'), checksEl, actionsEl));
+      h('div.cb', treeEl, nodeEl, valuesEl, h('div.hr'), costEl, h('div.hr'), checksEl, noteEl, actionsBarEl));
 
     const schedHeadEl = h('div.ch');
     const chartEl = h('div.pipe-chart');
@@ -936,7 +943,9 @@ export default {
       const stem = name || (typed && typed.name) || '';
       const overwrites = recipes.some((r) => r.name === stem);
       const armed = Boolean(stem) && saveArmed === stem;
-      keyed(actionsEl, JSON.stringify([Boolean(typed), v.answer && v.answer.valid, v.busy, v.stale, inflight, c && c.total_s, name, recipes.map((r) => r.name), loaded && loaded.name, moved, history.depth, history.canRedo, history.undoLabel, history.redoLabel, saveArmed, overwrites]), () => [
+      const key = JSON.stringify([Boolean(typed), v.answer && v.answer.valid, v.busy, v.stale, inflight, c && c.total_s, name, recipes.map((r) => r.name), loaded && loaded.name, moved, history.depth, history.canRedo, history.undoLabel, history.redoLabel, saveArmed, overwrites]);
+      keyed(noteEl, key, () => [recipeNote(v)]);
+      keyed(actionsBarEl, key, () => [
         h('div.namerow',
           h('span.l', 'name'),
           h('input.v', {
@@ -964,7 +973,6 @@ export default {
             }, h('option', { value: '' }, 'saved recipes …'),
             ...recipes.map((r) => h('option', { value: r.name }, r.name)))
             : null),
-        recipeNote(v),
         h('div.btnrow',
           // The way back, beside the ways forward. Named rather than counted:
           // `undo · remove the temperature loop` is answerable without

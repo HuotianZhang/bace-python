@@ -15,6 +15,7 @@
   --fill: #eae7e7;
   --grid: #f2efef;            /* a chart's gridlines: present, never competing */
   --paper: #ffffff;
+  --view-pad-b: 40px;         /* the view's foot — `.pipe-actions-bar` cancels it */
   --accent: #ec3013;          /* the swept quantity, and the primary button */
   --accent-dark: #ae1800;
   --alert: #ec3013;           /* a live bias output, a crit, a saturation verdict */
@@ -283,7 +284,7 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
 .tabs a.on { color: #fff; border-bottom-color: var(--accent); }
 
 /* -- the view ------------------------------------------------------------- */
-.view { flex: 1 1 auto; overflow: auto; padding: 16px 18px 40px; }
+.view { flex: 1 1 auto; overflow: auto; padding: 16px 18px var(--view-pad-b); }
 .view h1 { font-size: 17px; margin: 0 0 12px; }
 .view h1 .sub { font-family: var(--mono, monospace); font-weight: normal; font-size: 11px; color: var(--grey); margin-left: 12px; letter-spacing: 0; }
 .chart-note .path { border-bottom: 1px dotted var(--grey); cursor: help; }
@@ -922,7 +923,28 @@ button.link:hover { color: var(--accent-dark); }
 .cklist .warn1.info { color: var(--grey); }
 .cklist .cs { margin-left: auto; padding-left: 10px; }
 
-.pipe-actions { display: flex; flex-direction: column; gap: 8px; }
+/* The drift note, alone in the flow now that the name row is in the bar. It is
+   null unless a recipe is open and the bench has moved under it (`recipeNote`),
+   so it collapses the way an unselected node form does. */
+.pipe-note:empty { display: none; }
+/* Start is the reason the tab exists, so it does not scroll away: the button
+   row is pinned to the foot of the structure card and the tree, the costs and
+   the check list pass under it. The row only — the name field and the recipe
+   note stay in the reading order, because a two-line note pinned as well would
+   hold a third of the panel against the operator.
+
+   The scrollport is `.view`, and a sticky offset is measured from its content
+   edge, so `bottom: 0` would leave the view's own foot open under the bar and
+   the check list would show through it — hence the offset cancels that foot.
+   The bar cannot leave `.cb` either way, so at the end of the scroll it lands
+   on the card's bottom border rather than hanging past it. The negative side
+   margins are `.cb`'s own padding, so the bar reaches both card edges. */
+.pipe-actions-bar {
+  position: sticky; bottom: calc(-1 * var(--view-pad-b)); z-index: 2;
+  display: flex; flex-direction: column; gap: 8px;
+  margin: 0 -10px -10px; padding: 8px 10px 10px;
+  background: var(--paper); border-top: 1px solid var(--rule);
+}
 .namerow { display: flex; align-items: center; gap: 8px; }
 /* Where the bench has moved since a recipe was saved (`lib/recipe.js`). */
 .recipe-note {
