@@ -114,8 +114,11 @@ voltage_compliance_v = 2.0      # while sourcing current (V_oc, at 0 A)
 settle_jsc_ms = 1000
 settle_voc_ms = 1000   # a slow cell settles far more slowly here
 settle_jsat_ms = 1000
-nplc = 1.0                      # integration time in power-line cycles
-averaging = 10
+nplc = 5.0                      # integration time in power-line cycles: 100 ms at
+                                # 50 Hz. 5 x 1 since 2026-09-05: the same noise
+                                # floor as 1 x 10 in the same 0.45 s a point,
+                                # with one auto-zero per point instead of ten
+averaging = 1                   # 1 is the filter off
 terminals = "FRON"
 four_wire = false
 

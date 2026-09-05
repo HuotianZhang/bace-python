@@ -127,9 +127,9 @@ def test_the_output_is_off_again_after_every_measurement():
 
 def test_sweep_is_one_point_at_a_time_and_unpacks_each_reading():
     """Since 2026-09-04 the sweep is the host's, not the 2400's: one
-    `:SOUR:VOLT:LEV`, a settle, one `:READ?` answering `V,I` per point. The
-    output comes on at the first level, never at *RST's 0 V."""
-    io = FakeIO(reads=["0.0,-2.0E-4", "0.5,-1.5E-4", "1.0,1.0E-4"])
+    `:SOUR:VOLT:LEV`, a settle, one `:READ?` answering the current per
+    point. The output comes on at the first level, never at *RST's 0 V."""
+    io = FakeIO(reads=["-2.0E-4", "-1.5E-4", "1.0E-4"])
     k = Keithley2400(io)
     got = list(k.sweep_points(0.0, 1.0, 3))
     assert got == [(0.0, -2e-4), (0.5, -1.5e-4), (1.0, 1e-4)]
@@ -140,10 +140,31 @@ def test_sweep_is_one_point_at_a_time_and_unpacks_each_reading():
     assert io.log.count(":READ?") == 3 and not any("SWE" in c for c in io.log)
     assert k.output_enabled is False and io.log[-1] == ":OUTP OFF;"
 
-    io = FakeIO(reads=["0.0,-2.0E-4", "0.5,-1.5E-4", "1.0,1.0E-4"])
+    io = FakeIO(reads=["-2.0E-4", "-1.5E-4", "1.0E-4"])
     v, i = Keithley2400(io).sweep(0.0, 1.0, 3)
     np.testing.assert_allclose(v, [0.0, 0.5, 1.0])
     np.testing.assert_allclose(i, [-2e-4, -1.5e-4, 1e-4])
+
+
+def test_the_sweep_files_the_setpoint_and_asks_the_2400_for_current_only():
+    """The point's voltage is the level sourced, never the V element of the
+    reply (2026-09-05). Only current is sensed (`:SENS:FUNC?` -> "CURR:DC"
+    on the bench), so that element is not a measurement: on the rig it
+    lagged the setpoint by up to 0.09 V and snapped back at every current
+    range change, which filed as 0.09 V kinks near 1 V and a FF ten to
+    fifteen percent low (runs 20260904_234336, 20260905_1108xx). Two-wire,
+    the setpoint is the device's voltage to better than a millivolt, and it
+    is what the instrument's own sweep filed before 2026-09-04."""
+    # A reply that still carried a lagging V element must not leak into the
+    # point: the driver asks for current only and would misread `V,I`.
+    io = FakeIO(reads=["-1.0E-6", "9.0E-7", "-5.0E-7"])
+    got = list(Keithley2400(io).sweep_points(-0.2, 1.2, 3))
+    assert got == [(-0.2, -1e-6), (0.5, 9e-7), (1.2, -5e-7)]
+    assert ":FORM:ELEM CURR;" in io.log and not any("ELEM VOLT" in c for c in io.log)
+    # ... and it is the level as *sent* (`:g`, six figures), so the file
+    # holds 0.733333, not linspace's 0.7333333333333334.
+    v, _ = Keithley2400(FakeIO(reads=["1", "2", "3", "4"])).sweep(1.2, -0.2, 4)
+    assert v.tolist() == [1.2, 0.733333, 0.266667, -0.2]
 
 
 def test_the_sweep_ranges_once_and_settles_in_the_instrument():
@@ -153,7 +174,7 @@ def test_the_sweep_ranges_once_and_settles_in_the_instrument():
     in the trigger model rather than a host-side sleep -- so no range
     change lands mid-sweep, and every point gets exactly `settle_s`
     whatever the stream and the recorder add between two points."""
-    io = FakeIO(reads=["-0.2,-2.0E-4", "0.5,-1.5E-4", "1.2,1.0E-4"])
+    io = FakeIO(reads=["-2.0E-4", "-1.5E-4", "1.0E-4"])
     k = Keithley2400(io)
     list(k.sweep_points(-0.2, 1.2, 3, settle_s=0.05))
     assert ":SOUR:VOLT:RANG 1.2;" in io.log, "the larger end, so 2 V, not auto"
@@ -162,7 +183,7 @@ def test_the_sweep_ranges_once_and_settles_in_the_instrument():
     assert ":SOUR:DEL 0.05;" in io.log
     assert io.log.index(":SOUR:DEL 0.05;") < io.log.index(":OUTP ON;")
 
-    io = FakeIO(reads=["0.0,-2.0E-4", "-1.0,-1.5E-4"])
+    io = FakeIO(reads=["-2.0E-4", "-1.5E-4"])
     list(Keithley2400(io).sweep_points(0.0, -1.0, 2))
     assert ":SOUR:VOLT:RANG 1;" in io.log, "magnitude: a reverse sweep ranges too"
     assert ":SOUR:DEL 0;" in io.log, "no settle asked for is 0, not the auto delay"
@@ -174,7 +195,7 @@ def test_four_wire_is_sent_after_the_reset_that_would_undo_it():
     io = FakeIO(reads=["-2.00E-4"])
     Keithley2400(io, config=SourceMeterConfig(four_wire=True)).measure_jsc(settle_ms=0)
     assert io.log.index("*RST") < io.log.index(":SYST:RSEN ON;") < io.log.index(":OUTP ON;")
-    io = FakeIO(reads=["0.0,-2.0E-4", "1.0,1.0E-4"])
+    io = FakeIO(reads=["-2.0E-4", "1.0E-4"])
     list(Keithley2400(io, config=SourceMeterConfig(four_wire=True)).sweep_points(0.0, 1.0, 2))
     assert io.log.index("*RST") < io.log.index(":SYST:RSEN ON;") < io.log.index(":OUTP ON;")
 
@@ -182,7 +203,7 @@ def test_four_wire_is_sent_after_the_reset_that_would_undo_it():
 def test_a_sweep_left_half_way_switches_the_output_off():
     """The consumer may stop iterating -- an abort between two points -- and
     the source it switched on into the device must not stay on."""
-    io = FakeIO(reads=["0.0,-2.0E-4", "0.5,-1.5E-4", "1.0,1.0E-4"])
+    io = FakeIO(reads=["-2.0E-4", "-1.5E-4", "1.0E-4"])
     k = Keithley2400(io)
     gen = k.sweep_points(0.0, 1.0, 3)
     next(gen)
@@ -203,7 +224,7 @@ def test_the_sweep_budget_covers_what_the_2400_actually_takes():
             return super().query(cmd)
 
     cfg = SourceMeterConfig(nplc=1.0, averaging=10)
-    io = Watch(reads=["0.0,-2.0E-4", "0.5,-1.5E-4", "1.0,1.0E-4"])
+    io = Watch(reads=["-2.0E-4", "-1.5E-4", "1.0E-4"])
     io.timeout = 20000
     k = Keithley2400(io, config=cfg)
     assert k.sweep_budget_s(36, settle_s=0.05) >= 1.5 * 36 * 0.83
@@ -1052,14 +1073,14 @@ def test_a_slow_point_raises_the_visa_timeout_for_its_read_and_puts_it_back():
                 self.timeout_at_read = self.timeout
             return super().query(cmd)
 
-    io_ = Timed(reads=["0.0,-2.0E-4", "0.5,-1.5E-4"])
+    io_ = Timed(reads=["-2.0E-4", "-1.5E-4"])
     k = Keithley2400(io_, config=SourceMeterConfig(averaging=50, nplc=10.0))
     k.sweep(0.0, 0.5, 2, settle_s=1.0)
     assert io_.timeout_at_read == int(k.sweep_budget_s(1, 1.0) * 1000) > 20000
     assert io_.timeout == 20000, "restored, so the next quick query fails fast"
 
     # a quick point leaves the session's timeout alone
-    io_ = Timed(reads=["0.0,-2.0E-4", "0.5,-1.5E-4"])
+    io_ = Timed(reads=["-2.0E-4", "-1.5E-4"])
     Keithley2400(io_, config=SourceMeterConfig(averaging=1, nplc=1.0)).sweep(
         0.0, 0.5, 2, settle_s=0.0)
     assert io_.timeout_at_read == 20000
