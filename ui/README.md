@@ -38,6 +38,7 @@ repo root for the offline bench at `/ui/replay.html`, which needs
 | `lib/charts/loops.js` | the M4 component: Q per loop, or Q(axis), with the switch between them in the caption — `ui-rules` §4's zero-width axis is a repeat, and the chart says so rather than drawing a curve through it |
 | `lib/charts/schedule.js` | the M5 component: the run as a length of time, settle in grey and measuring in accent, one pair per temperature. A settle nobody has measured is hatched and takes no time on the axis, and there is no clock under a total that is a floor |
 | `lib/tree.js` | the pipeline tree (M5): the tree as typed, the edit operations, the flat schedule nested back into the shape it was a walk of, what the cryostat will be at on every node, and the cost with `lower_bound` carried as the word "at least" |
+| `lib/undo.js` | the way back from a tree edit (M5): a history of `{tree, selected}` pairs, what `Cmd/Ctrl+Z` and its redo mean, and the rule that a field being edited keeps its own undo. Knows nothing about trees — `push` is *told* how to compare two entries; pure and tested |
 | `lib/history.js` | the results tab's models (M6): the run list grouped by session, the T × LED grid with its partial and never-run cells, the summary strip, the temperature triple and the V_oc in words, every flag with its reason, the provenance line, the CSV |
 | `lib/grid.js` | the results tab's DOM, beside those models — the same split the rail has |
 | `lib/charts/grid.js` | the M6 component: Q(led_v) per temperature, or Q(T) per level, the partial cell hollow in the accent |
@@ -299,6 +300,28 @@ Three more things it is careful about:
   *and* is refused by `tree.owned-param`; the reset is offered anyway, or a
   saved recipe with that in it would block Start with no way out but deleting
   the node.
+* **`✕` has no confirm dialog; it has an undo stack.** The button removes the
+  node *and its whole subtree*, and a nine-temperature tree with five levels
+  and two modules under it is one mis-click from gone. A dialog on it would be
+  the wrong answer twice over: it taxes every deliberate removal — composing a
+  tree is mostly removals — to catch the rare accidental one, and it says
+  nothing about `↑`, `↓`, an added node or a typed override, which are as
+  irreversible and would get no dialog at all. So the way back is
+  `Cmd/Ctrl+Z`, with `↶`/`↷` in the structure header for the hand already on
+  the mouse, disabled at the ends of the stack. The click stays cheap, which
+  is the point. It costs almost nothing to keep, because `lib/tree.js` is
+  immutable and shares every branch an edit did not touch — fifty entries are
+  fifty references, not fifty trees — and a held `Cmd+Z` is still **one**
+  validate, since the coalescing window does not care where the tree came
+  from. Three rules make it honest: a commit that leaves the same pipeline is
+  not an edit (re-typing a value it already has, or `↑` between two identical
+  `bace` siblings, which the schema allows and the service numbers `bace` and
+  `bace#2`); reopening a recipe starts a new history rather than pushing onto
+  it, since an undo across that boundary would put back a tree from a file the
+  operator has closed, under the name of the one they opened; and a field
+  being edited keeps its own undo, because stealing `Cmd+Z` from a caret in a
+  value list loses an edit the operator can see for one they cannot. Start
+  does not clear it.
 * **What is on screen while a validate is in flight is a moment old, and says
   so.** Blanked instead, the schedule read *"no nodes yet"* on a tree with
   four nodes in it for the third of a second after every commit. `stale` marks

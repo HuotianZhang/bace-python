@@ -743,6 +743,12 @@ button.link:hover { color: var(--accent-dark); }
 .pipe-col > .cb { gap: 10px; }
 .hr { height: 1px; background: var(--rule); }
 .addbar { display: inline-flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+
+/* Undo and redo. A rule's width of air from the add bar beside it: they are
+   the two controls in this header that do not add anything, and at the ends
+   of the stack they are the two that go quiet. */
+.steps { display: inline-flex; align-items: center; gap: 3px; margin-right: 8px; }
+.steps .btng { padding: 0 6px; line-height: 18px; font-size: 13px; }
 .addbar select.v {
   border: 1px solid var(--rule); background: var(--paper); padding: 2px 4px;
   font-family: var(--font-num); font-size: 11px;

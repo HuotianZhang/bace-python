@@ -266,7 +266,7 @@ def test_the_console_suite_passes():
          "ui/tests/format.test.mjs", "ui/tests/rail.test.mjs", "ui/tests/fields.test.mjs",
          "ui/tests/render.test.mjs", "ui/tests/scale.test.mjs", "ui/tests/charts.test.mjs",
          "ui/tests/monitor.test.mjs", "ui/tests/tree.test.mjs", "ui/tests/rig.test.mjs",
-         "ui/tests/power.test.mjs"],
+         "ui/tests/power.test.mjs", "ui/tests/undo.test.mjs"],
         cwd=REPO, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-2000:]
 

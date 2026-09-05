@@ -42,6 +42,7 @@ import { renderRow, field, fold } from '../lib/card.js';
 import { chart } from '../lib/charts/frame.js';
 import { scheduleModel } from '../lib/charts/schedule.js';
 import * as tree from '../lib/tree.js';
+import * as undoStack from '../lib/undo.js';
 import { drift, recorded, restore } from '../lib/recipe.js';
 import { benchHash } from '../lib/route.js';
 
@@ -167,14 +168,76 @@ export default {
       if (now) fire(); else timer = setTimeout(fire, VALIDATE_MS);
     }
 
-    /** Every mutation goes through here, so nothing can change the tree quietly. */
-    function change(next, { select = undefined } = {}) {
+    /**
+     * Every mutation goes through here, so nothing can change the tree quietly.
+     *
+     * `fresh` is a tree that **replaces** rather than edits — reopening a
+     * recipe — and it starts the history over rather than pushing onto it.
+     */
+    function change(next, { select = undefined, fresh = false } = {}) {
       typed = next;
       if (select !== undefined) selected = select;
+      if (selected && !tree.nodeAt(typed, selected)) selected = null;
+      // The one choke point is also where the history is kept: an edit that
+      // reached the tree without passing here would be one `Cmd+Z` could not
+      // take back, and the operator would have no way to tell which.
+      history = fresh ? undoStack.start(snapshot()) : undoStack.push(history, snapshot(), sameEntry);
+      revalidate();
+      render();
+    }
+
+    // -- the way back ------------------------------------------------------
+
+    /**
+     * The tree and which node's form is open, restored together — and it is
+     * **the selection that tree was committed with**, not the one in hand.
+     * The alternative (keep the current selection where it still resolves)
+     * reads better while browsing and worse where it matters: after a `✕` the
+     * current selection is `null`, so the subtree would come back with nothing
+     * open, when the node worth looking at is the one the removal took.
+     * Going back a step puts the screen back, not half of it.
+     *
+     * `lib/undo.js` holds the stack and knows nothing about either.
+     */
+    let history = undoStack.start({ tree: null, selected: null });
+
+    const snapshot = () => ({ tree: typed, selected });
+    const sameEntry = (a, b) => tree.sameTree(a.tree, b.tree);
+
+    /** Reopen at `entry` — the same restore either direction moves through. */
+    function travel(next) {
+      if (next === history) return;
+      history = next;
+      typed = history.present.tree;
+      selected = history.present.selected;
+      // A path that no longer resolves is `change`'s rule, applied here for
+      // the same reason: the stack is only ever asked for trees it recorded,
+      // but a selection is restored, not recomputed.
       if (selected && !tree.nodeAt(typed, selected)) selected = null;
       revalidate();
       render();
     }
+
+    const stepBack = () => travel(undoStack.undo(history));
+    const stepForward = () => travel(undoStack.redo(history));
+
+    /**
+     * `Cmd/Ctrl+Z` and its redo, for as long as this tab is mounted — the
+     * console's first global key, so it is bound on `document` and taken off
+     * again in `dispose`, which the shell calls before mounting the next view
+     * (`app.js`). Bound to `body` instead it would need the focus, and the
+     * press that matters most comes right after a click on `✕`.
+     *
+     * `lib/undo.js` decides what the keystroke means, including whether a
+     * field being edited should keep its own undo — which it always does.
+     */
+    function onKey(e) {
+      const action = undoStack.keyAction(e, document.activeElement);
+      if (!action) return;
+      e.preventDefault();
+      if (action === 'undo') stepBack(); else stepForward();
+    }
+    document.addEventListener('keydown', onKey);
 
     // -- the model the whole view renders from -----------------------------
 
@@ -260,7 +323,8 @@ export default {
     function renderHead(v) {
       const s = typed ? tree.structureSummary(typed) : { loops: 0, modules: 0 };
       const runs = v.counters.modules;
-      keyed(headEl, JSON.stringify([s, runs, v.moduleNames, Boolean(typed), selected, recipes.length, inflight]), () => [
+      const back = undoStack.depth(history);
+      keyed(headEl, JSON.stringify([s, runs, v.moduleNames, Boolean(typed), selected, recipes.length, inflight, back]), () => [
         h('span.cn', 'structure'),
         h('span.cs', {
           text: `${s.loops} ${s.loops === 1 ? 'loop' : 'loops'} · ${s.modules} `
@@ -269,8 +333,34 @@ export default {
         }),
         inflight ? h('span.cs', { text: '· checking' }) : null,
         h('span', { style: { flex: '1' } }),
+        stepControls(back),
         addControls(v),
       ]);
+    }
+
+    /**
+     * The way back, for the hand that is already on the mouse. The keystroke
+     * is the one an operator composing a tree will use; these are here because
+     * an undo nobody can see is one nobody trusts — disabled at the ends of
+     * the stack, so the header also says how far back it goes.
+     */
+    function stepControls(back) {
+      const key = navigator.platform && /mac/i.test(navigator.platform) ? '\u2318' : 'Ctrl+';
+      return h('span.steps',
+        h('button.btng', {
+          disabled: !back.back || null,
+          title: back.back
+            ? `take back the last edit — ${back.back} ${back.back === 1 ? 'edit' : 'edits'} back (${key}Z)`
+            : 'nothing to take back',
+          onclick: stepBack,
+        }, '\u21b6'),
+        h('button.btng', {
+          disabled: !back.forward || null,
+          title: back.forward
+            ? `put back the last undone edit — ${back.forward} forward (${key}\u21e7Z)`
+            : 'nothing to put back',
+          onclick: stepForward,
+        }, '\u21b7'));
     }
 
     /**
@@ -859,7 +949,7 @@ export default {
               title: 'reopen a saved recipe',
               onchange: (e) => {
                 const found = recipes.find((r) => r.name === e.target.value);
-                if (found && found.tree) { name = found.name; loaded = found; change(found.tree, { select: null }); }
+                if (found && found.tree) { name = found.name; loaded = found; change(found.tree, { select: null, fresh: true }); }
               },
             }, h('option', { value: '' }, 'saved recipes …'),
             ...recipes.map((r) => h('option', { value: r.name }, r.name)))
@@ -1203,6 +1293,9 @@ export default {
       } catch {
         // 404 is the ordinary case: nothing validated in this session yet.
       }
+      // What the session opens on is the bottom of the stack, not an edit:
+      // there is nothing behind it to go back to.
+      history = undoStack.start(snapshot());
       if (typed) revalidate({ now: true });
       render();
     }
@@ -1236,6 +1329,6 @@ export default {
     });
 
     boot();
-    return { dispose() { off(); clearTimeout(timer); } };
+    return { dispose() { off(); clearTimeout(timer); document.removeEventListener('keydown', onKey); } };
   },
 };
