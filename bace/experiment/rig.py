@@ -112,6 +112,21 @@ class RigConfig:
     the package installs both, and taking the first one that exists picks
     wrong half the time and yields a bare WinError 193."""
 
+    power_meter_averaging: bool = True
+    """Put the 1918-C in DC-continuous mode with its 5 Hz analog filter at
+    open, so a reading is the time average of the light. The LED is pulsed
+    at 500 Hz, 50 % duty for every transient, and an unfiltered meter shows
+    one instant of that square wave -- the full level, nothing, or a flicker
+    -- where the average (half the DC level) is the only number that is a
+    power. `false` leaves the meter unfiltered for a measurement that wants
+    the instantaneous value; the mode is set to DC-continuous either way."""
+
+    power_meter_digital_filter: int = 100
+    """`PM:DIGITALFILTER` samples on top of the analog filter when averaging
+    is on. Light smoothing only -- the analog filter does the averaging --
+    and short enough that the LED settle still sees the intensity move
+    inside its 0.5 s poll. 0 disables it."""
+
     power_meter_console: str = ""
     """Empty (the default) means **this process opens the 1918-C itself**.
     Only one process can hold the USB device; on this rig that process is the

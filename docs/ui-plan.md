@@ -1101,9 +1101,12 @@ about `n_loops` that is only true of the swept axis — it is now the axis
 row's alone; and the provenance line said *the rest are defaults* when the
 rest could be edited or inherited — it counts the defaults instead.
 
-Still open from that review, in its own words: the live power monitor
-(§8), the Cursor 1 alignment check (§12), and a shortcut for the repeated dark
-J–V. The timing diagram as a collapsible panel landed 2026-09-05: shut by
+Still open from that review, in its own words: ~~the live power monitor
+(§8)~~ — **built 2026-09-05** as the power panel under the rail
+(`ui/lib/power.js`: the switch that keeps the service's monitor running and
+is remembered across reloads, the reading, the trace over a window, the
+statistics, CSV and SVG export; `ui/README.md`), the Cursor 1 alignment
+check (§12), and a shortcut for the repeated dark J–V. The timing diagram as a collapsible panel landed 2026-09-05: shut by
 default behind one line that carries the alert count in the worst level's
 colour, open per session (`lib/results.js`, `timingFold`). The same day the
 axis rows were relabelled *scan parameter* and *scan range* (the wire names

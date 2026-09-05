@@ -42,6 +42,8 @@ import { renderRow, field, fold } from '../lib/card.js';
 import { chart } from '../lib/charts/frame.js';
 import { scheduleModel } from '../lib/charts/schedule.js';
 import * as tree from '../lib/tree.js';
+import { drift, recorded, restore } from '../lib/recipe.js';
+import { benchHash } from '../lib/route.js';
 
 /**
  * How long a burst of edits is collapsed into one validate.
@@ -80,6 +82,15 @@ export default {
     let showAllChecks = false;
     let showFlat = false;
     let recipes = [];
+    /**
+     * The recipe the tree was reopened from, until the operator dismisses
+     * the note or reopens another. A recipe is an instance of the bench: the
+     * file records the bench values it was saved with, and while any of them
+     * has moved since, the note under the name row says which and offers to
+     * put them back. Nothing else changes — Start still runs with the bench
+     * as it is, which is what it always did; now it is visible.
+     */
+    let loaded = null;
 
     const body = h('div.pipe');
     fill(container,
@@ -373,7 +384,9 @@ export default {
       return fill(el,
         h('span.nk' + (row.kind === 'module' ? '.mod' : ''), { text: row.kind === 'loop' ? '⟳' : '▪' }),
         h('span.n', { text: row.kind === 'loop' ? row.loop : row.module }),
-        h('span.d', { text: row.kind === 'loop' ? row.summary : nodeSummary(row) }),
+        // A module row says nothing about the bench: it *is* the bench's
+        // module, and only a node that differs carries the mark.
+        row.kind === 'loop' ? h('span.d', { text: row.summary }) : overrideTag(row),
         h('span', { style: { flex: '1' } }),
         tags,
         h('span.rowact',
@@ -398,10 +411,11 @@ export default {
       change(next, { select: tree.remapPath(selected, path, delta) });
     }
 
-    /** `as on the bench · n_loops 100` — the contract's own sentence for a node. */
-    function nodeSummary(row) {
-      if (!row.overrides.length) return 'as on the bench';
-      return 'as on the bench, except ' + row.overrides.map(([k, val]) => `${k} ${val}`).join(' · ');
+    /** The `↺` a differing node carries in the tree, with the list on hover. */
+    function overrideTag(row) {
+      const mark = tree.overrideMark(row);
+      if (!mark) return null;
+      return h('span.ovr', { title: mark.title, 'aria-label': mark.title, text: mark.text });
     }
 
     function label(node) {
@@ -420,8 +434,25 @@ export default {
         return h('div.nf',
           h('div.nfh',
             h('span.cn', { text: node.kind === 'loop' ? `${node.loop} loop` : node.module }),
-            h('span.cs', { text: node.kind === 'loop' ? 'the values it runs, and how it settles' : 'as on the bench · only what differs is typed here' }),
+            h('span.cs', { text: node.kind === 'loop' ? 'the values it runs, and how it settles' : 'as on the bench' }),
+            // The way to the main component: this module's card on the bench,
+            // where every value the node does not override is set.
+            node.kind === 'module'
+              ? h('a.btng.goto', {
+                href: benchHash(node.module),
+                title: `${node.module} on the bench — what every node of it starts from`,
+              }, '→ bench')
+              : null,
             h('span', { style: { flex: '1' } }),
+            // The way back for the whole node, offered only while there is
+            // something to take back: every override dropped, the node is the
+            // bench's module again, and the form shrinks to say so.
+            node.kind === 'module' && Object.keys(node.params || {}).length
+              ? h('button.btng.undo', {
+                title: 'drop every override this node types — back to the module as it stands on the bench',
+                onclick: () => change(tree.clearParams(typed, selected)),
+              }, '↺ bench')
+              : null,
             h('button.btng', { onclick: () => { selected = null; render(); } }, 'close')),
           node.kind === 'loop' ? loopForm(node, row) : moduleForm(node, row, v, open));
       });
@@ -627,8 +658,13 @@ export default {
       };
       // `bench: null` on purpose: the read-back row on a bench card says what
       // the light is doing *now*, and a node that runs in four hours inside an
-      // illumination loop is not described by it.
-      const model = cardModel(entry, { bench: null });
+      // illumination loop is not described by it. `form: 'node'` keeps only
+      // what differs from the bench above the fold — a loop's binding, this
+      // node's override, and the rows a node has and a card does not
+      // (`light`'s shutter, mode and settle) — and folds the rest as `same
+      // as bench`. A node with nothing typed on it is one or two rows and a
+      // fold, which is what it is.
+      const model = cardModel(entry, { bench: null, form: 'node' });
       const ctx = moduleCtx(catalogue);
       const first = (row && row.first) || null;
       const where = [];
@@ -809,7 +845,8 @@ export default {
     function renderActions(v) {
       const c = v.cost;
       const blocked = !v.answer || !v.answer.valid || v.busy || v.stale || inflight || !typed;
-      keyed(actionsEl, JSON.stringify([Boolean(typed), v.answer && v.answer.valid, v.busy, v.stale, inflight, c && c.total_s, name, recipes.map((r) => r.name)]), () => [
+      const moved = loaded ? drift(loaded, store.getState().modules.byName, { tree: typed, rows: v.rows }) : [];
+      keyed(actionsEl, JSON.stringify([Boolean(typed), v.answer && v.answer.valid, v.busy, v.stale, inflight, c && c.total_s, name, recipes.map((r) => r.name), loaded && loaded.name, moved]), () => [
         h('div.namerow',
           h('span.l', 'name'),
           h('input.v', {
@@ -822,11 +859,12 @@ export default {
               title: 'reopen a saved recipe',
               onchange: (e) => {
                 const found = recipes.find((r) => r.name === e.target.value);
-                if (found && found.tree) { name = found.name; change(found.tree, { select: null }); }
+                if (found && found.tree) { name = found.name; loaded = found; change(found.tree, { select: null }); }
               },
             }, h('option', { value: '' }, 'saved recipes …'),
             ...recipes.map((r) => h('option', { value: r.name }, r.name)))
             : null),
+        recipeNote(v),
         h('div.btnrow',
           h('button.btnp', {
             disabled: blocked || null,
@@ -873,6 +911,62 @@ export default {
       }
     }
 
+    /**
+     * Where the bench has moved since the recipe was saved. One line per
+     * parameter — `bace.vpre  saved 1.020 · bench 0.800` — and two buttons:
+     * put the bench back to the recipe's values (the ordinary `PUT`, one per
+     * module, so the cards and every node form move with it), or keep the
+     * bench and dismiss. A recipe saved before the bench was recorded says
+     * so instead, once.
+     */
+    function recipeNote(v) {
+      if (!loaded) return null;
+      const byName = store.getState().modules.byName;
+      if (!recorded(loaded)) {
+        return h('div.recipe-note',
+          h('span', { text: `${loaded.name} was saved before the bench was recorded with it — what its nodes do not override is whatever the bench has now.` }),
+          h('button.btng', { onclick: () => { loaded = null; render(); } }, 'ok'));
+      }
+      const moved = drift(loaded, byName, { tree: typed, rows: (v && v.rows) || null });
+      if (!moved.length) return null;
+      return h('div.recipe-note',
+        h('div.rn-head',
+          h('span', { text: `the bench has moved since ${loaded.name} was saved — its nodes will run with the bench, not the file:` }),
+          h('span', { style: { flex: '1' } }),
+          h('button.btns', {
+            title: 'PUT the recipe’s values back onto the bench, one module at a time',
+            onclick: () => restoreBench(moved),
+          }, '↺ bench to recipe'),
+          h('button.btng', { title: 'keep the bench as it is', onclick: () => { loaded = null; render(); } }, 'keep bench')),
+        h('div.rn-list', moved.map((it) => h('div.rn-row',
+          h('span.l', { text: `${it.module}.${it.name}` }),
+          h('span.v', { text: `saved ${show(it.saved, it.unit)}` }),
+          h('span.v.now', { text: `bench ${show(it.now, it.unit)}` }),
+          h('i', { text: it.unit })))));
+    }
+
+    function show(v, unit) {
+      if (typeof v === 'number') return unit === 'V' ? v.toFixed(3) : Number.isInteger(v) ? String(v) : v.toFixed(3);
+      if (Array.isArray(v)) return v.map((x) => show(x, unit)).join(', ');
+      return v === null || v === undefined ? '—' : String(v);
+    }
+
+    async function restoreBench(moved) {
+      const bodies = restore(moved);
+      try {
+        for (const [module, params] of Object.entries(bodies)) {
+          // The response is the module entry as the bench now has it; the
+          // store's copy is what every card and node form draws from.
+          store.applyModule(await api.setParams(module, params));
+        }
+        notify(`bench back to ${loaded.name}: ${moved.map((m) => `${m.module}.${m.name}`).join(', ')}`, 'ok');
+      } catch (error) {
+        notify(error.text || String(error), 'warn');
+      }
+      revalidate({ now: true });
+      render();
+    }
+
     async function save() {
       const stem = name || (typed && typed.name) || '';
       if (!stem) {
@@ -883,6 +977,9 @@ export default {
         const out = await api.savePipeline(typed, stem);
         notify(`saved ${out.name} → ${out.path}`, 'ok');
         await loadRecipes();
+        // Saved just now, so the file and the bench agree; the note has
+        // nothing to say until the bench moves under it.
+        loaded = recipes.find((r) => r.name === out.name) || null;
       } catch (error) {
         notify(error.text || String(error), 'warn');
       }

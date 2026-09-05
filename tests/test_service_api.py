@@ -650,7 +650,18 @@ def test_recipes_are_saved_under_out(service):
     path = r.json()["path"]
     assert os.path.dirname(path) == os.path.join(session.out, "recipes")
     with open(path, encoding="utf-8") as fh:
-        assert json.load(fh)["tree"] == canonical()
+        record = json.load(fh)
+    assert record["tree"] == canonical()
+    # The file is complete: the bench values every module in the tree sits
+    # on, value and source, so a recipe reopened after a bench edit can say
+    # where the bench moved -- the tree alone is an instance with no main.
+    assert set(record["bench"]) == {"jv_bace", "bace"}, "only the modules the tree names"
+    vpre = record["bench"]["bace"]["vpre"]
+    assert set(vpre) == {"value", "source"}
+    assert vpre["value"] == session.catalogue.param_set("bace").get("vpre").value
+    assert vpre["source"] in ("default", "run.toml", "last-used", "edited")
+    listed = client.get("/pipelines/saved").json()["recipes"][0]
+    assert listed["bench"] == record["bench"], "the list carries it too"
     r = client.post("/pipelines/save", json={"tree": {"kind": "module", "module": "note",
                                                       "name": "hello"}})
     assert r.status_code == 200 and r.json()["name"] == "hello", "the root name serves"
@@ -889,6 +900,74 @@ def test_the_power_monitor_starts_stops_and_emits_readings(service):
     assert r.status_code == 422 and "interval_s" in r.json()["error"]
 
 
+def test_the_power_history_is_served_as_rows_and_as_a_csv_and_can_be_cleared(service):
+    """The console's chart and its export. The rows carry the frame's own
+    `ts`, so a client that already folded the stream can merge them without a
+    duplicate; the CSV is the whole of what the session holds, not what one
+    tab happened to see."""
+    client, session = service
+    empty = client.get("/monitors/power/history").json()
+    assert empty == {"points": [], "count": 0, "total": 0, "kept_max": 200_000,
+                     "first_ts": None, "last_ts": None, "wavelength_nm": None,
+                     "source": None, "averaged": None, "running": False, "interval_s": None}
+
+    assert client.post("/monitors/power", json={"interval_s": 0.01}).status_code == 202
+    wait_until(lambda: client.get("/monitors/power/history").json()["count"] >= 5)
+    body = client.get("/monitors/power/history").json()
+    assert body["running"] is True and body["interval_s"] == 0.01
+    assert body["averaged"] is True and body["source"] == "simulated"
+    assert body["wavelength_nm"] == 530.0
+    ts = [row[0] for row in body["points"]]
+    assert ts == sorted(ts) and len(set(ts)) == len(ts)
+    for row in body["points"]:
+        assert len(row) == 3 and row[1] >= 0 and row[2] is True
+
+    # The same clock as the stream: every history row is a `PowerReading`
+    # frame's `ts`, exactly.
+    on_stream = {f["ts"] for f in frames(client) if f["type"] == "PowerReading"}
+    assert set(ts) <= on_stream
+
+    # `since` and `limit` cut the list without changing its order.
+    later = client.get("/monitors/power/history", params={"since": ts[2]}).json()
+    assert later["points"][0][0] > ts[2] and later["total"] >= later["count"]
+    last2 = client.get("/monitors/power/history", params={"limit": 2}).json()
+    assert last2["count"] == 2 and last2["points"][-1][0] == last2["last_ts"]
+
+    r = client.get("/monitors/power/history.csv")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv")
+    assert r.headers["content-disposition"].startswith('attachment; filename="power_20260902_220000_')
+    lines = r.text.splitlines()
+    assert lines[0] == "time_iso,unix_s,watts,trustworthy,wavelength_nm,source,averaged"
+    assert len(lines) - 1 >= 5
+    cells = lines[1].split(",")
+    assert cells[1] == f"{float(cells[1]):.3f}" and float(cells[2]) >= 0
+    assert cells[3] == "1" and cells[4] == "530" and cells[5] == "simulated" and cells[6] == "1"
+
+    assert client.delete("/monitors/power").status_code == 200
+    kept = client.get("/monitors/power/history").json()
+    assert kept["count"] >= 5 and kept["running"] is False, "stopping the monitor keeps the trace"
+    r = client.delete("/monitors/power/history")
+    assert r.status_code == 200 and r.json()["cleared"] >= 5
+    assert client.get("/monitors/power/history").json()["count"] == 0
+    assert client.get("/monitors/power/history.csv").text.splitlines() == [lines[0]]
+
+
+def test_a_power_reading_says_whether_it_was_averaged(service):
+    """The 1918-C is put in DC-continuous mode with its 5 Hz filter when the
+    bench opens it, so a pulsed LED reads as its mean; the flag travels on
+    the read-back, the action and the stream so the console can say so."""
+    client, session = service
+    assert client.get("/bench").json()["instruments"]["power"]["averaged"] is True
+    r = client.post("/bench/actions/read-power", json={})
+    assert r.status_code == 202, r.text
+    assert r.json()["result"]["averaged"] is True
+    assert client.post("/monitors/power", json={"interval_s": 0.01}).status_code == 202
+    wait_until(lambda: any(f["type"] == "PowerReading" for f in frames(client)))
+    reading = next(f for f in frames(client) if f["type"] == "PowerReading")
+    assert reading["data"]["averaged"] is True
+    client.delete("/monitors/power")
+
+
 # -- the UI mount and the shutdown -------------------------------------------------------------
 def test_the_ui_mount_redirects_the_root_and_serves_the_files(tmp_path):
     ui = tmp_path / "ui"
@@ -975,6 +1054,8 @@ def test_the_cli_builds_a_sim_session_without_pyvisa_and_refuses_fast_on_the_rig
     assert main(["--fast", "--port", "1"]) == 2, "--fast is for --sim only"
     assert main(["--sim", "--ui", str(tmp_path / "nope")]) == 2
     assert main(["--sim", "--run", str(tmp_path / "nope.toml")]) == 2
+    assert parse_args(["--sim"]).power_monitor is None
+    assert parse_args(["--sim", "--power-monitor", "0.5"]).power_monitor == 0.5
     a = parse_args(["--sim", "--fast", "--out", str(tmp_path / "runs"), "--seed", "3"])
     assert (a.sim, a.fast, a.port, a.host, a.seed) == (True, True, 8900, "127.0.0.1", 3)
 

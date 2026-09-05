@@ -88,7 +88,7 @@ let mounted = null;
 function mountView() {
   if (mounted) mounted.dispose();
   const view = route() === 'rig' ? rig : bench;
-  mounted = view.mount(viewEl, { store, api, stream: { state: {} }, fmt, notify });
+  mounted = view.mount(viewEl, { store, api, stream: { state: {} }, fmt, notify, park: () => notify('offline: the strip would POST /bench/actions/park') });
   renderTabs();
 }
 window.addEventListener('hashchange', mountView);

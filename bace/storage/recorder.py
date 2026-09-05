@@ -66,6 +66,12 @@ class RunRecorder:
     _q: np.ndarray | None = None
     _light: RunningAverage | None = None
     _dark: RunningAverage | None = None
+    _sync_light: RunningAverage | None = None
+    _sync_dark: RunningAverage | None = None
+    _diag: dict | None = None
+    """Per-shot diagnostics, (loop, step): the average counts the digitiser
+    reported, the light-to-dark spike lag, the spike edges and the sync
+    edges (`core.diagnostics`, 2026-09-05). NaN where a shot could not say."""
     _photo: np.ndarray | None = None
     _shots: np.ndarray | None = None
     _intensity: np.ndarray | None = None
@@ -110,6 +116,8 @@ class RunRecorder:
         self._dt = ev.light.dt
         self._light.update(ev.step, loop, ev.light.y)
         self._dark.update(ev.step, loop, ev.dark.y)
+        self._sync(ev)
+        self._diagnose(ev, loop - 1, i)
         self._photo[i] = ev.photo_averaged
         self._q[loop - 1, i] = ev.q
         if ev.intensity_w is not None:
@@ -119,6 +127,42 @@ class RunRecorder:
 
         # keep the setpoints so the file is readable without knowing the axis
         self._setpoints[i] = ev.setpoint
+
+    def _sync(self, ev: E.StepDone) -> None:
+        """The trigger channel's traces, loop-averaged like `light`/`dark`,
+        when the digitiser handed them over."""
+        for name, tr in (("_sync_light", ev.sync_light), ("_sync_dark", ev.sync_dark)):
+            if tr is None:
+                continue
+            avg = getattr(self, name)
+            if avg is None:
+                avg = RunningAverage(self._n_steps, int(np.asarray(tr.y).size))
+                setattr(self, name, avg)
+            if int(np.asarray(tr.y).size) == avg.traces.shape[1]:
+                avg.update(ev.step, ev.loop, np.asarray(tr.y, dtype=float))
+
+    DIAG_KEYS = ("averages_light", "averages_dark", "spike_lag_ns", "edge_light_ns",
+                 "edge_dark_ns", "sync_edge_light_ns", "sync_edge_dark_ns")
+
+    def _diagnose(self, ev: E.StepDone, loop_i: int, step_i: int) -> None:
+        from ..core.diagnostics import edge_10_90_ns, spike_lag_ns, sync_edge_ns
+        if self._diag is None:
+            self._diag = {k: np.full((self._n_loops, self._n_steps), np.nan)
+                          for k in self.DIAG_KEYS}
+        dt = float(ev.light.dt)
+        values = {
+            "averages_light": ev.light.count, "averages_dark": ev.dark.count,
+            "spike_lag_ns": spike_lag_ns(ev.light.y, ev.dark.y, dt),
+            "edge_light_ns": edge_10_90_ns(ev.light.y, dt),
+            "edge_dark_ns": edge_10_90_ns(ev.dark.y, dt),
+            "sync_edge_light_ns": None if ev.sync_light is None else sync_edge_ns(
+                ev.sync_light.y, float(ev.sync_light.dt), float(ev.sync_light.t0)),
+            "sync_edge_dark_ns": None if ev.sync_dark is None else sync_edge_ns(
+                ev.sync_dark.y, float(ev.sync_dark.dt), float(ev.sync_dark.t0)),
+        }
+        for k, v in values.items():
+            if v is not None and 0 <= loop_i < self._n_loops and 0 <= step_i < self._n_steps:
+                self._diag[k][loop_i, step_i] = float(v)
 
     # -- output -----------------------------------------------------------
     def finish(self) -> list[str]:
@@ -181,6 +225,9 @@ class RunRecorder:
             photocurrent=self._photo, shots=self._shots,
             intensity_mean=i_mean if have_intensity else None,
             intensity_std=i_std if have_intensity else None,
+            sync_light=None if self._sync_light is None else self._sync_light.traces,
+            sync_dark=None if self._sync_dark is None else self._sync_dark.traces,
+            diagnostics=self._diag,
         )
         self.written.append(path)
 

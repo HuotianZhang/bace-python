@@ -263,8 +263,33 @@ the whole card as last-used and hide a recipe edit for twenty sessions.
 
 **Service-added per-shot verdict.** For every `StepDone` the asyncio side
 computes `service.wire.shot_verdict(light.y, dark.y)` and attaches
-`"verdict": {"rail_light": n, "rail_dark": n, "rail_run_light": n, "rail_run_dark": n, "shared_extreme": bool, "peak_light_a": A, "peak_dark_a": A, "level": "ok"|"warn", "text": …}`
-to the wire `data` (not to the dataclass). The rule is the design's, corrected
+`"verdict": {"rail_light": n, "rail_dark": n, "rail_run_light": n, "rail_run_dark": n, "shared_extreme": bool, "peak_light_a": A, "peak_dark_a": A, "spike_lag_ns": ns|null, "edge_light_ns": ns|null, "edge_dark_ns": ns|null, "averages_light": n|null, "averages_dark": n|null, "sync_edge_light_ns": ns|null, "sync_edge_dark_ns": ns|null, "level": "ok"|"warn", "text": …}`
+to the wire `data` (not to the dataclass).
+
+**The alignment rule (2026-09-05, `core.diagnostics`).** Six of twenty-three
+delay-scan shots on the first hardware day had a photocurrent ten times too
+large and a charge of the wrong sign, and passed every rail check: the
+trigger had jittered for the length of the shot, both displacement spikes
+were 4–14 % lower with 8–13 ns edges instead of 6, and the light and dark
+spikes sat 0.3–1.2 ns apart where a good shot aligns to 0.01 ns — so the
+50 mA spike no longer cancelled in `light − dark`. `spike_lag_ns` is the
+light-to-dark lag of the spike by cross-correlation, sub-sample; beyond
+`SPIKE_LAG_NS = 0.25` the shot is `warn`, "Q of this shot is not a charge".
+`edge_*_ns` are the spikes' 10–90 % times and `sync_edge_*_ns` the same on
+the trigger channel, which the engine fetches out of the same record after
+each acquisition (`StepDone.sync_light/sync_dark`, volts, decimated on the
+socket like the currents): sharp sync edges beside smeared spikes put the
+jitter between the sync and the 81150A's pulse, smeared sync edges put it
+between the sync and the scope's trigger. `averages_*` are `:WAV:COUN?` after
+each acquisition — the Acquisition Done flag both this service and the
+LabVIEW original waited on is set per acquisition, not per completed
+average — and the engine yields a warning `Notice` when a trace folded fewer
+than `n_averages`. The recorder stores the same numbers per (loop, step) in
+the HDF5 `diagnostics` group and the sync traces under `traces/sync_light`
+and `traces/sync_dark`. The `ok` line now reads
+"autorange pass 1 · no shared extreme · 1 rail sample · spikes 0.01 ns apart · edge 6.5 ns · 200 avg · sync edge 2.1 ns".
+
+The rail rules are the design's, corrected
 2026-09-02 (the design pack 03-states §C, `docs/ui-rules.md`): **only a run of identical samples inside
 one trace is evidence of the digitiser's rail** — `rail_run_*` ≥ 7 consecutive
 samples on the trace's own extreme is `warn`, "the charge of this shot is
@@ -916,6 +941,7 @@ Never invent a settle time: `null` renders as "—" (the design's table shows
 - `POST /pipelines/validate` body `{"tree": …}` → 200 `{"valid": bool, "checks": [Verdict…], "schedule": [Step…], "counters": {…}, "cost": {…}, "node_paths": […], "folder": "<out>/<stem>", "folder_pattern": "<out>/<stem>_YYYYMMDD_HHMMSS"}`. This is the **Dry run** button: touches nothing. `folder` is the stem; the run's folder is `folder_pattern` with the stamp `submit` takes, which the Dry run cannot know — "writes 90 folders under `20260901_Txill_YYYYMMDD_HHMMSS/`".
 - `POST /pipelines` body `{"tree": …, "name": "…"}` → validates (including a fresh chain read-back job when idle), 422 with the checks when `invalid`/`crit`, else 202 `{"run_id", "state", "checks", "cost", "folder"}` (the stamped folder).
 - `GET /pipelines/last` → the last validated tree in this session (so the UI can reopen it). Saving recipes to disk is `POST /pipelines/save {"tree", "name"}` → `<out>/recipes/<name>.json`; `GET /pipelines/saved` lists them. Small, optional.
+  **The file is complete.** A tree carries only what its nodes override; everything else a node runs with is the module's bench value at *start* time, so a file holding the tree alone would run differently after a bench edit with no diff in it. The record is `{"name", "saved_at", "tree", "bench"}`, where `bench` is `{module: {param: {"value", "source"}}}` for every module the tree names, as the bench had them at save time (a tree that does not parse records `{}`). The UI compares `bench` with `GET /modules` when a recipe is reopened, lists every parameter the bench has moved on that some node of that module still takes from the bench (not one every node overrides or a loop binds), and offers to `PUT` the recipe's values back. Start is unchanged: it runs with the bench as it is — the note is what makes that visible.
 
 ### Executor (`executor.run_pipeline`)
 
@@ -979,7 +1005,33 @@ never on the bus** — USB when this process owns it, HTTP when the meter's
 console does — so it runs right through a bace scan (this is R3·2),
 serialised against the worker's own reads by `rigs._METER_LOCK`. One monitor
 of each kind at most. If the meter stops answering, emit a `Verdict(warn,
-"power.console")` once and keep trying.
+"power.console")` once and keep trying. `--power-monitor SECONDS` on the
+service starts it as the process comes up, so the meter is watched from boot
+and not from the moment a console is opened.
+
+**The history (2026-09-05).** The session keeps every monitor reading — up to
+`POWER_HISTORY_MAX = 200 000`, 55 h at 1 Hz — across monitor stops and
+restarts, and stamps each with the same `ts` its frame carries, so a console
+that folds the stream can merge it without a duplicate.
+`GET /monitors/power/history?since=<ts>&limit=<n>` answers `{points:
+[[ts, watts, trustworthy], …], count, total, kept_max, first_ts, last_ts,
+wavelength_nm, source, averaged, running, interval_s}` (the last five are the
+meter's settings, off the newest reading); `GET /monitors/power/history.csv`
+is the same as a file (`time_iso, unix_s, watts, trustworthy, wavelength_nm,
+source, averaged`, `Content-Disposition: attachment`);
+`DELETE /monitors/power/history` forgets it — the journal on disk keeps every
+reading regardless.
+
+**`averaged`** on every `PowerReading`, on the read-back's `instruments.power`
+and on `read-power`'s result: whether the meter was averaging (DC-continuous
+mode, the 5 Hz analog filter — `DirectPowerMeter.set_averaging`, set at open
+from `[power_meter] averaging`). The LED is pulsed at 500 Hz, 50 % duty for
+every transient, and an unfiltered 1918-C samples that square wave at one
+instant — the operator saw the reading flicker between the level and
+nothing. Averaged, it reads the mean, **half the DC level**, which is the
+power the sample sees. `null` when the driver cannot say (the console
+escape hatch, whose filter route this repository cannot verify); render it —
+a reading that is *not* averaged under a pulse is one instant of it.
 
 `POST /monitors/temperature {"interval_s": 5.0}` is the same shape for the
 331; 422 only when the bench has no 331 at all (neither `[temperature]

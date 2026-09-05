@@ -105,6 +105,24 @@ export function newModule(name) {
   return { kind: 'module', module: name, params: {} };
 }
 
+/**
+ * The mark a tree row carries for a node that differs from the bench: the
+ * same `↺` the node form puts beside each override, with the list in the
+ * title. `null` for a node with nothing typed on it — the absence of the
+ * mark is the statement, as a Figma instance with no overrides carries
+ * nothing. (The row used to say "as on the bench, except n_loops 100", a
+ * sentence in the one place that has no room to grow.)
+ */
+export function overrideMark(row) {
+  const overrides = (row && row.overrides) || [];
+  if (!overrides.length) return null;
+  return {
+    text: '↺',
+    title: 'differs from the bench: ' + overrides.map(([k, v]) => `${k} ${v}`).join(' · '),
+    count: overrides.length,
+  };
+}
+
 // -- walking and editing ----------------------------------------------------
 //
 // A path is a list of child indices from the root: `[]` is the root itself,
@@ -211,6 +229,11 @@ export function setParam(tree, path, name, value) {
     else params[name] = value;
     return { ...node, params };
   });
+}
+
+/** Drop every override a module node types: the node is the bench's module again. */
+export function clearParams(tree, path) {
+  return updateAt(tree, path, (node) => ({ ...node, params: {} }));
 }
 
 /** Set a field on a loop node; `null` removes it, so the service's default returns. */

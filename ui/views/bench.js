@@ -14,16 +14,55 @@
 
 import { h, fill, keyed } from './../lib/dom.js';
 import { moduleCard } from './../lib/card.js';
-import { BENCH_CARDS, cardModel } from './../lib/fields.js';
+import { BENCH_CARDS, cardModel, cardRuns } from './../lib/fields.js';
+import { panelModel, renderInstruments } from './../lib/instruments.js';
 import { RESULT_CARDS, createChartThrottle, resultKeys, resultPanel, runFor } from './../lib/results.js';
 
 export default {
   route: 'bench',
   title: 'bench',
 
-  mount(container, { store, api, notify }) {
+  mount(container, { store, api, notify, park, query = {} }) {
+    // The Instruments panel first — the switches — then the module cards.
+    // Two zones, because they are two different things: a switch acts on the
+    // bench the moment it is clicked, a card's Run posts a job the worker
+    // runs, and the values on a card are also where every pipeline node of
+    // that module starts. The shape says which is which; nothing is labelled.
+    const panel = h('div.instruments');
     const body = h('div.cards');
-    fill(container, body);
+    fill(container, panel, body);
+
+    /**
+     * A card asked for by name — `#/bench?module=bace`, the pipeline tab's
+     * "→ bench" on a node form: the module every node of it starts from.
+     * Kept until the card exists (the catalogue may not have answered yet),
+     * then scrolled into view and pinged once. The Figma gesture: an
+     * instance has "go to main component", and so does a node.
+     */
+    let wanted = query.module || null;
+    /** The card lit right now, by name: a re-render replaces the element
+     *  (the checks land a beat after the catalogue), so the ping is state
+     *  the render re-applies, not a class on one element. */
+    let ping = null;
+    function focus(next) {
+      wanted = (next && next.module) || null;
+      settle();
+    }
+    function settle() {
+      if (!wanted) return;
+      const card = body.querySelector(`[data-module="${wanted}"]`);
+      if (!card) return;
+      const name = wanted;
+      wanted = null;
+      card.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      ping = { name, until: Date.now() + 1600 };
+      card.classList.add('pinged');
+      setTimeout(() => {
+        ping = null;
+        const now = held.get(name);
+        if (now) now.el.classList.remove('pinged');
+      }, 1600);
+    }
 
     /** Which fold groups are open, per card. Kept here so a re-render — and
      *  every edit is one — does not shut a fold the operator just opened. */
@@ -136,11 +175,16 @@ export default {
      * The node's params are empty on purpose: the edited layer is already in
      * the catalogue, so an empty-params node validates with exactly the values
      * a Run would use, and the answer cannot drift from the button beside it.
+     *
+     * Only cards with a Run are asked. `light` has bench actions and no Run,
+     * and its one-node tree is precisely the light-only run the service
+     * refuses (`light.undone-by-park`) — validating it would draw that
+     * refusal, permanently, under buttons that do not go through the worker.
      */
     const checks = new Map();
 
     function revalidate(names) {
-      return Promise.all(names.map(async (name) => {
+      return Promise.all(names.filter(cardRuns).map(async (name) => {
         try {
           const v = await api.validate({ kind: 'module', module: name, params: {} });
           checks.set(name, v.checks || []);
@@ -222,6 +266,20 @@ export default {
             await api.startRun(model.name, params);
           } catch (err) { fail(err); } finally { submitting = false; }
         },
+        /**
+         * A switch position, as a bench action. The arguments are the
+         * panel's own (the `light` module's levels, read at click time) and
+         * the answer's read-back is what lights the position — a refusal
+         * leaves the switch where the bench is.
+         */
+        async actInstrument(action, args) {
+          await settled();
+          if (refused) return stale();
+          try {
+            const out = await api.action(action, args);
+            if (out && out.bench) store.applyBench(out.bench, { readBack: true });
+          } catch (err) { fail(err); }
+        },
         async act(model, action) {
           await settled();
           if (refused) return stale();
@@ -285,10 +343,25 @@ export default {
     const cardKey = (entry, c, open, docKeys) => JSON.stringify(
       [cardModel(entry, { bench: c.bench }), c.busy, c.checksFor(entry.name), [...open].sort(), docKeys]);
 
+    /** The panel, keyed on what it draws: the snapshot's three instruments,
+     *  the light levels and whether the worker is held. */
+    function renderPanel(state, c) {
+      const light = state.modules.byName.light || null;
+      const model = panelModel(state.bench, light);
+      keyed(panel, JSON.stringify([model, c.busy]), () => renderInstruments(model, {
+        busy: c.busy,
+        act: (action, args) => c.actInstrument(action, args),
+        edit: (name, params) => c.edit(name, params),
+        park,
+      }));
+    }
+
     function render() {
       if (pressing) { missed = true; return; }
       const state = store.getState();
       const { byName } = state.modules;
+      const c0 = ctx();
+      renderPanel(state, c0);
       const names = BENCH_CARDS.filter((n) => byName[n]);
       if (!names.length) {
         held.clear();
@@ -328,11 +401,13 @@ export default {
           continue;
         }
         const card = moduleCard(entry, c, open);
+        if (ping && ping.name === name && Date.now() < ping.until) card.classList.add('pinged');
         if (was && was.el.parentNode === body) body.replaceChild(card, was.el);
         else body.append(card);
         held.set(name, { key, el: card });
         renderResult(name);
       }
+      settle();
 
       // Several of the checks are about the bench rather than the values —
       // an instrument that went away, the chain, a V_oc that has just been
@@ -393,6 +468,6 @@ export default {
 
     const off = store.subscribe(render);
     render();
-    return { dispose() { off(); charts.dispose(); } };
+    return { dispose() { off(); charts.dispose(); }, focus };
   },
 };

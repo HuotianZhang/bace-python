@@ -12,7 +12,7 @@ Rules, in the order they are likely to surprise:
 * numpy arrays become lists of Python numbers; NaN and infinity become `null`.
   JSON has no spelling for them, and `json.dumps` would otherwise emit `NaN`,
   a token no browser's parser accepts.
-* `Trace` becomes `{"y", "dt", "t0", "n"}`. `n` is the **full** record length
+* `Trace` becomes `{"y", "dt", "t0", "n", "count"}`. `n` is the **full** record length
   even when `y` has been decimated, so the UI can still put the samples on
   their time axis: kept sample `i` of `len(y)` sits at `t0 + i * stride * dt`
   for every `i` but the last, and the last sits at `t0 + (n - 1) * dt` -- it
@@ -103,7 +103,8 @@ def _convert(value: Any, path: str, max_points: int | None,
         # consumer can tell a short record from a decimated one.
         return {"y": _convert(value.y, _join(path, "y"), max_points, info),
                 "dt": _scalar(value.dt), "t0": _scalar(value.t0),
-                "n": int(value.n)}
+                "n": int(value.n),
+                "count": None if value.count is None else int(value.count)}
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         omit = _OMIT_WHEN_DECIMATING.get(type(value), ()) if max_points else ()
         out: dict[str, Any] = {}

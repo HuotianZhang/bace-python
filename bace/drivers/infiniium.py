@@ -571,8 +571,20 @@ class Infiniium:
         # complete once acquisition has ended anyway.
         self._io.write(":STOP;")
         trace = self._fetch(source)
+        count = self._averages_folded()
         self._io.write(":MEAS:CLE;")
-        return trace
+        return Trace(y=trace.y, dt=trace.dt, t0=trace.t0, count=count)
+
+    def _averages_folded(self) -> int | None:
+        """`:WAV:COUN?` for the source just fetched: how many acquisitions the
+        averager folded into the record. The Acquisition Done flag this driver
+        waits on is set per acquisition, not per completed average, so this
+        is the only readback that says whether 200 were 200 (2026-09-05)."""
+        try:
+            n = int(float(self._io.query(":WAV:COUN?").strip()))
+        except Exception:                                   # noqa: BLE001
+            return None
+        return n if n > 0 else None
 
     def close(self) -> None:
         try:

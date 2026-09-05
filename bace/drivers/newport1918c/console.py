@@ -56,6 +56,12 @@ class Reading:
     overrange: bool
     units: int | None
     wavelength_nm: float | None
+    averaged: bool | None = None
+    """Whether the meter was averaging when this was read -- DC-continuous
+    mode with its 5 Hz analog filter on (`set_averaging`). A pulsed LED read
+    without it is one instant of a square wave; with it, the time average,
+    which at 50 % duty is half the DC level. None when the driver could not
+    say (the console path, until that console answers `/api/filter`)."""
 
     @property
     def trustworthy(self) -> bool:
@@ -76,6 +82,9 @@ class ConsolePowerMeter:
         self.timeout_s = timeout_s
         self.strict = strict
         self.last: Reading | None = None
+        self.averaged: bool | None = None
+        """What `set_averaging` last managed to set, or None when this console
+        has never been asked -- or has no route for it."""
 
     # -- transport --------------------------------------------------------
     def _get(self, path: str) -> dict:
@@ -142,6 +151,31 @@ class ConsolePowerMeter:
         # this against the real console before.
         self._post("/api/units", {"code": WATTS})
 
+    def set_averaging(self, on: bool = True, *, digital_samples: int = 100) -> bool:
+        """Ask the console to put the meter in DC-continuous mode with the
+        analog 5 Hz filter (and `digital_samples` of digital filter) so a
+        pulsed LED reads as its time average -- the same setting
+        `DirectPowerMeter.set_averaging` writes itself.
+
+        The console's `/api/filter` route is assumed, not verified against
+        that project (which this repository cannot see): a console that has
+        no such route answers 404, and that is reported as *False*, never
+        raised -- an escape hatch that cannot average is still a meter. The
+        caller says so once; `averaged` stays None so no reading claims what
+        was not set.
+        """
+        body = {"filter": 3 if on else 0, "analogFilter": 4 if on else 0,
+                "digitalFilter": int(digital_samples) if on else 0, "mode": 0}
+        try:
+            self._post("/api/filter", body)
+        except PowerMeterError as exc:
+            if "HTTP 404" in str(exc) or "HTTP 405" in str(exc):
+                self.averaged = None
+                return False
+            raise
+        self.averaged = bool(on)
+        return True
+
     # -- reading ----------------------------------------------------------
     def read(self) -> Reading:
         d = self._get("/api/reading")
@@ -150,7 +184,8 @@ class ConsolePowerMeter:
                     saturated=bool(st.get("saturated")),
                     overrange=bool(st.get("overrange")),
                     units=int(d["units"]) if d.get("units") is not None else None,
-                    wavelength_nm=d.get("wavelength"))
+                    wavelength_nm=d.get("wavelength"),
+                    averaged=self.averaged)
         self.last = r
         if self.strict and not r.trustworthy:
             raise PowerMeterError(_why(r))

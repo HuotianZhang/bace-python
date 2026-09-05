@@ -35,7 +35,10 @@ export function moduleCard(entry, ctx, open) {
   const wide = Boolean(ctx.hasResult && ctx.hasResult(model.name));
   const card = h('div.card.mod' + (wide ? '.wide' : ''), { dataset: { module: model.name } });
 
-  const blocked = startBlockers(ctx.checksFor(model.name), model);
+  // Blockers gate Start. A card with no Start (`light`: bench actions only)
+  // has nothing for them to gate, and a verdict drawn under buttons it does
+  // not concern reads as a warning about the buttons.
+  const blocked = model.run.length ? startBlockers(ctx.checksFor(model.name), model) : [];
   const form = [
     h('div.pr', model.above.map((row) => renderRow(row, model, ctx))),
     model.readback ? readback(model.readback) : null,
@@ -178,6 +181,7 @@ export function field(spec, ctx, model, { segmented = false, accent = false, lab
   const editable = spec.editable !== false;
   const cls = ['pf'];
   if (!editable) cls.push('ro');
+  if (spec.node) cls.push('node');
   if (spec.source === 'inherited') cls.push('inh');
   if (spec.source === 'derived') cls.push('der');
   if (accent) cls.push('acc');
@@ -290,7 +294,9 @@ function input(spec, commit, segmented, { blank = false } = {}) {
 const QUIET_SOURCES = new Set(['default', 'run.toml', 'last-used']);
 
 function provenance(spec, ctx, model, editable) {
-  const label = QUIET_SOURCES.has(spec.source) ? '' : spec.source;
+  // A node's own override carries no tag: the value in ink and the ↺ beside
+  // it are the statement, and `edited` next to them said it a third time.
+  const label = QUIET_SOURCES.has(spec.source) || spec.node ? '' : spec.source;
   // Who can take the value back. On a bench card that is whoever edited it,
   // and `source === 'edited'` says so. On a pipeline node form it is not:
   // the node's overrides and the bench card's edits **both** resolve as
@@ -312,12 +318,13 @@ function provenance(spec, ctx, model, editable) {
   return h('span.src',
     label ? h('span.tag.src-' + spec.source, { title: spec.detail || '', text: label }) : null,
     resettable
-      ? h('button.link', {
+      ? h('button.link.undo', {
         title: spec.node
-          ? 'drop this node’s override — the value falls back to the module as it stands on the bench'
+          ? 'back to the bench — drop this node’s override, the value falls back to the module as it stands on the bench'
           : 'PUT null — drop the edit and fall back to the layer below',
+        'aria-label': spec.node ? 'back to the bench' : 'reset',
         onclick: () => ctx.edit(model.name, { [spec.name]: null }),
-      }, 'reset')
+      }, '↺')
       : null);
 }
 
@@ -532,7 +539,9 @@ export function fold(model, ctx, open) {
   if (!total) return null;
   return h('div.fold',
     h('div.foldbar',
-      h('span.cs', { text: `${total} more · run.toml` }),
+      // On a node form the fold *is* the statement: everything in it is the
+      // module as it stands on the bench, and only what is above it differs.
+      h('span.cs', { text: `${total} more · ${model.form === 'node' ? 'same as bench' : 'run.toml'}` }),
       model.fold.map((group) => h('button.btng', {
         class: open.has(group.group) ? 'on' : '',
         title: group.inert ? group.params[0].inert : '',

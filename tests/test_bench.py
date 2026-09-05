@@ -1421,3 +1421,22 @@ def test_rail_counting_survives_an_empty_trace():
     from bace.bench.checks import _rail_samples
 
     assert _rail_samples(np.array([])) == 0
+
+
+def test_rig_toml_carries_the_meter_averaging_and_a_typo_is_refused(tmp_path):
+    """`[power_meter] averaging` and `digital_filter` load, default on, and an
+    unknown key there is refused like every other -- a typo would be a meter
+    that silently shows one instant of the pulsed LED."""
+    from bace.config import ConfigError, load_rig
+
+    rig = load_rig(_repo_file("rig.toml"))
+    assert rig.power_meter_averaging is True and rig.power_meter_digital_filter == 100
+
+    p = tmp_path / "rig.toml"
+    p.write_text("[power_meter]\naveraging = false\ndigital_filter = 0\n", encoding="utf-8")
+    rig = load_rig(p)
+    assert rig.power_meter_averaging is False and rig.power_meter_digital_filter == 0
+
+    p.write_text("[power_meter]\naverage = true\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="unknown key.*average"):
+        load_rig(p)

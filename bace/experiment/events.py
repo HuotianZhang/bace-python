@@ -127,6 +127,13 @@ class StepDone(Event):
     q_std: float
     intensity_w: float | None = None
     clipped: bool = False
+    sync_light: Trace | None = None
+    sync_dark: Trace | None = None
+    """The trigger channel's trace out of the same record as `light` and
+    `dark`, in volts (2026-09-05). What the edge the scope fired on looked
+    like: smeared, the jitter is between the sync and the scope's trigger;
+    sharp beside a smeared displacement spike, it is between the sync and the
+    81150A's pulse. None on a rig whose digitiser cannot fetch it."""
 
 
 @dataclass(frozen=True)
@@ -360,6 +367,11 @@ class PowerReading(Event):
     trustworthy: bool
     wavelength_nm: float | None
     source: str
+    averaged: bool | None = None
+    """True when the meter was averaging (DC-continuous, 5 Hz analog filter),
+    so the number is the time average of a pulsed LED -- half the DC level
+    at 50 % duty -- and not one instant of it. None when the driver cannot
+    say (a console that has no filter route)."""
 
 
 @dataclass(frozen=True)

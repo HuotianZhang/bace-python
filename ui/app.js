@@ -10,8 +10,10 @@ import { createStore, currentRun } from './lib/store.js';
 import { createStream } from './lib/stream.js';
 import { h, fill, keyed } from './lib/dom.js';
 import * as fmt from './lib/format.js';
+import { parseHash } from './lib/route.js';
 import { renderRail, renderChainStrip, PREREQUISITE } from './lib/rail.js';
 import { renderMonitor } from './lib/monitor.js';
+import { renderPowerPanel, svgFileOf, DEFAULT_UI as POWER_DEFAULTS } from './lib/power.js';
 import { createBenchWatch } from './lib/watch.js';
 
 import bench from './views/bench.js';
@@ -26,7 +28,9 @@ const api = createApi({});
 const store = createStore({ schedule: (fn) => requestAnimationFrame(fn) });
 
 const stream = createStream({
-  onHello: (frame) => store.applyHello(frame),
+  // Every connect, not only the first: the power panel's trace and its
+  // switch are re-asserted against the service each time (`syncPower`).
+  onHello: (frame) => { store.applyHello(frame); syncPower(); },
   onFrame: (frame, meta) => { store.applyFrame(frame); afterFrame(frame, meta || {}); },
   onStatus: (status) => store.applyConnection(status),
   onSessionChange: ({ from, to }) => {
@@ -46,6 +50,7 @@ const stream = createStream({
 const tabsEl = h('nav.tabs');
 const chipsEl = h('span.chips');
 const railEl = h('header.rail');
+const powerEl = h('section.power');
 const monitorEl = h('section.monitor', { hidden: true });
 const viewEl = h('main.view');
 const stripEl = h('div.strip');
@@ -53,23 +58,31 @@ const barEl = h('footer.stream-bar');
 
 document.getElementById('app').replaceChildren(
   h('div.bar', h('span.wordmark', 'bace'), tabsEl, h('span.spacer'), chipsEl),
-  railEl, monitorEl, viewEl, stripEl, barEl);
+  railEl, powerEl, monitorEl, viewEl, stripEl, barEl);
 
 let mounted = null;
 let mountedRoute = null;
 
 function route() {
-  const hash = (location.hash || '').replace(/^#\/?/, '').split('?')[0];
+  const { route: hash } = parseHash(location.hash);
   return BY_ROUTE[hash] ? hash : 'bench';
 }
 
 function show() {
   const name = route();
-  if (name === mountedRoute) return;
+  const { query } = parseHash(location.hash);
+  if (name === mountedRoute) {
+    // Same tab, new query — `#/bench?module=bace` from a node form while
+    // the bench is already up. The view answers it without remounting.
+    if (mounted && mounted.focus) mounted.focus(query);
+    return;
+  }
   if (mounted && mounted.dispose) mounted.dispose();
   viewEl.scrollTop = 0;
   mountedRoute = name;
-  mounted = BY_ROUTE[name].mount(viewEl, { store, api, stream, fmt, notify });
+  // `park` is the strip's: the bench tab's Instruments panel offers the same
+  // button, and a busy bench arms it there exactly as it does on the strip.
+  mounted = BY_ROUTE[name].mount(viewEl, { store, api, stream, fmt, notify, park, query });
   renderTabs();
 }
 
@@ -288,6 +301,158 @@ async function resumeRun(runId, detail) {
 }
 
 /**
+ * The power panel — `lib/power.js`. The switch is the operator's wish and the
+ * console keeps it: a reload, or the service coming back, re-asserts it, so
+ * "on" stays on until somebody switches it off. What the panel *shows* as
+ * running is the service's answer (`bench.monitors`), never the wish.
+ */
+const POWER_KEY = 'bace.power';
+let powerUi = loadPowerUi();
+let powerStatus = null;
+let powerBusy = false;
+
+function loadPowerUi() {
+  try {
+    const raw = localStorage.getItem(POWER_KEY);
+    return raw ? { ...POWER_DEFAULTS, ...JSON.parse(raw) } : { ...POWER_DEFAULTS };
+  } catch { return { ...POWER_DEFAULTS }; }
+}
+
+function savePowerUi(patch) {
+  powerUi = { ...powerUi, ...patch };
+  try { localStorage.setItem(POWER_KEY, JSON.stringify(powerUi)); } catch { /* a private window */ }
+  drawPower(store.getState());
+}
+
+function drawPower(state) {
+  renderPowerPanel(powerEl, state, powerUi, {
+    status: powerStatus,
+    onToggle: togglePower, onInterval: setPowerInterval,
+    onWindow: (key) => savePowerUi({ window: key }),
+    onChart: (open) => savePowerUi({ chart: open }),
+    onZero: (on) => savePowerUi({ fromZero: on }),
+    onClear: clearPowerHistory, onExportCsv: exportPowerCsv, onExportSvg: exportPowerSvg,
+  });
+}
+
+function powerSay(level, text) {
+  powerStatus = text ? { level, text } : null;
+  drawPower(store.getState());
+}
+
+async function refreshMonitors() {
+  try { store.applyMonitors((await api.monitors()).monitors); } catch { /* the bench snapshot will say */ }
+}
+
+/** Start or stop the monitor in the service, and remember the wish. */
+async function togglePower(on) {
+  if (powerBusy) return;
+  powerBusy = true;
+  savePowerUi({ on });
+  try {
+    if (on) {
+      await api.startMonitor('power', powerUi.interval_s);
+      powerSay('ok', `monitoring every ${powerUi.interval_s} s`);
+    } else {
+      try { await api.stopMonitor('power'); } catch (error) { if (error.status !== 404) throw error; }
+      powerSay('', 'monitor off · the trace is kept');
+    }
+  } catch (error) {
+    powerSay('bad', error.text || error.message);
+  } finally {
+    powerBusy = false;
+    await refreshMonitors();
+  }
+}
+
+/** A new interval restarts a running monitor; the trace carries on. */
+async function setPowerInterval(seconds) {
+  savePowerUi({ interval_s: seconds });
+  const running = (store.getState().monitors || []).some((m) => m.name === 'power' && m.running);
+  if (!running || powerBusy) return;
+  powerBusy = true;
+  try {
+    try { await api.stopMonitor('power'); } catch (error) { if (error.status !== 404) throw error; }
+    await api.startMonitor('power', seconds);
+    powerSay('ok', `monitoring every ${seconds} s`);
+  } catch (error) {
+    powerSay('bad', error.text || error.message);
+  } finally {
+    powerBusy = false;
+    await refreshMonitors();
+  }
+}
+
+async function clearPowerHistory() {
+  try {
+    const out = await api.clearPowerHistory();
+    store.clearPowerLog();
+    powerSay('', `cleared ${out.cleared} readings · the journal keeps them`);
+  } catch (error) {
+    powerSay('bad', error.text || error.message);
+  }
+}
+
+/** The whole history the service holds, as the file the route names. */
+function exportPowerCsv() {
+  const a = h('a', { href: api.powerHistoryCsv(), download: '' });
+  document.body.append(a);
+  a.click();
+  a.remove();
+}
+
+function exportPowerSvg() {
+  const svg = powerEl.querySelector('.pw-chart svg');
+  if (!svg) return;
+  const css = getComputedStyle(document.documentElement);
+  const tokens = {};
+  for (const name of ['--ink', '--grey', '--rule', '--fill', '--grid', '--paper', '--accent', '--alert', '--warn', '--ok', '--font-num', '--font-body']) {
+    tokens[name] = css.getPropertyValue(name).trim();
+  }
+  const blob = new Blob([svgFileOf(svg, tokens)], { type: 'image/svg+xml' });
+  const url = URL.createObjectURL(blob);
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const a = h('a', { href: url, download: `power_${stamp}.svg` });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/**
+ * On every connect: the trace the service holds, merged into the log by
+ * `ts`, and the switch re-asserted — a monitor the operator switched on
+ * is started again after the service restarted under a console that
+ * still says on.
+ */
+let syncingPower = false;
+
+async function syncPower() {
+  if (syncingPower) return;
+  syncingPower = true;
+  try {
+    try { store.applyPowerHistory(await api.powerHistory()); } catch (error) {
+      console.warn('power history:', error.message);
+    }
+    const running = (store.getState().monitors || []).some((m) => m.name === 'power' && m.running);
+    if (powerUi.on && !running && !powerBusy) {
+      powerBusy = true;
+      try {
+        await api.startMonitor('power', powerUi.interval_s);
+        powerSay('ok', `monitoring every ${powerUi.interval_s} s`);
+      } catch (error) {
+        if (error.status !== 409) powerSay('bad', error.text || error.message);
+      } finally {
+        powerBusy = false;
+        await refreshMonitors();
+      }
+    }
+  } finally {
+    syncingPower = false;
+  }
+}
+
+/**
  * Fill in a run the stream could not rebuild whole.
  *
  * Two cases, one cause: the ring is 5000 envelopes and a long scan is more
@@ -381,6 +546,7 @@ function renderBar(state) {
 store.subscribe((state) => {
   renderRail(railEl, state);
   renderChips(state);
+  drawPower(state);
   drawMonitor(state);
   drawStrip(state);
   renderBar(state);

@@ -753,3 +753,36 @@ def test_the_snapshot_stub_says_attached_and_not_read_back_yet():
     assert bench().snapshot_stub()["temperature"] == {
         "wired": False, "kelvin": None, "setpoint_k": None, "in_band": None,
         "source": None, "connected": None}
+
+
+def test_the_simulated_meter_reads_the_average_of_a_pulsed_led_and_says_so():
+    """The stand-in plays the filtered meter `open_power_meter` leaves on the
+    rig: under a 50 % pulse it reads half the DC level, and the reading
+    carries `averaged` so the console can say the number is a mean. With
+    the filter off it reads whichever phase it sampled -- the flicker the
+    operator saw, kept so this test can show why the filter exists."""
+    from bace.service.rigs import power_reading
+    b = Bench.build_simulated(RigConfig(), seed=3, fast=True)
+    sim = b.sim
+    sim.shutter.unblock()
+    sim.led.set_dc(1.02)
+    sim.led.enable_output(True)
+    dc = power_reading(sim.power)
+    assert dc.averaged is True and dc.watts > 0
+
+    sim.led.set_pulse(1.02, 0.4, frequency_hz=500.0, duty_percent=50.0)
+    pulsed = [power_reading(sim.power).watts for _ in range(20)]
+    for w in pulsed:
+        assert w == pytest.approx(dc.watts * 0.5, rel=0.02), "the duty-weighted mean, steady"
+
+    sim.power.set_averaging(False)
+    raw = [power_reading(sim.power) for _ in range(40)]
+    assert all(r.averaged is False for r in raw)
+    highs = [r.watts for r in raw if r.watts > dc.watts * 0.5]
+    lows = [r.watts for r in raw if r.watts < dc.watts * 0.01]
+    assert highs and lows and len(highs) + len(lows) == len(raw), "one phase or the other, never the mean"
+
+    snap = b.read_back()
+    assert snap["instruments"]["power"]["averaged"] is False
+    sim.power.set_averaging(True)
+    assert b.read_back()["instruments"]["power"]["averaged"] is True

@@ -554,6 +554,8 @@ def stage_local(report: Report, rig_config) -> None:
         c.data["wavelength_nm"] = r.wavelength_nm
         c.data["saturated"] = r.saturated
         c.data["trustworthy"] = r.trustworthy
+        c.data["averaged"] = r.averaged
+        c.data["averaging"] = dict(getattr(m, "averaging", {}) or {})
         if not r.trustworthy:
             c.warn("the meter reading is not trustworthy (saturated, overrange, "
                    "or not in watts)")

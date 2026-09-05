@@ -302,17 +302,25 @@ def power_reading(meter, *, samples: int = 1) -> E.PowerReading:
         last = getattr(meter, "last", None)
     trustworthy = True if last is None else bool(getattr(last, "trustworthy", True))
     wavelength = None
+    averaged = None
     if last is not None:
         wavelength = _float_or_none(getattr(last, "wavelength_nm", None))
+        averaged = getattr(last, "averaged", None)
     if wavelength is None:
         wavelength = _float_or_none(getattr(meter, "wavelength_nm", None))
+    if averaged is None:
+        # The simulated meter keeps no `Reading`; it says on itself.
+        averaged = getattr(meter, "averaged", None)
+    if averaged is not None:
+        averaged = bool(averaged)
     # `source` before `base_url`: the direct driver has no URL, and falling
     # through to "simulated" would render a real watt reading as a made-up
     # one -- the exact confusion this field exists to prevent.
     source = (getattr(meter, "source", None) or getattr(meter, "base_url", None)
               or "simulated")
     return E.PowerReading(watts=float(watts), trustworthy=trustworthy,
-                          wavelength_nm=wavelength, source=str(source))
+                          wavelength_nm=wavelength, source=str(source),
+                          averaged=averaged)
 
 
 def apply_led(led, mode: str, *, level: float | None = None,
@@ -946,7 +954,7 @@ class Bench:
     def _power_state(self, monitor: bool) -> dict:
         power = self.rig.power
         out = {"available": False, "watts": None, "trustworthy": None,
-               "wavelength_nm": None, "monitor": bool(monitor)}
+               "wavelength_nm": None, "averaged": None, "monitor": bool(monitor)}
         if not _usable(power):
             out["reason"] = self.unavailable.get("power", "no power meter on this bench")
             return out
@@ -956,7 +964,8 @@ class Bench:
             out["reason"] = f"{type(exc).__name__}: {exc}"
             return out
         out.update({"available": True, "watts": ev.watts,
-                    "trustworthy": ev.trustworthy, "wavelength_nm": ev.wavelength_nm})
+                    "trustworthy": ev.trustworthy, "wavelength_nm": ev.wavelength_nm,
+                    "averaged": ev.averaged})
         return out
 
     def _temperature_state(self) -> dict:
@@ -1236,7 +1245,8 @@ class Bench:
             raise BenchActionRefused(
                 "warn", f"the 1918-C console is silent: {exc}") from None
         return {"watts": ev.watts, "trustworthy": ev.trustworthy,
-                "wavelength_nm": ev.wavelength_nm, "source": ev.source}
+                "wavelength_nm": ev.wavelength_nm, "source": ev.source,
+                "averaged": ev.averaged}
 
 
 # -- helpers ------------------------------------------------------------

@@ -249,6 +249,25 @@ class Keithley2400:
           recorder's rewrite add between two points. It also switches the
           2400's auto delay off, which the reset had left on top.
 
+        **The voltage yielded is the setpoint, not the instrument's V
+        element** (2026-09-05). Only current is sensed here -- `:SENS:FUNC?`
+        on the bench answers `"CURR:DC"` alone -- so the 2400 is not
+        measuring voltage, and what it puts in the V element of a `:READ?`
+        is not one: on the rig it lagged the setpoint by up to 0.09 V with
+        an exponential memory across points (about 17 % of the gap closed
+        per point) and snapped back to the exact setpoint at every current
+        range change -- with the filter confirmed `REP`, autorange on. Filed
+        as the curve's voltage it put 0.09 V kinks near 1 V wherever the
+        current changed range and pulled V_mpp, P_max and FF down by ten to
+        fifteen percent (runs 20260904_234336 and 20260905_1108xx against
+        the instrument-sweep run 20260904_220109). Two-wire, the setpoint
+        *is* the best estimate of the device's voltage -- 0.02 % plus 0.6 mV
+        of source accuracy against a sub-millivolt lead drop -- and it is
+        what the 2400's own sweep filed for every curve before 2026-09-04.
+        So `:FORM:ELEM CURR` asks for the one thing measured, and the point
+        is `(level sourced, current read)`. Four-wire would be the moment
+        to sense voltage for real; that is not this rig.
+
         Used by the J-V experiment, not by the transient one, so it is not
         part of the `SourceMeter` protocol -- the transient layer must not
         be able to start a sweep by accident.
@@ -269,7 +288,9 @@ class Keithley2400:
         self._io.write(":SENS:FUNC 'CURR:DC';")
         self._io.write(f":SENS:CURR:PROT:LEV {self.config.current_compliance_a:g};")
         self._io.write(f":SENS:CURR:NPLC {self.config.nplc:g};")
-        self._io.write(":FORM:ELEM VOLT,CURR;")
+        # Current only: voltage is not sensed, and the V element the 2400
+        # would fill in is not a measurement (see the docstring).
+        self._io.write(":FORM:ELEM CURR;")
         self._io.write(":TRIG:COUN 1;")
         # One point is settle + averaging x four apertures (`sweep_budget_s`):
         # under a second at the validated recipe, inside the session's 20 s.
@@ -283,10 +304,13 @@ class Keithley2400:
         started = time.monotonic()
         try:
             for x in np.linspace(float(start_v), float(stop_v), int(points)):
-                self._io.write(f":SOUR:VOLT:LEV {x:g};")
+                level = f"{x:g}"
+                self._io.write(f":SOUR:VOLT:LEV {level};")
                 # `:READ?` steps to the level, waits `:SOUR:DEL`, integrates.
                 raw = self._io.query(":READ?").strip().split(",")
-                yield float(raw[0]), float(raw[1])
+                # The level as the instrument received it, not linspace's
+                # 0.49999999999999994 -- the point's voltage is what was sourced.
+                yield float(level), float(raw[0])
         finally:
             self.last_sweep_s = time.monotonic() - started
             self.disable_output()

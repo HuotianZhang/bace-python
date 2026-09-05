@@ -622,10 +622,130 @@ def test_the_meter_path_is_chosen_the_same_way_and_units_are_set_either_way(
                         lambda self: calls.append("units"))
     monkeypatch.setattr(ConsolePowerMeter, "set_wavelength",
                         lambda self, nm: calls.append(f"lambda {nm:g}"))
+    monkeypatch.setattr(ConsolePowerMeter, "set_averaging",
+                        lambda self, on=True, **kw: calls.append(f"averaging {on}") or True)
     via = open_power_meter(RigConfig(power_meter_console="http://127.0.0.1:8918"))
     assert isinstance(via, ConsolePowerMeter)
-    assert calls == ["units", "lambda 530"]
+    assert calls == ["units", "lambda 530", "averaging True"]
+    # The direct path set it too, and read it back off the (simulated) meter.
+    assert m.averaged is True and m.averaging["analog_filter_name"] == "5 Hz"
 
     monkeypatch.setattr(ConsolePowerMeter, "available", lambda self: False)
     with pytest.raises(PowerMeterError, match="clear \\[power_meter\\] console"):
         open_power_meter(RigConfig(power_meter_console="http://127.0.0.1:8918"))
+
+
+# ===========================================================================
+# 1918-C: averaging, so a pulsed LED reads as a power (2026-09-05)
+# ===========================================================================
+
+def test_averaging_puts_the_meter_in_dc_continuous_with_the_5hz_filter():
+    """The rig pulses the LED at 500 Hz, 50 % duty. A 1918-C sampling that
+    square wave at one instant shows whichever phase it landed in -- the
+    operator saw the rail flicker between the level and nothing. DC-continuous
+    mode with the analog 5 Hz filter is what integrates over the cycles and
+    reads the mean, half the DC level; that is what `open_power_meter` sets,
+    and every reading says whether it was on."""
+    m = DirectPowerMeter(simulate=True)
+    try:
+        assert m.averaged is None and m.read().averaged is None, "nothing claimed before it is set"
+        got = m.set_averaging(True, digital_samples=100)
+        assert m._meter.query("PM:MODE?") == "0"
+        assert m._meter.query("PM:ANALOGFILTER?") == "4"
+        assert m._meter.query("PM:FILT?") == "3"
+        assert m._meter.query("PM:DIGITALFILTER?") == "100"
+        assert got["mode_name"] == "DC continuous" and got["analog_filter_name"] == "5 Hz"
+        assert got["filter_name"] == "analog + digital" and got["digital_filter"] == 100
+        assert m.averaged is True
+        assert m.read().averaged is True and m.last.averaged is True
+
+        # Off: unfiltered, and still DC-continuous -- a meter someone left in
+        # *pulse* on the front panel is wrong under both.
+        m._meter.write("PM:MODE 5")
+        m.set_averaging(False)
+        assert m._meter.query("PM:MODE?") == "0"
+        assert m._meter.query("PM:FILT?") == "0" and m._meter.query("PM:ANALOGFILTER?") == "0"
+        assert m.averaged is False and m.read().averaged is False
+
+        # Analog only when no digital samples are asked for.
+        m.set_averaging(True, digital_samples=0)
+        assert m._meter.query("PM:FILT?") == "1" and m.averaged is True
+    finally:
+        m.close()
+
+
+def test_a_meter_that_does_not_take_the_filter_is_refused_not_trusted(monkeypatch):
+    """`averaged` is what the meter *reports*, never what was asked: an
+    instrument that ignores `PM:ANALOGFILTER` would otherwise be labelled as
+    averaging while showing the flicker."""
+    m = DirectPowerMeter(simulate=True)
+    try:
+        real = m._meter._t.write
+
+        def deaf(command):
+            if not command.upper().startswith("PM:ANALOGFILTER"):
+                real(command)
+        monkeypatch.setattr(m._meter._t, "write", deaf)
+        with pytest.raises(PowerMeterError, match="did not take the averaging"):
+            m.set_averaging(True)
+        assert m.averaged is False
+    finally:
+        m.close()
+
+
+def test_open_power_meter_sets_averaging_from_rig_toml(monkeypatch):
+    monkeypatch.setattr(np.PowerMeter, "open",
+                        classmethod(lambda cls, dll=None, simulate=False:
+                                    cls(np.SimulatedTransport())))
+    m = open_power_meter(RigConfig(power_meter_wavelength_nm=530.0))
+    try:
+        assert m.averaged is True and m.averaging["digital_filter"] == 100
+        assert m._meter.query("PM:MODE?") == "0"
+    finally:
+        m.close()
+    m = open_power_meter(RigConfig(power_meter_averaging=False, power_meter_digital_filter=0))
+    try:
+        assert m.averaged is False and m._meter.query("PM:FILT?") == "0"
+        assert m._meter.query("PM:MODE?") == "0", "the mode is written either way"
+    finally:
+        m.close()
+
+
+def test_the_console_client_says_when_it_could_not_set_averaging(monkeypatch):
+    """The console's filter route is assumed, not verified. A console with no
+    such route answers 404: reported as False and no reading claims the
+    average; any other refusal is the console saying no, and is raised."""
+    c = ConsolePowerMeter("http://127.0.0.1:8918")
+    posted = []
+
+    def missing(self, path, body):
+        posted.append((path, body))
+        raise PowerMeterError("the 1918-C console refused POST /api/filter with HTTP 404")
+    monkeypatch.setattr(ConsolePowerMeter, "_post", missing)
+    assert c.set_averaging(True) is False and c.averaged is None
+    assert posted == [("/api/filter", {"filter": 3, "analogFilter": 4,
+                                       "digitalFilter": 100, "mode": 0})]
+
+    monkeypatch.setattr(ConsolePowerMeter, "_post", lambda self, path, body: {})
+    assert c.set_averaging(True) is True and c.averaged is True
+    monkeypatch.setattr(ConsolePowerMeter, "_get", lambda self, path: {
+        "value": 2.0e-5, "units": 2, "wavelength": 530.0, "status": {}})
+    assert c.read().averaged is True
+
+    def refused(self, path, body):
+        raise PowerMeterError("refused POST /api/filter with HTTP 400: bad body")
+    monkeypatch.setattr(ConsolePowerMeter, "_post", refused)
+    with pytest.raises(PowerMeterError, match="HTTP 400"):
+        c.set_averaging(True)
+
+
+def test_open_power_meter_warns_once_when_the_console_cannot_average(monkeypatch):
+    import warnings
+    monkeypatch.setattr(ConsolePowerMeter, "available", lambda self: True)
+    monkeypatch.setattr(ConsolePowerMeter, "set_units_watts", lambda self: None)
+    monkeypatch.setattr(ConsolePowerMeter, "set_wavelength", lambda self, nm: None)
+    monkeypatch.setattr(ConsolePowerMeter, "set_averaging", lambda self, on=True, **kw: False)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        open_power_meter(RigConfig(power_meter_console="http://127.0.0.1:8918"))
+    assert len(caught) == 1 and "no /api/filter route" in str(caught[0].message)

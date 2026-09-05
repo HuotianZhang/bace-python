@@ -279,6 +279,61 @@ button:disabled { opacity: .45; cursor: not-allowed; }
    explanation is a `title`, revealed on hover and read out by a screen reader,
    because a comfortable screen is one that is hiding something. */
 
+/* -- the Instruments panel: switches whose lit position is the read-back ---
+   `lib/instruments.js`. Above the cards, in its own zone, because it is a
+   different thing from a card: a switch acts the moment it is clicked. */
+.instruments:empty { display: none; }
+.inst {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 12px 10px; margin: 0 0 12px;
+  background: var(--paper); border: 1px solid var(--rule);
+}
+.zh { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.zt {
+  font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase;
+  color: var(--grey);
+}
+.cards::before {
+  content: 'Modules'; display: block; grid-column: 1 / -1;
+  font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase;
+  color: var(--grey); margin-bottom: 6px;
+}
+.irow {
+  display: grid; grid-template-columns: 9em auto 1fr; align-items: center; gap: 14px;
+  padding: 5px 4px; border-bottom: 1px solid var(--fill);
+}
+.irow:last-child { border-bottom: 0; }
+.irow .n { font-family: var(--font-head); font-weight: 800; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.sw { display: inline-flex; border: 1px solid var(--ink); }
+.sw .p {
+  padding: 3px 12px; font-size: 12px; color: var(--grey); cursor: pointer;
+  font-family: var(--font-num); font-weight: 400; letter-spacing: 0; line-height: 1.4;
+  border: 0; border-right: 1px solid var(--rule); background: var(--paper);
+}
+.sw .p:last-child { border-right: 0; }
+.sw .p:hover { color: var(--ink); }
+.sw .p.on { background: var(--ink); color: #fff; }
+.sw .p:disabled { cursor: not-allowed; opacity: .45; }
+/* Inferred, not read: the same dashed rule the rail uses. */
+.irow.inferred .sw { border-style: dashed; }
+.irow.inferred .sw .p.on { background: var(--grey); }
+.vals { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
+.vals label { display: inline-flex; align-items: baseline; gap: 4px; }
+.vals input.v {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 12px;
+  border: 1px solid transparent; border-bottom-color: var(--rule);
+  background: transparent; color: inherit; padding: 1px 3px; width: 5.5em; text-align: right;
+}
+.vals input.v:hover { border-color: var(--rule); }
+.vals input.v:focus { border-color: var(--accent); outline: none; background: var(--paper); }
+.vals i { font-style: normal; color: var(--grey); font-size: 11px; }
+.vals label.dim input.v { color: var(--grey); border-bottom-color: var(--fill); }
+.vals label.dim i { color: var(--rule); }
+
+/* A node's own override reads as one: the value in ink, and ↺ beside it. */
+.pf.node .v, .pf.node input.v { color: var(--ink); font-weight: 500; border-bottom-color: var(--ink); }
+button.undo { font-family: var(--font-num); }
+
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(430px, 1fr));
@@ -286,6 +341,10 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   align-items: start;
 }
 .card.mod { margin: 0; padding: 0; display: flex; flex-direction: column; }
+/* The card a node form pointed at (`#/bench?module=…`): one ping, then gone. */
+.card.mod { transition: outline-color .6s ease, box-shadow .6s ease; outline: 2px solid transparent; outline-offset: 2px; }
+.card.mod.pinged { outline-color: var(--accent); transition: none; }
+a.btng.goto { text-decoration: none; display: inline-flex; align-items: center; }
 
 .ch {
   display: flex; align-items: center; gap: 8px;
@@ -561,10 +620,14 @@ button.link:hover { color: var(--accent-dark); }
 .alerts .warn1.alert { color: var(--alert); }
 .alerts .warn1 .code { text-transform: uppercase; letter-spacing: .04em; }
 
-.metrics table.rows { width: 100%; }
-.metrics th { text-align: left; font-weight: 600; font-size: 11px; padding-top: 4px; }
-.metrics td.l { color: var(--grey); font-size: 11px; }
-.metrics td.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 11px; }
+/* One row per curve: the LED drive voltage (or `dark`) down the first column,
+   the derived parameters across. Numbers right-aligned so a column reads as
+   a column; the header row is the only text that is not a number. */
+.metrics table.rows { width: auto; }
+.metrics table.rows th { text-align: right; font-weight: 600; font-size: 11px; padding: 2px 0 3px 14px; white-space: nowrap; border-bottom: 1px solid var(--rule); }
+.metrics table.rows th.l { text-align: left; padding-left: 0; }
+.metrics td.l { color: var(--grey); font-size: 11px; white-space: nowrap; padding-right: 0; }
+.metrics td.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 11px; text-align: right; padding: 2px 0 2px 14px; white-space: nowrap; }
 
 /* -- the run monitor (M4) ---------------------------------------------------
    Under the rail on every tab while a run holds the worker, gone when the
@@ -703,6 +766,8 @@ button.link:hover { color: var(--accent-dark); }
 .tr .nk.mod { border-color: var(--ink); color: var(--ink); }
 .tr .n { font-family: var(--font-num); font-size: 12px; font-weight: 500; }
 .tr .d { color: var(--grey); font-family: var(--font-num); font-size: 11px; }
+/* A node that differs from the bench: the node form's own glyph, the list on hover. */
+.tr .ovr { color: var(--ink); font-family: var(--font-num); font-size: 12px; cursor: help; }
 .tr .rowact { display: inline-flex; gap: 2px; opacity: .25; }
 .tr:hover .rowact, .tr.on .rowact { opacity: 1; }
 .tr .rowact button.btng { padding: 0 5px; line-height: 16px; }
@@ -759,6 +824,19 @@ button.link:hover { color: var(--accent-dark); }
 
 .pipe-actions { display: flex; flex-direction: column; gap: 8px; }
 .namerow { display: flex; align-items: center; gap: 8px; }
+/* Where the bench has moved since a recipe was saved (`lib/recipe.js`). */
+.recipe-note {
+  display: flex; flex-direction: column; gap: 4px;
+  border-left: 2px solid var(--warn); background: #fff8ef; padding: 5px 8px;
+  font-size: 12px;
+}
+.recipe-note .rn-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.recipe-note .rn-list { display: grid; grid-template-columns: max-content max-content max-content auto; gap: 1px 14px; }
+.recipe-note .rn-row { display: contents; }
+.recipe-note .rn-row .l { color: var(--grey); font-family: var(--font-num); font-size: 11px; }
+.recipe-note .rn-row .v { font-family: var(--font-num); font-size: 11px; color: var(--grey); }
+.recipe-note .rn-row .v.now { color: var(--ink); font-weight: 500; }
+.recipe-note .rn-row i { font-style: normal; color: var(--grey); font-size: 11px; }
 .namerow .l { color: var(--grey); font-size: 12px; }
 .namerow input.v, .namerow select.v {
   border: 1px solid var(--rule); background: var(--paper); padding: 3px 6px;
@@ -944,3 +1022,58 @@ table.qgrid td { padding: 0; }
 .rig .cb { gap: 10px; }
 .rig .cs .accent { color: var(--accent-dark); font-family: var(--font-num); }
 .rig-readback .card { margin: 0; }
+
+/* -- the power panel --------------------------------------------------------
+   The 1918-C under the rail on every tab: the switch that keeps the monitor
+   running in the service, the reading, the statistics over the window, and
+   the trace. Shell furniture like the run monitor, in the rail's register. */
+.power {
+  display: flex; flex-direction: column;
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper);
+  flex: 0 0 auto;
+}
+.pw-row {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 4px 12px;
+  font-family: var(--font-num); font-size: 11.5px;
+}
+.pw-row > span { display: inline-flex; align-items: center; gap: 8px; }
+.pw-row > span:empty { display: none; }
+.power .spacer { flex: 1 1 auto; }
+.pw-switch {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  font-family: var(--font-head); font-weight: 600; font-size: 12px;
+}
+.pw-switch input {
+  appearance: none; -webkit-appearance: none;
+  width: 32px; height: 17px; border-radius: 9px; margin: 0;
+  background: var(--rule); position: relative; cursor: pointer;
+  transition: background .15s;
+}
+.pw-switch input::after {
+  content: ''; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px;
+  border-radius: 50%; background: #fff; transition: left .15s;
+}
+.pw-switch input:checked { background: var(--ok); }
+.pw-switch input:checked::after { left: 17px; }
+.pw-switch input:disabled { opacity: .4; cursor: not-allowed; }
+.pw-switch input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pw-note { color: var(--warn); font-size: 10.5px; }
+.pw-value {
+  font-size: 21px; font-weight: 500; letter-spacing: -.02em; line-height: 1;
+  font-variant-numeric: tabular-nums; min-width: 6ch;
+}
+.pw-value.warn { color: var(--warn); }
+.pw-value.stale, .pw-value.off { color: var(--grey); }
+.pw-sub { color: var(--grey); font-size: 10.5px; }
+.pw-stats-box { gap: 12px; color: var(--ink); }
+.pw-stats-box i { font-style: normal; color: var(--grey); }
+.pw-controls { gap: 6px; }
+.power .seg .opt { line-height: 1.7; }
+.pw-status.ok { color: var(--ok); }
+.pw-status.bad { color: var(--alert); }
+.pw-chart { padding: 0 12px 6px; }
+.pw-chart[hidden] { display: none; }
+.pw-chart .chart-svg { max-height: 210px; }
+.pw-chart .chart-readout { min-height: 13px; }
