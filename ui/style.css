@@ -539,10 +539,14 @@ button.link:hover { color: var(--accent-dark); }
 .alerts .warn1.alert { color: var(--alert); }
 .alerts .warn1 .code { text-transform: uppercase; letter-spacing: .04em; }
 
-.metrics table.rows { width: 100%; }
-.metrics th { text-align: left; font-weight: 600; font-size: 11px; padding-top: 4px; }
-.metrics td.l { color: var(--grey); font-size: 11px; }
-.metrics td.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 11px; }
+/* One row per curve: the LED drive voltage (or `dark`) down the first column,
+   the derived parameters across. Numbers right-aligned so a column reads as
+   a column; the header row is the only text that is not a number. */
+.metrics table.rows { width: auto; }
+.metrics table.rows th { text-align: right; font-weight: 600; font-size: 11px; padding: 2px 0 3px 14px; white-space: nowrap; border-bottom: 1px solid var(--rule); }
+.metrics table.rows th.l { text-align: left; padding-left: 0; }
+.metrics td.l { color: var(--grey); font-size: 11px; white-space: nowrap; padding-right: 0; }
+.metrics td.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 11px; text-align: right; padding: 2px 0 2px 14px; white-space: nowrap; }
 
 /* -- the run monitor (M4) ---------------------------------------------------
    Under the rail on every tab while a run holds the worker, gone when the

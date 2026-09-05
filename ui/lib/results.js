@@ -323,18 +323,32 @@ function alertList(alerts) {
 }
 
 /**
- * The metrics, labelled derived — `ui-rules` §6: *"J–V metrics are
- * interpolated, not measured."* And `J_sc` says `in amps` because it is: it is
- * interpolated from `current`, whatever area the run was given, so it is the
- * one number on this card the mA/cm² rule does not reach.
+ * The metrics, one row per curve — the LED drive voltage (or `dark`) in the
+ * first column, the parameters across — labelled derived (`ui-rules` §6:
+ * *"J–V metrics are interpolated, not measured."*). `J_sc` carries `in amps`
+ * in its header because it is: it is interpolated from `current`, whatever
+ * area the run was given, so it is the one number on this card the mA/cm²
+ * rule does not reach.
  */
 function metricsTable(metrics) {
+  const keys = [];
+  const notes = {};
+  for (const entry of metrics.entries) {
+    for (const row of entry.rows) {
+      if (!keys.includes(row.key)) keys.push(row.key);
+      if (row.note) notes[row.key] = row.note;
+    }
+  }
+  const header = h('tr',
+    h('th.l', { text: 'LED' }),
+    ...keys.map((k) => h('th', { text: k + (notes[k] ? ` · ${notes[k]}` : '') })));
+  const body = metrics.entries.map((entry) => {
+    const byKey = Object.fromEntries(entry.rows.map((r) => [r.key, r.value]));
+    return h('tr',
+      h('td.l', { text: entry.label }),
+      ...keys.map((k) => h('td.num', { text: byKey[k] === undefined ? fmt.ABSENT : byKey[k] })));
+  });
   return h('div.metrics',
-    h('table.rows', metrics.entries.map((entry) => [
-      h('tr', h('th', { colspan: 2, text: entry.label })),
-      ...entry.rows.map((row) => h('tr',
-        h('td.l', { text: row.key }),
-        h('td.num', { text: row.value + (row.note ? ` · ${row.note}` : '') }))),
-    ])),
+    h('table.rows', h('thead', header), h('tbody', body)),
     h('p.chart-note', { text: metrics.note }));
 }

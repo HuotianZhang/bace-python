@@ -263,8 +263,33 @@ the whole card as last-used and hide a recipe edit for twenty sessions.
 
 **Service-added per-shot verdict.** For every `StepDone` the asyncio side
 computes `service.wire.shot_verdict(light.y, dark.y)` and attaches
-`"verdict": {"rail_light": n, "rail_dark": n, "rail_run_light": n, "rail_run_dark": n, "shared_extreme": bool, "peak_light_a": A, "peak_dark_a": A, "level": "ok"|"warn", "text": …}`
-to the wire `data` (not to the dataclass). The rule is the design's, corrected
+`"verdict": {"rail_light": n, "rail_dark": n, "rail_run_light": n, "rail_run_dark": n, "shared_extreme": bool, "peak_light_a": A, "peak_dark_a": A, "spike_lag_ns": ns|null, "edge_light_ns": ns|null, "edge_dark_ns": ns|null, "averages_light": n|null, "averages_dark": n|null, "sync_edge_light_ns": ns|null, "sync_edge_dark_ns": ns|null, "level": "ok"|"warn", "text": …}`
+to the wire `data` (not to the dataclass).
+
+**The alignment rule (2026-09-05, `core.diagnostics`).** Six of twenty-three
+delay-scan shots on the first hardware day had a photocurrent ten times too
+large and a charge of the wrong sign, and passed every rail check: the
+trigger had jittered for the length of the shot, both displacement spikes
+were 4–14 % lower with 8–13 ns edges instead of 6, and the light and dark
+spikes sat 0.3–1.2 ns apart where a good shot aligns to 0.01 ns — so the
+50 mA spike no longer cancelled in `light − dark`. `spike_lag_ns` is the
+light-to-dark lag of the spike by cross-correlation, sub-sample; beyond
+`SPIKE_LAG_NS = 0.25` the shot is `warn`, "Q of this shot is not a charge".
+`edge_*_ns` are the spikes' 10–90 % times and `sync_edge_*_ns` the same on
+the trigger channel, which the engine fetches out of the same record after
+each acquisition (`StepDone.sync_light/sync_dark`, volts, decimated on the
+socket like the currents): sharp sync edges beside smeared spikes put the
+jitter between the sync and the 81150A's pulse, smeared sync edges put it
+between the sync and the scope's trigger. `averages_*` are `:WAV:COUN?` after
+each acquisition — the Acquisition Done flag both this service and the
+LabVIEW original waited on is set per acquisition, not per completed
+average — and the engine yields a warning `Notice` when a trace folded fewer
+than `n_averages`. The recorder stores the same numbers per (loop, step) in
+the HDF5 `diagnostics` group and the sync traces under `traces/sync_light`
+and `traces/sync_dark`. The `ok` line now reads
+"autorange pass 1 · no shared extreme · 1 rail sample · spikes 0.01 ns apart · edge 6.5 ns · 200 avg · sync edge 2.1 ns".
+
+The rail rules are the design's, corrected
 2026-09-02 (the design pack 03-states §C, `docs/ui-rules.md`): **only a run of identical samples inside
 one trace is evidence of the digitiser's rail** — `rail_run_*` ≥ 7 consecutive
 samples on the trace's own extreme is `warn`, "the charge of this shot is
