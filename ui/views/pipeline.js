@@ -1161,7 +1161,7 @@ export default {
       ]);
 
       keyed(chartEl, JSON.stringify([v.blocks, v.cost]),
-        () => chart(scheduleModel({ blocks: v.blocks, cost: v.cost })));
+        () => chart((w) => scheduleModel({ blocks: v.blocks, cost: v.cost, width: w })));
 
       // Keyed on the *answer*, not on the shape of it. Revalidating the same
       // tree — a Dry run, or a bench read-back — leaves the node paths and

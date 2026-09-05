@@ -13,7 +13,7 @@ import { transientModel, traceSet, sampleTime, windowRecordS } from '../lib/char
 import { jvModel, currentOf, ramp, RAMP } from '../lib/charts/jv.js';
 import { timingModel, shotSegments, cyclePlan, biasLevels, timingAlerts, recordPlan } from '../lib/charts/timing.js';
 import { runFor, shotRows } from '../lib/results.js';
-import { axisTicks, layout } from '../lib/charts/frame.js';
+import { axisTicks, layout, heightFor, ASPECT } from '../lib/charts/frame.js';
 import * as scale from '../lib/scale.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -124,6 +124,44 @@ test('the settings under the transient became labels on the panel they define', 
   // Where the window came from now sits beside the window it dates.
   const marks = model.panels[0].marks || [];
   assert.ok(marks.some((m) => /t0_int_reference|trigger/.test(m.text)), JSON.stringify(marks));
+});
+
+test('every chart is built to one of the three stated aspects', () => {
+  // Before `ASPECT` each chart carried a hand-picked viewBox and, measured per
+  // panel, the console ran 2.1:1 (the J–V) to 12.3:1 (the power monitor) with
+  // nothing to appeal to. The families are the rule now, so a new chart that
+  // invents a ratio fails here rather than being noticed a year later.
+  const at = (width, model, family, margin = {}) => {
+    const panels = model.panels.length ? model.panels : [{ key: 'x', weight: 1 }];
+    const height = heightFor(width, panels, { margin, aspect: ASPECT[family] });
+    const laid = layout({ width, height, panels, margin });
+    // The panel of weight 1 is the one the ratio names; the others follow their
+    // weight, which stays a deliberate choice.
+    const unit = laid.panels.find((p) => (p.weight || 1) === 1) || laid.panels[0];
+    return unit.rect.w / unit.rect.h;
+  };
+  const cases = [
+    ['transient', 570, { panels: [{ weight: 1.25 }, { weight: 1 }, { weight: 0.8 }] }, 'trace', {}],
+    ['jv', 570, { panels: [{ weight: 1 }] }, 'curve', { left: 58, bottom: 28, top: 18 }],
+    ['loops', 570, { panels: [{ weight: 1 }] }, 'curve', { left: 60 }],
+    ['grid', 620, { panels: [{ weight: 1 }] }, 'curve', { left: 64 }],
+    ['power', 1896, { panels: [{ weight: 1 }] }, 'strip', { left: 60 }],
+  ];
+  for (const [name, width, model, family, margin] of cases) {
+    const got = at(width, model, family, margin);
+    assert.ok(Math.abs(got - ASPECT[family]) < 0.15,
+      `${name} is ${got.toFixed(2)}:1, but claims ${family} = ${ASPECT[family]}:1`);
+  }
+});
+
+test('a wider chart gets longer, never squarer', () => {
+  const panels = [{ key: 'p', weight: 1 }];
+  const narrow = heightFor(400, panels, { aspect: ASPECT.trace });
+  const wide = heightFor(900, panels, { aspect: ASPECT.trace });
+  assert.ok(wide > narrow, 'more width buys more height');
+  const ratio = (w, hh) => (w - 56 - 16) / (hh - 16 - 26);
+  assert.ok(Math.abs(ratio(400, narrow) - ratio(900, wide)) < 0.05,
+    'the ratio the chart was drawn to survives the container it is put in');
 });
 
 test('a tick position is formatted, not computed — a renderer must coerce before it adds', () => {

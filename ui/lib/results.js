@@ -212,7 +212,10 @@ function baceResult(entry, found, bench) {
   const rig = (bench && bench.rig && bench.rig.values) || {};
   const chain = (bench && bench.chain) || {};
   const timing = timingModel(values, { rig, chain });
-  const diagram = [timingFold(entry.name, timing)];
+  // The fold gets the model for its alert count and a maker for the drawing:
+  // the count is needed shut, the drawing only when open and only at a width
+  // nobody knows until the observer measures one.
+  const diagram = [timingFold(entry.name, timing, (w) => timingModel(values, { rig, chain, width: w }))];
 
   const shot = found && found.node.lastShot;
   // No early return for the unrun card. `transientModel(null)` and
@@ -221,8 +224,8 @@ function baceResult(entry, found, bench) {
   // side of a run rather than a sentence before and three charts after.
   if (!shot) {
     return [
-      chart(transientModel(null)),
-      chart(loopsModel(null)),
+      chart((w) => transientModel(null, { width: w })),
+      chart((w) => loopsModel(null, { width: w })),
       ...diagram,
     ];
   }
@@ -230,14 +233,15 @@ function baceResult(entry, found, bench) {
   const config = ((found.node.config || found.record.config || {}).run) || {};
   return [
     shotBlock(shot, found, config),
-    chart(transientModel(shot, {
+    chart((w) => transientModel(shot, {
+      width: w,
       t0_int_s: values.t0_int_s,
       t0_int_reference: values.t0_int_reference,
       pulse_delay_s: pulseDelayS(shot, values, rig),
       offset_corrected: values.offset_correct,
       dark_reference: values.dark_reference,
     })),
-    chart(loopsModel(found)),
+    chart((w) => loopsModel(found, { width: w })),
     ...diagram,
   ];
 }
@@ -335,13 +339,16 @@ function jvResult(found) {
   if (node && node.partial && node.partial.voltage.length) curves.push(node.partial);
   // As in `baceResult`: `jvModel([])` is an `absent` model, and the frame it
   // carries is the sweep's own, so the slot holds its shape before the run.
-  if (!curves.length) return [chart(jvModel([]))];
+  if (!curves.length) return [chart((w) => jvModel([], { width: w }))];
   // The planned sweep range, so the axis does not grow with the curve.
   const jv = found.record && found.record.jv;
   const cfg = jv && jv.config && jv.config.jv;
   const planned = cfg && Number.isFinite(cfg.start_v) && Number.isFinite(cfg.stop_v) ? [cfg.start_v, cfg.stop_v] : null;
+  // Two builds on purpose: the chart's is a function of the width the
+  // observer measures, and the metrics table beneath it cannot wait for a
+  // measurement — it is text, and its numbers do not depend on the width.
   const model = jvModel(curves, { planned });
-  const out = [chart(model)];
+  const out = [chart((w) => jvModel(curves, { planned, width: w }))];
   if (model.metrics.entries.length) out.push(metricsTable(model.metrics));
   return out;
 }
@@ -371,10 +378,10 @@ export function alertSummary(alerts) {
  * height. Shut, the line still carries the count and the worst level, in
  * that level's colour, so nothing the diagram would have said is silent.
  */
-function timingFold(name, timing) {
+function timingFold(name, timing, makeTiming) {
   const summary = alertSummary(timing.alerts);
   const open = openTiming.has(name);
-  const body = h('div.tbody', { hidden: !open }, chart(timing),
+  const body = h('div.tbody', { hidden: !open }, chart(makeTiming),
     timing.alerts.length ? alertList(timing.alerts) : null);
   const button = h('button.btng', { type: 'button', class: open ? 'on' : '', 'aria-expanded': String(open) },
     open ? 'hide' : 'show');

@@ -32,6 +32,48 @@ export function paint(colour) {
 export const FONT_N = "var(--font-num)";
 export const FONT_S = "var(--font-body)";
 
+/** The plot's surround, in the model's own units. One default, in one place. */
+export const MARGIN = { left: 56, right: 16, top: 16, bottom: 26, gap: 22 };
+
+/**
+ * The three shapes a panel comes in here, as **plot width ÷ plot height**.
+ *
+ * Before this there was no such rule and every chart picked its own numbers:
+ * measured per panel the console ran from 2.1:1 (the J–V) to 12.3:1 (the power
+ * monitor), a sixfold spread with nothing to appeal to. The design pack's own
+ * drawings sit in a band — `docs/design/bace-charts-r3.js` draws its four
+ * panels at 5.2, 5.7, 6.6 and 6.8 : 1 — and `trace` is that band's middle.
+ *
+ * Three, not one, because the spread was not all error. A quantity against
+ * *time* wants length: a 4000-sample transient in a square is a smudge. A
+ * quantity against another *quantity* — a J–V's power quadrant, Q against the
+ * swept axis — is read for its shape, and stretching it lies about the slope.
+ * A `strip` is a length of time seen whole, where only the ends and the
+ * excursions matter.
+ *
+ * The ratio names the panel of **weight 1**; the others follow their weight,
+ * which stays a deliberate choice — a running-integral panel is half the
+ * height of the traces it belongs to, on purpose.
+ */
+export const ASPECT = {
+  trace: 6,     // a quantity against time — the transient's panels
+  curve: 2.6,   // a quantity against another quantity — J–V, Q(axis), the grid
+  strip: 11,    // a length of time seen whole — the power monitor, the schedule
+};
+
+/**
+ * The height that gives `panels` their aspect at this width. A chart derives
+ * its `height` from this instead of carrying a hand-picked one, so widening a
+ * chart makes it *longer* rather than squarer, and the ratio it was drawn to
+ * survives every container it is put in.
+ */
+export function heightFor(width, panels, { margin = {}, aspect = ASPECT.trace } = {}) {
+  const m = { ...MARGIN, ...margin };
+  const total = panels.reduce((sum, p) => sum + (p.weight || 1), 0);
+  const plot = Math.max(1, width - m.left - m.right);
+  return Math.round((plot / aspect) * total + m.top + m.bottom + m.gap * (panels.length - 1));
+}
+
 /**
  * Stacked panel rectangles over one x axis.
  *
@@ -41,7 +83,7 @@ export const FONT_S = "var(--font-body)";
  * is the whole reason they are stacked rather than side by side.
  */
 export function layout({ width, height, panels, margin = {} }) {
-  const m = { left: 56, right: 16, top: 16, bottom: 26, gap: 22, ...margin };
+  const m = { ...MARGIN, ...margin };
   const total = panels.reduce((sum, p) => sum + (p.weight || 1), 0);
   const free = height - m.top - m.bottom - m.gap * (panels.length - 1);
   const w = width - m.left - m.right;
@@ -66,7 +108,65 @@ export function layout({ width, height, panels, margin = {} }) {
  * when the pointer enters.
  */
 export function chart(model) {
-  const figure = h('figure.chart', { dataset: { chart: model.key || '' } });
+  if (typeof model !== 'function') {
+    const figure = h('figure.chart', { dataset: { chart: model.key || '' } });
+    return drawInto(figure, model);
+  }
+  return responsive(model);
+}
+
+/**
+ * Rounding applied to a measured container before it is handed to a model, so
+ * a drag across the window is a handful of rebuilds and not one per pixel.
+ * Four units is under half a stroke: nothing on screen moves by it.
+ */
+const WIDTH_STEP = 4;
+
+/** Below this the axis labels collide whatever the aspect; do not go smaller. */
+const MIN_WIDTH = 240;
+
+/**
+ * A chart that is a function of the width it is given, rather than of a number
+ * picked in its own file.
+ *
+ * `svg.root()` sets a `viewBox` and `width: 100%`, so the container does not
+ * lay a chart out — it **zooms** it, type and all. With each chart carrying a
+ * hand-picked viewBox width and each container a different real one, the same
+ * `9.5px` axis label was landing anywhere from 8.6 px (the rig tab) to 12.9 px
+ * (the power monitor): a 1.5× spread invisible in code, where every file says
+ * the same number. Measuring the container and building the model at that
+ * width pins the scale at 1, so 9.5 px is 9.5 px on every tab.
+ *
+ * The observer fires once with the first real width, before paint. Until then
+ * the figure stays empty rather than being drawn at a guessed width and
+ * redrawn a frame later.
+ */
+function responsive(make) {
+  const figure = h('figure.chart');
+  let drawn = null;
+  const draw = (raw) => {
+    const width = Math.max(MIN_WIDTH, Math.round(raw / WIDTH_STEP) * WIDTH_STEP);
+    if (width === drawn) return;
+    drawn = width;
+    const model = make(width);
+    figure.dataset.chart = model.key || '';
+    drawInto(figure, model);
+  };
+  if (typeof ResizeObserver === 'function') {
+    // The figure's width comes from its container and the SVG inside is
+    // `width: 100%`, so painting can never change what is being observed —
+    // there is no feedback loop to guard against.
+    new ResizeObserver((entries) => {
+      const w = entries[entries.length - 1].contentRect.width;
+      if (w > 0) draw(w);
+    }).observe(figure);
+  } else {
+    draw(MIN_WIDTH);
+  }
+  return figure;
+}
+
+function drawInto(figure, model) {
   if (model.absent) {
     fill(figure, absent(model.absent));
     return figure;

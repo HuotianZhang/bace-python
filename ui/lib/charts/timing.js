@@ -31,7 +31,7 @@
 
 import * as scale from '../scale.js';
 import * as fmt from '../format.js';
-import { layout, axisTicks } from './frame.js';
+import { layout, axisTicks, heightFor, ASPECT } from './frame.js';
 
 /**
  * The shot, segment by segment, in `run_transient_scan`'s own order.
@@ -261,18 +261,21 @@ export function timingAlerts(values = {}, rig = {}, chain = {}) {
 const AXIS_OF = { vpre: 'vpre', delay_ns: 'delay_ns', vcoll: 'vcoll' };
 
 export function timingModel(values = {}, options = {}) {
-  const { rig = {}, chain = {}, width = 640, height = 470 } = options;
+  const { rig = {}, chain = {}, width = 640, height = null } = options;
   const swept = AXIS_OF[values.axis_name] || null;
   const cycle = cyclePlan(values, rig, chain);
   const record = recordPlan(values, rig);
   const segments = shotSegments(values);
   const alerts = timingAlerts(values, rig, chain);
 
+  // Three lanes of a quantity against time, so `trace` like the transient's.
+  const lanes = [{ key: 'shot', weight: 0.7 }, { key: 'cycle', weight: 1.15 }, { key: 'record', weight: 1 }];
+  const laneMargin = { left: 92, right: 16, top: 20, bottom: 34, gap: 46 };
   const frame = layout({
     width,
-    height,
-    panels: [{ key: 'shot', weight: 0.7 }, { key: 'cycle', weight: 1.15 }, { key: 'record', weight: 1 }],
-    margin: { left: 92, right: 16, top: 20, bottom: 34, gap: 46 },
+    height: height ?? heightFor(width, lanes, { margin: laneMargin, aspect: ASPECT.trace }),
+    panels: lanes,
+    margin: laneMargin,
   });
   const [shotPanel, cyclePanel, recordPanel] = frame.panels;
 
