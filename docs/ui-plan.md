@@ -1193,7 +1193,7 @@ that have not started. They are here so they are not rediscovered there:
 
 | before | must be done |
 |---|---|
-| anything on the rig | the folder-name defect in `docs/naming-plan.md` §2 — `material = "PTQ10:IT-4F"` builds a path segment with a colon, which fails on Windows and passes on Linux |
+| anything on the rig | ~~the folder-name defect in `docs/naming-plan.md` §2 — `material = "PTQ10:IT-4F"` builds a path segment with a colon, which fails on Windows and passes on Linux~~ **fixed 2026-09-05**: `RunMetadata.identity_in_name()` slugs all three identity fields into the name at `NAME_MAX = 24` and `as_dict()` keeps them verbatim. Brought forward ahead of the grid because `PUT /session/sample` made it typeable rather than only editable; `GET /session`'s `sample_in_name` is what the console previews |
 | M6 | ~~`docs/naming-plan.md` rule 1 — the journal carries the sample block and the temperature triple on every node, **and `GET /runs` exposes them on each row**; writing them into `SessionStarted` alone leaves `run_index()` emitting summaries with no identity~~ **built 2026-09-04**, in the service: `RunQueued.sample`, the triple from `RunContext.temperature()` on every node, and one `node_record` shape from both `GET /runs/{id}` sources |
 | M6 | ~~a Round 3 design pass on results, with the user, in Claude Design~~ **R2·3 built as it stands, 2026-09-04**, its two open questions settled in the code; the iteration with the user is still to be had, on the built tab |
 | M3 | ~~nothing — the chart foundation is new code with no service dependency~~ **built 2026-09-03**; nothing in the service changed |

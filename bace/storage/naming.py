@@ -49,42 +49,38 @@ _UNSAFE = re.compile("[\x00-\x1f" + re.escape(_PATH_UNSAFE) + "]+")
 _TO_DASH = re.compile(r"[\s_]+")
 """Whitespace, and `_` -- the field separator, which a comment must not forge."""
 
+NAME_MAX = 24
+"""Characters of `sample`, `material` and `pixel` the folder name will carry,
+each.
+
+`docs/naming-plan.md` asked for "a shorter limit than a comment's 64" and
+measured its collision table at 24; this is that number. It is nearly three
+times the archive's longest identity field (`PTQ10IT4F`, nine) and half again
+the sixteen that all three of `s4_PTQ10IT4F_pxa` take together -- which is the
+figure `COMMENT_MAX` below budgets the rest of the name against -- so it
+truncates nothing anybody has actually typed. What it is for is the other end:
+a text field in the console (`PUT /session/sample`) can hold a pasted sentence,
+and an unbounded path segment is how a run folder reaches Windows' limit.
+
+**`slug` is many-to-one, so a limit can make two identities one name.**
+`PTQ10IT4F-batch-2026-08-A` and `…-B` both reduce to
+`PTQ10IT4F-batch-2026-08`, and two batches of one material differing after
+character 24 is an ordinary thing for a lab to have. Nothing is lost -- every
+field is verbatim in `as_dict()`, and since `docs/naming-plan.md` rule 1 the
+console reads the record and never parses a name -- but the *name* stops
+telling them apart, so the console shows what a value will be filed as while
+it is being typed rather than after the run. What it does not yet do is make
+the **directories** unique; that is naming-plan's own next section, it is a
+hazard that predates this (two runs whose metadata matches to the second
+already land in one folder, and the J-V path opens its HDF5 with mode "w"),
+and it wants all three writers changed at once."""
+
 COMMENT_MAX = 64
 """Characters of comment the folder name will carry. The rest of a name runs
 to about 66 (`s4_PTQ10IT4F_pxa_290K_1020mVLED_906mVVOC_offsetcorr_<stamp>`)
 and the longest file inside to about 40, which leaves this much before a run
 under a `runs/` directory a few levels deep approaches Windows' 260-character
 path limit."""
-
-
-def unsafe_in_name(text: str) -> str:
-    """The characters in `text` that a path segment cannot hold, as a string.
-
-    The ones `slug` *deletes* -- `<>:"/|?*`, the backslash, and the control
-    characters -- as against the ones it turns into a dash (whitespace and
-    `_`), which make an ugly folder name and not an impossible one. The
-    difference matters because only one of them is worth refusing: `sample =
-    "s4 pixel a"` is a directory with spaces in it, and `sample = "a/b"` is
-    two directories.
-
-    `sample`, `material` and `pixel` reach `folder_name` **raw** -- only the
-    comment is slugged -- so nothing below this turns one of these into a
-    single segment. `docs/naming-plan.md` proposes reducing all three with
-    `slug()` on the way in, which would settle it for every source at once;
-    until that is decided, this is what lets a caller refuse the values that
-    are not merely ugly.
-    """
-    return "".join(sorted({c for c in text if c in _PATH_UNSAFE or ord(c) < 0x20}))
-
-
-def traverses(text: str) -> bool:
-    """Whether `text` is a path segment that walks up out of its folder.
-
-    `..` is not an unsafe *character* and every check built out of a character
-    class misses it -- `sample = "../../etc"` passes `unsafe_in_name` and
-    `folder_name` hands `os.path.join` a path two levels above `runs/`.
-    """
-    return text.strip() in {".", ".."} or text.startswith(("../", "..\\"))
 
 
 def slug(text: str, limit: int = COMMENT_MAX) -> str:
@@ -155,8 +151,30 @@ class RunMetadata:
         """`YYYYMMDD_HHMMSS`, shared by the folder and every file in it."""
         return self.started.strftime("%Y%m%d_%H%M%S")
 
+    def identity_in_name(self) -> tuple[str, str, str]:
+        """`sample`, `material`, `pixel` as the folder name carries them.
+
+        Reduced with `slug` -- whitespace and `_` become `-`, what a Windows
+        path segment may not hold is dropped, anything merely non-ASCII is
+        kept -- to `NAME_MAX` each. `as_dict()` keeps all three verbatim: the
+        same split the comment has had since it was written, and the reason
+        `material = "PTQ10:IT-4F"` can be both the true material and a legal
+        directory.
+
+        Public because the service answers with it (`GET /session`'s
+        `sample_in_name`), so the console can show what a value will be filed
+        as *while it is typed*. A second implementation of this in the browser
+        would be a second answer to that question.
+        """
+        return tuple(slug(p, NAME_MAX) for p in (self.sample, self.material, self.pixel))
+
     def folder_name(self) -> str:
-        parts = [p for p in (self.sample, self.material, self.pixel) if p]
+        # Reduced, not raw. Until 2026-09-05 these three went in as typed, so
+        # `material = "PTQ10:IT-4F"` -- the service contract's own example --
+        # built a path segment with a colon in it, which fails on the lab PC
+        # and passes on Linux, and `sample = "a/b"` was two directories.
+        # `docs/naming-plan.md` §2 carried it as a live defect.
+        parts = [p for p in self.identity_in_name() if p]
         if self.temperature_k is not None:
             parts.append(f"{self.temperature_k:g}K")
         if self.led_drive_v is not None:

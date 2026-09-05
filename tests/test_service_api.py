@@ -354,35 +354,46 @@ def test_an_unnamed_key_is_refused_with_what_is_accepted(service):
     assert r.status_code == 422 and "not a number" in r.json()["error"]
 
 
-def test_a_name_that_is_not_a_folder_name_is_refused_with_the_one_that_is(service):
-    """`docs/naming-plan.md` §2's live defect, at the door this route opened.
+def test_an_awkward_name_is_reduced_where_the_name_is_built_and_kept_where_it_matters(service):
+    """`docs/naming-plan.md` §2's live defect, closed at its source.
 
-    `sample`, `material` and `pixel` reach `folder_name()` unreduced and it
-    goes straight to `os.path.join`, so `a/b` is two directories and
-    `../../etc` is a folder above `runs/`. Editing `run.toml` could always do
-    that -- it is the operator's own file on their own machine -- but a text
-    field in the console is a different reachability, so the route closes what
-    it opens. Only what is *impossible*: a space and an underscore make a bad
-    folder name and are the console's to warn about, not this route's to
-    refuse.
+    `sample`, `material` and `pixel` reached `folder_name()` raw until
+    2026-09-05 — only the comment was slugged — so `material = "PTQ10:IT-4F"`
+    (the contract's own §4 example) built a path segment with a colon in it,
+    which fails on the lab PC and passes here, and `sample = "a/b"` was two
+    directories. All three are slugged now, at `NAME_MAX`, and every value is
+    still verbatim in the record: for a material whose real name has a colon
+    in it, that is the difference between recording it and recording somebody's
+    transcription of it.
+
+    So nothing is refused for being an awkward name. What the route owes the
+    console instead is `sample_in_name` — what the folder will actually carry —
+    so the reduction is visible while it is typed rather than in a listing
+    afterwards.
     """
-    client, _ = service
-    for value in ("a/b", "../../etc", ".."):
+    client, session = service
+    for value, filed in (("a/b", "ab"), ("../../etc", "etc"), ("s4 pixel a", "s4-pixel-a"),
+                         ("a_b", "a-b"), ("PTQ10IT4F-batch-2026-08-A", "PTQ10IT4F-batch-2026-08")):
         r = client.put("/session/sample", json={"sample": value})
-        assert r.status_code == 422, f"{value!r} was accepted"
-    # The contract's own example, which fails on the lab PC and passes here.
-    r = client.put("/session/sample", json={"material": "PTQ10:IT-4F"})
-    assert r.status_code == 422
-    # The remedy, not only the complaint -- and `slug`'s own answer, which is
-    # what the console offers as a click.
-    assert "PTQ10IT-4F" in r.json()["error"]
+        assert r.status_code == 200, r.text
+        block = r.json()["session"]
+        assert block["sample"]["sample"] == value, "verbatim in the record"
+        assert block["sample_in_name"]["sample"] == filed, f"{value!r} is filed as {filed!r}"
 
-    # Ugly is allowed, and nothing was left half applied by the refusals.
-    assert client.put("/session/sample", json={"sample": "s4 pixel a"}).status_code == 200
-    assert client.get("/session").json()["sample"] == {
-        "sample": "s4 pixel a", "material": "SIM", "pixel": "a", "temperature_k": 290.0}
-    # The comment is slugged on the way into the name, so it takes anything.
-    assert client.put("/session/sample", json={"comment": "a/b: 4 K, shutter only"}).status_code == 200
+    r = client.put("/session/sample", json={"material": "PTQ10:IT-4F"})
+    assert r.json()["session"]["sample_in_name"]["material"] == "PTQ10IT-4F"
+
+    # A field that reduces to nothing leaves the name, as an empty one does.
+    r = client.put("/session/sample", json={"sample": "///"})
+    assert r.json()["session"]["sample_in_name"]["sample"] == ""
+
+    # And what the console previews is what the run writes.
+    client.put("/session/sample", json={"sample": "s4", "material": "PTQ10:IT-4F", "pixel": "px a"})
+    run_id = client.post("/runs", json={"module": "jv", "params": {"step_v": 0.4}}).json()["run_id"]
+    wait_run(session, run_id)
+    folder = next(n["folder"] for n in client.get(f"/runs/{run_id}").json()["nodes"].values())
+    assert os.path.basename(folder).startswith("s4_PTQ10IT-4F_px-a_")
+    assert ":" not in os.path.basename(folder), "a colon is not a Windows path segment"
 
 
 def test_a_run_keeps_the_identity_it_was_queued_under(service):

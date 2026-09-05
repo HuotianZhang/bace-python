@@ -83,7 +83,7 @@ from ..experiment.rig import RigConfig
 from ..experiment.transient import RunConfig
 from ..experiment.wire import to_wire
 from ..params import Source
-from ..storage.naming import slug, traverses, unsafe_in_name
+from ..storage.naming import RunMetadata
 from . import pipeline
 from .executor import run_pipeline
 from .journal import (Journal, add_curve, axis_result, count_shot, finished_result, jv_result,
@@ -453,52 +453,6 @@ def backlog_of(sink: Any) -> int:
     return sink.qsize() if numbered is None else numbered
 
 
-NAME_FIELDS = ("sample", "material", "pixel")
-"""The `[sample]` keys `RunMetadata.folder_name` puts into the path **raw** --
-only the comment is slugged on the way in."""
-
-
-def _check_name_fields(patch: Mapping[str, Any]) -> None:
-    """Refuse an identity that would not be a folder name, or `ValueError`.
-
-    `folder_name()` joins `sample`, `material` and `pixel` unreduced and the
-    result goes straight to `os.path.join` (`storage/recorder.py`), so
-    `sample = "a/b"` is two directories and `sample = "../../etc"` is a folder
-    two levels above `runs/`. That was reachable before this route only by
-    editing `run.toml`, which is the operator's own file on their own machine;
-    `PUT /session/sample` makes it a text field, so the route closes what it
-    opens rather than waiting for `naming-plan.md`'s `slug()` question to be
-    settled for every source at once.
-
-    **Only what is impossible, never what is ugly.** A space or an underscore
-    makes a bad folder name -- `naming-plan.md` §"Fields collide" -- and the
-    console warns about both at the field; refusing them here would be
-    stricter than `run.toml` is and would block a value somebody has a reason
-    for. What is refused is what `slug` would *delete*: a path separator, the
-    Windows-reserved characters, a control character, or a `..`.
-    """
-    for key in NAME_FIELDS:
-        value = patch.get(key)
-        if value is None:
-            continue
-        text = str(value)
-        bad = unsafe_in_name(text)
-        if bad:
-            # The remedy, not only the complaint: `slug` is what the comment
-            # already goes through, and for a value whose only problem is
-            # these characters it is exactly "drop them". The archive spells
-            # the contract's own `PTQ10:IT-4F` as `PTQ10IT4F` because
-            # somebody did this by hand while typing.
-            raise ValueError(
-                f"[sample] {key}: {text!r} cannot be a folder name -- "
-                f"{' '.join(repr(c) for c in bad)} is not allowed in a path segment, and this "
-                f"goes into every folder name this session writes, unreduced. Try {slug(text)!r}.")
-        if traverses(text):
-            raise ValueError(
-                f"[sample] {key}: {text!r} would put the run's folder outside {'{out}'} -- "
-                "the name is one path segment, not a path.")
-
-
 # -- the session --------------------------------------------------------------
 class Session:
     """One service process lifetime. See the module docstring."""
@@ -667,10 +621,25 @@ class Session:
                 # block is the only thing in the session with two layers and
                 # no `ParamSet` to render them.
                 "sample_file": dict(self._sample_file),
+                # The three identity fields as a folder name carries them:
+                # `slug`ged to `NAME_MAX`, which is where `PTQ10:IT-4F`
+                # becomes `PTQ10IT-4F`. The console shows what a value will be
+                # filed as while it is being typed, and reducing it a second
+                # time in the browser would be a second answer to that.
+                "sample_in_name": dict(zip(("sample", "material", "pixel"),
+                                           self._metadata_for_name().identity_in_name())),
                 "out": self.out, "rig_toml": self.rig_path, "run_toml": self.run_path,
                 "fingerprint": self.bench.fingerprint, "journal": self.journal.path,
                 "errors": len(self.errors),
                 "last_error": self.errors[-1] if self.errors else None}
+
+    def _metadata_for_name(self) -> RunMetadata:
+        """The session's identity as `storage.naming` sees it -- for
+        `sample_in_name` only, so the reduction the console shows is the one
+        `folder_name()` will actually perform."""
+        s = self.catalogue.sample
+        return RunMetadata(sample=str(s.get("sample", "")), material=str(s.get("material", "")),
+                           pixel=str(s.get("pixel", "")))
 
     def set_sample(self, values: Mapping[str, Any]) -> dict:
         """`PUT /session/sample` -- name the device from the console.
@@ -688,6 +657,15 @@ class Session:
         opened with -- the same "the way back is a `null`" the parameter
         layers use, and the reason the console can offer four fields without
         silently dropping a `temperature_k` somebody typed into the file.
+
+        **Nothing here is refused for being an awkward name.** Since
+        2026-09-05 `folder_name()` reduces all three identity fields with
+        `slug()`, so a colon, a path separator and a `..` are all handled
+        where the name is built rather than at this door -- and the value
+        stays verbatim in the metadata, which for `material = "PTQ10:IT-4F"`
+        is the difference between recording the material and recording a
+        transcription of it. `sample_in_name` in the answer is what the folder
+        will carry, so the console can say so as it is typed.
 
         **It binds the runs queued after it and no others.** Every run takes
         its own copy at submit (`RunRecord.sample`, `RunQueued.sample`) and
@@ -707,7 +685,6 @@ class Session:
         # must not leave the block half applied. Its return is discarded --
         # `None` means "back to the file" here and `coerce_sample` drops it.
         coerce_sample(patch)
-        _check_name_fields(patch)
         with self._lock:
             before = dict(self.catalogue.sample)
             merged = dict(before)

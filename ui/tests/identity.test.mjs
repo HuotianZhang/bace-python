@@ -42,33 +42,55 @@ test('a partly named device is named', () => {
   assert.equal(model.stem, 's4');
 });
 
-test('an ugly folder name is warned about and an impossible one is refused', () => {
-  // `naming-plan.md` §"Fields collide" lists three, and they are two kinds of
-  // thing. Ugly: `a_b` forges a field boundary, `s4 pixel a` puts a space in a
-  // directory name (the 2026-09-01 bug). Nothing refuses either — `run.toml`
-  // may hold them — so the warning is the whole of the protection.
-  assert.equal(nameHazard('a_b').level, 'warn');
-  assert.match(nameHazard('a_b').text, /underscore/);
-  assert.equal(nameHazard('s4 pixel a').level, 'warn');
-  assert.equal(nameHazard('s4'), null);
-  assert.equal(nameHazard(''), null, 'an empty field is not named, not badly named');
+test('a value the folder name will spell differently says so, and why', () => {
+  // Since 2026-09-05 all three identity fields are slugged into the name
+  // (`naming-plan.md` §2 — `material = "PTQ10:IT-4F"`, the contract's own
+  // example, was a colon in a Windows path segment). Nothing is an error any
+  // more: the metadata keeps the value and the name is reduced, the same
+  // split the comment has always had. What the operator needs is to see it.
+  //
+  // The reduction itself is the service's (`sample_in_name`) — a second
+  // `slug()` here would be a second answer to "what will this be called".
+  assert.equal(nameHazard('s4', 's4'), null, 'the ordinary case says nothing');
+  assert.equal(nameHazard('', ''), null);
 
-  // Impossible, and the service refuses all three: two directories, a colon
-  // that fails on the lab PC and passes here, and a climb out of `runs/`.
-  assert.equal(nameHazard('a/b').level, 'refused');
-  assert.equal(nameHazard('../../etc').level, 'refused');
-  assert.equal(nameHazard('..').level, 'refused');
-  const colon = nameHazard('PTQ10:IT-4F');
-  assert.equal(colon.level, 'refused');
-  // The remedy, not only the complaint — and the same string `slug()` gives,
-  // which is what the service's own refusal names.
-  assert.equal(colon.suggest, 'PTQ10IT-4F');
-  assert.equal(nameHazard('a/b').suggest, 'ab');
+  const colon = nameHazard('PTQ10:IT-4F', 'PTQ10IT-4F');
+  assert.equal(colon.filed, 'PTQ10IT-4F');
+  assert.match(colon.why, /cannot hold that character/);
 
-  const model = identityModel(session({ sample: 's4 pixel a', material: 'a/b', comment: 'a/b: fine' }));
-  assert.deepEqual(model.hazards.map((r) => r.name), ['sample', 'material'],
-    'the comment is slugged on the way in, so it is never one');
-  assert.deepEqual(model.refused.map((r) => r.name), ['material']);
+  assert.match(nameHazard('s4 pixel a', 's4-pixel-a').why, /space/);
+  assert.match(nameHazard('a_b', 'a-b').why, /underscore/);
+
+  // The one that matters most, and the one the character rules cannot
+  // explain: two batches differing after character 24 are one folder name.
+  const long = nameHazard('PTQ10IT4F-batch-2026-08-A', 'PTQ10IT4F-batch-2026-08');
+  assert.equal(long.why, null);
+  assert.match(long.text, /too long/);
+
+  // Reduced to nothing: the field leaves the name entirely.
+  const gone = nameHazard('///', '');
+  assert.equal(gone.filed, '');
+  assert.match(gone.text, /left out of the name/);
+});
+
+test('the folder preview is what the folder will say, not what was typed', () => {
+  const state = {
+    session: {
+      sample: { sample: 's4', material: 'PTQ10:IT-4F', pixel: 'px a' },
+      sample_file: {},
+      sample_in_name: { sample: 's4', material: 'PTQ10IT-4F', pixel: 'px-a' },
+    },
+  };
+  const model = identityModel(state);
+  assert.equal(model.stem, 's4_PTQ10IT-4F_px-a');
+  assert.equal(model.chip, 's4 · PTQ10:IT-4F · px a', 'the chip is the identity as recorded');
+  assert.deepEqual(model.hazards.map((r) => r.name), ['material', 'pixel']);
+});
+
+test('a service too old to answer with the reduction is drawn as it would write it', () => {
+  const model = identityModel(session({ sample: 's4', material: 'M' }));
+  assert.equal(model.stem, 's4_M');
+  assert.equal(model.hazards.length, 0);
 });
 
 test('temperature_k is not a field this panel offers', () => {
@@ -104,23 +126,6 @@ test('SampleNamed replaces the block, so a second console is not left filing und
   assert.equal(model.rows.find((r) => r.name === 'sample').value, 's7');
   assert.equal(model.rows.find((r) => r.name === 'operator').value, '',
     'a replacement, not a merge — the merge happened in the service');
-});
-
-test('a refused value stays in its field, with the remedy beside it', () => {
-  // It never reached the block — the service would not take it — so a model
-  // drawn from the block alone would clear the operator's typing on the very
-  // re-render the refusal causes, and never draw the `use …` that exists for
-  // this case. The chip and the folder stem stay the service's: nothing will
-  // ever be filed under a name it refused.
-  const state = session({ sample: 's4', material: '' }, { sample: '', material: '' });
-  const model = identityModel(state, { rejected: { name: 'material', value: 'PTQ10:IT-4F' } });
-  const material = model.rows.find((r) => r.name === 'material');
-  assert.equal(material.value, 'PTQ10:IT-4F', 'still in the field');
-  assert.equal(material.refused, true);
-  assert.equal(material.hazard.level, 'refused');
-  assert.equal(material.hazard.suggest, 'PTQ10IT-4F');
-  assert.equal(model.stem, 's4', 'the stem is what the service holds, not what it refused');
-  assert.equal(model.chip, 's4');
 });
 
 test('identityOf is the chip the bar has always drawn', () => {

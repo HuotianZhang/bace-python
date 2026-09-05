@@ -56,53 +56,53 @@ export const IDENTITY_FIELDS = [
 ];
 
 /**
- * What a path segment may not hold — `storage.naming._PATH_UNSAFE`, and the
- * control characters. Kept in step with that constant by hand; the service
- * refuses the same set, so a drift here costs a refusal the operator did not
- * see coming, never a bad folder.
+ * Why a value is not the string it will be filed as.
+ *
+ * The *what* comes from the service (`sample_in_name` — `slug()` at
+ * `NAME_MAX`, which is what `folder_name()` will actually do); this is only
+ * the reason, in the words `naming-plan.md` §"Fields collide" uses. Splitting
+ * them that way is deliberate: a second `slug()` in the browser would be a
+ * second answer to "what will this be called", and the two would drift on the
+ * case nobody tested.
  */
-const UNSAFE = /[<>:"/|?*\\\x00-\x1f]/g;
+const REASONS = [
+  [/[<>:"/|?*\\]/, 'a folder name cannot hold that character'],
+  [/[\x00-\x1f]/, 'a folder name cannot hold a control character'],
+  [/\s/, 'a space would be a space in a directory name'],
+  [/_/, 'an underscore forges a field boundary in the name'],
+];
 
 /**
- * What is wrong with a value that goes into the folder name, at two levels.
+ * What a field will be filed as, and why it differs — or `null` when it does
+ * not.
  *
- * `naming-plan.md` §"Fields collide" lists three, and they are not the same
- * kind of thing — which is the whole point of separating them here:
- *
- *   * **refused** — `a/b` is two directories, `../..` climbs out of `runs/`,
- *     and `PTQ10:IT-4F` (the contract's own example) is a colon in a Windows
- *     path segment, which fails on the lab PC and passes here. The service
- *     refuses these, so the panel says so before the `PUT` and offers the
- *     value it *would* take — the console's standing rule that a refusal
- *     naming a remedy gets a button for it.
- *   * **warn** — a space makes a directory with a space in it (the
- *     2026-09-01 bug), an underscore forges a field boundary in a name whose
- *     fields are separated by `_`. Ugly, not impossible, and nothing refuses
- *     them: `run.toml` may hold either and the operator may have a reason,
- *     so this is a warning and the whole of the protection.
- *
- * `suggest` is the unsafe characters dropped, which is what `slug()` does to
- * a value whose only problem is those characters — so it is the same string
- * the service's own refusal names.
+ * Until 2026-09-05 nothing reduced these three: `sample`, `material` and
+ * `pixel` reached `folder_name()` raw, so `material = "PTQ10:IT-4F"` — the
+ * contract's own example — put a colon in a Windows path segment, which fails
+ * on the lab PC and passes on Linux (`naming-plan.md` §2). They are slugged
+ * now, so nothing here is an error: the value is kept verbatim in the
+ * metadata and reduced in the name, exactly as the comment has always been.
+ * What the operator needs is to *see* the reduction, and to see it while they
+ * are typing rather than in a folder listing afterwards — most of all when
+ * the limit bites, because `PTQ10IT4F-batch-2026-08-A` and `…-B` are the
+ * same 24 characters and a lab with two batches would otherwise find out from
+ * the archive.
  */
-export function nameHazard(value) {
+export function nameHazard(value, inName) {
   const text = String(value == null ? '' : value);
-  if (!text) return null;
-  if (text.trim() === '.' || text.trim() === '..' || text.startsWith('../')) {
-    return { level: 'refused', text: 'a name is one path segment, not a path out of the run folder' };
-  }
-  const bad = [...new Set(text.match(UNSAFE) || [])];
-  if (bad.length) {
-    return {
-      level: 'refused',
-      text: `${bad.map((c) => (c.charCodeAt(0) < 0x20 ? 'a control character' : `"${c}"`)).join(' ')} `
-        + 'cannot be in a folder name',
-      suggest: text.replace(UNSAFE, ''),
-    };
-  }
-  if (/\s/.test(text)) return { level: 'warn', text: 'a space becomes a space in a directory name' };
-  if (text.includes('_')) return { level: 'warn', text: 'an underscore forges a field boundary in the name' };
-  return null;
+  const filed = String(inName == null ? '' : inName);
+  if (!text || filed === text) return null;
+  const reason = REASONS.find(([re]) => re.test(text));
+  return {
+    filed,
+    // Reduced to nothing: the field drops out of the name altogether, which
+    // is worth saying plainly rather than showing an empty suggestion.
+    text: filed
+      ? (text.length > filed.length && !reason
+        ? `too long for a name — filed as` : `filed as`)
+      : 'reduces to nothing, so it is left out of the name',
+    why: reason ? reason[1] : null,
+  };
 }
 
 /** `s4 · PTQ10IT4F · pxa`, or null — what the bar's chip has always shown. */
@@ -121,36 +121,32 @@ export function identityOf(sample) {
  * is the temperature, the LED level, the V_oc and the stamp, none of which is
  * this panel's.
  */
-export function identityModel(state, { rejected = null } = {}) {
+export function identityModel(state) {
   const session = (state && state.session) || {};
   const sample = session.sample || {};
   const file = session.sample_file || {};
+  // What the folder will carry, the service's own reduction. Absent from a
+  // service older than this, in which case a field is shown as typed and the
+  // stem is what that service would have written.
+  const inName = session.sample_in_name || sample;
   const rows = IDENTITY_FIELDS.map((spec) => {
-    const refused = rejected && rejected.name === spec.name ? rejected : null;
-    // What the service refused is not in the block — it never got there — so
-    // a panel drawn from the block alone would throw the operator's typing
-    // away and, worse, never draw the hazard or the remedy for the one case
-    // they exist for. The refused value stands in its own field until it is
-    // replaced by one the service takes.
-    const value = refused ? String(refused.value)
-      : sample[spec.name] == null ? '' : String(sample[spec.name]);
+    const value = sample[spec.name] == null ? '' : String(sample[spec.name]);
     const was = file[spec.name] == null ? '' : String(file[spec.name]);
     return {
       ...spec,
       value,
       file: was,
-      refused: Boolean(refused),
       // Typed here rather than opened with. The way back is a `null`, which
       // the service resolves to the file's value — so the reset is offered on
       // exactly the rows where it would change something.
       typed: value !== was,
-      hazard: spec.in_name === true ? nameHazard(value) : null,
+      hazard: spec.in_name === true ? nameHazard(value, inName[spec.name]) : null,
     };
   });
-  // The chip and the stem are what the *service* holds: a refused value names
-  // nothing and no run will ever be filed under it.
+  // The chip is the identity as recorded; the stem is the identity as the
+  // folder will spell it, which after `slug()` is not always the same string.
   const named = identityOf(sample);
-  const stem = [sample.sample, sample.material, sample.pixel].filter(Boolean).join('_');
+  const stem = [inName.sample, inName.material, inName.pixel].filter(Boolean).join('_');
   return {
     rows,
     named,
@@ -161,10 +157,8 @@ export function identityModel(state, { rejected = null } = {}) {
     // `folder_name` starts with the temperature when there is no identity, so
     // an unnamed session's folders open on `290K_…` and carry no device.
     preview: stem ? `${stem}_…` : '290K_… — no device in the name',
-    /** Anything worth a colour on the chip: nothing named, or a name that breaks a path. */
+    /** The fields the folder name will not spell the way they were typed. */
     hazards: rows.filter((r) => r.hazard),
-    /** The ones the service will refuse, which is what blocks the chip red. */
-    refused: rows.filter((r) => r.hazard && r.hazard.level === 'refused'),
   };
 }
 
@@ -181,14 +175,14 @@ export function identityModel(state, { rejected = null } = {}) {
  * in a millisecond on localhost — the measured case `views/bench.js` guards
  * against is a scan's worth of frames, and nothing here moves with a run.
  */
-export function renderIdentity(el, state, { open, onSet, onClose, status = null, rejected = null } = {}) {
-  const model = identityModel(state, { rejected });
+export function renderIdentity(el, state, { open, onSet, onClose, status = null } = {}) {
+  const model = identityModel(state);
   el.hidden = !open;
   if (!open) {
     if (el.__key !== undefined) { el.__key = undefined; el.textContent = ''; }
     return model;
   }
-  keyed(el, JSON.stringify([model, status, rejected]), () => [
+  keyed(el, JSON.stringify([model, status]), () => [
     h('div.id-head',
       h('span.cn', 'what is mounted'),
       h('span.cs', 'the session’s [sample] block — PUT /session/sample. '
@@ -223,7 +217,7 @@ function identityRow(row, onSet) {
   });
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); });
   const hazard = row.hazard;
-  return h('div.id-row' + (hazard ? (hazard.level === 'refused' ? '.bad' : '.warn') : ''),
+  return h('div.id-row' + (hazard ? '.warn' : ''),
     h('span.l', { text: row.name },
       row.in_name === true ? h('i', 'in the name') : row.in_name === 'slug' ? h('i', 'slugged into the name') : null),
     input,
@@ -239,16 +233,19 @@ function identityRow(row, onSet) {
         : null),
     h('div.doc', h('span', { text: row.doc }),
       hazard
-        ? h('span', { class: 'id-warn ' + hazard.level },
-          h('span', { text: `⚠ ${hazard.text}` }),
-          // A refusal that names a remedy gets a button for it, or the
-          // operator is told what to do and given no way to do it — the same
-          // rule the chain strip's `status.offer` follows.
-          hazard.suggest
+        ? h('span.id-warn',
+          h('span', { text: `${hazard.text}` }),
+          hazard.filed ? h('b', { text: hazard.filed }) : null,
+          hazard.why ? h('i', { text: `— ${hazard.why}` }) : null,
+          // The name as typed is kept in the metadata, so this is not an
+          // error to fix; it is offered because a lab whose two batches
+          // differ after character 24 would otherwise find out from the
+          // archive. One click and the record says what the folder says.
+          hazard.filed
             ? h('button.link', {
-              title: `use ${hazard.suggest}`,
-              onclick: () => onSet && onSet(row.name, hazard.suggest),
-            }, `use ${hazard.suggest}`)
+              title: `type ${hazard.filed} instead, so the record and the folder agree`,
+              onclick: () => onSet && onSet(row.name, hazard.filed),
+            }, 'use it')
             : null)
         : null));
 }

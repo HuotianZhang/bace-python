@@ -203,27 +203,27 @@ Five decisions, and the input box is none of them:
   the next run will be filed under — `s4_PTQ10IT4F_pxa_…`, or, with nothing
   named, `290K_… — no device in the name`. The operator is typing a filename;
   the panel says so.
-- **It separates the ugly from the impossible**, because `naming-plan.md`
-  §"Fields collide" lists both and they are not the same thing. *Ugly*:
-  `sample = "a_b"` forges a field boundary, `sample = "s4 pixel a"` puts a
-  space in a directory name — the 2026-09-01 bug. Nothing refuses either,
-  `run.toml` may hold them, so the warning at the field is the whole of the
-  protection. *Impossible*: `sample = "a/b"` is two directories,
-  `"../../etc"` is a folder above `<out>`, and `material = "PTQ10:IT-4F"` —
-  **the contract's own example** — is a colon in a Windows path segment, which
-  fails on the lab PC and passes here. Those the route refuses, with the value
-  it would take instead (`slug()`'s own answer, offered in the panel as a
-  click: *"⚠ ":" cannot be in a folder name · use PTQ10IT-4F"*).
+- **It shows how the name will be spelled, not just what was typed.**
+  `naming-plan.md` §2 had carried a live defect since 2026-09-04: `sample`,
+  `material` and `pixel` reached `folder_name()` raw, so `sample = "a/b"` was
+  two directories, `"../../etc"` climbed out of `<out>`, and
+  `material = "PTQ10:IT-4F"` — **the contract's own example** — put a colon in
+  a Windows path segment, which fails on the lab PC and passes here. That was
+  reachable only by editing `run.toml`; adding a text field to the console is
+  a different reachability, and a route that opens a door without closing it
+  is a regression. So the plan's own remedy was brought forward with the
+  feature: all three are slugged into the name at `NAME_MAX = 24`, and kept
+  verbatim in the record — for a material whose real name has a colon, the
+  difference between recording it and recording a transcription of it.
 
-  That last part was not optional. `naming-plan.md` §2 has carried this defect
-  since 2026-09-04 and it was reachable only by editing `run.toml` — the
-  operator's own file, on their own machine. Adding a text field to the
-  console is a different reachability, and a route that opens one without
-  closing it is a regression, so the refusal is part of the feature rather
-  than a follow-up. **What is still open is that file's own remedy**: reducing
-  all three fields with `slug()` inside `folder_name()`, which would settle it
-  for `run.toml` too and is what its "always nine parts" needs. It changes
-  names on disk and wants a length limit chosen, so it is not taken here.
+  The console's job is then what it always was: make the consequence visible.
+  The service answers with the reduced block (`sample_in_name`), the panel
+  previews the stem from it, and a field the name will spell differently says
+  so with the reason and a one-click `use it` — including the case no
+  character rule explains, `PTQ10IT4F-batch-2026-08-A` and `…-B` being one
+  folder name at 24 characters. A lab with two batches finds that out while
+  typing rather than from the archive.
+
 - **`temperature_k` is not offered**, though the route accepts it. `run.toml`'s
   own comment (2026-09-04) says why: every recipe said 290, and a run at 220 K
   was filed as "290 K, typed". A field here would rebuild that defect with a
