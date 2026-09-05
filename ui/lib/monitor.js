@@ -453,7 +453,7 @@ function actionButtons(model, { onStop, onAbort, abortArmed, status }) {
   if (status) kids.push(h('span', { class: 'mon-status ' + (status.level || ''), text: status.text }));
   const stop = model.stop;
   if (stop.canCancel) {
-    kids.push(h('button.btns', { onclick: () => onStop && onStop(model.run_id, 'after_shot'), title: 'POST /runs/{id}/stop — a queued run is cancelled' }, 'Cancel'));
+    kids.push(h('button.btns', { onclick: () => onStop && onStop(model.run_id, 'after_shot'), title: 'cancel this run before it starts' }, 'Cancel'));
   } else {
     kids.push(h('button.btns', {
       disabled: !stop.canStop || null,
@@ -486,7 +486,7 @@ function queueRow(queued, status, onStop) {
         h('span', { title: q.run_id, text: `${q.position} · ${q.label}` }),
         answer ? h('span', { class: 'mon-status ' + (answer.level || ''), text: answer.text }) : null,
         h('button.btns', {
-          title: 'POST /runs/{id}/stop — a run the worker has not picked up is cancelled',
+          title: 'cancel this run before it starts',
           onclick: () => onStop && onStop(q.run_id, 'after_shot'),
         }, 'Cancel'));
     }),
@@ -520,7 +520,7 @@ function promptForm(model, p, onResume) {
     h('span.mon-reading'),
     h('label.mon-field', h('span', 'temperature_k'), temperature, h('i', 'K')),
     h('label.mon-field', note),
-    h('button.btnp', { onclick: submit, title: 'POST /runs/{id}/resume — answers the pause that is open and no other' }, 'Resume'),
+    h('button.btnp', { onclick: submit, title: 'answers the pause that is open and no other' }, 'Resume'),
   ];
 }
 

@@ -106,7 +106,7 @@ export function renderInstruments(model, ctx) {
       h('span.zt', 'Instruments'),
       h('span', { style: { flex: '1' } }),
       h('button.btnd', {
-        title: busy ? 'abort the run and park — the chain strip asks first' : 'POST /bench/actions/park — outputs off, shutter shut, relay parked',
+        title: busy ? 'abort the run and park — the chain strip asks first' : 'outputs off, shutter shut, relay parked',
         onclick: () => ctx.park(),
       }, 'Park')),
     model.rows.map((row) => h('div.irow', { class: row.inferred ? 'inferred' : '' },
@@ -117,7 +117,7 @@ export function renderInstruments(model, ctx) {
           class: p.on ? 'on' : '',
           'aria-pressed': p.on ? 'true' : 'false',
           disabled: busy || null,
-          title: busy ? 'a run holds the worker; every action but park answers 409' : `POST /bench/actions/${p.action}`,
+          title: busy ? 'a run holds the bench; only Park is allowed until it ends' : `${row.label} → ${p.label}`,
           onclick: () => { if (!p.on) ctx.act(p.action, p.args); },
         }, p.label))),
       row.levels ? levels(row, ctx) : h('span'))));

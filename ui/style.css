@@ -284,7 +284,9 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
 
 /* -- the view ------------------------------------------------------------- */
 .view { flex: 1 1 auto; overflow: auto; padding: 16px 18px 40px; }
-.view h1 { font-size: 17px; margin: 0 0 2px; }
+.view h1 { font-size: 17px; margin: 0 0 12px; }
+.view h1 .sub { font-family: var(--mono, monospace); font-weight: normal; font-size: 11px; color: var(--grey); margin-left: 12px; letter-spacing: 0; }
+.chart-note .path { border-bottom: 1px dotted var(--grey); cursor: help; }
 .view .lede { color: var(--grey); margin: 0 0 16px; max-width: 74ch; }
 
 .card {

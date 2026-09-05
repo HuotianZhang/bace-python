@@ -73,7 +73,7 @@ test('a live shot says it is decimated, and where the full precision is', () => 
   const shot = liveRun().lastShot;
   const model = transientModel(shot);
   assert.ok(model.notes.some((n) => /1 in 5 of 4000/.test(n)));
-  assert.ok(model.notes.some((n) => /runs\/\{id\}\/data/.test(n)));
+  assert.ok(model.notes.some((n) => /full precision/.test(n)), 'says where the full precision is, in operator terms (#38)');
 });
 
 test('a shot with no arrays states the absence rather than drawing an empty chart', () => {

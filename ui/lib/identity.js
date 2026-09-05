@@ -190,7 +190,7 @@ export function renderIdentity(el, state, { open, onSet, onClose, status = null 
   keyed(el, JSON.stringify([model, status]), () => [
     h('div.id-head',
       h('span.cn', 'what is mounted'),
-      h('span.cs', 'the session’s [sample] block — PUT /session/sample. '
+      h('span.cs', 'the session’s [sample] block. '
         + 'It names the runs queued after it; anything already queued keeps the name it has.'),
       h('span', { style: { flex: '1' } }),
       status ? h('span', { class: 'id-status ' + (status.level || ''), text: status.text }) : null,

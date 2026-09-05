@@ -68,8 +68,8 @@ function header(model, ctx, busy, blocked) {
     const danger = action.action === 'led-off';
     buttons.push(h('button' + (danger ? '.btnd' : '.btns'), {
       disabled: busy || null,
-      title: busy ? 'a run holds the worker; every action but park answers 409'
-        : `POST /bench/actions/${action.action}`,
+      title: busy ? 'a run holds the bench; only Park is allowed until it ends'
+        : `${action.label} — acts on the bench now`,
       onclick: () => ctx.act(model, action),
     }, action.label));
   }
@@ -321,7 +321,7 @@ function provenance(spec, ctx, model, editable) {
       ? h('button.link.undo', {
         title: spec.node
           ? 'back to the bench — drop this node’s override, the value falls back to the module as it stands on the bench'
-          : 'PUT null — drop the edit and fall back to the layer below',
+          : 'drop the edit — the value falls back to the layer below',
         'aria-label': spec.node ? 'back to the bench' : 'reset',
         onclick: () => ctx.edit(model.name, { [spec.name]: null }),
       }, '↺')
@@ -414,7 +414,7 @@ function rangeProvenance(specs, ctx, model) {
     h('span.tag.src-' + top.source, { title: `${which} — ${top.detail || top.source}`, text: top.source }),
     edited.length
       ? h('button.link', {
-        title: `PUT null for ${edited.map((s) => s.name).join(', ')}`,
+        title: `drop the edits to ${edited.map((s) => s.name).join(', ')} — each falls back to the layer below`,
         onclick: () => ctx.edit(model.name, Object.fromEntries(edited.map((s) => [s.name, null]))),
       }, 'reset')
       : null);

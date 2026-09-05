@@ -157,8 +157,8 @@ function switchRow(model, { onToggle, onInterval }) {
   });
   const title = model.available === false
     ? model.reason
-    : model.running ? 'DELETE /monitors/power — the thread stops; the trace stays'
-      : 'POST /monitors/power — a thread in the service reads the meter at this interval, whether or not this page is open';
+    : model.running ? 'stop reading the meter — the trace stays'
+      : 'the service reads the meter at this interval, whether or not this page is open';
   return [
     h('label.pw-switch', { title }, box, h('span', 'power monitor')),
     h('span.seg', { role: 'group', 'aria-label': 'interval' }, INTERVALS.map((s) => h('button.opt', {
@@ -211,11 +211,11 @@ function controls(model, { onWindow, onChart, onZero, onClear, onExportCsv, onEx
       onclick: () => onZero && onZero(!model.fromZero) }, 'from 0'),
     h('button.btng', { class: model.chart ? 'on' : '', title: 'show or hide the trace',
       onclick: () => onChart && onChart(!model.chart) }, model.chart ? 'trace ▾' : 'trace ▸'),
-    h('button.btns', { title: 'GET /monitors/power/history.csv — every reading the service holds, not only what this page saw',
+    h('button.btns', { title: 'every reading the service holds, not only what this page saw',
       disabled: !model.count || null, onclick: () => onExportCsv && onExportCsv() }, 'Export CSV'),
     h('button.btns', { title: 'the trace on screen, as an SVG file',
       disabled: !model.points.length || !model.chart || null, onclick: () => onExportSvg && onExportSvg() }, 'Export SVG'),
-    h('button.btns', { title: 'DELETE /monitors/power/history — forget the readings held; the journal keeps them',
+    h('button.btns', { title: 'forget the readings held; the journal keeps them',
       disabled: !model.count || null, onclick: () => onClear && onClear() }, 'Clear'),
   ];
 }

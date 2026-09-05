@@ -47,10 +47,7 @@ export default {
     const shot = h('div.card.mod.rig-shot');
     const readback = h('div.rig-readback');
     fill(container,
-      h('h1', 'rig'),
-      h('p.lede', 'Reference, not a work surface: the chain as it is wired, and one shot at three '
-        + 'scales with the timing measured on 2026-09-01. The drawing that follows the form is on '
-        + 'the bace card; this is what to read it against.'),
+      h('h1', 'rig', h('span.sub', 'reference — nothing here acts on the bench')),
       h('div.rig', chain, shot),
       readback);
 
@@ -66,7 +63,7 @@ export default {
       const axis = sweptAxis(state);
       keyed(shot, axis, () => [
         h('div.ch', h('span.cn', 'one shot · three scales'),
-          h('span.cs', 'swept · ', h('span.accent', { text: axis }))),
+          h('span.cs', 'timing measured 2026-09-01 · swept · ', h('span.accent', { text: axis }))),
         h('div.cb', shotSvg(axis)),
       ]);
 
