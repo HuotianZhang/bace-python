@@ -1,10 +1,22 @@
-// The power panel — the 1918-C, always on the screen, under the rail.
+// The power panel — the 1918-C, in a drawer under the rail.
 //
 // `docs/ui-rules.md` §8 names the two uses of the meter: a *spot check* (one
 // number, now, to confirm the lamp is on) and a *live monitor* that stays
-// visible while a scan runs. The rail's cell is the first. This is the
-// second, and it is shell furniture like the run monitor: whichever tab is
-// open, the switch, the number and the trace are here.
+// visible while a scan runs. The rail's cell is the first — with the last two
+// minutes drawn beside its number (`charts/power.sparkModel`). This is the
+// second: the switch, the reading with everything the meter said about it,
+// the trace with its axes and statistics, and the exports.
+//
+// It used to be shell furniture like the run monitor — on every tab, always.
+// Measured on `--sim --fast` at 1920 × 1080 that was 263 px of a 1080 px
+// screen, on all four tabs, whether or not anyone was reading the meter: the
+// fixed chrome went from 19 % to 41 % the moment the monitor was switched on,
+// and what those 263 px drew, most of the time, was one straight line and
+// `mean 0 W · min 0 · max 0 · σ 0 W`. So the panel is now opened from the
+// rail's cell and shut again, and the wish is remembered like the monitor's
+// own (`localStorage`). Nothing it can say is lost — shut, the cell carries
+// the number, the shape and the alert colour, and one click brings back the
+// axes, the σ and the exports.
 //
 // What it owes, taken from the meter's own console (`D:\1918cPowerMeter`,
 // whose driver is the one vendored under `bace/drivers/newport1918c/`):
@@ -39,7 +51,7 @@ import { powerModel, powerStats, windowPoints, WINDOWS } from './charts/power.js
 export const INTERVALS = [0.2, 0.5, 1, 2, 5];
 
 /** What the console remembers about the panel between loads. */
-export const DEFAULT_UI = { on: false, interval_s: 1, window: 'auto', chart: true, fromZero: false };
+export const DEFAULT_UI = { on: false, interval_s: 1, window: 'auto', chart: true, fromZero: false, open: false };
 
 /** `auto` shows everything until the log is longer than this, then the last of it. */
 export const AUTO_CAP_S = 7200;
@@ -59,12 +71,34 @@ export function autoWindow(log, now) {
 export const STALE_INTERVALS = 3;
 
 /**
- * The panel as one plain object.
+ * What the meter says *now*: the newest of the stream's `PowerReading` and
+ * the read-back in the bench snapshot, whichever is later. Both are watts at
+ * the meter and both carry `averaged`; neither is invented here.
  *
- * The number shown is the newest reading the console has: the stream's
- * `PowerReading` when the monitor is running, else the read-back's (`GET
- * /bench`), whichever is later. Both are watts at the meter and both carry
- * `averaged`; neither is invented here.
+ * Exported because the **rail's cell needs the same answer**, and used to
+ * have its own. It read `bench.instruments.power` alone — the read-back —
+ * and the read-back that follows a bench action is taken before the meter
+ * has settled, so the cell sat on a number from before the action until
+ * something else read the bench: measured on `--sim --fast`, a rail reading
+ * `0 W` above a panel reading `1.70 mW`, same meter, same screen, for as
+ * long as nobody touched anything. Two answers to *what is the power* is
+ * `ui-rules` §9's failure that looks like a result, and once the trace
+ * itself is drawn in that cell it is a number contradicting the line beside
+ * it. One function, so they cannot drift apart again.
+ */
+export function newestReading(state) {
+  const bench = state.bench || {};
+  const inst = (bench.instruments || {}).power || null;
+  const stream = state.power && Number.isFinite(state.power.watts) ? state.power : null;
+  const readBack = inst && inst.available && Number.isFinite(inst.watts)
+    ? { watts: inst.watts, trustworthy: inst.trustworthy, wavelength_nm: inst.wavelength_nm,
+        averaged: inst.averaged, source: 'read-back', ts: bench.read_at || 0 }
+    : null;
+  return stream && (!readBack || (stream.ts || 0) >= (readBack.ts || 0)) ? stream : readBack;
+}
+
+/**
+ * The panel as one plain object. The number is `newestReading`'s.
  */
 export function powerPanelModel(state, ui = DEFAULT_UI, { now = Date.now() / 1000 } = {}) {
   const bench = state.bench || {};
@@ -78,12 +112,7 @@ export function powerPanelModel(state, ui = DEFAULT_UI, { now = Date.now() / 100
   const points = windowPoints(log, { seconds: window.seconds, now });
   const stats = powerStats(points);
 
-  const stream = state.power && Number.isFinite(state.power.watts) ? state.power : null;
-  const readBack = inst && inst.available && Number.isFinite(inst.watts)
-    ? { watts: inst.watts, trustworthy: inst.trustworthy, wavelength_nm: inst.wavelength_nm,
-        averaged: inst.averaged, source: 'read-back', ts: bench.read_at || 0 }
-    : null;
-  const newest = stream && (!readBack || (stream.ts || 0) >= (readBack.ts || 0)) ? stream : readBack;
+  const newest = newestReading(state);
   const age = newest ? now - (newest.ts || now) : null;
   const value = newest ? {
     watts: newest.watts,
@@ -109,6 +138,9 @@ export function powerPanelModel(state, ui = DEFAULT_UI, { now = Date.now() / 100
   return {
     running,
     wanted: Boolean(ui.on),
+    // Whether the operator has the drawer open. The rail's cell is the handle;
+    // this is the same wish `ui.on` is, remembered the same way.
+    open: Boolean(ui.open),
     // Live is running *or* wanted: the wish counts, so the panel opens the
     // moment the switch is flipped rather than a round trip later. The
     // definition lives here rather than in the renderer, so `panelShape` and
@@ -150,8 +182,15 @@ export function powerPanelModel(state, ui = DEFAULT_UI, { now = Date.now() / 100
  */
 export function panelShape(model) {
   return {
+    // Shut, the panel draws nothing at all — the rail's cell carries the
+    // number and the last two minutes, and this is 263 px of every tab back.
+    // Everything below is what it draws *once opened*, unchanged.
+    open: model.open,
     collapsed: !model.live,
-    chart: model.live && model.chart,
+    // Not merely hidden: a chart built into a `display: none` box measures
+    // its container at zero width, and `frame.chart()`'s ResizeObserver would
+    // pin the model to the minimum. Shut, there is no chart to pin.
+    chart: model.open && model.live && model.chart,
     menu: {
       interval: true,
       window: model.live,
@@ -183,7 +222,7 @@ export function panelShape(model) {
 export function panelKeys(model, status) {
   return {
     switch: JSON.stringify([model.running, model.wanted, model.available]),
-    reading: JSON.stringify([model.value, model.sub, model.level, model.reason, model.live]),
+    reading: JSON.stringify([model.value, model.sub, model.level, model.reason, model.live, model.open]),
     status: JSON.stringify([status]),
     menu: JSON.stringify([model.live, model.interval_s, model.window.key, model.chart, model.fromZero,
       model.count > 0, model.points.length > 0]),
@@ -210,15 +249,28 @@ export function renderPowerPanel(el, state, ui, handlers = {}) {
       h('div.pw-chart'));
   }
   // Off: the switch, the last spot check muted, and the `⋯` — one line.
+  // Shut: not on the screen at all.
   const shape = panelShape(model);
   const key = panelKeys(model, status);
+  el.hidden = !shape.open;
+  const chartEl = el.querySelector('.pw-chart');
+  if (!shape.open) {
+    // Nothing under here is on the screen, and a `PowerReading` arrives five
+    // times a second: the reading's key moves with every one of them, and
+    // rebuilding a `<span>` nobody can see at that rate is the waste
+    // `render.test.mjs` counts. Reopening goes through `savePowerUi`, which
+    // draws — so the parts are correct the moment they are visible again.
+    // The chart is still emptied rather than left standing: `app.js`'s Export
+    // SVG serialises whatever `svg` sits under `.pw-chart`.
+    if (chartEl.__key !== undefined) { chartEl.__key = undefined; chartEl.textContent = ''; }
+    return model;
+  }
   el.classList.toggle('off', shape.collapsed);
   keyed(el.querySelector('.pw-switch-box'), key.switch, () => switchRow(model, handlers));
   keyed(el.querySelector('.pw-reading'), key.reading, () => readingEl(model, model.live));
   keyed(el.querySelector('.pw-status-box'), key.status, () => (status
     ? h('span', { class: 'pw-status ' + (status.level || ''), text: status.text }) : []));
   keyed(el.querySelector('.pw-menu-box'), key.menu, () => menu(model, shape.menu, handlers));
-  const chartEl = el.querySelector('.pw-chart');
   chartEl.hidden = !shape.chart;
   if (shape.chart) {
     keyed(chartEl, key.chart,

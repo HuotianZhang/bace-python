@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 import { createStore, insertReading, POWER_LOG_MAX } from '../lib/store.js';
 import {
   powerModel, powerStats, windowPoints, timeUnit, wattsUnit, lowerBound, statsLine, WINDOWS,
+  sparkModel, SPARK_WINDOW_S,
 } from '../lib/charts/power.js';
 import { powerPanelModel, panelShape, panelKeys, DEFAULT_UI, INTERVALS } from '../lib/power.js';
 
@@ -274,13 +275,36 @@ test('switched off, the panel is one line but nothing it recorded is out of reac
     'nor is anything else that only describes a chart that is not drawn');
 });
 
-test('running, the menu carries all of it', () => {
-  const on = powerPanelModel(stateWith({ log: trace(100), monitors: RUNNING }), { ...DEFAULT_UI, on: true }, { now: T0 + 200 });
+test('running and open, the menu carries all of it', () => {
+  const on = powerPanelModel(stateWith({ log: trace(100), monitors: RUNNING }),
+    { ...DEFAULT_UI, on: true, open: true }, { now: T0 + 200 });
   const shape = panelShape(on);
+  assert.equal(shape.open, true);
   assert.equal(shape.collapsed, false);
   assert.equal(shape.chart, true);
   assert.deepEqual(shape.menu,
     { interval: true, window: true, toggles: true, exportCsv: true, exportSvg: true, clear: true });
+});
+
+test('shut, the panel draws nothing — and builds no chart to draw it into', () => {
+  // The drawer is the 263 px this panel used to take from every tab. Shut is
+  // the default, and it is not "the collapsed line": it is not on the screen.
+  const shut = powerPanelModel(stateWith({ log: trace(100), monitors: RUNNING }),
+    { ...DEFAULT_UI, on: true }, { now: T0 + 200 });
+  assert.equal(shut.open, false, 'no stored wish means shut, for an operator upgrading too');
+  const shape = panelShape(shut);
+  assert.equal(shape.open, false);
+  assert.equal(shape.chart, false,
+    'a chart built into a display:none box measures its container at zero and pins the model to the minimum');
+  // Everything the monitor recorded is still one click away, not gone.
+  assert.equal(shape.menu.exportCsv, true);
+});
+
+test('the drawer is in the reading key, so opening it redraws the reading', () => {
+  const base = stateWith({ log: trace(10), monitors: RUNNING });
+  const shut = panelKeys(powerPanelModel(base, { ...DEFAULT_UI, on: true }), null);
+  const open = panelKeys(powerPanelModel(base, { ...DEFAULT_UI, on: true, open: true }), null);
+  assert.notEqual(shut.reading, open.reading);
 });
 
 test('the wish alone opens the panel, before the service has answered', () => {
@@ -302,4 +326,74 @@ test('the sentence an action came back with does not depend on the monitor being
     'the same sentence keys the same either way, so the refresh cannot remove it');
   assert.notEqual(panelKeys(off, said).status, panelKeys(off, null).status,
     'and a sentence that changes still redraws');
+});
+
+// -- the rail's spark -------------------------------------------------------
+//
+// 60 x 18 px beside the number in the rail's cell, so the panel can be shut.
+// It reads the same `powerLog` the panel's chart does, so the two cannot
+// disagree about the shape; what is held down here is the handful of
+// decisions a box that small forces.
+
+const at = (n, watts, { step = 1, from = T0, trustworthy = true } = {}) =>
+  Array.from({ length: n }, (_, i) => ({
+    ts: from + i * step,
+    watts: typeof watts === 'function' ? watts(i) : watts,
+    trustworthy: typeof trustworthy === 'function' ? trustworthy(i) : trustworthy,
+  }));
+
+test('a spark needs two readings; one is a dot, not a trace', () => {
+  assert.equal(sparkModel([], { now: T0 }), null);
+  assert.equal(sparkModel(at(1, 1e-3), { now: T0 }), null);
+  assert.ok(sparkModel(at(2, 1e-3), { now: T0 + 1 }), 'two is a line');
+});
+
+test('the box is filled by the window, and the trace ends at now', () => {
+  const m = sparkModel(at(10, (i) => i * 1e-4), { now: T0 + 9 });
+  assert.equal(m.n, 10);
+  assert.ok(m.d.startsWith('M1.5 16.5'), 'the first reading is at the left edge and the floor');
+  assert.equal(Number(m.last.x), 58.5, 'and the newest at the right edge');
+  assert.equal(Number(m.last.y), 1.5, 'at the top, because it is the largest');
+});
+
+test('a constant zero lies on the floor; a constant reading sits mid-box', () => {
+  // The rule this exists for: zero is the lamp being *off*, not a level it is
+  // holding. Centred, the two are the same picture — `ui-rules` §2's absence
+  // drawn as a value, one box smaller.
+  const off = sparkModel(at(10, 0), { now: T0 + 9 });
+  const holding = sparkModel(at(10, 1.4e-3), { now: T0 + 9 });
+  assert.deepEqual([off.flat, holding.flat], [true, true]);
+  assert.equal(Number(off.last.y), 16.5, 'off is on the floor');
+  assert.equal(Number(holding.last.y), 9, 'holding is mid-box');
+  assert.notEqual(off.last.y, holding.last.y, 'and the two never draw the same line');
+});
+
+test('the window is fixed at two minutes, whatever the panel is showing', () => {
+  // The panel's window is the operator's to pick; a glyph that meant a
+  // different span each glance would be worse than no glyph.
+  const now = T0 + 600;
+  const long = at(601, (i) => i * 1e-6, { from: T0 });
+  const m = sparkModel(long, { now });
+  assert.equal(SPARK_WINDOW_S, 120);
+  assert.equal(m.n, 121, 'only the last two minutes of readings');
+  assert.ok(m.span_s <= SPARK_WINDOW_S + 1);
+});
+
+test('a reading the meter flagged is carried, because the panel is shut', () => {
+  const clean = sparkModel(at(10, 1e-3), { now: T0 + 9 });
+  const clipped = sparkModel(at(10, 1e-3, { trustworthy: (i) => i !== 4 }), { now: T0 + 9 });
+  assert.equal(clean.flagged, 0);
+  assert.equal(clipped.flagged, 1, 'the panel draws these as dots; 60 px colours the whole glyph');
+});
+
+test('more readings than pixels are thinned keeping the extremes', () => {
+  // The same argument `scale.envelopePath` exists for: a column that drops
+  // its own peak is a peak nobody sees. At 0.2 s over two minutes that is
+  // 600 readings into ~57 columns.
+  const spiky = at(600, (i) => (i === 300 ? 9e-3 : 1e-3), { step: 0.2 });
+  const m = sparkModel(spiky, { now: T0 + 120 });
+  assert.equal(m.n, 600);
+  const ys = [...m.d.matchAll(/[ML][\d.]+ ([\d.]+)/g)].map((x) => Number(x[1]));
+  assert.ok(Math.min(...ys) <= 1.6, 'the spike survives the thinning');
+  assert.ok(m.d.length < spiky.length * 12, 'and the path is a fraction of the samples');
 });

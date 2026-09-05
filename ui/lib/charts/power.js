@@ -206,3 +206,86 @@ export function statsLine(stats) {
   parts.push(`${stats.n} reading${stats.n === 1 ? '' : 's'}`);
   return parts.join('  ·  ');
 }
+
+// -- the rail's spark --------------------------------------------------------
+
+/**
+ * How much of the trace the rail's spark carries, in seconds.
+ *
+ * Two minutes. The panel's window is the operator's to pick, and a glyph that
+ * meant a different span every time it was glanced at would be worse than no
+ * glyph; this one is fixed, so *flat* always means flat for the same two
+ * minutes. Long enough that a drift or a step is a shape rather than a
+ * wobble, short enough that it is a statement about now — which is the whole
+ * of what the rail is for (`ui-rules` §8's spot check).
+ */
+export const SPARK_WINDOW_S = 120;
+
+/**
+ * The last two minutes as a path that fits beside a number: the rail's cell,
+ * 60 × 18 px.
+ *
+ * This is `powerModel` with everything a 60 px box cannot carry taken out —
+ * no axes, no units, no statistics, no crosshair. What is left is the one
+ * question the rail answers: *is the lamp on, and is it holding?* The panel a
+ * click away answers the rest, and the two read the same log so they cannot
+ * disagree about the shape.
+ *
+ * Two decisions are worth naming.
+ *
+ * **The box always spans the window's own readings**, from the first in it to
+ * `now`. A domain pinned to `[now - SPARK_WINDOW_S, now]` would draw a stub
+ * in the right sixth of the box for the first twenty seconds of a monitor,
+ * which is exactly when somebody is watching it.
+ *
+ * **A constant series is not centred unless it is non-zero.** A flat line has
+ * no extent to scale into, and the two constants say different things: a
+ * steady reading is holding, and mid-box is where it belongs — but zero is
+ * the lamp being *off*, and a line drawn mid-box says it is on and steady.
+ * That is `ui-rules` §2's refusal to draw an absence as a value, one box
+ * smaller, and it is the reason the panel carries a `y from 0` switch at all.
+ */
+export function sparkModel(points, {
+  w = 60, h = 18, pad = 1.5, seconds = SPARK_WINDOW_S, now, columns = null,
+} = {}) {
+  const at = now !== undefined ? now : Date.now() / 1000;
+  const inWindow = windowPoints(points || [], { seconds, now: at });
+  if (inWindow.length < 2) return null;
+
+  let lo = Infinity;
+  let hi = -Infinity;
+  let flagged = 0;
+  for (const p of inWindow) {
+    if (p.trustworthy === false) flagged += 1;
+    if (!Number.isFinite(p.watts)) continue;
+    if (p.watts < lo) lo = p.watts;
+    if (p.watts > hi) hi = p.watts;
+  }
+  if (!Number.isFinite(lo)) return null;
+
+  const flat = hi === lo;
+  const X = scale.linear([inWindow[0].ts, at], [pad, w - pad]);
+  const Y = flat
+    ? () => (lo === 0 ? h - pad : h / 2)
+    : scale.linear([lo, hi], [h - pad, pad]);
+
+  const xs = inWindow.map((p) => p.ts);
+  const ys = inWindow.map((p) => p.watts);
+  const cols = columns || Math.round(w - 2 * pad);
+  const last = inWindow[inWindow.length - 1];
+  return {
+    w,
+    h,
+    flat,
+    flagged,
+    n: inWindow.length,
+    span_s: at - inWindow[0].ts,
+    // The same thinning the panel uses, for the same reason: a column that
+    // drops its own extreme is a peak the operator never sees. At 60 px the
+    // envelope is one vertical segment per pixel, which is what a spark is.
+    d: inWindow.length > cols * 2
+      ? scale.envelopePath(ys, (i) => X(xs[i]), Y, { columns: cols })
+      : scale.linePath(xs, ys, X, Y),
+    last: { x: scale.fixed(X(last.ts)), y: scale.fixed(Y(last.watts)), watts: last.watts },
+  };
+}

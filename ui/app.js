@@ -421,9 +421,19 @@ function loadPowerUi() {
 }
 
 function savePowerUi(patch) {
+  const wasOpen = powerUi.open;
   powerUi = { ...powerUi, ...patch };
   try { localStorage.setItem(POWER_KEY, JSON.stringify(powerUi)); } catch { /* a private window */ }
   drawPower(store.getState());
+  // The rail carries the drawer's handle, and nothing else redraws it until
+  // the next frame arrives — which on an idle bench is a while. The click has
+  // already turned the handle over itself; this is for the other opener, the
+  // failure `powerSay` raises.
+  if (powerUi.open !== wasOpen) drawRail(store.getState());
+}
+
+function drawRail(state) {
+  renderRail(railEl, state, { powerOpen: powerUi.open, onPowerToggle: setPowerOpen });
 }
 
 function drawPower(state) {
@@ -437,8 +447,26 @@ function drawPower(state) {
   });
 }
 
+/**
+ * The drawer, from the rail's handle. The handle has already drawn itself —
+ * `rail.setFold` mutates it in place so the click does not wait on a round
+ * trip — so this only has to move the panel and remember the wish, which is
+ * the same thing the switch beside it does.
+ */
+function setPowerOpen(open) {
+  savePowerUi({ open });
+}
+
 function powerSay(level, text) {
   powerStatus = text ? { level, text } : null;
+  // A sentence written into a shut drawer is not an answer. `syncPower` can
+  // raise one on any reconnect — the monitor the console remembers refusing
+  // to start — with nobody having touched anything, and the panel is where
+  // the switch it is about lives. So a failure opens the drawer (`ui-rules`
+  // §9: a failure must not look like nothing happening). Anything else is
+  // the answer to a click, and a click can only have come from inside the
+  // panel, which is therefore already open.
+  if (level === 'bad' && !powerUi.open) { savePowerUi({ open: true }); return; }
   drawPower(store.getState());
 }
 
@@ -687,7 +715,7 @@ window.addEventListener('blur', gone);
 document.addEventListener('visibilitychange', () => (document.hidden ? gone() : seen()));
 
 store.subscribe((state) => {
-  renderRail(railEl, state);
+  drawRail(state);
   drawIdent(state);
   renderChips(state);
   drawPower(state);

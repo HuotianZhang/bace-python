@@ -15,6 +15,7 @@ import { dirname, join } from 'node:path';
 
 import { createStore } from '../lib/store.js';
 import { railModel, chainModel, parkLabel, parkTitle } from '../lib/rail.js';
+import { powerPanelModel, DEFAULT_UI } from '../lib/power.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = (name) => JSON.parse(readFileSync(join(here, '../fixtures', name), 'utf8'));
@@ -315,4 +316,66 @@ test('a console with no snapshot yet says so, and claims nothing', () => {
   assert.equal(noRouter.value, '—');
   assert.equal(noRouter.level, 'warn');
   assert.equal(noRouter.sub, 'no router answering');
+});
+
+// -- the power cell and the panel say the same number -----------------------
+//
+// The cell used to read `bench.instruments.power` alone. That block is a
+// read-back, and the read-back that follows a bench action is taken before
+// the meter has settled, so under a running monitor the rail sat on a stale
+// number while the panel directly below it showed the live one — measured on
+// `--sim --fast` as `0 W` above `1.70 mW`, same meter, same screen. Both now
+// go through `power.newestReading`.
+
+const T = 1_788_000_000;
+const BENCH = (watts, readAt) => ({
+  read_at: readAt,
+  instruments: { power: { available: true, watts, trustworthy: true, wavelength_nm: 530, averaged: true, monitor: true } },
+});
+const FRAME = (ts, watts) => ({ seq: 1, ts, run_id: null, node_path: '', type: 'PowerReading',
+  data: { watts, trustworthy: true, wavelength_nm: 530, averaged: true, source: 'simulated' }, decimated: {} });
+
+function stateWithReading(bench, frame) {
+  const store = createStore({ schedule: () => {} });
+  store.applyBench(bench, { readBack: true });
+  if (frame) store.applyFrame(frame);
+  return store.getState();
+}
+
+test('the rail takes the newest reading, not the read-back it was left with', () => {
+  const state = stateWithReading(BENCH(0, T), FRAME(T + 30, 1.7e-3));
+  assert.equal(cell(railModel(state), 'power').value, '1.70 mW',
+    'the stream frame is 30 s newer than the snapshot the action left behind');
+});
+
+test('and the read-back wins when it is the newer of the two', () => {
+  const state = stateWithReading(BENCH(3.8e-3, T + 60), FRAME(T, 1.7e-3));
+  assert.equal(cell(railModel(state), 'power').value, '3.80 mW');
+});
+
+test('the rail and the panel never show two numbers for one meter', () => {
+  for (const [bench, frame] of [
+    [BENCH(0, T), FRAME(T + 30, 1.7e-3)],
+    [BENCH(3.8e-3, T + 60), FRAME(T, 1.7e-3)],
+    [BENCH(2.5e-4, T), null],
+  ]) {
+    const state = stateWithReading(bench, frame);
+    assert.equal(cell(railModel(state), 'power').value,
+      powerPanelModel(state, DEFAULT_UI, { now: T + 61 }).value.text,
+      'one function answers *what is the power*, so they cannot drift apart');
+  }
+});
+
+test('a reading arriving does not change the rail model, so the row is not rebuilt', () => {
+  // The trace is drawn beside the keyed rail rather than inside it: at the
+  // 0.2 s interval a `PowerReading` arrives five times a second, and in the
+  // key the whole row — the drawer's handle with it — would be torn down and
+  // rebuilt at that rate. Only the *value* the cell shows may move the key.
+  const store = createStore({ schedule: () => {} });
+  store.applyBench(BENCH(1.7e-3, T + 60), { readBack: true });
+  const before = JSON.stringify(railModel(store.getState()));
+  for (let i = 0; i < 20; i += 1) store.applyFrame(FRAME(T + 10 + i * 0.2, 1.7e-3));
+  assert.ok(store.getState().powerLog.length >= 20, 'the readings did arrive');
+  assert.equal(JSON.stringify(railModel(store.getState())), before,
+    'and the rail, whose number did not move, is not rebuilt for them');
 });

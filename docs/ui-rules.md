@@ -410,10 +410,21 @@ box whose meaning is the word next to it.
 **And a fourth question before the family: how often is it touched?** A
 control the operator reaches for less than once a session does not sit on
 the screen at all — it sits behind one `⋯`. The power monitor is the
-example: the switch, the reading and the trace are always there; the
-interval, the window, the chart toggles and the exports are one click
-further away, with defaults (`1 s`, `auto`) that a spot check never needs to
-change. Off, the panel is one quiet line.
+example: the interval, the window, the chart toggles and the exports are one
+click further away, with defaults (`1 s`, `auto`) that a spot check never
+needs to change. Off, the panel is one quiet line.
+
+**The same question, asked of the panel itself, moved it too** (2026-09-05).
+The switch, the reading and the trace used to be always there, on all four
+tabs. Measured at 1920 × 1080 that was 263 px of a 1080 px screen — the fixed
+chrome going from 19 % to 41 % the moment the monitor was switched on — and
+what it drew, whenever the lamp was off, was one straight line and `mean 0 W
+· min 0 · max 0 · σ 0 W`. So the panel is a drawer now, opened from the
+rail's own cell and remembered like the switch. What stays always there is
+the rail cell: the number, and the last two minutes as a 60 × 18 trace beside
+it. That is the reading and the shape — *is the lamp on, is it holding* — and
+it is what the rail is for. The axes, the σ, the window and the exports are
+the click, which is where a thing looked at once a session belongs.
 
 **And the limit on that answer: folding a panel away must not fold away what
 it recorded.** Behind one `⋯` is one click further; behind a switch the

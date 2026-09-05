@@ -24,8 +24,11 @@
 // invents no value of its own — an absent reading renders as an absence.
 
 import { h, fill, keyed } from './dom.js';
+import { s as svg } from './svg.js';
 import { icon } from './icons.js';
 import * as fmt from './format.js';
+import { newestReading } from './power.js';
+import { sparkModel } from './charts/power.js';
 
 /** The relay's three nodes, left to right, as `design/BenchRail.dc.html` draws them. */
 export const RELAY_NODES = ['2400', 'device', 'amp'];
@@ -72,7 +75,7 @@ export function railModel(state) {
     shutterCell(instruments.shutter, is('shutter')),
     ledCell(instruments.led, chain, is('led')),
     vocCell(instruments.voc),
-    powerCell(instruments.power),
+    powerCell(instruments.power, newestReading(state)),
     temperatureCell(temperatureNow(state), session),
   ];
 }
@@ -302,7 +305,7 @@ function vocCell(voc) {
  * and is not (`ui-rules` §2). A console that will not answer is a warning, and
  * one of the empty states §9 names.
  */
-function powerCell(power) {
+function powerCell(power, reading) {
   const p = power || {};
   // No snapshot at all is not a meter that will not answer: before the first
   // `GET /bench` the console knows nothing, and saying "not answering" would
@@ -312,18 +315,24 @@ function powerCell(power) {
     return { key: 'power', label: 'optical power', value: fmt.ABSENT,
       sub: p.reason || 'console not answering', level: 'warn', inferred: false };
   }
+  // The block says whether the meter answers and whether the service is
+  // polling it. The **number** is `power.newestReading`'s, which under a
+  // running monitor is the stream's frame and not this block: the read-back
+  // that follows a bench action is taken before the meter has settled, and
+  // reading it here left the cell contradicting the panel directly below it.
+  const v = reading && Number.isFinite(reading.watts) ? reading : p;
   const parts = [];
-  if (p.wavelength_nm) parts.push(`${p.wavelength_nm} nm`);
+  if (v.wavelength_nm) parts.push(`${v.wavelength_nm} nm`);
   // The meter's averaging is what makes a pulsed LED read as a power (its
   // mean, half the DC level at 50 % duty) rather than one instant of the
   // square wave; a meter that is *not* averaging is worth a word.
-  if (p.averaged === true) parts.push('avg');
-  if (p.averaged === false) parts.push('not averaged');
+  if (v.averaged === true) parts.push('avg');
+  if (v.averaged === false) parts.push('not averaged');
   if (p.monitor) parts.push('monitored');
   return {
-    key: 'power', label: 'optical power', value: fmt.intensity(p.watts),
+    key: 'power', label: 'optical power', value: fmt.intensity(v.watts),
     sub: parts.join(' · ') || null,
-    level: p.trustworthy === false ? 'warn' : null,
+    level: v.trustworthy === false ? 'warn' : null,
     inferred: false,
   };
 }
@@ -472,9 +481,77 @@ export function parkTitle(queued = 0) {
  * rebuilt sixty times a second to draw the same eight values is not just
  * waste — it is the operator's selection dropped mid-copy.
  */
-export function renderRail(el, state) {
+export function renderRail(el, state, { powerOpen = false, onPowerToggle = null } = {}) {
   const model = railModel(state);
-  keyed(el, JSON.stringify(model), () => model.map(cellEl));
+  // The drawer's state is in the key, because the handle is not the only
+  // thing that opens it: `app.js` opens it on a failure the operator has to
+  // see, and a handle left pointing the wrong way would be lying about what
+  // is on the screen. The click still mutates the handle in place (`setFold`)
+  // so it answers at once rather than at the next notify; this rebuild then
+  // draws the same thing.
+  //
+  // What stays out of the key is the trace — see `drawSpark`.
+  const held = el.contains(document.activeElement) && document.activeElement.closest('.brfold');
+  keyed(el, JSON.stringify([model, powerOpen, Boolean(onPowerToggle)]), () => model.map((cell) => cellEl(
+    cell, cell.key === 'power' && onPowerToggle ? { open: powerOpen, onToggle: onPowerToggle } : null)));
+  // A rebuild replaces the handle, and with it the keyboard's place on the
+  // page. Any rail rebuild can land while it is focused, not only this one.
+  if (held) el.querySelector('.brfold')?.focus();
+  drawSpark(el, state);
+}
+
+/**
+ * The meter's last two minutes, into the slot the power cell leaves for it.
+ *
+ * **Beside the keyed rail, not inside it.** A `PowerReading` arrives five
+ * times a second at the 0.2 s interval; in the rail's key the whole row would
+ * be torn down and rebuilt at that rate — the handle destroyed under the
+ * operator's pointer, the focus with it — for a path that changes and eight
+ * cells that do not. `lib/power.js`'s `panelKeys` makes the same argument
+ * about the `⋯` menu, and this is the same trap one element smaller.
+ *
+ * Keyed on the path itself, so a state notify that did not move the trace
+ * (and most do not: `watch.js`'s snapshot, a step's events) redraws nothing.
+ */
+function drawSpark(el, state) {
+  const slot = el.querySelector('.brc[data-cell="power"] .brspark');
+  if (!slot) return;
+  const model = sparkModel(state.powerLog || []);
+  keyed(slot, model ? JSON.stringify([model.d, model.last, model.flagged]) : 'none',
+    () => (model ? [sparkEl(model)] : []));
+}
+
+/**
+ * The path as an element: no axes, no labels, no box — a 60 × 18 glyph drawn
+ * in `currentColor`, so the one rule in `style.css` that colours the slot
+ * colours the trace and the end mark together.
+ *
+ * The end of the trace is marked, because the rail's question is about *now*
+ * and a line with two ends does not say which of them is now. A reading the
+ * meter flagged anywhere in the window turns the whole glyph the alert
+ * colour: the panel draws those as dots on the line and 60 px has no room for
+ * a dot, but a clipped log ruining a long measurement is precisely what must
+ * not be silent while the panel is shut (`ui-rules` §9).
+ */
+function sparkEl(model) {
+  const label = `the meter's last ${fmt.duration(model.span_s)}`
+    + (model.flat ? ', unchanged' : '')
+    + (model.flagged ? ` · ${fmt.plural(model.flagged, 'reading')} the meter flagged` : '');
+  return svg('svg', {
+    class: 'spark' + (model.flagged ? ' flagged' : ''),
+    viewBox: `0 0 ${model.w} ${model.h}`,
+    width: model.w,
+    height: model.h,
+    fill: 'none',
+    stroke: 'currentColor',
+    'stroke-width': 1.3,
+    'stroke-linecap': 'round',
+    'stroke-linejoin': 'round',
+    role: 'img',
+    'aria-label': label,
+  }, svg('title', { text: label }),
+    svg('path', { d: model.d }),
+    svg('circle', { cx: model.last.x, cy: model.last.y, r: 1.7, fill: 'currentColor', stroke: 'none' }));
 }
 
 /**
@@ -497,20 +574,66 @@ const CELL_ICON = {
   temperature: 'temp',
 };
 
-function cellEl(cell) {
+function cellEl(cell, fold = null) {
   const classes = ['brc'];
   if (cell.level) classes.push('lv-' + cell.level);
   if (cell.inferred) classes.push('inferred');
-  return h('div', { class: classes.join(' ') },
+  const value = h('span.brv', { text: cell.value });
+  // Seven cells are a number and nothing else, and stay one element. The
+  // eighth carries a drawing and a handle, which need a row beside the
+  // number rather than a second line: the rail's height is fixed by §1 and
+  // a cell that grew would take it from every tab.
+  const spark = SPARK_CELLS.has(cell.key) ? h('span.brspark') : null;
+  const handle = fold && fold.onToggle
+    ? h('button.brfold', { type: 'button', 'aria-label': 'the power monitor panel' })
+    : null;
+  const el = h('div', { class: classes.join(' '), dataset: { cell: cell.key } },
     h('span.brl',
       icon(CELL_ICON[cell.key] || 'blank'),
       h('span', { text: cell.label }),
       // The inferred mark rides on the label, so the value keeps the register
       // of a number: this cell is what the run implies, not what was read.
       cell.inferred ? h('span.tag-inferred', { title: 'implied by the running step, not read back', text: 'inferred' }) : null),
-    h('span.brv', { text: cell.value }),
+    spark || handle ? h('span.brrow', value, spark, handle) : value,
     cell.key === 'relay' ? relayEl(cell) : null,
     cell.sub ? h('span.brs', { text: cell.sub }) : null);
+  if (handle) {
+    setFold(el, handle, fold.open);
+    handle.onclick = () => {
+      const now = handle.getAttribute('aria-expanded') !== 'true';
+      setFold(el, handle, now);
+      fold.onToggle(now);
+    };
+  }
+  return el;
+}
+
+/** Which cells carry a trace beside their number. One, so far. */
+const SPARK_CELLS = new Set(['power']);
+
+/**
+ * The handle's two states. `tfold`'s shape on the bace card — a real
+ * `<button>` with `aria-expanded`, **mutated in place rather than rebuilt**,
+ * so the operator's focus survives the click and the rail is not torn down
+ * to change one glyph.
+ *
+ * The glyph and not the word `show`: `tfold`'s button spells it out, and a
+ * console that had a drawn set and used words for it is the whole argument of
+ * the review that put the drawing in this cell.
+ *
+ * One glyph in both states, turned over. The pack has `down` and `right` and
+ * no `up`, and `right` is the wrong statement — the panel comes *down* out of
+ * this cell, it does not lead somewhere. So the shut handle points down and
+ * the open one is the same path rotated (`style.css`), which is a truer pair
+ * than two glyphs would be and adds no geometry the pack did not draw.
+ */
+function setFold(cell, button, open) {
+  cell.classList.toggle('open', open);
+  button.setAttribute('aria-expanded', String(open));
+  button.title = open
+    ? 'hide the power monitor'
+    : 'the trace, its statistics, the interval and the exports';
+  fill(button, [icon('down', { size: 13 })]);
 }
 
 /** `2400 —— device —— amp`: which circuit the device is actually in. */
