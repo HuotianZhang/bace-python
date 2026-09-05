@@ -46,6 +46,7 @@
 
 import { h, fill, keyed } from '../lib/dom.js';
 import * as fmt from '../lib/format.js';
+import { icon } from '../lib/icons.js';
 import { cardModel } from '../lib/fields.js';
 import { renderRow, field, fold } from '../lib/card.js';
 import { chart } from '../lib/charts/frame.js';
@@ -455,8 +456,8 @@ export default {
         if (row.centre_on_voc) {
           tags.push(h('span.inh', {
             title: row.voc ? `${row.voc.how} ${row.voc.node_path || ''} at ${fmt.volts(row.voc.led_v)}` : 'no source in scope',
-            text: row.voc ? `↳ V_oc ← ${row.voc.how}` : '⚠ V_oc',
-          }));
+          }, icon(row.voc ? 'inherit' : 'warn'),
+          h('span', { text: row.voc ? `V_oc ← ${row.voc.how}` : 'V_oc' })));
         }
         if (row.relay_transition) {
           tags.push(h('span.cs', { title: 'the router moves at this boundary; the interlock refuses while a source is live', text: `relay → ${row.relay}` }));
@@ -468,7 +469,8 @@ export default {
         }
       }
       return fill(el,
-        h('span.nk' + (row.kind === 'module' ? '.mod' : ''), { text: row.kind === 'loop' ? '⟳' : '▪' }),
+        h('span.nk' + (row.kind === 'module' ? '.mod' : ''),
+          icon(row.kind === 'loop' ? 'loop' : 'module')),
         h('span.n', { text: row.kind === 'loop' ? row.loop : row.module }),
         // A module row says nothing about the bench: it *is* the bench's
         // module, and only a node that differs carries the mark.
@@ -921,7 +923,7 @@ export default {
               showAllChecks ? 'collapse' : 'show')),
           shown.length
             ? h('div.cklist', shown.map((check) => h('div.warn1.' + check.level,
-              h('span.ico', { text: icon(check.level) }),
+              levelMark(check.level),
               h('span.code', { text: check.code }),
               h('span', { text: check.text }),
               check.node_path ? h('span.cs', { text: check.node_path }) : null)))
@@ -931,7 +933,11 @@ export default {
     }
 
     const tagClass = (level) => (level === 'ok' ? 'ok' : level === 'warn' ? 'cost' : level === 'info' ? 'nb' : 'bad');
-    const icon = (level) => (level === 'crit' ? '⛔' : level === 'ok' ? '✓' : level === 'info' ? 'i' : '⚠');
+    // `info` keeps its letter: the pack has no glyph for *worth knowing*, and
+    // a borrowed one would say something the check does not.
+    const levelMark = (level) => (level === 'info'
+      ? h('span.ico', 'i')
+      : icon(level === 'crit' ? 'crit' : level === 'ok' ? 'ok' : 'warn', { cls: 'ico' }));
 
     // -- Start, Save, Dry run ----------------------------------------------
 
@@ -1220,7 +1226,7 @@ export default {
     function schedNode(node) {
       if (node.kind === 'module') {
         return h('div.sr.mod', { style: { marginLeft: `${node.depth * 16}px` } },
-          h('span.nk.mod', '▪'),
+          h('span.nk.mod', icon('module')),
           h('span.n', { text: node.module }),
           node.led_v !== null && node.led_v !== undefined ? h('span.d', { text: fmt.volts(node.led_v) + ' LED' }) : null,
           node.temperature && node.temperature.k !== null && node.temperature.k !== undefined

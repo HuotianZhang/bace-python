@@ -787,6 +787,11 @@ dl.shot-rows dd {
    there is nothing here but the box and the baseline: an icon sits on the text
    it labels, never on its own line. */
 .icon { flex: none; vertical-align: -0.12em; }
+/* A row of text and a glyph aligns on the text's baseline, which an SVG has
+   none of — centre the glyph on the line instead of dropping it to the floor. */
+.warn1 > .icon, .need1 > .icon, .note1 > .icon, .inh > .icon { align-self: center; }
+/* `not read` is a glyph and a word now, not a word alone. */
+.tag.off { display: inline-flex; align-items: center; gap: 3px; }
 
 /* The timing diagram's fold on the bace card: one line shut, the drawing and
    its alerts open. The count keeps the worst level's colour either way. */
