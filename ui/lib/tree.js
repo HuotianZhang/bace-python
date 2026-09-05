@@ -213,6 +213,11 @@ export function setParam(tree, path, name, value) {
   });
 }
 
+/** Drop every override a module node types: the node is the bench's module again. */
+export function clearParams(tree, path) {
+  return updateAt(tree, path, (node) => ({ ...node, params: {} }));
+}
+
 /** Set a field on a loop node; `null` removes it, so the service's default returns. */
 export function setField(tree, path, name, value) {
   return updateAt(tree, path, (node) => {

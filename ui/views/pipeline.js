@@ -420,8 +420,17 @@ export default {
         return h('div.nf',
           h('div.nfh',
             h('span.cn', { text: node.kind === 'loop' ? `${node.loop} loop` : node.module }),
-            h('span.cs', { text: node.kind === 'loop' ? 'the values it runs, and how it settles' : 'as on the bench · only what differs is typed here' }),
+            h('span.cs', { text: node.kind === 'loop' ? 'the values it runs, and how it settles' : 'as on the bench' }),
             h('span', { style: { flex: '1' } }),
+            // The way back for the whole node, offered only while there is
+            // something to take back: every override dropped, the node is the
+            // bench's module again, and the form shrinks to say so.
+            node.kind === 'module' && Object.keys(node.params || {}).length
+              ? h('button.btng.undo', {
+                title: 'drop every override this node types — back to the module as it stands on the bench',
+                onclick: () => change(tree.clearParams(typed, selected)),
+              }, '↺ bench')
+              : null,
             h('button.btng', { onclick: () => { selected = null; render(); } }, 'close')),
           node.kind === 'loop' ? loopForm(node, row) : moduleForm(node, row, v, open));
       });
@@ -627,10 +636,12 @@ export default {
       };
       // `bench: null` on purpose: the read-back row on a bench card says what
       // the light is doing *now*, and a node that runs in four hours inside an
-      // illumination loop is not described by it. `form: 'node'` puts every
-      // field the node reads above the fold — on the bench card the buttons
-      // are the verb, so `light`'s `shutter`, `led_mode` and `settle_s` fold
-      // there; here the node is what runs, and it reads all three.
+      // illumination loop is not described by it. `form: 'node'` keeps only
+      // what differs from the bench above the fold — a loop's binding, this
+      // node's override, and the rows a node has and a card does not
+      // (`light`'s shutter, mode and settle) — and folds the rest as `same
+      // as bench`. A node with nothing typed on it is one or two rows and a
+      // fold, which is what it is.
       const model = cardModel(entry, { bench: null, form: 'node' });
       const ctx = moduleCtx(catalogue);
       const first = (row && row.first) || null;

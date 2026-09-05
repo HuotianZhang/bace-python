@@ -112,46 +112,19 @@ export const LAYOUT = {
   },
 
   light: {
-    // One layout, two forms, and the split between them is what each field
-    // is *for*:
-    //
-    //   * On the bench card the buttons are the verb. `DC` sends `led_v`,
-    //     `Pulse` sends all four levels, and a button that drives the lamp
-    //     from a number the operator cannot see is worse than a field they
-    //     do not need — so those four are always above the fold. `shutter`,
-    //     `led_mode` and `settle_s` are what a *node* reads to know what to
-    //     do; no button sends them, because clicking `Open` already said
-    //     `shutter = open`. On the bench card they fold under `node only`,
-    //     still editable (they are the module's edited layer, which a tree's
-    //     light node inherits) but not mistakable for something the buttons
-    //     act on.
-    //   * The pipeline node form (`form: 'node'`) shows all seven above,
-    //     because there the node is what runs and every one of them is read.
+    // The `light` node's form. There is no light *card* any more: on the
+    // bench the shutter and the LED are two rows of the Instruments panel
+    // (`lib/instruments.js`), switches whose lit position is the read-back.
+    // A node is different: it runs later, inside a tree, and reads all
+    // seven — `shutter` and `led_mode` to know what to do, the levels to do
+    // it at, `settle_s` to know how long to hold before the next step.
+    // `node: true` marks the three no switch sends, which the node form
+    // always shows: they are what the node *is*.
     above: [
       { kind: 'segmented', name: 'shutter', node: true },
       { kind: 'segmented', name: 'led_mode', node: true },
       'led_v', 'led_low_v', 'pulse_frequency_hz', 'duty_percent',
       { kind: 'field', name: 'settle_s', node: true },
-    ],
-    readback: 'illumination',
-    // Not a Run, so nothing on this card is validated as one. A run whose
-    // only module is `light` is refused (`light.undone-by-park`): every run
-    // ends parked, so it would set a light and hand it straight back. The
-    // manual form is the bench action, which does not go through the worker.
-    // One action per click, as M1's strip does.
-    actions: [
-      { label: 'Open', action: 'shutter-open' },
-      { label: 'Shut', action: 'shutter-shut' },
-      { label: 'DC', action: 'set-led-dc', args: (v) => ({ level: v.led_v }) },
-      {
-        label: 'Pulse',
-        action: 'set-led-pulse',
-        args: (v) => ({
-          level: v.led_v, low: v.led_low_v,
-          frequency_hz: v.pulse_frequency_hz, duty_percent: v.duty_percent,
-        }),
-      },
-      { label: 'LED off', action: 'led-off' },
     ],
   },
 
@@ -159,24 +132,24 @@ export const LAYOUT = {
   temperature: { above: ['setpoint_k', 'tolerance_k', 'hold_s', 'timeout_s'], run: { label: 'Hold', kind: 'run' } },
 };
 
-/** Which modules get a bench card, in the order the artboard lays them out. */
-export const BENCH_CARDS = ['jv', 'jv_bace', 'bace', 'light', 'power', 'temperature'];
+/**
+ * Which modules get a bench card, in the order the artboard lays them out.
+ * `light` is not one: the shutter and the LED are rows of the Instruments
+ * panel above the cards, and the `light` *node* is edited where it runs,
+ * on the pipeline tab.
+ */
+export const BENCH_CARDS = ['jv', 'jv_bace', 'bace', 'power', 'temperature'];
 
 /**
- * Whether a card's primary control is a Run. A card that only has bench
- * actions (`light`) has no Start to gate, so its one-node tree is never sent
- * to `POST /pipelines/validate`: that tree is exactly the light-only run the
- * service refuses by design (`light.undone-by-park`), and the refusal would
- * reach the operator as a permanent red note under buttons it does not
- * concern.
+ * Whether a card's primary control is a Run — the only kind of card that has
+ * a Start to gate, and so the only kind sent to `POST /pipelines/validate`.
+ * A module with no Run (`light`) validated as its own one-node tree is the
+ * light-only run the service refuses by design (`light.undone-by-park`).
  */
 export function cardRuns(name) {
   const layout = LAYOUT[name];
   return Boolean(layout && [].concat(layout.run || []).length);
 }
-
-/** The fold group the bench card keeps its node-only fields under. */
-export const NODE_ONLY = 'node only';
 
 /** An enum small enough to be a segmented control rather than a select. */
 export const SEGMENTED_MAX = 4;
@@ -190,10 +163,13 @@ function isBound(wire) {
  * One card, as rows. `entry` is a `GET /modules` entry (or the one a `PUT`
  * answers with — same shape, which is why an edit re-renders from the
  * response). `bench` is the `/bench` snapshot, for the read-back rows.
- * `form` is which form this is: `'bench'` (the card, whose buttons act now)
- * or `'node'` (the pipeline editor, where the module runs as a step). A row
- * marked `node: true` is above the fold only on the node form; on the bench
- * card it folds under `NODE_ONLY`.
+ * `form` is which form this is: `'bench'` (the card) or `'node'` (the
+ * pipeline editor). **A node form shows only what differs from the bench**:
+ * a value a loop binds or a run derives, a value this node overrides, and
+ * the rows marked `node: true` in the layout (what a node is, with no bench
+ * counterpart). Everything else folds, under `same as bench` — the node is
+ * the module as it stands on the bench, and the form says so by being
+ * small. A bench card never shows a `node: true` row at all.
  *
  * Returns `{name, title, status, kind, estimate, needs, chips, above, fold,
  * run, actions, hidden}`. `hidden` is the parameters the run will not read in
@@ -208,17 +184,20 @@ export function cardModel(entry, { bench = null, form = 'bench' } = {}) {
 
   const used = new Set();
   const hidden = new Set();
-  const nodeOnly = new Set();
   const above = [];
+
+  // What a node form keeps above the fold: the differences.
+  const differs = (n) => Boolean(wire[n] && (wire[n].node || isBound(wire[n])));
 
   for (const spec of layout.above || []) {
     const row = normalise(spec);
     const names = rowNames(row);
     if (!names.every((n) => n in wire)) continue;
     if (row.node && form !== 'node') {
-      names.forEach((n) => nodeOnly.add(n));
+      names.forEach((n) => hidden.add(n));
       continue;
     }
+    if (form === 'node' && !row.node && !names.some(differs)) continue;
     if (row.when && !row.when(values, wire)) {
       if (row.otherwise !== 'fold') names.forEach((n) => hidden.add(n));
       continue;
@@ -231,9 +210,10 @@ export function cardModel(entry, { bench = null, form = 'bench' } = {}) {
   // The axis's own pinned field is not folded — it *is* the axis.
   if (entry.name === 'bace' && values.axis_name in wire) hidden.add(values.axis_name);
 
-  const fold = foldGroups(entry, used, hidden, nodeOnly);
+  const fold = foldGroups(entry, used, hidden);
   return {
     name: entry.name,
+    form,
     title: entry.title || entry.name,
     status: entry.status,
     kind: entry.kind,
@@ -309,18 +289,15 @@ export function effectivePolarity(values) {
  * up empty does not render — which is how the `output` group disappears once
  * `inverted_output` is drawn inside the polarity control above.
  */
-function foldGroups(entry, used, hidden, nodeOnly = new Set()) {
+function foldGroups(entry, used, hidden) {
   const by = new Map();
   for (const p of entry.params || []) {
     if (used.has(p.name) || hidden.has(p.name)) continue;
-    // A node-only field folds as what it is, not as its service group: on the
-    // bench card `shutter` under `illumination` would sit beside `led_v` and
-    // read as another number the buttons send.
-    const group = nodeOnly.has(p.name) ? NODE_ONLY : (p.group || 'other');
+    const group = p.group || 'other';
     if (!by.has(group)) by.set(group, []);
     by.get(group).push(p);
   }
-  const order = [NODE_ONLY, ...FOLD_ORDER, ...[...by.keys()].filter((g) => g !== NODE_ONLY && !FOLD_ORDER.includes(g))];
+  const order = [...FOLD_ORDER, ...[...by.keys()].filter((g) => !FOLD_ORDER.includes(g))];
   return order.filter((g) => by.has(g)).map((g) => ({ group: g, params: by.get(g), count: by.get(g).length }));
 }
 

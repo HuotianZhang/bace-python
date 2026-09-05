@@ -279,6 +279,61 @@ button:disabled { opacity: .45; cursor: not-allowed; }
    explanation is a `title`, revealed on hover and read out by a screen reader,
    because a comfortable screen is one that is hiding something. */
 
+/* -- the Instruments panel: switches whose lit position is the read-back ---
+   `lib/instruments.js`. Above the cards, in its own zone, because it is a
+   different thing from a card: a switch acts the moment it is clicked. */
+.instruments:empty { display: none; }
+.inst {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 12px 10px; margin: 0 0 12px;
+  background: var(--paper); border: 1px solid var(--rule);
+}
+.zh { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.zt {
+  font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase;
+  color: var(--grey);
+}
+.cards::before {
+  content: 'Modules'; display: block; grid-column: 1 / -1;
+  font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase;
+  color: var(--grey); margin-bottom: 6px;
+}
+.irow {
+  display: grid; grid-template-columns: 9em auto 1fr; align-items: center; gap: 14px;
+  padding: 5px 4px; border-bottom: 1px solid var(--fill);
+}
+.irow:last-child { border-bottom: 0; }
+.irow .n { font-family: var(--font-head); font-weight: 800; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.sw { display: inline-flex; border: 1px solid var(--ink); }
+.sw .p {
+  padding: 3px 12px; font-size: 12px; color: var(--grey); cursor: pointer;
+  font-family: var(--font-num); font-weight: 400; letter-spacing: 0; line-height: 1.4;
+  border: 0; border-right: 1px solid var(--rule); background: var(--paper);
+}
+.sw .p:last-child { border-right: 0; }
+.sw .p:hover { color: var(--ink); }
+.sw .p.on { background: var(--ink); color: #fff; }
+.sw .p:disabled { cursor: not-allowed; opacity: .45; }
+/* Inferred, not read: the same dashed rule the rail uses. */
+.irow.inferred .sw { border-style: dashed; }
+.irow.inferred .sw .p.on { background: var(--grey); }
+.vals { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
+.vals label { display: inline-flex; align-items: baseline; gap: 4px; }
+.vals input.v {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 12px;
+  border: 1px solid transparent; border-bottom-color: var(--rule);
+  background: transparent; color: inherit; padding: 1px 3px; width: 5.5em; text-align: right;
+}
+.vals input.v:hover { border-color: var(--rule); }
+.vals input.v:focus { border-color: var(--accent); outline: none; background: var(--paper); }
+.vals i { font-style: normal; color: var(--grey); font-size: 11px; }
+.vals label.dim input.v { color: var(--grey); border-bottom-color: var(--fill); }
+.vals label.dim i { color: var(--rule); }
+
+/* A node's own override reads as one: the value in ink, and ↺ beside it. */
+.pf.node .v, .pf.node input.v { color: var(--ink); font-weight: 500; border-bottom-color: var(--ink); }
+button.undo { font-family: var(--font-num); }
+
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(430px, 1fr));
