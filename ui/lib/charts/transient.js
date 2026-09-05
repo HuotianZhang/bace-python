@@ -25,7 +25,7 @@
 
 import * as scale from '../scale.js';
 import * as fmt from '../format.js';
-import { layout, axisTicks, heightFor, ASPECT } from './frame.js';
+import { layout, axisTicks, heightFor, headLines, HEAD_LINE, ASPECT, MARGIN } from './frame.js';
 
 /** Where the integration window starts, **in record time** — the service's own arithmetic. */
 export function windowRecordS(t0IntS, reference, { traceT0 = 0, pulseDelayS = 0 } = {}) {
@@ -174,6 +174,9 @@ const MA = 1e3;
  * panel, see `frame.js` — and every absence stated rather than drawn as a
  * value.
  */
+/** The plot's own width, which is what a label has to fit inside. */
+const plotWidth = (width) => width - MARGIN.left - MARGIN.right;
+
 /**
  * The panels an unrun slot stands for: the two every shot has. The running
  * integral is not among them — whether there is one depends on a window this
@@ -234,9 +237,18 @@ export function transientModel(input, options = {}) {
   if (hasCumulative || derived) {
     panels.push({ key: 'charge', weight: 0.8, label: 'running integral  ·  Q / C' });
   }
+  // Every panel here carries a caption and a label that names what the curve
+  // *is*, and both live above the plot. How many lines that takes depends on
+  // the width, so the room for it is worked out rather than guessed: reserve
+  // the tallest header in `top`, and the same again in the gap between panels.
+  const head = Math.max(...panels.map((p) => headLines(p.label + (p.suffix || ''), plotWidth(width), true)));
+  const margin = { top: 5 + head * HEAD_LINE, gap: MARGIN.gap + (head - 1) * HEAD_LINE };
   // The height is the aspect's, not a number chosen here: three panels of a
   // quantity against time, each at `ASPECT.trace` for its weight.
-  const frame = layout({ width, height: height ?? heightFor(width, panels, { aspect: ASPECT.trace }), panels });
+  const frame = layout({
+    width, panels, margin,
+    height: height ?? heightFor(width, panels, { margin, aspect: ASPECT.trace }),
+  });
   const plot = frame.panels[0].rect;
   const cols = columns || Math.round(plot.w);
 

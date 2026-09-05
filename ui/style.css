@@ -727,6 +727,37 @@ button.armed { background: var(--alert); border-color: var(--alert); color: #fff
 .cb.split > .col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .res { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 
+/* R3·2 sets the shot's numbers as a narrow column to the **right** of the
+   charts, not as a block above them: seven rows of text before the first plot
+   put the drawing 160 px down a card that is already taller than its window.
+   Beside them the chart starts at the top of the slot, and each number stays
+   next to the panel it is about.
+
+   This only became possible once a chart was built to the width it is given
+   (`charts/frame.js`): while the container merely zoomed a fixed viewBox,
+   taking 170 px for a column shrank the chart's type with it. */
+@media (min-width: 980px) {
+  .card.mod.wide .cb.split > .res {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 172px;
+    gap: 0 14px;
+    align-items: start;
+  }
+  .card.mod.wide .cb.split > .res > * { grid-column: 1; margin-bottom: 12px; }
+  .card.mod.wide .cb.split > .res > *:last-child { margin-bottom: 0; }
+  /* The block spans the column so it stays put while the charts flow past it. */
+  .card.mod.wide .cb.split > .res > .shot { grid-column: 2; grid-row: 1 / -1; margin-bottom: 0; }
+}
+
+/* Label over value, so the pair reads down a 172 px column instead of across
+   a table that has no room for one. */
+dl.shot-rows { margin: 0; display: flex; flex-direction: column; gap: 5px; }
+dl.shot-rows dt { color: var(--grey); font-size: 11px; line-height: 1.3; }
+dl.shot-rows dd {
+  margin: 0; font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 11.5px; line-height: 1.3; overflow-wrap: anywhere;
+}
+
 .chart { margin: 0; display: flex; flex-direction: column; gap: 4px; }
 .chart-svg { width: 100%; }
 .chart-svg .series { vector-effect: non-scaling-stroke; }
@@ -868,9 +899,6 @@ button.armed { background: var(--alert); border-color: var(--alert); color: #fff
 .shot.alert { border-color: var(--alert); }
 .shot-head { display: flex; align-items: center; gap: 8px; }
 .shot-title { font-family: var(--font-head); font-weight: 600; font-size: 12px; }
-.shot-rows { width: auto; }
-.shot-rows td.l { color: var(--grey); font-size: 11px; padding-right: 14px; }
-.shot-rows td.num { font-size: 11.5px; }
 .shot-verdict { font-size: 11px; color: var(--grey); }
 .shot-verdict.alert { color: var(--alert); font-weight: 600; }
 .shot-trigger { font-family: var(--font-num); font-size: 10.5px; color: var(--grey); }

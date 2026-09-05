@@ -301,7 +301,10 @@ export function shotBlock(shot, found, config) {
       h('span.shot-title', { text: `shot ${nth} · loop ${shot.loop}${where}` }),
       shot.clipped ? h('span.tag.bad', { text: 'clipped' }) : null,
       shot.tracesGone ? h('span.tag', { text: 'no traces' }) : null),
-    h('table.rows.shot-rows', rows.map(([k, val]) => h('tr', h('td.l', { text: k }), h('td.num', { text: val })))),
+    // A definition list, not a table: in the narrow column beside the charts
+    // each pair stacks — the label over the number, as R3·2 sets them — and
+    // `dt`/`dd` is what a label and its value are.
+    h('dl.shot-rows', rows.map(([k, val]) => [h('dt', { text: k }), h('dd.num', { text: val })])),
     v ? h('div', { class: 'shot-verdict ' + level, text: `digitiser · ${v.text}` }) : null,
     trigger ? h('div', {
       class: 'shot-trigger' + (trigger === 'AUTO' ? ' auto' : ''),

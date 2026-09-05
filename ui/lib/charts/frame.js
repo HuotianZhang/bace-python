@@ -265,6 +265,48 @@ function legendGlyph(e) {
   }
 }
 
+/** The step between header lines, at the 9 px they are set in. */
+export const HEAD_LINE = 11;
+
+/**
+ * How many header lines a label of this length needs at this plot width, so a
+ * model can reserve the room before anything is drawn. Same arithmetic as
+ * `wrapLabel`, which is the only reason it is worth sharing.
+ */
+export function headLines(label, width, note = false) {
+  return (label ? wrapLabel(label, width).length : 0) + (note ? 1 : 0);
+}
+
+/**
+ * A panel label broken at its own separators so it fits the plot.
+ *
+ * SVG text does not wrap, and these labels are built by joining clauses with
+ * ` · ` — `photocurrent = light − dark · I / mA · averaged over the loops so
+ * far · dark translated to zero`. So the separator is the break, and a label
+ * splits only where it already reads as a break. Two lines at most: a third
+ * would be a paragraph, and a panel that needs a paragraph needs a note.
+ *
+ * The width is estimated, not measured — 4.8 units a character at 9 px, a
+ * little generous for this face. A model cannot measure text, and being a few
+ * characters pessimistic costs a wrap nobody notices; being optimistic costs
+ * the overflow this exists to stop.
+ */
+export function wrapLabel(label, width, per = 4.8) {
+  const fits = (t) => t.length * per <= width;
+  if (fits(label)) return [label];
+  const parts = String(label).split('  ·  ');
+  if (parts.length < 2) return [label];
+  let head = parts[0];
+  let i = 1;
+  for (; i < parts.length; i += 1) {
+    const next = `${head}  ·  ${parts[i]}`;
+    if (!fits(next)) break;
+    head = next;
+  }
+  const tail = parts.slice(i).join('  ·  ');
+  return tail ? [head, tail] : [head];
+}
+
 /** Clip-path ids have to be unique in a document, and a card holds several charts. */
 let uid = 0;
 
@@ -380,12 +422,25 @@ function renderPanel(panel, model) {
       text: mark.text,
     }));
   }
-  if (panel.label) {
-    kids.push(s('text', { x: rect.x, y: rect.y - 5,
-      style: { font: `600 9px ${FONT_S}`, fill: paint('ink') }, text: panel.label }));
-  }
+  // The header, from the bottom up: the note last, the label's lines above it.
+  //
+  // Both used to sit on one line, the label from the left and the note from the
+  // right, which held only while labels were short and panels wide. Once the
+  // labels took on what they define — `dark translated to zero`, `offset
+  // corrected` — and the plot narrowed to make room for the shot's numbers, the
+  // two ran into each other, and a left-anchored label long enough simply left
+  // the chart: `svg.root()` sets `overflow: visible`, so it carried on across
+  // whatever the card had put beside it.
+  const lines = [];
+  if (panel.label) lines.push(...wrapLabel(panel.label, rect.w));
+  const noteAt = rect.y - 5;
+  const labelTop = noteAt - (panel.note ? HEAD_LINE : 0) - (lines.length - 1) * HEAD_LINE;
+  lines.forEach((line, i) => {
+    kids.push(s('text', { x: rect.x, y: labelTop + i * HEAD_LINE,
+      style: { font: `600 9px ${FONT_S}`, fill: paint('ink') }, text: line }));
+  });
   if (panel.note) {
-    kids.push(s('text', { x: rect.x + rect.w, y: rect.y - 5, 'text-anchor': 'end',
+    kids.push(s('text', { x: rect.x, y: noteAt,
       style: { font: `400 9px ${FONT_S}`, fill: paint(panel.noteColour || 'grey') }, text: panel.note }));
   }
   // One dot per series at the crosshair, hidden until the pointer is over the
