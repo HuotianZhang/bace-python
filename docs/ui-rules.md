@@ -370,8 +370,8 @@ that answers:
 | a click… | family | in `style.css` | looks like |
 |---|---|---|---|
 | **changes a value a later Run reads** — a setting | `.seg` (enums), `.bool` | grey border, the chosen option white on ink; the swept axis's chooser is white on the accent | `true \| false`, `vpre \| vcoll \| delay_ns`, `auto \| NORM \| INV \| leave` |
-| **acts on the bench the moment it lands** — an instrument switch | `.sw` | ink border, a larger hit target, the lit position filled grey with the accent under it; dashed and grey-underlined when the position is inferred, not read back | Instruments: `open \| shut`, `off \| DC \| pulse`, `amplifier \| sourcemeter` |
-| **changes only what is drawn** — a view filter | `.filt` (a group of `.opt`s), or a lone `button.filt` toggle | no border, no fill; the chosen option is bold with a rule under it | the power monitor's `every 0.2 s … 5 s` and `window auto … all`, inside its `⋯` menu; the results grid's `Q(led_v) per T \| Q(T) per led_v` |
+| **acts on the bench the moment it lands** — an instrument switch | `.sw` | ink border, a larger hit target, the lit position filled grey with the accent under it; dashed and grey-underlined when the position is inferred, not read back | Instruments: `open \| shut`, `off \| DC \| pulse`, `amplifier \| sourcemeter`; the power monitor's `every 0.2 s … 5 s`, which stops and restarts the service's polling of the meter |
+| **changes only what is drawn** — a view filter | `.filt` (a group of `.opt`s), or a lone `button.filt` toggle | no border, no fill; the chosen option is bold with a rule under it | the power monitor's `window auto … all`, inside its `⋯` menu; the results grid's `Q(led_v) per T \| Q(T) per led_v` |
 
 The rule is about consequence, not shape. A pair of options that flips a
 relay is a switch even though it has two positions like a boolean; a chip
@@ -386,3 +386,16 @@ example: the switch, the reading and the trace are always there; the
 interval, the window, the chart toggles and the exports are one click
 further away, with defaults (`1 s`, `auto`) that a spot check never needs to
 change. Off, the panel is one quiet line.
+
+**And the limit on that answer: folding a panel away must not fold away what
+it recorded.** Behind one `⋯` is one click further; behind a switch the
+operator has just turned off is unreachable, and a trace that cost an hour of
+the sample's life is not something to make them restart the instrument to
+export. So the collapsed power panel keeps its `⋯`, carrying Export CSV,
+Clear and the interval — the last because it acts on the bench and is the one
+thing worth setting *before* the switch is flipped. What collapsing drops is
+only what describes a chart that is not drawn: the window, the chart toggles,
+and Export SVG, which serialises the SVG on screen. The same limit applies to
+the sentence an action answers with: it belongs to the click, not to the
+state the click leaves behind, so switching a thing *off* — or failing to —
+still says so.

@@ -14,7 +14,7 @@ import { createStore, insertReading, POWER_LOG_MAX } from '../lib/store.js';
 import {
   powerModel, powerStats, windowPoints, timeUnit, wattsUnit, lowerBound, statsLine, WINDOWS,
 } from '../lib/charts/power.js';
-import { powerPanelModel, DEFAULT_UI, INTERVALS } from '../lib/power.js';
+import { powerPanelModel, panelShape, panelKeys, DEFAULT_UI, INTERVALS } from '../lib/power.js';
 
 const T0 = 1_788_000_000;
 
@@ -218,4 +218,88 @@ test('the window and the statistics on the panel are the chart\'s', () => {
   assert.equal(m.count, 600);
   assert.equal(m.chart, true);
   assert.equal(m.fromZero, false);
+});
+
+// -- what the panel draws, and what it rebuilds it on -------------------------
+//
+// Three decisions that are invisible in the model and expensive in the hand,
+// so they are pure functions and they are held down here: what the collapsed
+// panel still reaches, what the `⋯` menu is rebuilt on, and whether the
+// sentence an action came back with survives the refresh that follows it.
+
+const RUNNING = [{ name: 'power', running: true, interval_s: 0.2, readings: 0, failures: 0, last_error: null }];
+const trace = (n) => Array.from({ length: n }, (_, i) => ({ ts: T0 + i * 0.2, watts: 1e-4, trustworthy: true }));
+
+test('a reading arriving does not rebuild the ⋯ menu under the pointer', () => {
+  // The log grows five times a second at 0.2 s, and the menu is a `<details>`
+  // the operator holds open while they pick. Keyed on the count it was torn
+  // down and rebuilt at that rate — in the one state where it is drawn at all.
+  const now = T0 + 200;
+  const ui = { ...DEFAULT_UI, on: true };
+  const before = powerPanelModel(stateWith({ log: trace(100), monitors: RUNNING }), ui, { now });
+  const after = powerPanelModel(stateWith({ log: trace(101), monitors: RUNNING }), ui, { now });
+  assert.equal(after.count, before.count + 1, 'a reading did arrive');
+  assert.equal(panelKeys(after, null).menu, panelKeys(before, null).menu,
+    'and the menu is not rebuilt for it');
+  assert.notEqual(panelKeys(after, null).chart, panelKeys(before, null).chart,
+    'while the trace, which is what the reading is for, still redraws');
+});
+
+test('the menu is rebuilt when what it draws changes, and only then', () => {
+  const now = T0 + 200;
+  const ui = { ...DEFAULT_UI, on: true };
+  const key = (log, patch = {}) => panelKeys(
+    powerPanelModel(stateWith({ log, monitors: RUNNING }), { ...ui, ...patch }, { now }), null).menu;
+  // Nothing held to export or clear, then something: the two actions go live.
+  assert.notEqual(key(trace(1)), key([]), 'the first reading enables Export CSV and Clear');
+  // And the options themselves.
+  assert.notEqual(key(trace(10), { window: '1m' }), key(trace(10)));
+  assert.notEqual(key(trace(10), { chart: false }), key(trace(10)));
+  assert.notEqual(key(trace(10), { fromZero: true }), key(trace(10)));
+});
+
+test('switched off, the panel is one line but nothing it recorded is out of reach', () => {
+  const off = powerPanelModel(stateWith({ log: trace(100) }), { ...DEFAULT_UI, on: false }, { now: T0 + 200 });
+  const shape = panelShape(off);
+  assert.equal(off.live, false);
+  assert.equal(shape.collapsed, true, 'the panel is still the one quiet line');
+  assert.equal(shape.chart, false, 'and the trace is not on every tab');
+  assert.equal(off.count, 100, 'but the readings are held');
+  assert.deepEqual(
+    [shape.menu.exportCsv, shape.menu.clear, shape.menu.interval], [true, true, true],
+    'so Export CSV, Clear and the interval are one click away, off as on');
+  assert.equal(shape.menu.exportSvg, false,
+    'Export SVG is not: it serialises the SVG on screen, and there is none');
+  assert.deepEqual([shape.menu.window, shape.menu.toggles], [false, false],
+    'nor is anything else that only describes a chart that is not drawn');
+});
+
+test('running, the menu carries all of it', () => {
+  const on = powerPanelModel(stateWith({ log: trace(100), monitors: RUNNING }), { ...DEFAULT_UI, on: true }, { now: T0 + 200 });
+  const shape = panelShape(on);
+  assert.equal(shape.collapsed, false);
+  assert.equal(shape.chart, true);
+  assert.deepEqual(shape.menu,
+    { interval: true, window: true, toggles: true, exportCsv: true, exportSvg: true, clear: true });
+});
+
+test('the wish alone opens the panel, before the service has answered', () => {
+  const wanted = powerPanelModel(stateWith(), { ...DEFAULT_UI, on: true });
+  assert.deepEqual([wanted.running, wanted.wanted, wanted.live], [false, true, true],
+    'the switch is flipped and the panel opens, not a round trip later');
+});
+
+test('the sentence an action came back with does not depend on the monitor being on', () => {
+  // `togglePower(false)` answers while `running` is still true, and the
+  // `refreshMonitors` in its `finally` then clears it. Keyed on `live`, the
+  // answer to switching the monitor off — and any error it carried — was
+  // drawn for that one round trip and then silently removed.
+  const said = { level: 'bad', text: ':8918 refused the stop' };
+  const on = powerPanelModel(stateWith({ monitors: RUNNING }), { ...DEFAULT_UI, on: true });
+  const off = powerPanelModel(stateWith(), { ...DEFAULT_UI, on: false });
+  assert.deepEqual([on.live, off.live], [true, false]);
+  assert.equal(panelKeys(off, said).status, panelKeys(on, said).status,
+    'the same sentence keys the same either way, so the refresh cannot remove it');
+  assert.notEqual(panelKeys(off, said).status, panelKeys(off, null).status,
+    'and a sentence that changes still redraws');
 });
