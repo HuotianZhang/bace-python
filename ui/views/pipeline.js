@@ -1004,11 +1004,17 @@ export default {
           h('button', {
             class: armed ? 'btns armed' : 'btns',
             disabled: !typed || null,
+            // The bar is pinned and the name field scrolls away above it, so
+            // the button names the stem it is about to write rather than
+            // leaving it to a field the operator cannot see. `overwrite`
+            // already said it; this is the same courtesy for a new name.
             title: overwrites
               ? `${stem} already exists — saving writes over it, and the file it replaces is not in the undo history`
-              : 'writes the structure to a file, with the bench values it was saved with',
+              : stem
+                ? `writes the structure to ${stem}, with the bench values it was saved with`
+                : 'writes the structure to a file, with the bench values it was saved with',
             onclick: save,
-          }, armed ? `overwrite ${stem}?` : 'Save recipe'),
+          }, armed ? `overwrite ${stem}?` : stem ? `Save recipe · ${stem}` : 'Save recipe'),
           h('button.btns', {
             disabled: !typed || null,
             title: 'checks the structure without touching the bench',

@@ -32,7 +32,13 @@ feels comfortable, it is probably hiding something the operator needs — ask
 what was left out.*
 
 Desktop only: a lab PC at 1920×1080 or wider, one window. No mobile, no tablet.
-The bench rail is fixed; everything else may scroll.
+The bench rail is fixed; everything else may scroll — with one exception, and
+it is the shape any other should take: the pipeline's action row is pinned to
+the foot of its own panel (`.pipe-actions-bar`), because the canonical
+structure is taller than the port and Start would otherwise sit below the fold.
+What it pins is a control, not a reading. The panel under it still scrolls,
+nothing the run recorded is behind it, and the row says what it will do — the
+name field scrolls away, so Save carries the stem it is about to write.
 
 Long names are real and must not truncate into ambiguity:
 
