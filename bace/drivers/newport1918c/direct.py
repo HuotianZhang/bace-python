@@ -25,7 +25,24 @@ from __future__ import annotations
 
 from .console import WATTS, PowerMeterError, Reading
 
-__all__ = ["DirectPowerMeter"]
+__all__ = ["DirectPowerMeter", "AVERAGING_DIGITAL_SAMPLES", "ANALOG_FILTER_5HZ",
+           "MODE_DC_CONTINUOUS"]
+
+MODE_DC_CONTINUOUS = 0
+"""`PM:MODE 0`. The other seven (`meter.MODE_NAMES`) are for pulse energy,
+peak-to-peak and RMS work, and every one of them shows a 500 Hz LED as
+something other than its power."""
+
+ANALOG_FILTER_5HZ = 4
+"""`PM:ANALOGFILTER 4`: the slowest of the four, and the only one that turns
+a 500 Hz square wave into its mean rather than tracking it -- 1 kHz (3) still
+follows the edges."""
+
+AVERAGING_DIGITAL_SAMPLES = 100
+"""`PM:DIGITALFILTER` default: a light smoothing on top of the analog filter,
+short enough that the LED settle in `service.modules` still sees the
+intensity move within its 0.5 s poll. `[power_meter] digital_filter` in
+rig.toml overrides it; the analog filter is what does the averaging."""
 
 
 class DirectPowerMeter:
@@ -55,6 +72,12 @@ class DirectPowerMeter:
                 "[power_meter] dll in rig.toml") from exc
         self.info: dict = dict(getattr(self._meter, "info", {}) or {})
         self.last: Reading | None = None
+        self.averaged: bool | None = None
+        """Whether the meter is averaging (`set_averaging`), as read back
+        from the instrument after the write. Every `Reading` carries it."""
+        self.averaging: dict = {}
+        """The settings behind `averaged`, for the bench check and `/bench`:
+        `mode`, `mode_name`, `filter`, `analog_filter`, `digital_filter`."""
         self.wavelength_nm: float | None = None
         """The wavelength the meter reports holding, kept because every
         `Reading` carries it and `rigs.power_reading` falls back to it. The
@@ -135,6 +158,64 @@ class DirectPowerMeter:
         except MeterError as exc:
             raise PowerMeterError(str(exc)) from exc
 
+    def set_averaging(self, on: bool = True, *,
+                      digital_samples: int = AVERAGING_DIGITAL_SAMPLES) -> dict:
+        """Make a reading the **time average** of the light, which is the only
+        number that is a power when the LED is pulsed.
+
+        The rig pulses the LED at 500 Hz, 50 % duty. A 1918-C in any mode
+        but DC-continuous -- or in DC-continuous with no filter, which is how
+        a meter comes up and how its front panel leaves it -- samples the
+        square wave at one instant and shows whichever phase it landed in:
+        the full level, nothing, or a flicker between the two. The operator
+        watched exactly that on the rig (2026-09-05). With `PM:MODE 0` and
+        the analog 5 Hz filter the meter integrates over a hundred cycles
+        and reads the mean, which at 50 % duty is half the DC level -- the
+        number the intensity series and the LED settle want, and the one the
+        rail should show.
+
+        `on=False` puts the meter back to DC-continuous with no filter, for a
+        measurement that wants the instantaneous value. Either way the mode
+        is written -- a meter someone left in *pulse* or *RMS* on the front
+        panel is wrong under both.
+
+        What is remembered is what the meter *reports* after the writes, not
+        what was asked for, and `averaged` is True only if the mode is 0 and
+        the analog 5 Hz filter is engaged in the filter selection.
+        """
+        from .meter import MeterError
+        digital = max(0, int(digital_samples))
+        try:
+            self._meter.set_mode(MODE_DC_CONTINUOUS)
+            if on:
+                self._meter.set_analog_filter(ANALOG_FILTER_5HZ)
+                self._meter.set_filter(3 if digital > 0 else 1, digital)
+            else:
+                self._meter.set_filter(0, 0)
+                self._meter.set_analog_filter(0)
+            s = self._meter.settings()
+        except MeterError as exc:
+            raise PowerMeterError(str(exc)) from exc
+        mode = s.get("mode")
+        filt = s.get("filter")
+        analog = s.get("analogFilter")
+        self.averaging = {
+            "mode": mode, "mode_name": s.get("modeName"),
+            "filter": filt, "filter_name": s.get("filterName"),
+            "analog_filter": analog, "analog_filter_name": s.get("analogFilterName"),
+            "digital_filter": s.get("digitalFilter"),
+        }
+        self.averaged = (mode is not None and int(mode) == MODE_DC_CONTINUOUS
+                         and filt is not None and int(filt) in (1, 3)
+                         and analog is not None and int(analog) == ANALOG_FILTER_5HZ)
+        if on and not self.averaged:
+            raise PowerMeterError(
+                f"the 1918-C did not take the averaging settings: it reports mode "
+                f"{s.get('modeName')}, filter {s.get('filterName')}, analog filter "
+                f"{s.get('analogFilterName')} -- a pulsed LED will not read as its "
+                "average")
+        return dict(self.averaging)
+
     # -- reading ----------------------------------------------------------
     def read(self) -> Reading:
         from .meter import MeterError
@@ -147,7 +228,8 @@ class DirectPowerMeter:
                     saturated=bool(st.get("saturated")),
                     overrange=bool(st.get("overrange")),
                     units=st.get("units"),
-                    wavelength_nm=self.wavelength_nm)
+                    wavelength_nm=self.wavelength_nm,
+                    averaged=self.averaged)
         self.last = r
         return r
 

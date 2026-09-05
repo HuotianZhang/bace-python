@@ -911,3 +911,58 @@ table.qgrid td { padding: 0; }
 /* The folder, whole. Long names are real and must not truncate (§1). */
 .path { margin: 0; font-size: 11px; overflow-wrap: anywhere; user-select: all; }
 .rchart { border-top: 1px solid var(--rule); padding-top: 6px; }
+
+/* -- the power panel --------------------------------------------------------
+   The 1918-C under the rail on every tab: the switch that keeps the monitor
+   running in the service, the reading, the statistics over the window, and
+   the trace. Shell furniture like the run monitor, in the rail's register. */
+.power {
+  display: flex; flex-direction: column;
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper);
+  flex: 0 0 auto;
+}
+.pw-row {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 4px 12px;
+  font-family: var(--font-num); font-size: 11.5px;
+}
+.pw-row > span { display: inline-flex; align-items: center; gap: 8px; }
+.pw-row > span:empty { display: none; }
+.power .spacer { flex: 1 1 auto; }
+.pw-switch {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  font-family: var(--font-head); font-weight: 600; font-size: 12px;
+}
+.pw-switch input {
+  appearance: none; -webkit-appearance: none;
+  width: 32px; height: 17px; border-radius: 9px; margin: 0;
+  background: var(--rule); position: relative; cursor: pointer;
+  transition: background .15s;
+}
+.pw-switch input::after {
+  content: ''; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px;
+  border-radius: 50%; background: #fff; transition: left .15s;
+}
+.pw-switch input:checked { background: var(--ok); }
+.pw-switch input:checked::after { left: 17px; }
+.pw-switch input:disabled { opacity: .4; cursor: not-allowed; }
+.pw-switch input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pw-note { color: var(--warn); font-size: 10.5px; }
+.pw-value {
+  font-size: 21px; font-weight: 500; letter-spacing: -.02em; line-height: 1;
+  font-variant-numeric: tabular-nums; min-width: 6ch;
+}
+.pw-value.warn { color: var(--warn); }
+.pw-value.stale, .pw-value.off { color: var(--grey); }
+.pw-sub { color: var(--grey); font-size: 10.5px; }
+.pw-stats-box { gap: 12px; color: var(--ink); }
+.pw-stats-box i { font-style: normal; color: var(--grey); }
+.pw-controls { gap: 6px; }
+.power .seg .opt { line-height: 1.7; }
+.pw-status.ok { color: var(--ok); }
+.pw-status.bad { color: var(--alert); }
+.pw-chart { padding: 0 12px 6px; }
+.pw-chart[hidden] { display: none; }
+.pw-chart .chart-svg { max-height: 210px; }
+.pw-chart .chart-readout { min-height: 13px; }

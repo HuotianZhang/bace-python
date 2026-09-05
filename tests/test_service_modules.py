@@ -1149,7 +1149,12 @@ def test_the_led_settle_reads_the_simulated_meter_behind_the_open_shutter(tmp_pa
     evs, notices, states, polls, _ = _settle_transcript(b, tmp_path, led_settle_s=0.0)
     assert seen == {"shutter": True, "led": ("PULSE", 1.02)}, "read under the pulse, shutter open"
     assert polls == _SPAN_POLLS == 20
-    expected = b.sim.bench.device.led_current(1.02) * b.sim.power.w_per_unit
+    # Half the DC level: the meter averages (2026-09-05) and the LED is
+    # pulsed at 50 % duty, so the settled intensity is the duty-weighted
+    # mean -- the power the sample sees, not the on-phase level.
+    assert b.sim.bench.led_duty == 0.5
+    expected = (b.sim.bench.device.led_current(1.02) * b.sim.power.w_per_unit
+                * b.sim.bench.led_duty)
     [notice] = notices
     assert notice.level == "info"
     assert notice.text == f"LED settled in {_SPAN_POLLS * LED_SETTLE_POLL_S:g} s at " \

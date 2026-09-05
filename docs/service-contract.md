@@ -1004,7 +1004,33 @@ never on the bus** — USB when this process owns it, HTTP when the meter's
 console does — so it runs right through a bace scan (this is R3·2),
 serialised against the worker's own reads by `rigs._METER_LOCK`. One monitor
 of each kind at most. If the meter stops answering, emit a `Verdict(warn,
-"power.console")` once and keep trying.
+"power.console")` once and keep trying. `--power-monitor SECONDS` on the
+service starts it as the process comes up, so the meter is watched from boot
+and not from the moment a console is opened.
+
+**The history (2026-09-05).** The session keeps every monitor reading — up to
+`POWER_HISTORY_MAX = 200 000`, 55 h at 1 Hz — across monitor stops and
+restarts, and stamps each with the same `ts` its frame carries, so a console
+that folds the stream can merge it without a duplicate.
+`GET /monitors/power/history?since=<ts>&limit=<n>` answers `{points:
+[[ts, watts, trustworthy], …], count, total, kept_max, first_ts, last_ts,
+wavelength_nm, source, averaged, running, interval_s}` (the last five are the
+meter's settings, off the newest reading); `GET /monitors/power/history.csv`
+is the same as a file (`time_iso, unix_s, watts, trustworthy, wavelength_nm,
+source, averaged`, `Content-Disposition: attachment`);
+`DELETE /monitors/power/history` forgets it — the journal on disk keeps every
+reading regardless.
+
+**`averaged`** on every `PowerReading`, on the read-back's `instruments.power`
+and on `read-power`'s result: whether the meter was averaging (DC-continuous
+mode, the 5 Hz analog filter — `DirectPowerMeter.set_averaging`, set at open
+from `[power_meter] averaging`). The LED is pulsed at 500 Hz, 50 % duty for
+every transient, and an unfiltered 1918-C samples that square wave at one
+instant — the operator saw the reading flicker between the level and
+nothing. Averaged, it reads the mean, **half the DC level**, which is the
+power the sample sees. `null` when the driver cannot say (the console
+escape hatch, whose filter route this repository cannot verify); render it —
+a reading that is *not* averaged under a pulse is one instant of it.
 
 `POST /monitors/temperature {"interval_s": 5.0}` is the same shape for the
 331; 422 only when the bench has no 331 at all (neither `[temperature]

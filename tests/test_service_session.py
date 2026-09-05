@@ -1066,3 +1066,25 @@ def test_the_temperature_monitor_reads_the_331_beside_the_bench(tmp_path):
         assert s.stop_temperature_monitor() is True
         assert s.bench_snapshot()["instruments"]["temperature"]["monitor"] is False
         assert any(l["type"] == "TemperatureRead" for l in journal_lines(s))
+
+
+def test_a_power_monitor_asked_for_at_start_is_running_before_anyone_connects(tmp_path):
+    """`--power-monitor 1`: the meter is watched from the moment the service
+    is up, so an overnight trace does not depend on a browser tab. A bench
+    with no meter records the refusal where start-up trouble goes and
+    starts anyway."""
+    with make_session(tmp_path, power_monitor_s=0.01) as s:
+        assert s.monitor_running and s.monitors()[0]["interval_s"] == 0.01
+        wait_until(lambda: s.power_history()["count"] >= 3)
+        h = s.power_history()
+        assert h["running"] is True and h["averaged"] is True
+        assert [row[0] for row in h["points"]] == sorted(row[0] for row in h["points"])
+        stamped = [f["ts"] for f in s.events_since(0) if f["type"] == "PowerReading"]
+        assert {row[0] for row in h["points"]} <= set(stamped)
+
+    s2 = make_session(tmp_path, session_id="20260902_220002", power_monitor_s=0.5)
+    s2.bench.rig.power = None
+    with s2:
+        assert not s2.monitor_running
+        assert any("--power-monitor" in e and "no power meter" in e for e in s2.errors)
+        s2.errors.clear()
