@@ -167,8 +167,8 @@ export function renderRow(row, model, ctx) {
     case 'range': return rangeRow(row, ctx, model);
     case 'voc': return vocRow(row, ctx, model);
     case 'polarity': return polarityRow(row, ctx, model);
-    case 'segmented': return field(row.spec, ctx, model, { segmented: true, accent: row.accent });
-    default: return field(row.spec, ctx, model, { accent: row.accent });
+    case 'segmented': return field(row.spec, ctx, model, { segmented: true, accent: row.accent, label: row.label });
+    default: return field(row.spec, ctx, model, { accent: row.accent, label: row.label });
   }
 }
 
@@ -177,7 +177,7 @@ export function renderRow(row, model, ctx) {
  * wire and is rendered, the editability is the wire's, and `doc`/`doc_full`
  * are the engine's docstring rather than anything this file invents.
  */
-export function field(spec, ctx, model, { segmented = false, accent = false } = {}) {
+export function field(spec, ctx, model, { segmented = false, accent = false, label: text = null } = {}) {
   const editable = spec.editable !== false;
   const cls = ['pf'];
   if (!editable) cls.push('ro');
@@ -185,12 +185,15 @@ export function field(spec, ctx, model, { segmented = false, accent = false } = 
   if (spec.source === 'inherited') cls.push('inh');
   if (spec.source === 'derived') cls.push('der');
   if (accent) cls.push('acc');
+  if (spec.inert) cls.push('inert');
 
   const commit = (value) => ctx.edit(model.name, { [spec.name]: value });
   return h('div.pw', h('div.' + cls.join('.'), help(spec),
-    label(spec, ctx, model),
+    label(spec, ctx, model, text),
     editable ? input(spec, commit, segmented) : h('span.v', { text: display(spec) }),
-    provenance(spec, ctx, model, editable)), docLine(spec, ctx, model));
+    spec.inert
+      ? h('span.src', h('span.tag.off', { title: spec.inert, text: 'not read' }))
+      : provenance(spec, ctx, model, editable)), docLine(spec, ctx, model));
 }
 
 /** The value as text, for a field the operator may not type into. */
@@ -244,6 +247,10 @@ function input(spec, commit, segmented, { blank = false } = {}) {
   // `tree.owned-param` refusing the tree. `ui-rules` §6: an inherited value
   // reads as inherited, showing the value it will get.
   if (spec.editable === false) return h('span.v', { text: display(spec) });
+  // Not read in this configuration (`fields.inertReason`): shown, not typed
+  // into. The value stays so it is there when the setting that reads it is
+  // turned back on; the reason is on the row's tag and on hover here.
+  if (spec.inert) return h('span.v.off', { text: display(spec), title: spec.inert });
   if (spec.type === 'bool') {
     return h('span.bool', { role: 'group', 'aria-label': spec.name },
       ...[true, false].map((v) => option(v ? 'true' : 'false', spec.value === v, () => commit(v))));
@@ -537,8 +544,9 @@ export function fold(model, ctx, open) {
       h('span.cs', { text: `${total} more · ${model.form === 'node' ? 'same as bench' : 'run.toml'}` }),
       model.fold.map((group) => h('button.btng', {
         class: open.has(group.group) ? 'on' : '',
+        title: group.inert ? group.params[0].inert : '',
         onclick: () => ctx.toggle(model.name, group.group),
-      }, `${group.group} · ${group.count}`))),
+      }, `${group.group} · ${group.count}${group.inert ? ' · not read' : ''}`))),
     model.fold.filter((g) => open.has(g.group)).map((g) => h('div.pr.folded',
       g.params.map((spec) => field(spec, ctx, model, {})))));
 }

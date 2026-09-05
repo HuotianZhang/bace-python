@@ -585,6 +585,37 @@ def test_bace_refuses_a_voc_measured_at_another_level_before_touching_anything(t
     assert sim.bench.shots == 0 and ctx.folders == []
 
 
+def test_bace_ignores_centre_on_voc_when_vpre_is_not_the_axis(tmp_path):
+    """The bench's case: `centre_on_voc` left true from run.toml, the scan
+    parameter switched to delay_ns. The console hides the flag; the build
+    must not read it -- it refused the axis before, and with no V_oc source
+    in scope it would have demanded one for an axis that has no use for it."""
+    b = bench()
+    cat = catalogue()
+    ctx = make_ctx(tmp_path)
+    gen = cat.build("bace", {**FAST, "centre_on_voc": True, "axis_name": "delay_ns",
+                             "axis_start": 50.0, "axis_stop": 50.0, "vpre": 0.9,
+                             "n_loops": 1}, ctx, b.rig)
+    first = next(gen)
+    assert first is not None
+    gen.close()
+
+
+def test_bace_reads_the_smu_config_only_under_measure_dc(tmp_path):
+    """The `sourcemeter` fold is "not read" on the card unless `measure_dc`
+    is on, and the build agrees: a compliance over the bench ceiling is
+    refused with `measure_dc`, and not read without it."""
+    b = bench()
+    cat = catalogue()
+    over = {**FAST, "centre_on_voc": False, "axis_start": 0.9, "axis_stop": 0.9,
+            "n_loops": 1, "smu_current_compliance_a": 1.0}
+    with pytest.raises(ModuleError, match=r"^bace: smu_current_compliance_a: .*ceiling"):
+        cat.build("bace", {**over, "measure_dc": True}, make_ctx(tmp_path), b.rig)
+    gen = cat.build("bace", {**over, "measure_dc": False}, make_ctx(tmp_path), b.rig)
+    assert next(gen) is not None
+    gen.close()
+
+
 def test_bace_refuses_centre_on_voc_without_a_source(tmp_path):
     b = bench()
     cat = catalogue()
@@ -735,8 +766,9 @@ def test_build_refuses_bad_parameters_by_name_and_touches_nothing(tmp_path):
     for bad, match in (({"nope": 1}, r"^bace: no such parameter\(s\): nope"),
                        ({"n_loops": 0}, r"^bace: n_loops: 0 is below the minimum"),
                        ({"led_low_v": 1.2}, r"^bace: led_v: low level 1.2 V is not below"),
-                       ({"smu_current_compliance_a": 0.1}, r"^bace: smu_current_compliance_a: .*ceiling"),
-                       ({"axis_name": "delay_ns"}, r"^bace: axis: centre_on_voc is only"),
+                       # read only under measure_dc, where the Keithley is sourced
+                       ({"smu_current_compliance_a": 0.1, "measure_dc": True},
+                        r"^bace: smu_current_compliance_a: .*ceiling"),
                        ({"axis_start": 0.0, "axis_stop": 0.1, "axis_step": 0.0}, r"^bace: axis: .*positive step"),
                        ({"delay_ns": -5.0}, r"^bace: delay_ns = -5"),
                        ({"t0_int_reference": "start"}, r"^bace: t0_int_reference: 'start' is not one of")):
@@ -937,10 +969,13 @@ def test_vpre_on_voc_pins_the_prebias_as_an_offset_from_the_voc_in_scope(tmp_pat
 
     with pytest.raises(ModuleError, match="vpre_on_voc: no V_oc source"):
         cat.build("bace", params, make_ctx(tmp_path), b.rig)
-    with pytest.raises(ModuleError, match="swept axis"):
-        cat.build("bace", {**params, "axis_name": "vpre", "axis_start": 0.0, "axis_stop": 0.0,
-                           "axis_step": 0.0}, make_ctx(tmp_path, voc=voc), b.rig)
-    assert b.sim.bench.shots == 6, "three shots, light and dark: the refusals touched nothing"
+    # With vpre the swept axis the flag does not apply (`core.axis.voc_flags`):
+    # the console hides it, and the build reads a stale true as nothing.
+    swept = {**params, "axis_name": "vpre", "axis_start": 0.9, "axis_stop": 0.9, "axis_step": 0.0}
+    starts = [ev for ev in cat.build("bace", swept, make_ctx(tmp_path), b.rig)
+              if isinstance(ev, E.StepStarted)]
+    assert [s.setpoint.vpre for s in starts] == [pytest.approx(0.9)], "absolute, no V_oc asked for"
+    assert b.sim.bench.shots == 8, "three shots and one, light and dark: the refusal touched nothing"
     spec = {p.name: p for p in cat._params["bace"]}["vpre_on_voc"]
     assert spec.group == "pinned" and spec.default is False
 

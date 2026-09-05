@@ -686,7 +686,7 @@
      "type": "enum",
      "unit": "",
      "default": "vpre",
-     "doc": "Which quantity is swept: vpre (BACE), delay_ns (TDCF) or vcoll.",
+     "doc": "The scan parameter -- which quantity the scan range steps through: vpre (BACE), delay_ns (TDCF) or vcoll (field dependence). The other two stay pinned at the values below.",
      "doc_full": "",
      "choices": [
       "vpre",
@@ -758,7 +758,7 @@
      "type": "bool",
      "unit": "",
      "default": false,
-     "doc": "Make start/stop offsets from the V_oc measured under the illumination in force (vpre only).",
+     "doc": "With vpre as the scan parameter: read the scan range as offsets from V_oc rather than as volts, so -0.01 .. +0.01 straddles V_oc at whatever illumination is in force and 0 .. 0 is BACE at V_oc. The V_oc comes from jv_bace at this led_v, measure_dc, or a typed voc. Applies to a swept vpre only; with another scan parameter the flag is ignored (the pinned vpre has vpre_on_voc instead).",
      "doc_full": "",
      "choices": [],
      "group": "axis",

@@ -282,7 +282,7 @@ service holds to it everywhere:
 
 | level | means | blocks Start |
 |---|---|---|
-| `invalid` | the tree cannot run as written: shape, a `bace` with `centre_on_voc` and no V_oc source in scope, a V_oc measured at a different LED level than the pulse will use, LED levels `LedDrive` refuses, axis geometry `Axis` refuses | yes |
+| `invalid` | the tree cannot run as written: shape, a `bace` with `centre_on_voc` (on a swept vpre — on any other axis the flag is inert, `core.axis.voc_flags`) and no V_oc source in scope, a V_oc measured at a different LED level than the pulse will use, LED levels `LedDrive` refuses, axis geometry `Axis` refuses | yes |
 | `crit` | **hardware safety only**: compliance above the bench ceiling, a bias or SMU output live at Start, the relay interlock | yes |
 | `warn` | **states the evidence and nothing more**: the 33220A reads `NORM`, the 81150A is not armed `EXT`, a temperature loop will pause, the power console is silent, a run over eight hours. `data.fix` names the action the operator may click | no |
 | `info`, `ok` | the record | no |

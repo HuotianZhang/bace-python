@@ -52,7 +52,7 @@ from typing import Any, Callable, Iterator, Mapping
 import numpy as np
 
 from ..config import ConfigError, check_smu_limits
-from ..core.axis import Axis, AxisError, ScanSpec
+from ..core.axis import Axis, AxisError, ScanSpec, voc_flags
 from ..core.illumination import IlluminationError, LedDrive, assert_axis_centre
 from ..core.process import ChargeAccumulator, RunningAverage
 from ..core.pulses import pulse_levels
@@ -342,15 +342,21 @@ SMU_UNITS: dict[str, str] = {
 }
 
 AXIS_DOCS: dict[str, str] = {
-    "axis_name": "Which quantity is swept: vpre (BACE), delay_ns (TDCF) or vcoll.",
+    "axis_name": "The scan parameter -- which quantity the scan range steps through: "
+                 "vpre (BACE), delay_ns (TDCF) or vcoll (field dependence). The other "
+                 "two stay pinned at the values below.",
     "axis_start": "First value of the swept quantity; an offset from V_oc when "
                    "centre_on_voc is on.",
     "axis_stop": "Last value of the swept quantity; start = stop is one point "
                   "(repeats come from n_loops).",
     "axis_step": "Spacing of the swept values; the point count is rounded from the "
                   "span, never truncated.",
-    "centre_on_voc": "Make start/stop offsets from the V_oc measured under the "
-                     "illumination in force (vpre only).",
+    "centre_on_voc": "With vpre as the scan parameter: read the scan range as offsets "
+                     "from V_oc rather than as volts, so -0.01 .. +0.01 straddles V_oc at "
+                     "whatever illumination is in force and 0 .. 0 is BACE at V_oc. The "
+                     "V_oc comes from jv_bace at this led_v, measure_dc, or a typed voc. "
+                     "Applies to a swept vpre only; with another scan parameter the flag "
+                     "is ignored (the pinned vpre has vpre_on_voc instead).",
 }
 
 PINNED_DOCS: dict[str, str] = {
@@ -941,7 +947,7 @@ class Catalogue:
                 out.append({"code": role, "text": f"{why}: {unavailable[role]}"})
 
         if name == "bace":
-            needs_voc = bool(p["centre_on_voc"]) or bool(p.get("vpre_on_voc"))
+            needs_voc = any(voc_flags(p))
             if needs_voc and p["voc"] is None and not p["measure_dc"]:
                 led_v = p["led_v"]
                 if session_voc is None:
@@ -1187,11 +1193,9 @@ class Catalogue:
         except ValueError as exc:
             raise ModuleError(f"{name}: {exc}") from None
         axis = _axis_of(p)
-        vpre_on_voc = bool(p.get("vpre_on_voc", False))
-        if vpre_on_voc and axis.name == "vpre":
-            raise ModuleError(f"{name}: vpre_on_voc: vpre is the swept axis here, so there "
-                              "is no pinned prebias to offset from V_oc; centre_on_voc is "
-                              "the flag for a swept vpre")
+        # `voc_flags`: each flag applies to one side of `axis_name` only, and
+        # the other is inert rather than refused -- the console hides it.
+        _, vpre_on_voc = voc_flags(p)
         needs_voc = axis.centre_on_voc or vpre_on_voc
         try:
             spec = ScanSpec(axis=axis, vpre=p["vpre"], vcoll=p["vcoll"],
@@ -1208,8 +1212,13 @@ class Catalogue:
                              threshold_v=self.rig_config.led_threshold_v)
         except IlluminationError as exc:
             raise ModuleError(f"{name}: led_v: {exc}") from None
-        smu_cfg = self._smu_config(name, p)
         measure_dc = bool(p["measure_dc"])
+        # The Keithley is touched inside `if measure_dc:` and nowhere else in
+        # a bace run, so its configuration -- and the ceiling refusal in it --
+        # is read only there. Read unconditionally, a compliance over the
+        # ceiling refused a run that would never have sourced the SourceMeter,
+        # from a fold the card marks "not read" (`ui-fields.md`).
+        smu_cfg = self._smu_config(name, p) if measure_dc else None
         if measure_dc and rig.smu is None:
             raise ModuleError(f"{name}: measure_dc: this bench has no SourceMeter")
         if measure_dc and rig.router is None:
@@ -1801,7 +1810,7 @@ def _axis_of(p: Mapping[str, Any]) -> Axis:
     try:
         return Axis(name=p["axis_name"], start=float(p["axis_start"]),
                     stop=float(p["axis_stop"]), step=float(p["axis_step"]),
-                    centre_on_voc=bool(p["centre_on_voc"]))
+                    centre_on_voc=voc_flags(p)[0])
     except AxisError as exc:
         raise ModuleError(f"bace: axis: {exc}") from None
 

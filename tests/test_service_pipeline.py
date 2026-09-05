@@ -615,11 +615,29 @@ def test_a_compliance_above_the_bench_ceiling_is_crit():
     assert levels(v, "smu.ceiling") == ["ok"]
 
 
+def test_the_smu_ceiling_is_a_bace_node_s_only_under_measure_dc():
+    """`smu_*` on a bace node is read inside `if measure_dc:` and nowhere
+    else, so a compliance over the ceiling is `crit` with `measure_dc` and
+    not a verdict at all without it -- the card folds the group as "not
+    read", and a check over a number nobody reads would block Start from
+    behind that fold."""
+    v = validate(module("bace", measure_dc=True, smu_current_compliance_a=1.0))
+    assert levels(v, "smu.ceiling") == ["crit"]
+    v = validate(module("bace", measure_dc=False, smu_current_compliance_a=1.0))
+    [ok] = v.by_code("smu.ceiling")
+    assert ok.level == "ok" and "no module sources" in ok.text
+    # A J-V node sources it whatever else is set.
+    v = validate(module("jv", smu_current_compliance_a=1.0))
+    assert levels(v, "smu.ceiling") == ["crit"]
+
+
 def test_axis_geometry_is_judged_by_axis_scanspec_and_pulse_levels():
+    # run.toml's `centre_on_voc = true` with the scan parameter switched to
+    # delay_ns is the bench's everyday case, not a fault: the flag is a swept
+    # vpre's and does not apply here (`core.axis.voc_flags`).
     v = validate(module("bace", measure_dc=True, axis_name="delay_ns", axis_start=0.0,
                         axis_stop=100.0, axis_step=10.0))
-    [bad] = v.by_code("axis.geometry")
-    assert bad.level == "invalid" and "centre_on_voc" in bad.text
+    assert levels(v, "axis.geometry") == ["ok"]
     v = validate(module("bace", measure_dc=True, axis_start=0.0, axis_stop=1.0,
                         axis_step=0.0, centre_on_voc=False))
     assert "positive step" in v.by_code("axis.geometry")[0].text
@@ -862,7 +880,9 @@ def test_a_malformed_tree_is_one_invalid_and_the_rest_not_evaluated():
 
 
 def test_per_node_verdicts_are_grouped_by_tree_node_not_iteration():
-    tree = canonical(smu_current_compliance_a=0.2)
+    # `measure_dc`, or the bace node would not source the SourceMeter and
+    # there would be no ceiling verdict to group.
+    tree = canonical(smu_current_compliance_a=0.2, measure_dc=True)
     v = validate(tree)
     [bad] = v.by_code("smu.ceiling")
     assert bad.node_path == "T=295K/led=1.010V/bace"
@@ -1037,11 +1057,24 @@ def test_a_pinned_prebias_on_voc_needs_a_source_and_a_pinned_vpre():
     assert step.params["voc"].source is Source.DERIVED and step.params["voc"].value == 0.906
     assert step.detail["voc_needed_by"] == ["vpre_on_voc"]
 
+    # The console hides `vpre_on_voc` when vpre is the swept axis, and a
+    # hidden flag is inert, not a fault: the swept tree is valid and V_oc is
+    # needed by `centre_on_voc` alone (`core.axis.voc_flags`).
     swept = dict(axis_name="vpre", axis_start=-0.1, axis_stop=0.1, axis_step=0.1,
                  centre_on_voc=True, vpre_on_voc=True)
     v = validate(module("bace", **swept), catalogue=cat, session_voc=voc)
-    [c] = v.by_code("axis.geometry")
-    assert c.level == "invalid" and "vpre_on_voc" in c.text and "swept axis" in c.text
+    assert v.valid, [c.text for c in v.checks if c.level != "ok"]
+    assert v.schedule.modules[0].detail["voc_needed_by"] == ["centre_on_voc"]
+
+    # And the mirror image, which is the one the bench hit: switch the scan
+    # parameter to delay_ns with `centre_on_voc` still true behind the hidden
+    # field. Shot and Scan were disabled by `axis.geometry` with nothing on
+    # screen to clear; now the flag does not apply and nothing needs a V_oc.
+    stale = dict(axis_name="delay_ns", axis_start=50.0, axis_stop=250.0, axis_step=50.0,
+                 centre_on_voc=True, vpre_on_voc=False, vpre=0.9)
+    v = validate(module("bace", **stale), catalogue=cat)
+    assert v.valid, [c.text for c in v.checks if c.level != "ok"]
+    assert v.schedule.modules[0].detail["voc_needed_by"] == []
 
 
 def test_the_temperature_check_tells_a_console_gone_since_start_from_an_instrument_silent():

@@ -338,7 +338,8 @@ def test_a_jv_bace_gives_the_session_its_voc_and_a_manual_bace_centres_on_it(tmp
 def test_submit_refuses_crit_and_invalid_trees_with_the_checks_and_queues_nothing(tmp_path):
     with make_session(tmp_path) as s:
         with pytest.raises(SubmitRefused) as refused:
-            s.submit(bace(1, voc=0.9, smu_current_compliance_a=0.1))
+            # `measure_dc`: a bace node reads its compliance only when it sources the 2400
+            s.submit(bace(1, voc=0.9, smu_current_compliance_a=0.1, measure_dc=True))
         checks = {(c.code, c.level) for c in refused.value.validation.checks}
         assert ("smu.ceiling", "crit") in checks
         assert "smu.ceiling" in str(refused.value)

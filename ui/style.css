@@ -438,6 +438,12 @@ a.btng.goto { text-decoration: none; display: inline-flex; align-items: center; 
 
 .pf.ro { color: var(--grey); }
 .pf.ro .v { color: var(--ink); }
+/* Not read in this configuration (`fields.inertReason`): the row stays, greyed,
+   with the value it will have when the setting that reads it is turned back
+   on, and a dashed tag naming that setting on hover. */
+.pf.inert .l, .pf.inert .v.off { color: var(--grey); opacity: .6; }
+.pf.inert .v.off { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 12px; }
+.tag.off { border-style: dashed; color: var(--grey); text-transform: none; letter-spacing: 0; }
 .pf.inh, .pf.der { background: rgba(236, 48, 19, .04); }
 .pf.inh .l::before, .pf.der .l::before { content: '↳ '; color: var(--accent); }
 .pf.acc .l { color: var(--accent-dark); }
@@ -450,6 +456,11 @@ a.btng.goto { text-decoration: none; display: inline-flex; align-items: center; 
    repetitions of "normal" — and making it near-white left an illegible tag
    still holding a column. */
 .src { display: flex; align-items: center; gap: 5px; justify-self: end; }
+/* A segmented control is as wide as its choices and cannot shrink, so on a
+   330 px card its provenance tag spilled into the next column. It sits under
+   the control instead. */
+.pf:has(> .seg) { grid-template-columns: 13em minmax(0, 1fr); }
+.pf:has(> .seg) > .src { grid-column: 2; justify-self: start; }
 .src .tag { text-transform: none; letter-spacing: 0; }
 .src-inherited, .src-derived { border-color: var(--accent); color: var(--accent-dark); }
 .src-edited { border-color: var(--ink); color: var(--ink); }
@@ -470,7 +481,10 @@ button.link:hover { color: var(--accent-dark); }
   border: 0; background: none; line-height: 1.5;
 }
 .seg .opt.on, .bool .opt.on { background: var(--ink); color: #fff; }
-.seg .opt:hover, .bool .opt:hover { color: var(--ink); }
+/* Hover darkens the type of an option that is not chosen; the chosen one is
+   already white on ink (or on the accent), and darkening it made the word
+   vanish under the pointer. */
+.seg .opt:not(.on):hover, .bool .opt:not(.on):hover { color: var(--ink); }
 .seg .opt:focus-visible, .bool .opt:focus-visible,
 .btng:focus-visible, .btnp:focus-visible, .btns:focus-visible,
 .btnd:focus-visible, .btnw:focus-visible, .pf .l.lh:focus-visible {
@@ -593,6 +607,14 @@ button.link:hover { color: var(--accent-dark); }
 .chart-note { font-size: 11px; color: var(--grey); }
 .chart-absent { border: 1px dashed var(--rule); padding: 10px; }
 
+/* The timing diagram's fold on the bace card: one line shut, the drawing and
+   its alerts open. The count keeps the worst level's colour either way. */
+.tfold { border-top: 1px solid var(--rule); padding-top: 6px; }
+.tfold .foldbar { gap: 10px; }
+.tfold .tsum.invalid, .tfold .tsum.alert { color: var(--alert); }
+.tfold .tsum.warn { color: var(--warn); }
+.tfold .tbody { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
+.tfold .tbody[hidden] { display: none; }
 .alerts { display: flex; flex-direction: column; gap: 4px; }
 .alerts .warn1.info { color: var(--grey); }
 .alerts .warn1.alert { color: var(--alert); }
@@ -985,6 +1007,21 @@ table.qgrid td { padding: 0; }
 /* The folder, whole. Long names are real and must not truncate (§1). */
 .path { margin: 0; font-size: 11px; overflow-wrap: anywhere; user-select: all; }
 .rchart { border-top: 1px solid var(--rule); padding-top: 6px; }
+
+/* -- the rig tab (R3·4): the chain beside one shot at three scales --------- */
+.rig {
+  display: grid;
+  grid-template-columns: minmax(0, 940px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  margin: 0 0 12px;
+}
+@media (max-width: 1500px) {
+  .rig { grid-template-columns: minmax(0, 1fr); }
+}
+.rig .cb { gap: 10px; }
+.rig .cs .accent { color: var(--accent-dark); font-family: var(--font-num); }
+.rig-readback .card { margin: 0; }
 
 /* -- the power panel --------------------------------------------------------
    The 1918-C under the rail on every tab: the switch that keeps the monitor

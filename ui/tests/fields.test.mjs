@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { cardModel, foldCount, points, effectivePolarity, driveLevel, cardRuns, BENCH_CARDS } from '../lib/fields.js';
+import { cardModel, foldCount, points, effectivePolarity, driveLevel, inertReason, cardRuns, BENCH_CARDS } from '../lib/fields.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const CATALOGUE = JSON.parse(fs.readFileSync(path.join(here, '..', 'fixtures', 'modules_sim.json'), 'utf8'));
@@ -77,6 +77,18 @@ test('the jv card reads the light off the bench, and unknown is not dark', () =>
     assert.equal(model.readback.lit, null, JSON.stringify(led));
     assert.equal(model.readback.text, 'unknown');
   }
+});
+
+test('the axis rows are labelled for the operator, and the wire names stay', () => {
+  const model = cardModel(entry('bace', { axis_name: 'vpre' }));
+  const seg = model.above.find((row) => row.kind === 'segmented' && row.spec.name === 'axis_name');
+  assert.equal(seg.label, 'scan parameter');
+  const range = model.above.find((row) => row.kind === 'range');
+  assert.equal(range.label, 'scan range');
+  assert.deepEqual([range.start.name, range.stop.name, range.step.name], ['axis_start', 'axis_stop', 'axis_step']);
+  // Any other field carries no label override: its name is its label.
+  const plain = model.above.find((row) => row.kind === 'field' && row.spec.name === 'n_loops');
+  assert.equal(plain.label, null);
 });
 
 test('bace reads the same length whichever axis is swept, and loses no parameter', () => {
@@ -339,4 +351,74 @@ test('the card model is what the card is keyed on, so it carries no clock', () =
                     JSON.stringify(cardModel(byName[name], { bench: moved })),
                     `${name}: the shutter moved and the model did not`);
   }
+});
+
+
+// -- not read: the mirror of hidden ------------------------------------------
+
+/** Every spec on the card, above the fold and in it, by name. */
+function specsOf(model) {
+  const out = {};
+  for (const row of model.above) {
+    if (row.kind === 'range') { out[row.start.name] = row.start; out[row.stop.name] = row.stop; out[row.step.name] = row.step; }
+    else if (row.spec) out[row.spec.name] = row.spec;
+  }
+  for (const g of model.fold) for (const p of g.params) out[p.name] = p;
+  return out;
+}
+
+test('a parameter the run will not read is marked inert with its reason, and reads again when it applies', () => {
+  const same = specsOf(cardModel(entry('bace', { dark_reference: 'same' })));
+  assert.match(same.dark_settle_s.inert, /dark_reference = same/);
+  const translated = specsOf(cardModel(entry('bace', { dark_reference: 'translated' })));
+  assert.equal(translated.dark_settle_s.inert, undefined);
+
+  const internal = specsOf(cardModel(entry('bace', { external_trigger: false })));
+  assert.match(internal.trigger_slope_positive.inert, /external_trigger = false/);
+  assert.equal(specsOf(cardModel(entry('bace', { external_trigger: true }))).trigger_slope_positive.inert, undefined);
+});
+
+test('the sourcemeter group is not read by a bace run without measure_dc, and the fold button says so', () => {
+  const off = cardModel(entry('bace', { measure_dc: false }));
+  const group = off.fold.find((g) => g.group === 'sourcemeter');
+  assert.equal(group.inert, true);
+  assert.ok(group.params.every((p) => /measure_dc = false/.test(p.inert)), 'every smu_* field carries the reason');
+  const on = cardModel(entry('bace', { measure_dc: true }));
+  assert.equal(on.fold.find((g) => g.group === 'sourcemeter').inert, false);
+  assert.ok(on.fold.find((g) => g.group === 'sourcemeter').params.every((p) => !p.inert));
+});
+
+test('a J–V module never reads the DC settles, whatever is set', () => {
+  for (const name of ['jv', 'jv_bace']) {
+    const specs = specsOf(cardModel(entry(name)));
+    for (const dc of ['smu_settle_jsc_ms', 'smu_settle_voc_ms', 'smu_settle_jsat_ms']) {
+      assert.match(specs[dc].inert, /only measure_dc reads it/, `${name}.${dc}`);
+    }
+    assert.equal(specs.smu_current_compliance_a.inert, undefined, `${name} does source the Keithley`);
+  }
+});
+
+test('a zero-width scan range does not read its step; a J–V sweep still needs one', () => {
+  const repeat = cardModel(entry('bace', { axis_start: 0, axis_stop: 0 }));
+  assert.match(repeat.above.find((r) => r.kind === 'range').step.inert, /start = stop/);
+  const swept = cardModel(entry('bace', { axis_start: -0.1, axis_stop: 0.1 }));
+  assert.equal(swept.above.find((r) => r.kind === 'range').step.inert, undefined);
+  // `JVConfig.points()` refuses `step_v <= 0` even at one point, so it stays live.
+  const jv = cardModel(entry('jv', { start_v: 0.5, stop_v: 0.5 }));
+  assert.equal(jv.above.find((r) => r.kind === 'range').step.inert, undefined);
+});
+
+test('bench-dependent reasons need the bench, and fall silent without it', () => {
+  const noMeter = { instruments: { power: { available: false }, temperature: { wired: false } } };
+  const wired = { instruments: { power: { available: true }, temperature: { wired: true } } };
+  assert.match(inertReason('bace', 'led_settle_max_s', {}, noMeter), /no power meter/);
+  assert.match(inertReason('bace', 'led_settle_tolerance', {}, noMeter), /no power meter/);
+  assert.equal(inertReason('bace', 'led_settle_max_s', {}, wired), null);
+  assert.equal(inertReason('bace', 'led_settle_max_s', {}, null), null, 'the node form has no bench');
+  assert.match(inertReason('temperature', 'timeout_s', {}, noMeter), /331 not wired/);
+  assert.equal(inertReason('temperature', 'timeout_s', {}, wired), null);
+  assert.equal(inertReason('temperature', 'hold_s', {}, noMeter), null, 'hold_s is slept after the resume');
+  // Through the model, so the fold and the row agree.
+  const specs = specsOf(cardModel(entry('bace'), { bench: noMeter }));
+  assert.match(specs.led_settle_max_s.inert, /no power meter/);
 });

@@ -71,7 +71,7 @@ export const LAYOUT = {
       { kind: 'field', name: 'led_v', when: (v, w) => isBound(w.led_v), otherwise: 'fold' },
       {
         kind: 'range', label: 'LED levels', names: ['led_start_v', 'led_stop_v', 'led_step_v'],
-        when: (v, w) => !isBound(w.led_v),
+        when: (v, w) => !isBound(w.led_v), stepUnusedAtZeroWidth: true,
       },
       'led_settle_s', 'dark',
       { kind: 'range', label: 'sweep', names: ['start_v', 'stop_v', 'step_v'] },
@@ -86,8 +86,11 @@ export const LAYOUT = {
       // §3: the accent is the swept quantity, and which quantity is swept *is*
       // the choice of experiment — `vpre` is BACE, `delay_ns` is TDCF. It was
       // spent on the polarity pair, which is a knob, not the experiment.
-      { kind: 'segmented', name: 'axis_name', accent: true },
-      { kind: 'range', label: 'axis', names: ['axis_start', 'axis_stop', 'axis_step'], accent: true },
+      // Labelled for the operator, not after the parameter: "scan parameter"
+      // is the question the control answers, and "scan range" what the three
+      // numbers under it are. The wire names stay `axis_*`.
+      { kind: 'segmented', name: 'axis_name', label: 'scan parameter', accent: true },
+      { kind: 'range', label: 'scan range', names: ['axis_start', 'axis_stop', 'axis_step'], accent: true, stepUnusedAtZeroWidth: true },
       // Exactly one of these two is ever valid, and `axis_name` decides which:
       // with the vpre axis the whole sweep is centred on V_oc; with any other
       // the *pinned* vpre is an offset from it. The other is not folded, it is
@@ -167,6 +170,67 @@ function isBound(wire) {
 }
 
 /**
+ * The parameters that are on screen and **not read** in the configuration on
+ * screen — the mirror of `hidden`. `centre_on_voc` was the case that bit:
+ * hidden because it did not apply, still read, and it refused the run.
+ * The rule since is that a parameter the run will not read is inert *both*
+ * ways: the service does not read it (`core.axis.voc_flags`,
+ * `_smu_config` under `measure_dc`), and the card says so and takes no
+ * typing into it. Each entry is the reason, as the row shows it, or `null`
+ * when the parameter applies. The bench-dependent ones fall silent with no
+ * bench (the pipeline's node form), where the answer is not known.
+ *
+ * Every rule here is a fact about the code that reads the parameter, named
+ * in the reason; none is a guess about what the operator meant.
+ */
+const SMU_FIELDS = ['smu_current_compliance_a', 'smu_voltage_compliance_v', 'smu_settle_jsc_ms',
+  'smu_settle_voc_ms', 'smu_settle_jsat_ms', 'smu_nplc', 'smu_averaging', 'smu_terminals', 'smu_four_wire'];
+const SMU_DC_ONLY = ['smu_settle_jsc_ms', 'smu_settle_voc_ms', 'smu_settle_jsat_ms'];
+
+const noPowerMeter = (bench) => Boolean(bench && bench.instruments && bench.instruments.power
+  && bench.instruments.power.available === false);
+const unwired331 = (bench) => Boolean(bench && bench.instruments && bench.instruments.temperature
+  && bench.instruments.temperature.wired === false);
+const settleOnClock = (v, bench) => (noPowerMeter(bench)
+  ? 'no power meter · the LED settles on the clock, led_settle_s alone' : null);
+const smuNotSourced = (v) => (v.measure_dc ? null : 'measure_dc = false · the Keithley is not sourced');
+const dcOnly = () => 'only measure_dc reads it · a J–V sweep settles settle_s per point';
+
+const INERT = {
+  bace: {
+    // `run_transient_scan`: `dark_settle_s` sleeps inside `dark levels`,
+    // which `dark_reference = same` skips whole (`charts/timing.js`).
+    dark_settle_s: (v) => (v.dark_reference === 'same'
+      ? 'dark_reference = same · the dark levels are not rewritten, so nothing settles after them' : null),
+    // `RunConfig.trigger_slope_positive`: "Moot when external_trigger is False."
+    trigger_slope_positive: (v) => (v.external_trigger === false
+      ? 'external_trigger = false · the 81150A is not armed by the Sync, so its slope is not read' : null),
+    // `_settle_led`: on the power meter when the rig has one, on the clock otherwise.
+    led_settle_max_s: settleOnClock,
+    led_settle_tolerance: settleOnClock,
+    // The Keithley is touched inside `if measure_dc:` and nowhere else in a bace run.
+    ...Object.fromEntries(SMU_FIELDS.map((n) => [n, smuNotSourced])),
+  },
+  // A J–V sweep is `smu.sweep(...)` with `settle_s`; `measure_jsc/voc/jsat`
+  // and their settles are `measure_dc`'s, which no J–V module calls.
+  jv: Object.fromEntries(SMU_DC_ONLY.map((n) => [n, dcOnly])),
+  jv_bace: Object.fromEntries(SMU_DC_ONLY.map((n) => [n, dcOnly])),
+  temperature: {
+    // `service.temperature.settle`: with no 331 the node pauses for the
+    // operator; `hold_s` is slept after the resume and `tolerance_k` judges
+    // the typed value, but nothing counts down `timeout_s`.
+    timeout_s: (v, bench) => (unwired331(bench)
+      ? '331 not wired · the pause waits for the operator and has no timeout' : null),
+  },
+};
+
+/** The reason `name` is not read on this card as it stands, or `null`. */
+export function inertReason(module, name, values, bench = null) {
+  const rule = INERT[module] && INERT[module][name];
+  return rule ? rule(values, bench) : null;
+}
+
+/**
  * One card, as rows. `entry` is a `GET /modules` entry (or the one a `PUT`
  * answers with — same shape, which is why an edit re-renders from the
  * response). `bench` is the `/bench` snapshot, for the read-back rows.
@@ -186,8 +250,14 @@ function isBound(wire) {
  */
 export function cardModel(entry, { bench = null, form = 'bench' } = {}) {
   const layout = LAYOUT[entry.name] || { above: (entry.params || []).map((p) => p.name) };
-  const wire = Object.fromEntries((entry.params || []).map((p) => [p.name, p]));
   const values = Object.fromEntries((entry.params || []).map((p) => [p.name, p.value]));
+  // Every spec carries its `inert` reason from here on, above the fold and
+  // in it, so one rule table serves both and the fold cannot disagree.
+  const specs = (entry.params || []).map((p) => {
+    const inert = inertReason(entry.name, p.name, values, bench);
+    return inert ? { ...p, inert } : p;
+  });
+  const wire = Object.fromEntries(specs.map((p) => [p.name, p]));
 
   const used = new Set();
   const hidden = new Set();
@@ -217,7 +287,7 @@ export function cardModel(entry, { bench = null, form = 'bench' } = {}) {
   // The axis's own pinned field is not folded — it *is* the axis.
   if (entry.name === 'bace' && values.axis_name in wire) hidden.add(values.axis_name);
 
-  const fold = foldGroups(entry, used, hidden);
+  const fold = foldGroups(specs, used, hidden);
   return {
     name: entry.name,
     form,
@@ -252,7 +322,14 @@ function rowNames(row) {
 
 function buildRow(row, wire, values, entry) {
   if (row.kind === 'range') {
-    const [start, stop, step] = row.names.map((n) => wire[n]);
+    const [start, stop, raw] = row.names.map((n) => wire[n]);
+    // `Axis.values()` and `_jv_levels` take `start == stop` as one point and
+    // never read the step. (`JVConfig.points()` still insists on a positive
+    // `step_v`, so a J–V sweep's is left alone.)
+    const zeroWidth = start.value !== null && start.value !== undefined
+      && Number(start.value) === Number(stop.value);
+    const step = row.stepUnusedAtZeroWidth && zeroWidth && !raw.inert
+      ? { ...raw, inert: 'start = stop · one point, so the step is not read' } : raw;
     return { kind: 'range', label: row.label, start, stop, step, points: points(entry.estimate_text), accent: Boolean(row.accent) };
   }
   if (row.kind === 'voc') {
@@ -279,7 +356,7 @@ function buildRow(row, wire, values, entry) {
   if (!spec) return null;
   const segmented = row.kind === 'segmented'
     || (spec.type === 'enum' && spec.choices.length <= SEGMENTED_MAX);
-  return { kind: segmented ? 'segmented' : 'field', spec, accent: Boolean(row.accent) };
+  return { kind: segmented ? 'segmented' : 'field', spec, accent: Boolean(row.accent), label: row.label || null };
 }
 
 /** What the 81150A will actually be told, given the pair. */
@@ -296,16 +373,20 @@ export function effectivePolarity(values) {
  * up empty does not render — which is how the `output` group disappears once
  * `inverted_output` is drawn inside the polarity control above.
  */
-function foldGroups(entry, used, hidden) {
+function foldGroups(specs, used, hidden) {
   const by = new Map();
-  for (const p of entry.params || []) {
+  for (const p of specs) {
     if (used.has(p.name) || hidden.has(p.name)) continue;
     const group = p.group || 'other';
     if (!by.has(group)) by.set(group, []);
     by.get(group).push(p);
   }
   const order = [...FOLD_ORDER, ...[...by.keys()].filter((g) => !FOLD_ORDER.includes(g))];
-  return order.filter((g) => by.has(g)).map((g) => ({ group: g, params: by.get(g), count: by.get(g).length }));
+  return order.filter((g) => by.has(g)).map((g) => ({
+    group: g, params: by.get(g), count: by.get(g).length,
+    // A whole group that is not read says so on its button, before it is opened.
+    inert: by.get(g).every((p) => p.inert),
+  }));
 }
 
 /** How many folded, across every group — the number the disclosure counts. */
