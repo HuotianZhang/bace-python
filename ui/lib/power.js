@@ -109,6 +109,11 @@ export function powerPanelModel(state, ui = DEFAULT_UI, { now = Date.now() / 100
   return {
     running,
     wanted: Boolean(ui.on),
+    // Live is running *or* wanted: the wish counts, so the panel opens the
+    // moment the switch is flipped rather than a round trip later. The
+    // definition lives here rather than in the renderer, so `panelShape` and
+    // the tests see the same one.
+    live: running || Boolean(ui.on),
     interval_s: interval,
     available: inst ? inst.available !== false : null,
     reason: inst && inst.available === false ? inst.reason || 'meter not answering' : null,
@@ -125,12 +130,73 @@ export function powerPanelModel(state, ui = DEFAULT_UI, { now = Date.now() / 100
   };
 }
 
+// -- what the panel draws, and what it rebuilds it on ------------------------
+
+/**
+ * What the panel draws: the collapsed line or the open one, which rows the
+ * `⋯` carries, and whether the trace is on screen. Pure and exported, so the
+ * three decisions are held down by `ui/tests/power.test.mjs` — the renderer
+ * only obeys it.
+ *
+ * The rule that shapes it: **switching the monitor off may take away the
+ * always-on chart; it must not take away what the monitor recorded.** So the
+ * `⋯` is there off as well as on, carrying Export CSV and Clear — and the
+ * interval, which is not a view filter at all but a control that acts on the
+ * bench the moment it lands (`app.js` stops and restarts the service's
+ * polling), and the one thing worth setting *before* the switch is flipped.
+ * What the collapsed panel drops is only what describes a chart that is not
+ * drawn: the window, the two chart toggles, and Export SVG, which serialises
+ * the SVG on screen and has none to serialise.
+ */
+export function panelShape(model) {
+  return {
+    collapsed: !model.live,
+    chart: model.live && model.chart,
+    menu: {
+      interval: true,
+      window: model.live,
+      toggles: model.live,
+      exportCsv: true,
+      exportSvg: model.live,
+      clear: true,
+    },
+  };
+}
+
+/**
+ * What each keyed part is rebuilt on. Pure and exported for the same reason:
+ * a key that carries too much is invisible in the DOM and ruinous in the hand.
+ *
+ * The reading count is the trap. It moves with every `PowerReading` — five
+ * times a second at the 0.2 s interval — and the menu is a `<details>` the
+ * operator holds open while they pick. Keyed on `count` it was torn down and
+ * rebuilt under the pointer at that rate, in the one state where it is drawn
+ * at all: `dom.keyed`'s argument and the run monitor's M2 finding, on this
+ * panel. Only *whether* there is anything to export or clear changes what the
+ * menu draws, so only that is in its key.
+ *
+ * The status sentence is keyed on itself and on nothing else. Keyed on `live`
+ * as well, it was drawn for the one round trip before `refreshMonitors` came
+ * back and then silently removed — taking the answer to *switching the
+ * monitor off*, and any error that answer carried, with it.
+ */
+export function panelKeys(model, status) {
+  return {
+    switch: JSON.stringify([model.running, model.wanted, model.available]),
+    reading: JSON.stringify([model.value, model.sub, model.level, model.reason, model.live]),
+    status: JSON.stringify([status]),
+    menu: JSON.stringify([model.live, model.interval_s, model.window.key, model.chart, model.fromZero,
+      model.count > 0, model.points.length > 0]),
+    chart: JSON.stringify([model.points.length ? model.points[model.points.length - 1].ts : null,
+      model.points.length, model.window.key, model.fromZero]),
+  };
+}
+
 // -- the DOM ----------------------------------------------------------------
 
 /**
- * Into `el`, in four keyed parts: the switch and its interval, the reading,
- * the window and the buttons, and the chart. `status` is the sentence the
- * last click came back with.
+ * Into `el`, in five keyed parts: the switch, the reading, the sentence the
+ * last click came back with, the `⋯` menu and the chart.
  */
 export function renderPowerPanel(el, state, ui, handlers = {}) {
   const model = powerPanelModel(state, ui);
@@ -143,24 +209,26 @@ export function renderPowerPanel(el, state, ui, handlers = {}) {
         h('span.spacer'), h('span.pw-status-box'), h('span.pw-menu-box')),
       h('div.pw-chart'));
   }
-  // Off: the switch and, muted, the last spot check. Nothing to configure
-  // until there is something running to configure.
-  const live = model.running || model.wanted;
-  el.classList.toggle('off', !live);
-  keyed(el.querySelector('.pw-switch-box'), JSON.stringify([model.running, model.wanted, model.available]),
-    () => switchRow(model, handlers));
-  keyed(el.querySelector('.pw-reading'), JSON.stringify([model.value, model.sub, model.level, model.reason, live]),
-    () => readingEl(model, live));
-  keyed(el.querySelector('.pw-status-box'), JSON.stringify([status, live]), () => (status && live
+  // Off: the switch, the last spot check muted, and the `⋯` — one line.
+  const shape = panelShape(model);
+  const key = panelKeys(model, status);
+  el.classList.toggle('off', shape.collapsed);
+  keyed(el.querySelector('.pw-switch-box'), key.switch, () => switchRow(model, handlers));
+  keyed(el.querySelector('.pw-reading'), key.reading, () => readingEl(model, model.live));
+  keyed(el.querySelector('.pw-status-box'), key.status, () => (status
     ? h('span', { class: 'pw-status ' + (status.level || ''), text: status.text }) : []));
-  keyed(el.querySelector('.pw-menu-box'), JSON.stringify([live, model.interval_s, model.window.key, model.chart, model.fromZero, model.count]),
-    () => (live ? menu(model, handlers) : []));
+  keyed(el.querySelector('.pw-menu-box'), key.menu, () => menu(model, shape.menu, handlers));
   const chartEl = el.querySelector('.pw-chart');
-  chartEl.hidden = !(live && model.chart);
-  if (live && model.chart) {
-    const last = model.points.length ? model.points[model.points.length - 1].ts : null;
-    keyed(chartEl, JSON.stringify([last, model.points.length, model.window.key, model.fromZero]),
+  chartEl.hidden = !shape.chart;
+  if (shape.chart) {
+    keyed(chartEl, key.chart,
       () => chart(powerModel(state.powerLog || [], { seconds: model.window.seconds, fromZero: model.fromZero })));
+  } else if (chartEl.__key !== undefined) {
+    // Emptied, not merely hidden: `app.js`'s Export SVG serialises whatever
+    // `svg` sits under `.pw-chart`, and one left there is the trace from
+    // before the monitor was switched off.
+    chartEl.__key = undefined;
+    chartEl.textContent = '';
   }
   return model;
 }
@@ -200,8 +268,12 @@ function readingEl(model, live) {
  * `⋯`: the interval and the window (with the defaults that suit a scan),
  * the two chart toggles, and the three actions. `<details>` so it needs no
  * script to open, and closes itself when the pointer leaves it.
+ *
+ * `rows` is `panelShape(model).menu` — which of them this state carries. Off,
+ * that is the interval, Export CSV and Clear: the panel is collapsed, but
+ * nothing it recorded is out of reach.
  */
-function menu(model, { onInterval, onWindow, onChart, onZero, onClear, onExportCsv, onExportSvg }) {
+function menu(model, rows, { onInterval, onWindow, onChart, onZero, onClear, onExportCsv, onExportSvg }) {
   const pick = (label, opts, current, onPick, title) => h('div.pw-opt',
     h('span.pw-optl', { text: label, title }),
     h('span.filt', { role: 'group', 'aria-label': label }, opts.map(([key, text]) => h('button.opt', {
@@ -213,23 +285,24 @@ function menu(model, { onInterval, onWindow, onChart, onZero, onClear, onExportC
     h('span', { text: label }));
   const action = (label, title, disabled, onPick) => h('button.btns', { title, disabled: disabled || null, onclick: onPick }, label);
   const details = h('details.pw-menu',
-    h('summary', { title: 'interval, window, export …', 'aria-label': 'power monitor options' }, '⋯'),
+    h('summary', { title: rows.window ? 'interval, window, export …' : 'interval, export …',
+      'aria-label': 'power monitor options' }, '⋯'),
     h('div.pw-menu-body',
-      pick('every', INTERVALS.map((s) => [s, `${s} s`]), model.interval_s, (s) => onInterval && onInterval(s),
-        'how often the service reads the meter'),
-      pick('window', [['auto', 'auto'], ...WINDOWS.map((w) => [w.key, w.label])], model.window.auto ? 'auto' : model.window.key,
+      rows.interval ? pick('every', INTERVALS.map((s) => [s, `${s} s`]), model.interval_s, (s) => onInterval && onInterval(s),
+        'how often the service reads the meter — it stops and restarts the monitor') : null,
+      rows.window ? pick('window', [['auto', 'auto'], ...WINDOWS.map((w) => [w.key, w.label])], model.window.auto ? 'auto' : model.window.key,
         (k) => onWindow && onWindow(k),
-        'how much of the trace is drawn; the statistics under it are over the same span'),
-      h('div.pw-opt.togs',
+        'how much of the trace is drawn; the statistics under it are over the same span') : null,
+      rows.toggles ? h('div.pw-opt.togs',
         toggle('trace', model.chart, (v) => onChart && onChart(v), 'show or hide the trace'),
-        toggle('y from 0', model.fromZero, (v) => onZero && onZero(v), 'pin the y axis to zero, so an LED that is off reads as off')),
+        toggle('y from 0', model.fromZero, (v) => onZero && onZero(v), 'pin the y axis to zero, so an LED that is off reads as off')) : null,
       h('div.pw-opt.acts',
-        action('Export CSV', 'every reading the service holds, not only what this page saw',
-          !model.count, () => onExportCsv && onExportCsv()),
-        action('Export SVG', 'the trace on screen, as an SVG file',
-          !model.points.length || !model.chart, () => onExportSvg && onExportSvg()),
-        action('Clear', 'forget the readings held; the journal keeps them',
-          !model.count, () => onClear && onClear()))));
+        rows.exportCsv ? action('Export CSV', 'every reading the service holds, not only what this page saw',
+          !model.count, () => onExportCsv && onExportCsv()) : null,
+        rows.exportSvg ? action('Export SVG', 'the trace on screen, as an SVG file',
+          !model.points.length || !model.chart, () => onExportSvg && onExportSvg()) : null,
+        rows.clear ? action('Clear', 'forget the readings held; the journal keeps them',
+          !model.count, () => onClear && onClear()) : null)));
   details.addEventListener('mouseleave', () => { details.open = false; });
   return details;
 }
