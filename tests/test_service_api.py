@@ -867,10 +867,17 @@ def test_unknown_things_are_404s(service):
     assert next(c for c in r.json()["checks"] if c["code"] == "tree.shape")["level"] == "invalid"
     r = client.post("/runs", json={"module": "note", "params": {"text": "x"}, "extra": 1})
     assert r.status_code == 422 and r.json()["param"] == "extra"
-    r = client.post("/runs", json={"module": "bace", "params": {**FAST, "smu_current_compliance_a": 0.1,
-                                                                "voc": 0.9}})
+    # The ceiling is read where the SourceMeter is sourced. A bace run touches
+    # the Keithley only under `measure_dc`, so that is where a compliance over
+    # the bench ceiling is refused (2026-09-05); without it the number is not
+    # read and the card marks the fold "not read".
+    over = {**FAST, "smu_current_compliance_a": 0.1, "voc": 0.9}
+    r = client.post("/runs", json={"module": "bace", "params": {**over, "measure_dc": True}})
     assert r.status_code == 422 and "smu.ceiling" in r.json()["error"]
-    assert client.get("/runs").json() == []
+    assert client.get("/runs").json() == [], "nothing refused above created a run"
+    r = client.post("/runs", json={"module": "bace", "params": over})
+    assert r.status_code == 202, "not read, not refused: no measure_dc, no SourceMeter"
+    client.post(f"/runs/{r.json()['run_id']}/stop", json={"mode": "abort"})
 
 
 # -- the power monitor ---------------------------------------------------------------------------
