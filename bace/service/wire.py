@@ -92,12 +92,21 @@ one line is still a line a person can open; the HDF5 holds the rest."""
 
 STEPDONE_SCALARS: tuple[str, ...] = ("index", "loop", "step", "setpoint", "axis_value",
                                      "q", "q_mean", "q_std", "intensity_w", "clipped")
-STEPDONE_ARRAYS: tuple[str, ...] = ("light", "dark", "photo", "photo_averaged")
+STEPDONE_ARRAYS: tuple[str, ...] = ("light", "dark", "photo", "photo_averaged",
+                                    "sync_light", "sync_dark")
 JVCURVE_SCALARS: tuple[str, ...] = ("index", "label", "dark", "led_level_v", "direction",
                                     "intensity_w")
 JVCURVE_ARRAYS: tuple[str, ...] = ("voltage", "current", "density")
+SPIKE_LAG_NS = 0.25
+"""Above this light-to-dark lag of the displacement spike the shot is
+judged jittered. Good shots on the rig align to 0.01-0.07 ns; the six bad
+ones of 2026-09-05 sat 0.33-1.15 ns apart (`core.diagnostics`)."""
+
 VERDICT_KEYS: tuple[str, ...] = ("rail_light", "rail_dark", "rail_run_light", "rail_run_dark",
-                                 "shared_extreme", "peak_light_a", "peak_dark_a", "level",
+                                 "shared_extreme", "peak_light_a", "peak_dark_a",
+                                 "spike_lag_ns", "edge_light_ns", "edge_dark_ns",
+                                 "averages_light", "averages_dark",
+                                 "sync_edge_light_ns", "sync_edge_dark_ns", "level",
                                  "text")
 """The keys every verdict carries. A diagnostic may add to them, never
 replace one: a `shot_diagnostics()` that happened to return `level` would
@@ -161,7 +170,9 @@ def journal_payload(env: Envelope, *, verdict: Mapping[str, Any] | None = None) 
     if isinstance(ev, StepDone):
         data = {name: _plain(getattr(ev, name)) for name in STEPDONE_SCALARS}
         data["verdict"] = (dict(verdict) if verdict is not None
-                           else shot_verdict(ev.light.y, ev.dark.y))
+                           else shot_verdict(ev.light.y, ev.dark.y, dt=ev.light.dt,
+                                             light=ev.light, dark=ev.dark,
+                                             sync_light=ev.sync_light, sync_dark=ev.sync_dark))
         return _frame(env, data, {name: {"omitted": True} for name in STEPDONE_ARRAYS})
     if isinstance(ev, RunFinished):
         data, info = _run_finished(ev)
@@ -196,7 +207,7 @@ def payloads(env: Envelope, *,
     verdict = None
     ev = env.event
     if isinstance(ev, StepDone):
-        verdict = attach_verdict(ws["data"], ev.light.y, ev.dark.y, diagnostics)
+        verdict = attach_verdict(ws["data"], ev, diagnostics)
     return ws, journal_payload(env, verdict=verdict)
 
 
@@ -234,11 +245,30 @@ def _peak(a: np.ndarray) -> float | None:
 
 
 def shot_verdict(light_y, dark_y,
-                 diagnostics: Mapping[str, Any] | None = None) -> dict[str, Any]:
+                 diagnostics: Mapping[str, Any] | None = None, *,
+                 dt: float | None = None,
+                 light: Any = None, dark: Any = None,
+                 sync_light: Any = None, sync_dark: Any = None) -> dict[str, Any]:
     """`{rail_light, rail_dark, rail_run_light, rail_run_dark, shared_extreme,
-    peak_light_a, peak_dark_a, level, text, ...diagnostics}`.
+    peak_light_a, peak_dark_a, spike_lag_ns, edge_light_ns, edge_dark_ns,
+    averages_light, averages_dark, sync_edge_light_ns, sync_edge_dark_ns,
+    level, text, ...diagnostics}`.
 
-    Two rules, both about a single trace (03-states section C, corrected):
+    Three rules. The third is the shot's *alignment* (2026-09-05,
+    `core.diagnostics`): the light and dark displacement spikes must sit on
+    top of each other, because `light - dark` is what the photocurrent is.
+    On six shots of the first hardware day they were 0.3-1.2 ns apart -- the
+    trigger had jittered for the length of the shot -- and the 50 mA spike's
+    residual was reported as a photocurrent ten times the real one, with the
+    charge's sign flipped, while every rail check passed. `spike_lag_ns`
+    beyond `SPIKE_LAG_NS` is `warn`: "Q of this shot is not a charge". The
+    edge times and the sync edges are reported beside it so the two sides of
+    the trigger chain can be told apart; the average counts say whether the
+    digitiser folded what was asked. All need `dt` (and the `Trace`s for the
+    counts and the syncs); called with bare arrays they are None and the
+    judgement is the two rail rules alone.
+
+    The two rail rules, both about a single trace (03-states section C, corrected):
 
     * a run of `RAIL_RUN_SAMPLES` or more consecutive samples on one extreme
       is the digitiser's rail -- `warn`, and the text says the charge is
@@ -255,17 +285,20 @@ def shot_verdict(light_y, dark_y,
     would overwrite one of the fixed keys is refused rather than silently
     winning.
     """
-    light = np.asarray(light_y, dtype=float)
-    dark = np.asarray(dark_y, dtype=float)
+    light_arr = np.asarray(light_y, dtype=float)
+    dark_arr = np.asarray(dark_y, dtype=float)
     diag = dict(diagnostics or {})
-    if light.size == 0 or dark.size == 0:
+    align = _alignment(light_arr, dark_arr, dt, light, dark, sync_light, sync_dark)
+    if light_arr.size == 0 or dark_arr.size == 0:
         verdict: dict[str, Any] = {
             "rail_light": 0, "rail_dark": 0, "rail_run_light": 0, "rail_run_dark": 0,
-            "shared_extreme": False, "peak_light_a": _peak(light), "peak_dark_a": _peak(dark),
+            "shared_extreme": False, "peak_light_a": _peak(light_arr), "peak_dark_a": _peak(dark_arr),
+            **align,
             "level": "warn",
             "text": "an empty trace: the digitiser returned no samples, so there "
                     "is nothing to judge and nothing to integrate"}
     else:
+        light, dark = light_arr, dark_arr
         rail_light, rail_dark = _rail_samples(light), _rail_samples(dark)
         run_light, run_dark = _rail_run(light), _rail_run(dark)
         shared = bool(light.min() == dark.min() or light.max() == dark.max())
@@ -281,12 +314,22 @@ def shot_verdict(light_y, dark_y,
                     "does not sit on one value, so the window is probably too small "
                     "even though the auto-range did not say so")
             level = "warn"
+        elif align["spike_lag_ns"] is not None and abs(align["spike_lag_ns"]) > SPIKE_LAG_NS:
+            lag = align["spike_lag_ns"]
+            edges = ", ".join(f"{e:.1f}" for e in (align["edge_light_ns"], align["edge_dark_ns"])
+                              if e is not None)
+            text = (f"the light and dark displacement spikes are {abs(lag):.2f} ns apart "
+                    f"(spike edges {edges} ns): the trigger jittered during this shot, "
+                    "so their difference leaves the spike in the photocurrent and Q "
+                    "of this shot is not a charge. " + _sync_side(align))
+            level = "warn"
         else:
-            level, text = "ok", _ok_text(rail_light, rail_dark, shared, diag)
+            level, text = "ok", _ok_text(rail_light, rail_dark, shared, diag, align)
         verdict = {"rail_light": int(rail_light), "rail_dark": int(rail_dark),
                    "rail_run_light": int(run_light), "rail_run_dark": int(run_dark),
                    "shared_extreme": shared,
                    "peak_light_a": _peak(light), "peak_dark_a": _peak(dark),
+                   **align,
                    "level": level, "text": text}
     for key, value in diag.items():
         if key in VERDICT_KEYS:
@@ -297,19 +340,58 @@ def shot_verdict(light_y, dark_y,
     return verdict
 
 
-def attach_verdict(payload_data: dict, light_y, dark_y,
+def attach_verdict(payload_data: dict, ev: StepDone,
                    diagnostics: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """Compute `shot_verdict` and store it as `payload_data["verdict"]`.
-    Returns the verdict so the caller can put the same object elsewhere."""
+    """Compute `shot_verdict` for the shot and store it as
+    `payload_data["verdict"]`. Returns the verdict so the caller can put the
+    same object elsewhere."""
     if not isinstance(payload_data, dict):
         raise TypeError("attach_verdict wants the payload's `data` dict, not "
                         f"{type(payload_data).__name__}")
-    verdict = shot_verdict(light_y, dark_y, diagnostics)
+    verdict = shot_verdict(ev.light.y, ev.dark.y, diagnostics, dt=ev.light.dt,
+                           light=ev.light, dark=ev.dark,
+                           sync_light=ev.sync_light, sync_dark=ev.sync_dark)
     payload_data["verdict"] = verdict
     return verdict
 
 
-def _ok_text(rail_light: int, rail_dark: int, shared: bool, diag: Mapping[str, Any]) -> str:
+def _alignment(light: np.ndarray, dark: np.ndarray, dt: float | None,
+               light_tr: Any, dark_tr: Any, sync_light: Any, sync_dark: Any) -> dict[str, Any]:
+    """The alignment and completeness numbers (`core.diagnostics`), None
+    where the inputs cannot give them."""
+    from ..core.diagnostics import edge_10_90_ns, spike_lag_ns, sync_edge_ns
+    out: dict[str, Any] = {"spike_lag_ns": None, "edge_light_ns": None, "edge_dark_ns": None,
+                           "averages_light": None, "averages_dark": None,
+                           "sync_edge_light_ns": None, "sync_edge_dark_ns": None}
+    if dt and light.size and dark.size:
+        out["spike_lag_ns"] = spike_lag_ns(light, dark, dt)
+        out["edge_light_ns"] = edge_10_90_ns(light, dt)
+        out["edge_dark_ns"] = edge_10_90_ns(dark, dt)
+    for key, tr in (("averages_light", light_tr), ("averages_dark", dark_tr)):
+        count = getattr(tr, "count", None)
+        out[key] = None if count is None else int(count)
+    for key, tr in (("sync_edge_light_ns", sync_light), ("sync_edge_dark_ns", sync_dark)):
+        y = getattr(tr, "y", None)
+        if y is not None and getattr(tr, "dt", None):
+            out[key] = sync_edge_ns(np.asarray(y, dtype=float), float(tr.dt),
+                                    float(getattr(tr, "t0", 0.0)))
+    return {k: (None if v is None else (float(v) if isinstance(v, float) else v))
+            for k, v in out.items()}
+
+
+def _sync_side(align: Mapping[str, Any]) -> str:
+    """Which side of the trigger chain the sync edges point at."""
+    edges = [align.get("sync_edge_light_ns"), align.get("sync_edge_dark_ns")]
+    if all(e is None for e in edges):
+        return "No sync trace was fetched, so which side jitters cannot be said."
+    text = "/".join("?" if e is None else f"{e:.1f}" for e in edges)
+    return (f"The sync edges are {text} ns: if those are as sharp as on good shots, the "
+            "jitter is between the sync and the 81150A's pulse; if they are smeared "
+            "too, it is between the sync and the scope's trigger.")
+
+
+def _ok_text(rail_light: int, rail_dark: int, shared: bool, diag: Mapping[str, Any],
+             align: Mapping[str, Any] | None = None) -> str:
     parts = []
     passes = diag.get("autorange_passes")
     if passes is not None:
@@ -317,6 +399,19 @@ def _ok_text(rail_light: int, rail_dark: int, shared: bool, diag: Mapping[str, A
     parts.append("shared extreme" if shared else "no shared extreme")
     worst = max(int(rail_light), int(rail_dark))
     parts.append(f"{worst} rail sample" + ("" if worst == 1 else "s"))
+    if align:
+        lag = align.get("spike_lag_ns")
+        if lag is not None:
+            parts.append(f"spikes {abs(lag):.2f} ns apart")
+        edge = align.get("edge_light_ns")
+        if edge is not None:
+            parts.append(f"edge {edge:.1f} ns")
+        n_l, n_d = align.get("averages_light"), align.get("averages_dark")
+        if n_l is not None and n_d is not None:
+            parts.append(f"{n_l} avg" if n_l == n_d else f"{n_l}/{n_d} avg")
+        s_l = align.get("sync_edge_light_ns")
+        if s_l is not None:
+            parts.append(f"sync edge {s_l:.1f} ns")
     return " · ".join(parts)
 
 

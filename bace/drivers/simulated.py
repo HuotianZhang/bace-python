@@ -441,8 +441,17 @@ class SimulatedDigitizer:
         # volts -> amps, with the sign convention, in one place. Clipping was
         # done in volts above, as the real window is, so the sign cannot move
         # the rail.
+        self._last_averages = max(1, int(n_averages))
         return Trace(y=self.current_sign * v / self.bench.sense_resistor_ohm,
-                     dt=self.dt, t0=-self.trigger_position_s)
+                     dt=self.dt, t0=-self.trigger_position_s, count=self._last_averages)
+
+    def fetch_volts(self, source: str) -> Trace:
+        """One channel of the record just acquired, in volts -- the sync on
+        its channel, the device current through the resistor on any other --
+        as the real driver returns it beside every acquisition."""
+        n = getattr(self, "_last_averages", 1)
+        return Trace(y=self._volts_for(source, n), dt=self.dt, t0=-self.trigger_position_s,
+                     count=n)
 
     @property
     def clipped(self) -> bool:

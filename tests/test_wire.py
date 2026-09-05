@@ -165,7 +165,7 @@ def test_every_event_survives_json(cls):
 def test_a_trace_carries_its_full_length_and_arrays_become_lists():
     data, _ = to_wire(realistic_events()[E.StepDone])
     light = data["light"]
-    assert set(light) == {"y", "dt", "t0", "n"}
+    assert set(light) == {"y", "dt", "t0", "n", "count"}
     assert light["n"] == N and len(light["y"]) == N
     assert isinstance(light["y"], list) and isinstance(light["y"][0], float)
     assert light["dt"] == DT and light["t0"] == T0

@@ -86,6 +86,9 @@ def write_run(path: str, *, metadata: dict, rig_config: dict, run_config: dict,
               shots: np.ndarray | None = None,
               intensity_mean: np.ndarray | None = None,
               intensity_std: np.ndarray | None = None,
+              sync_light: np.ndarray | None = None,
+              sync_dark: np.ndarray | None = None,
+              diagnostics: dict | None = None,
               software: str = "bace") -> str:
     h5py = _require_h5py()
     q_all = np.asarray(q_all, dtype=float)
@@ -135,6 +138,24 @@ def write_run(path: str, *, metadata: dict, rig_config: dict, run_config: dict,
                                   **COMPRESSION)
             d.attrs["unit"] = "A"
             d.attrs["note"] = "(loop, step, sample) photocurrent, un-averaged"
+        # The trigger channel out of the same records (2026-09-05): what the
+        # edge the scope fired on looked like, loop-averaged like the
+        # currents. Volts, not amps -- it is a sync line, not the resistor.
+        for name, arr in (("sync_light", sync_light), ("sync_dark", sync_dark)):
+            if arr is None:
+                continue
+            d = tr.create_dataset(name, data=np.asarray(arr, dtype=float), **COMPRESSION)
+            d.attrs["unit"] = "V"
+            d.attrs["note"] = "the trigger channel, same record as the current trace"
+        if diagnostics:
+            # Per-shot, (loop, step): is this shot the measurement it claims
+            # to be? Average counts from `:WAV:COUN?`, the light-to-dark
+            # spike lag and the spike and sync edges (`core.diagnostics`).
+            dg = f.create_group("diagnostics")
+            for name, arr in diagnostics.items():
+                d = dg.create_dataset(name, data=np.asarray(arr, dtype=float))
+                d.attrs["unit"] = "ns" if name.endswith("_ns") else "acquisitions"
+            dg.attrs["note"] = "(loop, step); NaN where a shot could not say"
 
         if intensity_mean is not None:
             it = f.create_group("intensity")
@@ -168,4 +189,6 @@ def read_run(path: str) -> dict:
         if "intensity" in f:
             for k in f["intensity"]:
                 out[f"intensity_{k}"] = f["intensity"][k][()]
+        if "diagnostics" in f:
+            out["diagnostics"] = {k: f["diagnostics"][k][()] for k in f["diagnostics"]}
     return out

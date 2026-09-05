@@ -48,6 +48,12 @@ class Trace:
     y: np.ndarray
     dt: float
     t0: float = 0.0
+    count: int | None = None
+    """How many acquisitions the digitiser says it folded into this record
+    (`:WAV:COUN?` on the Infiniium), read back after every acquisition since
+    2026-09-05. None when the driver cannot say. Until then nothing checked
+    that 200 hardware averages were 200: both this port and the LabVIEW
+    original waited on a done flag the instrument sets per acquisition."""
 
     @property
     def n(self) -> int:
@@ -149,6 +155,13 @@ class Digitizer(Protocol):
         between the pair changes the digitiser scaling and invalidates the
         subtraction.
         """
+        ...
+
+    def fetch_volts(self, source: str) -> Trace:
+        """One channel of the record already acquired, in volts at the input,
+        with no sense-resistor division: the sync line the scope triggered on,
+        fetched beside the current trace so a shot's file says what the
+        trigger edge looked like (2026-09-05)."""
         ...
 
     @property
