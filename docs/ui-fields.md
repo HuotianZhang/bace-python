@@ -136,6 +136,22 @@ statement**, and the split is the rule the code applies:
   which only the `measure_dc` branch reads. Showing it offers a knob that does
   nothing, which is exactly the trap the polarity pair was.
 * **folded** — it applies, it is just not worth a line right now.
+* **not read** — on screen (above or folded) and not read *in this
+  configuration*: `dark_settle_s` under `dark_reference = same`,
+  `trigger_slope_positive` under `external_trigger = false`, the whole
+  `sourcemeter` group in a bace run without `measure_dc`, a scan range's step
+  at `start = stop`, `led_settle_max_s` / `led_settle_tolerance` on a bench
+  with no power meter, a temperature node's `timeout_s` with the 331 not
+  wired, and the three DC settles on any J–V module. The row stays, greyed,
+  with the value it will have when the setting that reads it is turned back
+  on, takes no typing, and carries a dashed *not read* tag naming that
+  setting (`fields.inertReason`). A fold whose every field is not read says
+  so on its button. **The service agrees with each of these**: the
+  parameter is inert on the wire, not merely dimmed — `_smu_config` is read
+  only under `measure_dc`, `smu.ceiling` skips a bace node without it, and
+  `core.axis.voc_flags` reads the V_oc pair by the axis. The rule this
+  encodes: a parameter that does not apply must not act, whether it is hidden
+  or shown.
 
 `above + folded + hidden` is every parameter the module has, and
 `ui/tests/fields.test.mjs` asserts that sum rather than the three numbers

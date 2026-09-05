@@ -1345,6 +1345,12 @@ def _c_smu_ceiling(f: _Facts) -> list[Verdict]:
         v = s.values()
         if "smu_current_compliance_a" not in v and "smu_voltage_compliance_v" not in v:
             continue
+        # A bace node sources the SourceMeter only under `measure_dc`; its
+        # compliance is not read otherwise (`Catalogue._build_bace`), and a
+        # `crit` over a number the run never uses is the card's "not read"
+        # fold blocking Start.
+        if s.module == "bace" and not bool(v.get("measure_dc", False)):
+            continue
         cfg = SourceMeterConfig(
             current_compliance_a=float(v.get("smu_current_compliance_a",
                                              SourceMeterConfig.current_compliance_a)),

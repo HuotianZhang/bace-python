@@ -379,6 +379,12 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 
 .pf.ro { color: var(--grey); }
 .pf.ro .v { color: var(--ink); }
+/* Not read in this configuration (`fields.inertReason`): the row stays, greyed,
+   with the value it will have when the setting that reads it is turned back
+   on, and a dashed tag naming that setting on hover. */
+.pf.inert .l, .pf.inert .v.off { color: var(--grey); opacity: .6; }
+.pf.inert .v.off { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 12px; }
+.tag.off { border-style: dashed; color: var(--grey); text-transform: none; letter-spacing: 0; }
 .pf.inh, .pf.der { background: rgba(236, 48, 19, .04); }
 .pf.inh .l::before, .pf.der .l::before { content: '↳ '; color: var(--accent); }
 .pf.acc .l { color: var(--accent-dark); }
@@ -416,7 +422,10 @@ button.link:hover { color: var(--accent-dark); }
   border: 0; background: none; line-height: 1.5;
 }
 .seg .opt.on, .bool .opt.on { background: var(--ink); color: #fff; }
-.seg .opt:hover, .bool .opt:hover { color: var(--ink); }
+/* Hover darkens the type of an option that is not chosen; the chosen one is
+   already white on ink (or on the accent), and darkening it made the word
+   vanish under the pointer. */
+.seg .opt:not(.on):hover, .bool .opt:not(.on):hover { color: var(--ink); }
 .seg .opt:focus-visible, .bool .opt:focus-visible,
 .btng:focus-visible, .btnp:focus-visible, .btns:focus-visible,
 .btnd:focus-visible, .btnw:focus-visible, .pf .l.lh:focus-visible {

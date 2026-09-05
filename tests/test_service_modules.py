@@ -601,6 +601,21 @@ def test_bace_ignores_centre_on_voc_when_vpre_is_not_the_axis(tmp_path):
     gen.close()
 
 
+def test_bace_reads_the_smu_config_only_under_measure_dc(tmp_path):
+    """The `sourcemeter` fold is "not read" on the card unless `measure_dc`
+    is on, and the build agrees: a compliance over the bench ceiling is
+    refused with `measure_dc`, and not read without it."""
+    b = bench()
+    cat = catalogue()
+    over = {**FAST, "centre_on_voc": False, "axis_start": 0.9, "axis_stop": 0.9,
+            "n_loops": 1, "smu_current_compliance_a": 1.0}
+    with pytest.raises(ModuleError, match=r"^bace: smu_current_compliance_a: .*ceiling"):
+        cat.build("bace", {**over, "measure_dc": True}, make_ctx(tmp_path), b.rig)
+    gen = cat.build("bace", {**over, "measure_dc": False}, make_ctx(tmp_path), b.rig)
+    assert next(gen) is not None
+    gen.close()
+
+
 def test_bace_refuses_centre_on_voc_without_a_source(tmp_path):
     b = bench()
     cat = catalogue()
@@ -751,7 +766,9 @@ def test_build_refuses_bad_parameters_by_name_and_touches_nothing(tmp_path):
     for bad, match in (({"nope": 1}, r"^bace: no such parameter\(s\): nope"),
                        ({"n_loops": 0}, r"^bace: n_loops: 0 is below the minimum"),
                        ({"led_low_v": 1.2}, r"^bace: led_v: low level 1.2 V is not below"),
-                       ({"smu_current_compliance_a": 0.1}, r"^bace: smu_current_compliance_a: .*ceiling"),
+                       # read only under measure_dc, where the Keithley is sourced
+                       ({"smu_current_compliance_a": 0.1, "measure_dc": True},
+                        r"^bace: smu_current_compliance_a: .*ceiling"),
                        ({"axis_start": 0.0, "axis_stop": 0.1, "axis_step": 0.0}, r"^bace: axis: .*positive step"),
                        ({"delay_ns": -5.0}, r"^bace: delay_ns = -5"),
                        ({"t0_int_reference": "start"}, r"^bace: t0_int_reference: 'start' is not one of")):

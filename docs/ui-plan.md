@@ -1110,7 +1110,15 @@ axis rows were relabelled *scan parameter* and *scan range* (the wire names
 stay `axis_*`), and the service stopped refusing a `centre_on_voc` left true
 behind the field the card hides when the scan parameter is not vpre — which
 had disabled Shot and Scan with nothing on screen to clear
-(`core.axis.voc_flags`).
+(`core.axis.voc_flags`). The audit that followed turned the case into a
+rule, *not read* (`ui-fields.md`): a parameter the run will not read in the
+configuration on screen is inert on the wire and says so on the card —
+`dark_settle_s` under `dark_reference = same`, `trigger_slope_positive`
+under `external_trigger = false`, the `sourcemeter` group without
+`measure_dc` (where `_smu_config` and `smu.ceiling` had refused a run over
+a compliance it would never have used), a zero-width range's step, the two
+power-meter settles on a bench without the meter, a temperature node's
+`timeout_s` with the 331 unwired, and the DC settles on any J–V module.
 
 ### Alongside · The rig tab
 

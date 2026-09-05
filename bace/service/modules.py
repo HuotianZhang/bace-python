@@ -1212,8 +1212,13 @@ class Catalogue:
                              threshold_v=self.rig_config.led_threshold_v)
         except IlluminationError as exc:
             raise ModuleError(f"{name}: led_v: {exc}") from None
-        smu_cfg = self._smu_config(name, p)
         measure_dc = bool(p["measure_dc"])
+        # The Keithley is touched inside `if measure_dc:` and nowhere else in
+        # a bace run, so its configuration -- and the ceiling refusal in it --
+        # is read only there. Read unconditionally, a compliance over the
+        # ceiling refused a run that would never have sourced the SourceMeter,
+        # from a fold the card marks "not read" (`ui-fields.md`).
+        smu_cfg = self._smu_config(name, p) if measure_dc else None
         if measure_dc and rig.smu is None:
             raise ModuleError(f"{name}: measure_dc: this bench has no SourceMeter")
         if measure_dc and rig.router is None:
