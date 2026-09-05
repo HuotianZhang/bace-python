@@ -371,8 +371,84 @@ to change.)
 - `RunQueued` (`experiment.events.RunQueued`; `service/journal.py run_queued()`
   builds the same line for a test or a script), `RunStateChanged`,
   `NodeStarted/NodeDone`, `Verdict`, `NeedsOperator`, `OperatorResumed`,
-  `BenchAction`, `TemperatureRead`, `PowerReading` are all journaled; so is
-  every run event under the payload policy, `StepPhase` excepted.
+  `BenchAction`, `TemperatureRead`, `PowerReading`, `SampleNamed` are all
+  journaled; so is every run event under the payload policy, `StepPhase`
+  excepted.
+
+---
+
+## 3a. `/session` — what is mounted
+
+`GET /session` is who this process is: `id, mode, fast, started, started_at,
+sample, sample_file, out, rig_toml, run_toml, fingerprint, journal, errors,
+last_error`. The same `session` block rides on `GET /bench` and in `Hello`.
+
+**`PUT /session/sample`** (2026-09-05) sets the `[sample]` block — the console's
+identity field, `docs/ux-screening.md` finding 5. Before it, the block came
+only from `run.toml`, so an operator who mounted a device on a session already
+running could not say so without editing the file and restarting the process
+that owns every instrument; the folder name is the record
+(`docs/naming-plan.md`) and every run of that session was filed without one.
+
+```
+PUT /session/sample  {"sample": "s4", "material": "PTQ10IT4F", "pixel": null}
+  -> 200 {"session": {…}, "changed": ["material", "pixel", "sample"], "run_active": "…-003" | null}
+  -> 422 {"error": "[sample]: unknown key(s) …", "param": "sample", "accepted": [...]}
+```
+
+Four rules, and each of them is a decision:
+
+- **It is a merge.** A key the body does not carry is left alone, so a console
+  offering four fields cannot silently drop a `temperature_k` somebody typed
+  into the file.
+- **`null` is the way back**, to the value `run.toml` opened the session with —
+  the same meaning `null` has in `PUT /modules/{m}/params`. `sample_file` is on
+  the wire (and only for this) so a client can render that layer and offer the
+  reset beside a typed field. A key the file never had is removed rather than
+  set to `""`.
+- **It touches nothing and takes no worker job**, so it is *allowed while a run
+  is going* — an operator who notices at hour one that the device is unnamed
+  should not have to choose between abandoning the sweep and mislabelling
+  everything after it. `run_active` is the run holding the bench, for the
+  sentence the console owes them.
+- **It binds the runs queued after it and no others.** Every run takes its own
+  copy at submit (`RunRecord.sample`, `RunQueued.sample`) and **is written from
+  that copy** — `Catalogue.base_metadata(rec.sample)`, changed the same day, so
+  the `RunMetadata` behind the folder names is the run's own block rather than
+  the session's now. Without that a rename halfway through a four-hour sweep
+  filed its remaining nodes under the new name inside a run folder named for
+  the old one, and the run contradicted its own `RunQueued.sample`.
+
+`SampleNamed(before, after, changed)` goes out on the event path like every
+other frame — `run_id` null, `node_path` `""` — and is journaled, because a
+file read years later has to be able to say which runs in it were measured
+under which name. Nothing moved means no event and no line: a no-op that
+writes to the journal is noise in the one file an operator reads to
+reconstruct a day.
+
+**No name is refused for being awkward, and the answer says how it will be
+spelled.** `sample`, `material` and `pixel` reached
+`RunMetadata.folder_name()` **raw** until 2026-09-05 — only the comment was
+slugged — so `material = "PTQ10:IT-4F"`, §4's own example, built a path segment
+with a colon in it, which fails on the lab PC and passes on Linux, and
+`sample = "a/b"` was two directories (`docs/naming-plan.md` §2, a live defect
+since it was written). All three are slugged now, at `NAME_MAX = 24`, and
+`as_dict()` keeps them verbatim — for a material whose real name has a colon
+in it, the difference between recording the material and recording somebody's
+transcription of it.
+
+So the route takes what is typed, and `GET /session` carries **`sample_in_name`**
+beside `sample`: the same three keys, reduced as `folder_name()` will reduce
+them. It is there so the console can show what a value will be filed as while
+it is being typed, rather than after the run — and so nothing reduces a name a
+second time in a second language. `PTQ10IT4F-batch-2026-08-A` and `…-B` are
+one folder name at 24 characters, which is the case that most needs saying out
+loud and the one no character rule explains.
+
+The console does not offer `temperature_k`, though the route accepts it:
+`run.toml`'s own comment (2026-09-04) says why — every recipe said 290 and a
+run at 220 K was filed as "290 K, typed", so a bench with a 331 reads the
+controller as each node starts instead (`temperature_how = "read"`).
 
 ---
 
@@ -1035,7 +1111,17 @@ a reading that is *not* averaged under a pulse is one instant of it.
 
 `POST /monitors/temperature {"interval_s": 5.0}` is the same shape for the
 331; 422 only when the bench has no 331 at all (neither `[temperature]
-address` nor `console`). Every reading is a
+address` nor `console`). **This one is on by default** (2026-09-05): a bench
+that has a 331 starts reading it in `Session.start`, at
+`TEMPERATURE_MONITOR_S = 5 s`, before any console connects -- a cryostat
+drifts whether or not a run is going, and the card's number should be a
+reading of a known age rather than the read-back of whenever somebody last
+pressed something. `--temperature-monitor SECONDS` changes the interval and
+`--no-temperature-monitor` turns it off; the route is then how a console
+changes the interval (`DELETE` then `POST`) or starts it again, not how it is
+first switched on. A bench with no 331 starts nothing and records no
+start-up error: that is the ordinary bench, and `unavailable["temperature"]`
+already says why the card is empty. Every reading is a
 `TemperatureRead(source="instrument"|"console"|"simulated")` on the stream
 and in the journal, the `/bench` temperature block follows it (`kelvin`,
 `read_at`, `monitor: true`, `reads`), and a silent instrument is one

@@ -170,6 +170,27 @@ So the grid needs the three identity fields to pass through `slug()` too, with
 a shorter limit than a comment's 64. That is not an extra: without it, "always
 nine parts" is not true.
 
+**Done, 2026-09-05, ahead of the grid** — `RunMetadata.identity_in_name()`,
+`NAME_MAX = 24` (the limit this file's collision table below was measured at).
+All three go through `slug()`, `as_dict()` keeps them verbatim, and the three
+rows of the table above are the parametrised cases of
+`test_an_identity_field_is_one_path_segment`. It was brought forward because
+`PUT /session/sample` (contract §3a) turned "the operator can put a colon in a
+path by editing `run.toml`" into "the operator can put a colon in a path by
+typing in a text box", and a route that opens a door without closing it is a
+regression. The service answers with `sample_in_name` — the reduced block —
+so the console shows what a value will be filed as **while it is typed**,
+which is also where the many-to-one problem below becomes visible instead of
+being discovered from the archive.
+
+What is **not** done with it: the `na` sentinel and its escaping (they belong
+to the grid, and there is no sentinel to collide with until the grid exists),
+and the directory allocator two sections down. That last one stays open on its
+own merits — the overwrite it prevents predates this and is not made
+materially likelier by it, since two *different* identities colliding into one
+folder also needs them to be measured in the same second — and it wants all
+three writers changed together.
+
 ### The grid
 
 Eight fields, every one present, in the 2026-08-07 order:

@@ -312,20 +312,56 @@ Do not re-open these; the artboard or the service settled them.
 
 ---
 
-## 12 · One thing nothing implements yet
+## 12 · The one the console now does itself
 
 Printed on the LabVIEW panel the operator is leaving behind:
 
 > *"Check if Cursor 1 matches the start of the transient."*
 
 A manual verification performed on **every single run**, by eye, for years.
-Nothing in `bace-python` does it. It is the strongest candidate in the whole
-design pack for something the new console should check itself — and the
-integration window is already drawn, so the comparison is on screen anyway.
+When this file was written nothing in `bace-python` did it, and it was named
+here as the strongest candidate in the whole design pack for something the new
+console should check itself.
+
+**Done, 2026-09-05** — `core.diagnostics`, and see `service-contract.md` §3.
+Six of twenty-three delay-scan shots on the first hardware day had a
+photocurrent ten times too large and passed every rail check, because the
+trigger had jittered and the light and dark displacement spikes sat 0.3–1.2 ns
+apart where a good shot aligns to 0.01 ns. `spike_lag_ns` is that lag, by
+cross-correlation, sub-sample; beyond `SPIKE_LAG_NS = 0.25` the shot is `warn`,
+*"Q of this shot is not a charge"*, and the console draws the verdict beside
+the trace it belongs to (`monitor.js: lastShotLine`). The eye did it for years;
+it is a number now.
+
+## 13 · What the screen owes the person, not the sample
+
+Everything above is about what a screen must say. `docs/ux-screening.md`
+(2026-09-05) is the other axis — what the flow *asks of* the operator — and it
+turned up one rule this file had not stated:
+
+> **Everything that costs the sample something arms and confirms. Nothing that
+> cost the operator something did.**
+
+Park on a busy bench arms, Abort arms, Run and Start are guarded against the
+double click that would start two experiments — and the pipeline tree, the one
+thing on screen composed by hand, could be destroyed in one click three ways
+with nothing offering it back. The asymmetry is backwards: the sample is not
+recoverable, which is why it is worth arming; the operator's work *is*
+recoverable, which is why it is worth giving back rather than making harder.
+So the tree has an undo (`lib/undo.js`) and the recipe picker still acts on one
+click.
+
+And the corollary, which is the same rule pointed outward: **a run that has
+stopped and is waiting for somebody has to be able to reach them.** A
+temperature step is 14 minutes to 2 hours and the operator is by construction
+elsewhere, so the window title carries the pause, the run, and an ending they
+were not there to see (`lib/title.js`). `document.title` and nothing else: it
+needs no permission and works behind another window, where a denied
+notification grant is denied silently for good.
 
 ---
 
-## 13 · Three control families, one look each
+## 14 · Three control families, one look each
 
 A dark "selected" chip used to carry three meanings. It now carries one.
 Before drawing a new control, ask what a click *does*, and pick the family

@@ -265,6 +265,20 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
       notify();
     },
 
+    /**
+     * The session block, as `PUT /session/sample` answers it.
+     *
+     * Applied from the response rather than waited for on the socket: the
+     * `SampleNamed` is coming and folds to the same place, but the operator
+     * who typed the name should see it in the bar on the keystroke that
+     * committed it, not one round trip later.
+     */
+    applySession(session) {
+      if (!session) return;
+      state.session = { ...(state.session || {}), ...session };
+      notify();
+    },
+
     /** One module entry, as `PUT /modules/{m}/params` answers it. */
     applyModule(entry) {
       if (!entry || !entry.name) return;
@@ -683,6 +697,17 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
           insertReading(state.powerLog, { ts: frame.ts, watts: data.watts, trustworthy: data.trustworthy !== false });
           trimPowerLog(state);
         }
+        break;
+
+      case 'SampleNamed':
+        // The identity of everything measured from here on. Folded rather
+        // than waited for on the next `/bench`, because two consoles may be
+        // open and the one that did not type it must not keep filing runs
+        // under a name the operator has already corrected. `after` is the
+        // whole block, so this is a replacement and not a merge — the merge
+        // happened in the service, which owns the layer below it.
+        state.session = { ...(state.session || {}), sample: { ...data.after } };
+        log(frame, 'info', `sample · ${(data.changed || []).join(', ') || 'named'}`);
         break;
 
       case 'TemperatureRead':

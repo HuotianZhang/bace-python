@@ -202,6 +202,31 @@ was built to serve it; `python -m bace.service --ui DIR` serves what gets built.
 The results tab: R2·3 was its design all along (`docs/design/README.md`),
 and it is built.
 
+**2026-09-05, the UX screening** (`docs/ux-screening.md`): the measurement flow
+walked end to end for what it asks of the *person*. The rule it turned up —
+everything that costs the sample something arms and confirms, and nothing that
+cost the operator something did. Five fixed: the window title carries a
+`NeedsOperator` pause, the run, and an ending nobody was there to see
+(`ui/lib/title.js`, the only channel to an operator who by construction is not
+watching a half-hour settle); an undo for the pipeline tree (`ui/lib/undo.js`);
+a Save that arms before overwriting a recipe; a strip message that can be
+dismissed; and **naming the device from the console** —
+`PUT /session/sample` (contract §3a) with `ui/lib/identity.js` behind the bar's
+`no sample named` chip. That last one moved two things under the console. A run
+takes its `RunMetadata` from the block it was **queued** with
+(`Catalogue.base_metadata(rec.sample)`), not the session's now, so a rename at
+hour one of a four-hour sweep cannot file its remaining nodes under a different
+name inside the same folder. And **`naming-plan.md` §2's live defect is
+fixed**: `sample`, `material` and `pixel` are slugged into the folder name
+(`RunMetadata.identity_in_name`, `NAME_MAX = 24`) and kept verbatim in the
+record, so `material = "PTQ10:IT-4F"` — the contract's own example — no longer
+builds a path segment with a colon in it, which failed on the lab PC and passed
+on Linux. It was brought forward ahead of the grid that plan proposes because
+the new route turned "editable in `run.toml`" into "typeable in a text box".
+`GET /session` answers with `sample_in_name` so the console previews the folder
+as it will be spelled. The plan's directory allocator (its collision section)
+is still open.
+
 **Temperature** — wired since this handover was written (superseded here by
 `docs/service-contract.md` section 7). The Lake Shore 331 is at
 `GPIB0::7::INSTR`, and **this process opens it** (2026-09-03):

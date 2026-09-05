@@ -131,6 +131,14 @@ dll_path = ""                   # empty = pick the DELIB build matching this
 # temperature stays a number someone types at the pause, and the reason is on
 # the bench card.
 #
+# The 331 is also *watched*: the service reads it every 5 s from the moment it
+# comes up (--temperature-monitor SECONDS, --no-temperature-monitor), so the
+# number on the card and in the journal is a reading with an age rather than
+# the read-back of whenever somebody last pressed something. On GPIB that read
+# happens only while the worker's bus lock is free, so it never lands beside an
+# acquisition -- during a long run the ticks are skipped and the card says the
+# reading is stale instead of pretending it is now.
+#
 # The one-owner rule still holds: the 331 answers only the last query it
 # received, so if the 331 console (D:/TemperatureController) is started beside
 # this program, both hold GPIB0::7 and both read the other's replies. Name it

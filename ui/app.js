@@ -14,6 +14,8 @@ import { parseHash } from './lib/route.js';
 import { renderRail, renderChainStrip, PREREQUISITE } from './lib/rail.js';
 import { renderMonitor } from './lib/monitor.js';
 import { renderPowerPanel, svgFileOf, DEFAULT_UI as POWER_DEFAULTS } from './lib/power.js';
+import { renderTitle, liveRunId } from './lib/title.js';
+import { renderIdentity, identityModel } from './lib/identity.js';
 import { createBenchWatch } from './lib/watch.js';
 
 import bench from './views/bench.js';
@@ -49,6 +51,7 @@ const stream = createStream({
 
 const tabsEl = h('nav.tabs');
 const chipsEl = h('span.chips');
+const identEl = h('section.ident', { hidden: true });
 const railEl = h('header.rail');
 const powerEl = h('section.power');
 const monitorEl = h('section.monitor', { hidden: true });
@@ -58,7 +61,7 @@ const barEl = h('footer.stream-bar');
 
 document.getElementById('app').replaceChildren(
   h('div.bar', h('span.wordmark', 'bace'), tabsEl, h('span.spacer'), chipsEl),
-  railEl, powerEl, monitorEl, viewEl, stripEl, barEl);
+  identEl, railEl, powerEl, monitorEl, viewEl, stripEl, barEl);
 
 let mounted = null;
 let mountedRoute = null;
@@ -99,8 +102,9 @@ function renderChips(state) {
   const sample = session.sample || {};
   const chain = (state.bench && state.bench.chain) || null;
   const bad = chain ? chain.total - chain.ok : 0;
-  const named = [sample.sample, sample.material, sample.pixel].filter(Boolean).join(' · ');
-  const model = [bad && chain ? [chain.ok, chain.total, worstChain(chain)] : null, named,
+  const ident = identityModel(state);
+  const model = [bad && chain ? [chain.ok, chain.total, worstChain(chain)] : null,
+                 ident.chip, ident.unnamed, ident.hazards.length, identOpen,
                  session.mode, session.fast, currentRun(state) ? runLabel(state) : null,
                  state.queue.length, state.benchState];
   keyed(chipsEl, JSON.stringify(model), () => [
@@ -108,12 +112,91 @@ function renderChips(state) {
     // visible from the pipeline and the results tabs too — the strip that
     // fixes it is at the foot of whichever view is open.
     bad ? h('span.chip.bad', { text: `chain ${chain.ok} / ${chain.total} · ${worstChain(chain)}` }) : null,
-    h('span.chip', { text: named || 'no sample named' }),
+    // The identity is a control, not a label. It said `no sample named` for
+    // as long as the console has existed and gave the operator nowhere to go
+    // with that; now the sentence is the button that answers it.
+    h('button', {
+      class: 'chip ident' + (ident.unnamed || ident.hazards.length ? ' bad' : '') + (identOpen ? ' on' : ''),
+      title: ident.unnamed
+        ? 'nothing names the device: every folder this session writes opens on the temperature. Click to name it.'
+        : `${ident.preview} — click to change what is mounted`,
+      'aria-expanded': identOpen ? 'true' : 'false',
+      onclick: () => toggleIdent(),
+    }, ident.chip),
     h('span.chip', { text: `${session.mode || fmt.ABSENT}${session.fast ? ' · fast' : ''}` }),
     currentRun(state) ? h('span.chip.m', { text: runLabel(state) }) : null,
     state.queue.length ? h('span.chip', { text: `queue ${state.queue.length}` }) : null,
     h('span', { class: 'chip state ' + (state.benchState || 'idle'), text: state.benchState || 'idle' }),
   ]);
+}
+
+/**
+ * The identity panel — `lib/identity.js` for why it exists.
+ *
+ * Open only when asked: the block is set once per device and read constantly,
+ * so the bar shows it and the panel edits it. `ui-rules` §1's rule against
+ * progressive disclosure is about what the operator needs *while measuring*;
+ * five fields nobody touches after the first minute are not that, and the
+ * value itself never leaves the bar.
+ *
+ * It opens itself once when nothing names the device — a console that knows
+ * the runs are about to be filed under no name and waits to be asked is the
+ * finding this fixes, not a smaller version of it. Once, and never again in
+ * this session: a panel that reopened on every reload would be a dialogue,
+ * and `--sim` benches genuinely have nothing mounted.
+ */
+let identOpen = false;
+let identStatus = null;
+let identOffered = false;
+
+function drawIdent(state) {
+  if (!identOffered && identityModel(state).unnamed && state.session) {
+    identOffered = true;
+    identOpen = true;
+  }
+  renderIdentity(identEl, state, {
+    open: identOpen, status: identStatus, onSet: setSample,
+    onClose: () => {
+      identOpen = false;
+      identStatus = null;
+      drawIdent(store.getState());
+      renderChips(store.getState());
+    },
+  });
+}
+
+function toggleIdent() {
+  identOpen = !identOpen;
+  identOffered = true;
+  if (!identOpen) identStatus = null;
+  drawIdent(store.getState());
+  renderChips(store.getState());
+}
+
+/**
+ * One key, merged in the service. The answer carries the whole session block,
+ * so the store takes it from there rather than waiting for the `SampleNamed`
+ * to come back round the socket — and the run holding the bench, which keeps
+ * the identity it was queued under and which the panel has to say out loud or
+ * the operator will believe they have just fixed it.
+ */
+async function setSample(name, value) {
+  identStatus = { level: '', text: `${name} …` };
+  drawIdent(store.getState());
+  try {
+    const out = await api.setSample({ [name]: value });
+    store.applySession(out.session);
+    identStatus = out.changed && out.changed.length
+      ? { level: 'ok',
+          text: out.run_active
+            ? `${out.changed.join(', ')} · ${out.run_active} keeps the name it was queued under`
+            : `${out.changed.join(', ')} · every run queued from now carries it` }
+      : { level: '', text: 'unchanged' };
+  } catch (error) {
+    identStatus = { level: 'bad', text: error.text || error.message };
+  }
+  drawIdent(store.getState());
+  renderChips(store.getState());
 }
 
 function worstChain(chain) {
@@ -131,7 +214,9 @@ let parkArmed = false;
 let parkArmedTimer = null;
 
 function drawStrip(state) {
-  renderChainStrip(stripEl, state, { onFix: fix, onPark: park, status: stripStatus, parkArmed });
+  renderChainStrip(stripEl, state, {
+    onFix: fix, onPark: park, onDismiss: dismiss, status: stripStatus, parkArmed,
+  });
 }
 
 /**
@@ -143,6 +228,20 @@ function drawStrip(state) {
  */
 function notify(text, level = 'warn', checks = null) {
   stripStatus = { level: level === 'crit' || level === 'bad' ? 'bad' : level, text, checks };
+  drawStrip(store.getState());
+}
+
+/**
+ * Clear the strip's sentence.
+ *
+ * It is the console's one place for a message and it is replaced only by the
+ * next one, so a three-hour-old `queued …` and a refusal the operator has
+ * already dealt with both keep reading as news. Dismissing is the operator's,
+ * never a timer's: a refusal that faded on its own is what this exists beside,
+ * not a milder version of it.
+ */
+function dismiss() {
+  stripStatus = null;
   drawStrip(store.getState());
 }
 
@@ -543,13 +642,56 @@ function renderBar(state) {
   ]);
 }
 
+/**
+ * The window title — `lib/title.js` for why it exists at all.
+ *
+ * The one thing that model cannot get from the store is whether anybody has
+ * looked at this window since a run ended, so the shell keeps it. `away` is
+ * the window's focus and visibility together (a console behind another window
+ * and a console in a background tab are the same case); `unseenEnd` is the run
+ * that ended while it was true, and it is dropped the moment the operator
+ * comes back — an ending that is still being announced after they have read it
+ * is a badge that means nothing the second time.
+ *
+ * A *pause* is not latched this way and must not be: it stands until it is
+ * answered, so the title keeps saying so with the window wide open.
+ */
+let away = document.hidden;
+let liveRun = null;
+let unseenEnd = null;
+
+function drawTitle(state) {
+  const holding = liveRunId(state);
+  // Was live, is not: the run ended. Read across draws rather than off a
+  // `parked` frame, which a ring gap can swallow — and this is the only sign
+  // of the ending an operator who is not here will get.
+  if (liveRun && liveRun !== holding && away) unseenEnd = liveRun;
+  liveRun = holding;
+  renderTitle(document, state, { announce: unseenEnd });
+}
+
+/** They are back: the ending has been delivered, and nothing else is owed. */
+function seen() {
+  away = false;
+  unseenEnd = null;
+  drawTitle(store.getState());
+}
+
+function gone() { away = true; }
+
+window.addEventListener('focus', seen);
+window.addEventListener('blur', gone);
+document.addEventListener('visibilitychange', () => (document.hidden ? gone() : seen()));
+
 store.subscribe((state) => {
   renderRail(railEl, state);
+  drawIdent(state);
   renderChips(state);
   drawPower(state);
   drawMonitor(state);
   drawStrip(state);
   renderBar(state);
+  drawTitle(state);
 });
 window.addEventListener('hashchange', show);
 
