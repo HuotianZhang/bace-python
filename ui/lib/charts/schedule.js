@@ -71,7 +71,7 @@ export function scheduleModel({ blocks, cost, width = 900, height = 118, now = n
       absent: {
         text: list.length ? 'nothing to run' : 'no nodes yet',
         detail: list.length
-          ? 'every module in this tree costs nothing the catalogue can estimate'
+          ? 'every module in this structure costs nothing the catalogue can estimate'
           : 'add a loop or a module, and the schedule appears with the first Dry run',
       },
       panels: [], notes: [],

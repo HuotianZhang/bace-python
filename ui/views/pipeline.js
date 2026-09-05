@@ -974,7 +974,7 @@ export default {
             disabled: !history.canUndo || null,
             title: history.canUndo
               ? `Ctrl-Z — takes back: ${history.undoLabel || 'the last change'}`
-              : 'nothing to take back on this tree',
+              : 'nothing to take back on this structure',
             onclick: () => step('undo'),
           }, history.canUndo && history.undoLabel ? `↶ undo · ${history.undoLabel}` : '↶ undo'),
           history.canRedo
@@ -997,8 +997,8 @@ export default {
             class: armed ? 'btns armed' : 'btns',
             disabled: !typed || null,
             title: overwrites
-              ? `${stem} already exists — POST /pipelines/save writes over it, and the file it replaces is not in the undo history`
-              : 'POST /pipelines/save — writes the tree and the bench values it was saved with',
+              ? `${stem} already exists — saving writes over it, and the file it replaces is not in the undo history`
+              : 'writes the structure to a file, with the bench values it was saved with',
             onclick: save,
           }, armed ? `overwrite ${stem}?` : 'Save recipe'),
           h('button.btns', {
