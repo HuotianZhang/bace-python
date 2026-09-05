@@ -205,6 +205,13 @@ h1, h2, h3, .wordmark, button {
 /* Park while a run is active aborts it and cancels the queue, so the second
    click is a different button from the first. */
 .strip button.armed { background: var(--alert); border-color: var(--alert); color: #fff; }
+/* The way to be rid of a sentence that has been read. Quiet until it is
+   wanted: it sits inside the status and is the only thing there that acts. */
+.strip .st.status button.stx {
+  border: 0; background: none; padding: 0 0 0 2px; margin: 0;
+  font: inherit; line-height: 1; color: var(--grey); cursor: pointer;
+}
+.strip .st.status button.stx:hover { color: var(--ink); }
 
 /* -- the tabs, inside the bar --------------------------------------------- */
 .tabs { display: flex; gap: 2px; align-items: stretch; }
@@ -845,6 +852,10 @@ button.link:hover { color: var(--accent-dark); }
 .namerow input.v { flex: 1 1 auto; min-width: 0; }
 .namerow input.v:focus, .namerow select.v:focus { border-color: var(--accent); outline: none; }
 .btnrow { display: flex; align-items: center; gap: 10px; }
+/* Undo sits to the left of the three that go forward, and carries the name of
+   what it takes back — so it is the widest of the small buttons and must be
+   allowed to shrink rather than push Start off the row. */
+.btnrow .btng { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .btnrow .btnp { padding: 10px 16px; font-size: 14px; }
 
 /* The schedule at three scales. A row is a line, not a box: the canonical

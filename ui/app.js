@@ -14,6 +14,7 @@ import { parseHash } from './lib/route.js';
 import { renderRail, renderChainStrip, PREREQUISITE } from './lib/rail.js';
 import { renderMonitor } from './lib/monitor.js';
 import { renderPowerPanel, svgFileOf, DEFAULT_UI as POWER_DEFAULTS } from './lib/power.js';
+import { renderTitle, liveRunId } from './lib/title.js';
 import { createBenchWatch } from './lib/watch.js';
 
 import bench from './views/bench.js';
@@ -131,7 +132,9 @@ let parkArmed = false;
 let parkArmedTimer = null;
 
 function drawStrip(state) {
-  renderChainStrip(stripEl, state, { onFix: fix, onPark: park, status: stripStatus, parkArmed });
+  renderChainStrip(stripEl, state, {
+    onFix: fix, onPark: park, onDismiss: dismiss, status: stripStatus, parkArmed,
+  });
 }
 
 /**
@@ -143,6 +146,20 @@ function drawStrip(state) {
  */
 function notify(text, level = 'warn', checks = null) {
   stripStatus = { level: level === 'crit' || level === 'bad' ? 'bad' : level, text, checks };
+  drawStrip(store.getState());
+}
+
+/**
+ * Clear the strip's sentence.
+ *
+ * It is the console's one place for a message and it is replaced only by the
+ * next one, so a three-hour-old `queued …` and a refusal the operator has
+ * already dealt with both keep reading as news. Dismissing is the operator's,
+ * never a timer's: a refusal that faded on its own is what this exists beside,
+ * not a milder version of it.
+ */
+function dismiss() {
+  stripStatus = null;
   drawStrip(store.getState());
 }
 
@@ -543,6 +560,47 @@ function renderBar(state) {
   ]);
 }
 
+/**
+ * The window title — `lib/title.js` for why it exists at all.
+ *
+ * The one thing that model cannot get from the store is whether anybody has
+ * looked at this window since a run ended, so the shell keeps it. `away` is
+ * the window's focus and visibility together (a console behind another window
+ * and a console in a background tab are the same case); `unseenEnd` is the run
+ * that ended while it was true, and it is dropped the moment the operator
+ * comes back — an ending that is still being announced after they have read it
+ * is a badge that means nothing the second time.
+ *
+ * A *pause* is not latched this way and must not be: it stands until it is
+ * answered, so the title keeps saying so with the window wide open.
+ */
+let away = document.hidden;
+let liveRun = null;
+let unseenEnd = null;
+
+function drawTitle(state) {
+  const holding = liveRunId(state);
+  // Was live, is not: the run ended. Read across draws rather than off a
+  // `parked` frame, which a ring gap can swallow — and this is the only sign
+  // of the ending an operator who is not here will get.
+  if (liveRun && liveRun !== holding && away) unseenEnd = liveRun;
+  liveRun = holding;
+  renderTitle(document, state, { announce: unseenEnd });
+}
+
+/** They are back: the ending has been delivered, and nothing else is owed. */
+function seen() {
+  away = false;
+  unseenEnd = null;
+  drawTitle(store.getState());
+}
+
+function gone() { away = true; }
+
+window.addEventListener('focus', seen);
+window.addEventListener('blur', gone);
+document.addEventListener('visibilitychange', () => (document.hidden ? gone() : seen()));
+
 store.subscribe((state) => {
   renderRail(railEl, state);
   renderChips(state);
@@ -550,6 +608,7 @@ store.subscribe((state) => {
   drawMonitor(state);
   drawStrip(state);
   renderBar(state);
+  drawTitle(state);
 });
 window.addEventListener('hashchange', show);
 
