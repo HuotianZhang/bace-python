@@ -14,7 +14,7 @@
 
 import { h, fill, keyed } from './../lib/dom.js';
 import { moduleCard } from './../lib/card.js';
-import { BENCH_CARDS, cardModel } from './../lib/fields.js';
+import { BENCH_CARDS, cardModel, cardRuns } from './../lib/fields.js';
 import { RESULT_CARDS, createChartThrottle, resultKeys, resultPanel, runFor } from './../lib/results.js';
 
 export default {
@@ -136,11 +136,16 @@ export default {
      * The node's params are empty on purpose: the edited layer is already in
      * the catalogue, so an empty-params node validates with exactly the values
      * a Run would use, and the answer cannot drift from the button beside it.
+     *
+     * Only cards with a Run are asked. `light` has bench actions and no Run,
+     * and its one-node tree is precisely the light-only run the service
+     * refuses (`light.undone-by-park`) — validating it would draw that
+     * refusal, permanently, under buttons that do not go through the worker.
      */
     const checks = new Map();
 
     function revalidate(names) {
-      return Promise.all(names.map(async (name) => {
+      return Promise.all(names.filter(cardRuns).map(async (name) => {
         try {
           const v = await api.validate({ kind: 'module', module: name, params: {} });
           checks.set(name, v.checks || []);

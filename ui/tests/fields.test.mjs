@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { cardModel, foldCount, points, effectivePolarity, driveLevel, BENCH_CARDS } from '../lib/fields.js';
+import { cardModel, foldCount, points, effectivePolarity, driveLevel, cardRuns, BENCH_CARDS, NODE_ONLY } from '../lib/fields.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const CATALOGUE = JSON.parse(fs.readFileSync(path.join(here, '..', 'fixtures', 'modules_sim.json'), 'utf8'));
@@ -200,20 +200,35 @@ test('jv_bace shows the LED range, or the inherited level instead of it', () => 
   assert.ok(!above(bound).includes('led_start_v'));
 });
 
-test('light shows every field, because its buttons act on them', () => {
-  // The one card that hides nothing, and the browser is what said so: `DC`
-  // sends `led_v` and `Pulse` sends all four, so a button driving the lamp
-  // from a number the operator cannot see is worse than a field they do not
-  // need right now.
+test('the light card shows what its buttons send, and folds what only a node reads', () => {
+  // The buttons are the verb: `DC` sends `led_v` and `Pulse` sends all four
+  // levels, so a button driving the lamp from a number the operator cannot
+  // see is worse than a field they do not need right now — those four are
+  // always above. `shutter`, `led_mode` and `settle_s` are what a node reads
+  // to know what to do; no button sends them (clicking `Open` *is*
+  // `shutter = open`), so on the bench card they fold under `node only` —
+  // still editable, since a tree's light node inherits the edited layer,
+  // but not beside the levels as if the buttons acted on them.
   const model = cardModel(entry('light'));
-  assert.deepEqual(above(model), ['shutter', 'led_mode', 'led_v', 'led_low_v',
-    'pulse_frequency_hz', 'duty_percent', 'settle_s']);
-  assert.equal(foldCount(model), 0);
+  assert.deepEqual(above(model), ['led_v', 'led_low_v', 'pulse_frequency_hz', 'duty_percent']);
+  assert.deepEqual(model.fold.map((g) => [g.group, g.params.map((p) => p.name)]),
+    [[NODE_ONLY, ['shutter', 'led_mode', 'settle_s']]]);
+  assert.equal(foldCount(model), 3);
   assert.deepEqual(model.hidden, []);
 
+  // The pipeline node form is the other way round: there the node is what
+  // runs, and it reads all seven.
+  const node = cardModel(entry('light'), { form: 'node' });
+  assert.deepEqual(above(node), ['shutter', 'led_mode', 'led_v', 'led_low_v',
+    'pulse_frequency_hz', 'duty_percent', 'settle_s']);
+  assert.equal(foldCount(node), 0);
+
   // Not a Run: a light-only run is `invalid` (`light.undone-by-park`) because
-  // the park that ends every run would undo it. One action per click.
+  // the park that ends every run would undo it — so the card has no Start
+  // to gate, and is the one bench card never sent to POST /pipelines/validate.
   assert.deepEqual(model.run, []);
+  assert.equal(cardRuns('light'), false);
+  for (const name of BENCH_CARDS.filter((n) => n !== 'light')) assert.ok(cardRuns(name), `${name} runs`);
   assert.deepEqual(model.actions.map((a) => a.action),
     ['shutter-open', 'shutter-shut', 'set-led-dc', 'set-led-pulse', 'led-off']);
   const dc = cardModel(entry('light', { led_v: 1.02 }));

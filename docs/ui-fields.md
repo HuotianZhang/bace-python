@@ -67,42 +67,66 @@ only that row says which. When it reads `unknown ⚠` the run will still go —
 `jv` is refusable by nothing but a missing SourceMeter — and the file will say
 `unknown` too.
 
-## light · 7 parameters → all 7 above, nothing folded and nothing hidden
+## light · 7 parameters → 4 above, 3 folded as `node only`
 
 Not on the R3 artboard: it did not exist. The card is the bench's two light
 switches, and it is the answer to "how do I make it dark" that the artboard
 left to a side effect of `jv_dark`.
 
-| # | field | render | note |
-|---|---|---|---|
-| 1 | `shutter` | **segmented**, 3 choices | `open` · `shut` · `leave`. The shutter is the light switch: it decides whether light reaches the sample, whatever the generator is doing |
-| 2 | `led_mode` | **segmented**, 4 choices | `dc` · `pulse` · `off` · `leave`. Prefer the shutter over `off` — a cycled generator loses its thermal steady state and the next module waits for it again (operator instruction, 2026-09-02) |
-| 3 | `led_v` | float, V | the DC level, or the pulse high level — the same number `bace` must pulse at |
-| 4 | `led_low_v` | float, V | `pulse` only — but always shown, see below |
-| 5 | `pulse_frequency_hz` `duty_percent` | float | `pulse` only — but always shown |
-| 6 | `settle_s` | float, s | |
-| — | illumination | **bench read-back** | the same row `jv` carries, and the same function behind it. What the node reports having achieved, not what it asked for |
+The card is one layout serving two forms, and the confusion it used to cause
+came from not saying which field belonged to which:
 
-**This is the one card that hides nothing, and the browser is what said so.**
-The first build hid `led_v` unless `led_mode` was `dc` or `pulse` — correct for
-the *node* form, where what the node does not read it does not read. On the
-bench card it was wrong: the **DC** button sends `led_v` and **Pulse** sends
-all four, so the card was driving the lamp from a number the operator could not
-see. A button that acts on a field is a reason to show the field.
+- **The bench card acts now.** Its primary controls are the five bench
+  actions **Open · Shut** and **DC · Pulse · LED off**, one action per click,
+  the way M1's chain strip does it. The buttons are the verb: clicking `Open`
+  *is* `shutter = open`.
+- **The pipeline node runs later.** In a tree, `light` is a step placed before
+  the one that needs the light, and there the node reads `shutter` and
+  `led_mode` to know what to do, and `settle_s` to know how long to wait
+  before the next step starts.
 
-**The card's buttons are bench actions, not a Run.** This is the one card
-whose primary control does not post to `/runs`: a run whose only module is
-`light` is `invalid` (`light.undone-by-park`), because every run ends parked —
-outputs off, shutter shut — so it would set a light and hand it straight back.
-The manual form is `POST /bench/actions/{shutter-open, shutter-shut,
-set-led-dc, set-led-pulse, led-off}`, which do not go through the worker. So
-the card offers **Open · Shut** and **DC · Pulse · Off** as action buttons,
-each one action per click, the way M1's chain strip already does it.
+| # | field | render | bench card | node form |
+|---|---|---|---|---|
+| 1 | `led_v` | float, V | above — `DC` sends it, `Pulse` sends it as the high level | above |
+| 2 | `led_low_v` | float, V | above — `Pulse` sends it | above |
+| 3 | `pulse_frequency_hz` `duty_percent` | float | above — `Pulse` sends them | above |
+| 4 | `shutter` | **segmented**, 3 choices | folded, `node only` — no button reads it | above. `open` · `shut` · `leave`. The shutter is the light switch: it decides whether light reaches the sample, whatever the generator is doing |
+| 5 | `led_mode` | **segmented**, 4 choices | folded, `node only` — no button reads it | above. `dc` · `pulse` · `off` · `leave`. Prefer the shutter over `off` — a cycled generator loses its thermal steady state and the next module waits for it again (operator instruction, 2026-09-02) |
+| 6 | `settle_s` | float, s | folded, `node only` — an action returns when the instrument answers; nothing waits after | above |
+| — | illumination | **bench read-back** | the same row `jv` carries, and the same function behind it. What the bench reports, not what was asked for | not shown: a node that runs in four hours is not described by the light now |
 
-The module still exists as a *node*: in a pipeline it goes before the step
-that needs the light, and there park at the end of the run is exactly where
-the bench should end up. So the same card feeds the pipeline tab's node
-editor (M5) with the same fields and a different verb.
+**The four levels are always visible on the bench card, and the browser is
+what said so.** The first build hid `led_v` unless `led_mode` was `dc` or
+`pulse` — correct for the node form, where what the node does not read it does
+not read. On the bench card it was wrong: the **DC** button sends `led_v` and
+**Pulse** sends all four, so the card was driving the lamp from a number the
+operator could not see. A button that acts on a field is a reason to show the
+field.
+
+**The three node-only fields fold rather than hide.** They are the module's
+edited layer, which a tree's `light` node inherits unless the node overrides
+them, so the bench card is still where their default is set. But laid out
+beside the levels, with `shutter = leave` and `led_mode = leave` under buttons
+that plainly open and shut, they read as inputs the buttons ignore — which is
+what they were. The fold's name says what they are for.
+
+**The card's buttons are bench actions, not a Run, so the card is never
+validated as one.** A run whose only module is `light` is `invalid`
+(`light.undone-by-park`), because every run ends parked — outputs off, shutter
+shut — so it would set a light and hand it straight back. The manual form is
+`POST /bench/actions/{shutter-open, shutter-shut, set-led-dc, set-led-pulse,
+led-off}`, which do not go through the worker. The bench view asks
+`POST /pipelines/validate` for each card's own one-node tree to gate its Start
+button; `light` has no Start, and its one-node tree is exactly the run the
+service refuses — so asking drew that refusal, permanently, as a red note
+under buttons it did not concern, telling the operator to use the bench
+actions they were looking at. `cardRuns` in `lib/fields.js` is what keeps the
+card out of that loop, and `lib/card.js` computes blockers only for a card
+with a Run.
+
+The subtitle says the same thing from the other side: `acts now · no run, no
+files` in place of a run estimate, because a card that only acts does not cost
+a run.
 
 ## jv_bace · 22 parameters → 11 above, 11 folded
 

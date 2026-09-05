@@ -112,22 +112,33 @@ export const LAYOUT = {
   },
 
   light: {
-    // Every field, unconditionally — unlike every other card, and for a
-    // reason the browser found: the buttons below *act on these values*.
-    // `DC` sends `led_v`, `Pulse` sends all four, and a button that drives the
-    // lamp from a number the operator cannot see is worse than a field they
-    // do not need. (The pipeline node form, M5, can hide by `led_mode`: there
-    // the node is what runs, and what it does not read it does not read.)
+    // One layout, two forms, and the split between them is what each field
+    // is *for*:
+    //
+    //   * On the bench card the buttons are the verb. `DC` sends `led_v`,
+    //     `Pulse` sends all four levels, and a button that drives the lamp
+    //     from a number the operator cannot see is worse than a field they
+    //     do not need — so those four are always above the fold. `shutter`,
+    //     `led_mode` and `settle_s` are what a *node* reads to know what to
+    //     do; no button sends them, because clicking `Open` already said
+    //     `shutter = open`. On the bench card they fold under `node only`,
+    //     still editable (they are the module's edited layer, which a tree's
+    //     light node inherits) but not mistakable for something the buttons
+    //     act on.
+    //   * The pipeline node form (`form: 'node'`) shows all seven above,
+    //     because there the node is what runs and every one of them is read.
     above: [
-      { kind: 'segmented', name: 'shutter' },
-      { kind: 'segmented', name: 'led_mode' },
-      'led_v', 'led_low_v', 'pulse_frequency_hz', 'duty_percent', 'settle_s',
+      { kind: 'segmented', name: 'shutter', node: true },
+      { kind: 'segmented', name: 'led_mode', node: true },
+      'led_v', 'led_low_v', 'pulse_frequency_hz', 'duty_percent',
+      { kind: 'field', name: 'settle_s', node: true },
     ],
     readback: 'illumination',
-    // Not a Run. A run whose only module is `light` is refused
-    // (`light.undone-by-park`): every run ends parked, so it would set a light
-    // and hand it straight back. The manual form is the bench action, which
-    // does not go through the worker. One action per click, as M1's strip does.
+    // Not a Run, so nothing on this card is validated as one. A run whose
+    // only module is `light` is refused (`light.undone-by-park`): every run
+    // ends parked, so it would set a light and hand it straight back. The
+    // manual form is the bench action, which does not go through the worker.
+    // One action per click, as M1's strip does.
     actions: [
       { label: 'Open', action: 'shutter-open' },
       { label: 'Shut', action: 'shutter-shut' },
@@ -151,6 +162,22 @@ export const LAYOUT = {
 /** Which modules get a bench card, in the order the artboard lays them out. */
 export const BENCH_CARDS = ['jv', 'jv_bace', 'bace', 'light', 'power', 'temperature'];
 
+/**
+ * Whether a card's primary control is a Run. A card that only has bench
+ * actions (`light`) has no Start to gate, so its one-node tree is never sent
+ * to `POST /pipelines/validate`: that tree is exactly the light-only run the
+ * service refuses by design (`light.undone-by-park`), and the refusal would
+ * reach the operator as a permanent red note under buttons it does not
+ * concern.
+ */
+export function cardRuns(name) {
+  const layout = LAYOUT[name];
+  return Boolean(layout && [].concat(layout.run || []).length);
+}
+
+/** The fold group the bench card keeps its node-only fields under. */
+export const NODE_ONLY = 'node only';
+
 /** An enum small enough to be a segmented control rather than a select. */
 export const SEGMENTED_MAX = 4;
 
@@ -163,6 +190,10 @@ function isBound(wire) {
  * One card, as rows. `entry` is a `GET /modules` entry (or the one a `PUT`
  * answers with — same shape, which is why an edit re-renders from the
  * response). `bench` is the `/bench` snapshot, for the read-back rows.
+ * `form` is which form this is: `'bench'` (the card, whose buttons act now)
+ * or `'node'` (the pipeline editor, where the module runs as a step). A row
+ * marked `node: true` is above the fold only on the node form; on the bench
+ * card it folds under `NODE_ONLY`.
  *
  * Returns `{name, title, status, kind, estimate, needs, chips, above, fold,
  * run, actions, hidden}`. `hidden` is the parameters the run will not read in
@@ -170,19 +201,24 @@ function isBound(wire) {
  * 3 not applicable" and mean both halves. `above + fold + hidden` is always
  * every parameter the module has.
  */
-export function cardModel(entry, { bench = null } = {}) {
+export function cardModel(entry, { bench = null, form = 'bench' } = {}) {
   const layout = LAYOUT[entry.name] || { above: (entry.params || []).map((p) => p.name) };
   const wire = Object.fromEntries((entry.params || []).map((p) => [p.name, p]));
   const values = Object.fromEntries((entry.params || []).map((p) => [p.name, p.value]));
 
   const used = new Set();
   const hidden = new Set();
+  const nodeOnly = new Set();
   const above = [];
 
   for (const spec of layout.above || []) {
     const row = normalise(spec);
     const names = rowNames(row);
     if (!names.every((n) => n in wire)) continue;
+    if (row.node && form !== 'node') {
+      names.forEach((n) => nodeOnly.add(n));
+      continue;
+    }
     if (row.when && !row.when(values, wire)) {
       if (row.otherwise !== 'fold') names.forEach((n) => hidden.add(n));
       continue;
@@ -195,7 +231,7 @@ export function cardModel(entry, { bench = null } = {}) {
   // The axis's own pinned field is not folded — it *is* the axis.
   if (entry.name === 'bace' && values.axis_name in wire) hidden.add(values.axis_name);
 
-  const fold = foldGroups(entry, used, hidden);
+  const fold = foldGroups(entry, used, hidden, nodeOnly);
   return {
     name: entry.name,
     title: entry.title || entry.name,
@@ -273,15 +309,18 @@ export function effectivePolarity(values) {
  * up empty does not render — which is how the `output` group disappears once
  * `inverted_output` is drawn inside the polarity control above.
  */
-function foldGroups(entry, used, hidden) {
+function foldGroups(entry, used, hidden, nodeOnly = new Set()) {
   const by = new Map();
   for (const p of entry.params || []) {
     if (used.has(p.name) || hidden.has(p.name)) continue;
-    const group = p.group || 'other';
+    // A node-only field folds as what it is, not as its service group: on the
+    // bench card `shutter` under `illumination` would sit beside `led_v` and
+    // read as another number the buttons send.
+    const group = nodeOnly.has(p.name) ? NODE_ONLY : (p.group || 'other');
     if (!by.has(group)) by.set(group, []);
     by.get(group).push(p);
   }
-  const order = [...FOLD_ORDER, ...[...by.keys()].filter((g) => !FOLD_ORDER.includes(g))];
+  const order = [NODE_ONLY, ...FOLD_ORDER, ...[...by.keys()].filter((g) => g !== NODE_ONLY && !FOLD_ORDER.includes(g))];
   return order.filter((g) => by.has(g)).map((g) => ({ group: g, params: by.get(g), count: by.get(g).length }));
 }
 

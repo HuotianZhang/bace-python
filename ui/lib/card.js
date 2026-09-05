@@ -35,7 +35,10 @@ export function moduleCard(entry, ctx, open) {
   const wide = Boolean(ctx.hasResult && ctx.hasResult(model.name));
   const card = h('div.card.mod' + (wide ? '.wide' : ''), { dataset: { module: model.name } });
 
-  const blocked = startBlockers(ctx.checksFor(model.name), model);
+  // Blockers gate Start. A card with no Start (`light`: bench actions only)
+  // has nothing for them to gate, and a verdict drawn under buttons it does
+  // not concern reads as a warning about the buttons.
+  const blocked = model.run.length ? startBlockers(ctx.checksFor(model.name), model) : [];
   const form = [
     h('div.pr', model.above.map((row) => renderRow(row, model, ctx))),
     model.readback ? readback(model.readback) : null,

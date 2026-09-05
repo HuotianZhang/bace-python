@@ -627,8 +627,11 @@ export default {
       };
       // `bench: null` on purpose: the read-back row on a bench card says what
       // the light is doing *now*, and a node that runs in four hours inside an
-      // illumination loop is not described by it.
-      const model = cardModel(entry, { bench: null });
+      // illumination loop is not described by it. `form: 'node'` puts every
+      // field the node reads above the fold — on the bench card the buttons
+      // are the verb, so `light`'s `shutter`, `led_mode` and `settle_s` fold
+      // there; here the node is what runs, and it reads all three.
+      const model = cardModel(entry, { bench: null, form: 'node' });
       const ctx = moduleCtx(catalogue);
       const first = (row && row.first) || null;
       const where = [];
