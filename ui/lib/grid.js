@@ -28,7 +28,7 @@ export function renderGroups(groups, { selected = null, onSelect } = {}) {
     h('div.hgh',
       h('span.num', { text: `session ${group.session}` }),
       h('span.cs', { text: group.identities.length ? group.identities.join(' / ') : 'no sample named' }),
-      h('span.cs.right', { text: `${group.runs.length} run${group.runs.length === 1 ? '' : 's'}` })),
+      h('span.cs.right', { text: fmt.plural(group.runs.length, 'run') })),
     group.runs.map((run) => h('button.hrow', {
       class: (run.run_id === selected ? 'on ' : '') + `lv-${run.level}`,
       dataset: { run: run.run_id },
@@ -42,7 +42,7 @@ export function renderGroups(groups, { selected = null, onSelect } = {}) {
         h('span.num', { text: run.at }),
         h('span.num', { text: run.counts }),
         run.voc ? h('span.num', { text: run.voc }) : null,
-        run.nodes ? h('span.num', { text: `${run.nodes} module run${run.nodes === 1 ? '' : 's'}` }) : null),
+        run.nodes ? h('span.num', { text: fmt.plural(run.nodes, 'module run') }) : null),
       run.outcome ? h('span.hr3.cs', { text: run.outcome }) : null))));
 }
 
@@ -56,8 +56,8 @@ export function renderRunHead(record, grid, summary) {
   const level = record.state === 'failed' || record.state === 'blocked' ? 'crit'
     : ['stopped', 'aborted', 'cancelled'].includes(record.state) ? 'warn' : record.state === 'done' ? 'ok' : 'live';
   const counts = grid.shape === 'grid'
-    ? `${summary.present} bace cell${summary.present === 1 ? '' : 's'} · ${summary.complete} complete · ${summary.partial} partial · ${summary.missing} never run`
-    : `${nodes.length} module node${nodes.length === 1 ? '' : 's'}`;
+    ? `${fmt.plural(summary.present, 'bace cell')} · ${summary.complete} complete · ${summary.partial} partial · ${summary.missing} never run`
+    : fmt.plural(nodes.length, 'module node');
   return h('div.rhead',
     h('div.rh1',
       h('span.rname', { text: record.kind === 'pipeline' ? (record.name || 'pipeline') : (record.module || record.kind || 'run') }),
@@ -81,7 +81,9 @@ export function renderRunHead(record, grid, summary) {
  */
 export function renderGrid(grid, { selected = null, onSelect } = {}) {
   if (grid.shape !== 'grid') {
-    return h('div.chart-absent', h('p.absent', 'no bace node in this run — the grid is one cell per bace; the nodes are listed below'));
+    // What is here, not why the grid is not (#42): "the grid is one cell per
+    // bace" is this file explaining itself to somebody who asked for numbers.
+    return h('div.chart-absent', h('p.absent', 'no bace node in this run — its nodes are listed below'));
   }
   const head = h('tr', h('th.corner', h('span.cs', 'T / K ↓  ·  led_v →')),
     grid.cols.map((col) => h('th', { text: col.label })));
@@ -151,7 +153,7 @@ export function renderNodes(record, { selected = null, onSelect } = {}) {
     const v = vocText(node);
     const level = node.outcome === 'failed' ? 'crit' : node.outcome === 'ok' ? 'ok' : 'warn';
     const q = GRID_MODULES.has(node.module) ? cellQ(node) : null;
-    const curves = node.curves ? `${node.curves.length} curve${node.curves.length === 1 ? '' : 's'}` : null;
+    const curves = node.curves ? fmt.plural(node.curves.length, 'curve') : null;
     return h('button.nrow', {
       class: (node.node_path === selected ? 'on ' : '') + (isPartial(node) ? 'partial' : ''),
       dataset: { node: node.node_path }, onclick: () => onSelect && onSelect(node.node_path),
@@ -192,7 +194,7 @@ export function renderNodePanel(record, node, grid, { onRerun, rerunState = null
   if (q) {
     numbers.push(['Q', q.q === null ? fmt.ABSENT : fmt.charge(q.q), q.q === null ? '' : `mean of ${node.kept ?? '?'} ${q.points > 1 ? '· ' + q.at : ''}`]);
     numbers.push(['σ_Q', q.sigma === null ? 'not recorded' : fmt.scientific(q.sigma, 3) + ' C',
-      q.sigma === null ? (sigmaRecorded(node) ? 'not at this point' : 'a zero is not a σ') : `over ${node.kept ?? '?'} loops`]);
+      q.sigma === null ? (sigmaRecorded(node) ? 'not at this point' : 'a zero is not a σ') : `over ${fmt.plural(node.kept ?? '?', 'loop')}`]);
   }
   numbers.push(['acquired', `${fmt.keptOf(node.kept, node.requested)} ${unit}`, partial ? (node.outcome || 'ended early') : node.outcome || '']);
   if (node.curves && node.curves.length) {

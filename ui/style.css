@@ -261,9 +261,6 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
 .strip .st.status.bad { border-color: var(--alert); color: var(--alert); }
 .strip .spacer { flex: 1 1 auto; }
 .strip button.btns { font-size: 11px; padding: 3px 8px; font-family: var(--font-body); font-weight: 500; }
-/* Park while a run is active aborts it and cancels the queue, so the second
-   click is a different button from the first. */
-.strip button.armed { background: var(--alert); border-color: var(--alert); color: #fff; }
 /* The way to be rid of a sentence that has been read. Quiet until it is
    wanted: it sits inside the status and is the only thing there that acts. */
 .strip .st.status button.stx {
@@ -556,18 +553,18 @@ button.link:hover { color: var(--accent-dark); }
    moves when one is clicked.
    `<button>`s, not clickable spans: a span with an onclick cannot be tabbed
    to, carries no role and is invisible to a screen reader. */
-.seg, .bool { display: inline-flex; border: 1px solid var(--rule); }
-.seg .opt, .bool .opt {
+.seg { display: inline-flex; border: 1px solid var(--rule); }
+.seg .opt {
   padding: 0 7px; font-size: 11px; cursor: pointer; color: var(--grey);
   font-family: var(--font-num); font-weight: 400; letter-spacing: 0;
   border: 0; background: none; line-height: 1.5;
 }
-.seg .opt.on, .bool .opt.on { background: var(--ink); color: #fff; }
+.seg .opt.on { background: var(--ink); color: #fff; }
 /* Hover darkens the type of an option that is not chosen; the chosen one is
    already white on ink (or on the accent), and darkening it made the word
    vanish under the pointer. */
-.seg .opt:not(.on):hover, .bool .opt:not(.on):hover { color: var(--ink); }
-.seg .opt:focus-visible, .bool .opt:focus-visible,
+.seg .opt:not(.on):hover { color: var(--ink); }
+.seg .opt:focus-visible,
 .btng:focus-visible, .btnp:focus-visible, .btns:focus-visible,
 .btnd:focus-visible, .btnw:focus-visible, .pf .l.lh:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 1px;
@@ -575,6 +572,39 @@ button.link:hover { color: var(--accent-dark); }
 /* §3: the accent is the swept quantity — so the axis chooser's selection is
    the accent, and the polarity pair is ordinary ink. */
 .pf.acc .seg .opt.on { background: var(--accent); }
+
+/* A boolean setting is a checkbox, not a `true | false` pair (#42). Same
+   family as `.seg` — it changes a value a later Run reads — so it takes the
+   family's ink and the family's focus ring. It is the grid's middle column on
+   its own: the row's label names it, so there is no text beside the box, and
+   `justify-self` keeps it the size of a box rather than the width of a
+   column. */
+.cbx {
+  appearance: none; -webkit-appearance: none; margin: 0;
+  width: 13px; height: 13px; cursor: pointer;
+  justify-self: start; align-self: center;
+  border: 1px solid var(--rule); background: var(--paper);
+}
+.cbx:hover { border-color: var(--ink); }
+.cbx:checked { background: var(--ink); border-color: var(--ink); }
+/* The tick is drawn, not typed: a `✓` glyph sits on the baseline of a 13 px
+   box and no font in the stack put it in the middle of one. */
+.cbx:checked::after {
+  content: ''; display: block;
+  width: 3px; height: 7px; margin: 1px 0 0 4px;
+  border: solid #fff; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg);
+}
+/* Neither on nor off: the service has not said, and an empty box would say
+   `false`. §2's rule about a zero that is not a zero, applied to a flag. */
+.cbx:indeterminate { background: var(--paper); border-color: var(--rule); }
+.cbx:indeterminate::after {
+  content: ''; display: block;
+  width: 7px; height: 0; margin: 5px 0 0 2px; border-top: 1.5px solid var(--grey);
+}
+.cbx:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Inherited, derived, or not read in this configuration: shown, not clicked. */
+.cbx:disabled { cursor: not-allowed; opacity: .5; }
+.cbx:disabled:hover { border-color: var(--rule); }
 
 /* -- the view filter ------------------------------------------------------
    The third family: what is *drawn* — a monitor's interval, its window,
@@ -657,6 +687,12 @@ button.link:hover { color: var(--accent-dark); }
 .btnw { border-color: var(--warn); color: var(--warn); }
 .btnw:hover { background: var(--warn); color: #fff; }
 .btnp:disabled, .btns:disabled, .btnd:disabled, .btnw:disabled { opacity: .38; cursor: not-allowed; }
+/* Armed: the second click of an arm-then-confirm is a different act from the
+   first — Park aborts the run and cancels the queue, Abort throws a shot
+   away — so it is a different button. One rule, because the strip, the
+   monitor and the Instruments panel all arm the same way and a Park that
+   looked armed in one place and not the other was #42's complaint. */
+button.armed { background: var(--alert); border-color: var(--alert); color: #fff; }
 
 /* The 422's own check list, beside the sentence that refused. */
 .strip .checks { display: inline-flex; gap: 5px; margin-left: 8px; }
@@ -782,7 +818,6 @@ button.link:hover { color: var(--accent-dark); }
 .mon-status.bad { color: var(--alert); }
 .monitor .spacer { flex: 1 1 auto; }
 .monitor button.btns { font-family: var(--font-body); font-weight: 500; font-size: 11px; padding: 3px 8px; }
-.monitor button.armed { background: var(--alert); border-color: var(--alert); color: #fff; }
 /* The queue: runs waiting for the worker, each with the Cancel it needs. */
 .mon-queue {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;

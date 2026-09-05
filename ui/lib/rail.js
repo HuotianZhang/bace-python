@@ -348,7 +348,7 @@ function temperatureCell(temperature, session) {
     if (t.setpoint_k !== null && t.setpoint_k !== undefined) parts.push(`set ${fmt.kelvin(t.setpoint_k, { unit: false })}`);
     if (t.source) parts.push(t.source);
     if (t.ramping) parts.push('ramping');
-    if (t.stale) parts.push(t.skipped ? `stale · ${t.skipped} ticks skipped` : 'stale');
+    if (t.stale) parts.push(t.skipped ? `stale · ${fmt.plural(t.skipped, 'tick')} skipped` : 'stale');
     // The cadence and not the count of readings: both are the service's, but
     // `readings` is only as new as the last snapshot, and a counter standing
     // still beside a number that moves says the wrong thing about which of
