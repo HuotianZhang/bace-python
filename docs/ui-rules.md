@@ -358,3 +358,31 @@ elsewhere, so the window title carries the pause, the run, and an ending they
 were not there to see (`lib/title.js`). `document.title` and nothing else: it
 needs no permission and works behind another window, where a denied
 notification grant is denied silently for good.
+
+---
+
+## 14 · Three control families, one look each
+
+A dark "selected" chip used to carry three meanings. It now carries one.
+Before drawing a new control, ask what a click *does*, and pick the family
+that answers:
+
+| a click… | family | in `style.css` | looks like |
+|---|---|---|---|
+| **changes a value a later Run reads** — a setting | `.seg` (enums), `.bool` | grey border, the chosen option white on ink; the swept axis's chooser is white on the accent | `true \| false`, `vpre \| vcoll \| delay_ns`, `auto \| NORM \| INV \| leave` |
+| **acts on the bench the moment it lands** — an instrument switch | `.sw` | ink border, a larger hit target, the lit position filled grey with the accent under it; dashed and grey-underlined when the position is inferred, not read back | Instruments: `open \| shut`, `off \| DC \| pulse`, `amplifier \| sourcemeter` |
+| **changes only what is drawn** — a view filter | `.filt` (a group of `.opt`s), or a lone `button.filt` toggle | no border, no fill; the chosen option is bold with a rule under it | the power monitor's `every 0.2 s … 5 s` and `window auto … all`, inside its `⋯` menu; the results grid's `Q(led_v) per T \| Q(T) per led_v` |
+
+The rule is about consequence, not shape. A pair of options that flips a
+relay is a switch even though it has two positions like a boolean; a chip
+that only re-plots is a filter even though it looks like an enum. A control
+that does not fit is a sign the action itself is unclear — settle that
+first.
+
+**And a fourth question before the family: how often is it touched?** A
+control the operator reaches for less than once a session does not sit on
+the screen at all — it sits behind one `⋯`. The power monitor is the
+example: the switch, the reading and the trace are always there; the
+interval, the window, the chart toggles and the exports are one click
+further away, with defaults (`1 s`, `auto`) that a spot check never needs to
+change. Off, the panel is one quiet line.

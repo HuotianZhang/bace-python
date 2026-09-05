@@ -39,7 +39,21 @@ import { powerModel, powerStats, windowPoints, WINDOWS } from './charts/power.js
 export const INTERVALS = [0.2, 0.5, 1, 2, 5];
 
 /** What the console remembers about the panel between loads. */
-export const DEFAULT_UI = { on: false, interval_s: 1, window: '5m', chart: true, fromZero: false };
+export const DEFAULT_UI = { on: false, interval_s: 1, window: 'auto', chart: true, fromZero: false };
+
+/** `auto` shows everything until the log is longer than this, then the last of it. */
+export const AUTO_CAP_S = 7200;
+
+/**
+ * `auto`: every reading there is, so the trace fills the axis from the
+ * first one — until the monitor has run longer than `AUTO_CAP_S`, when it
+ * becomes the last two hours. Nobody chooses a window for a spot check.
+ */
+export function autoWindow(log, now) {
+  const first = log.length ? log[0].ts : now;
+  const span = Math.max(0, now - first);
+  return { key: 'auto', label: 'auto', seconds: span > AUTO_CAP_S ? AUTO_CAP_S : null, auto: true };
+}
 
 /** After this many intervals with no reading, the number is drawn as stale. */
 export const STALE_INTERVALS = 3;
@@ -58,8 +72,9 @@ export function powerPanelModel(state, ui = DEFAULT_UI, { now = Date.now() / 100
   const monitor = (state.monitors || []).find((m) => m.name === 'power') || null;
   const running = Boolean(monitor && monitor.running);
   const interval = running ? monitor.interval_s : ui.interval_s;
-  const window = WINDOWS.find((w) => w.key === ui.window) || WINDOWS[1];
   const log = state.powerLog || [];
+  const auto = !ui.window || ui.window === 'auto';
+  const window = auto ? autoWindow(log, now) : WINDOWS.find((w) => w.key === ui.window) || autoWindow(log, now);
   const points = windowPoints(log, { seconds: window.seconds, now });
   const stats = powerStats(points);
 
@@ -124,23 +139,25 @@ export function renderPowerPanel(el, state, ui, handlers = {}) {
     el.__key = 'power';
     el.replaceChildren(
       h('div.pw-row',
-        h('span.pw-switch-box'), h('span.pw-reading'), h('span.pw-stats-box'),
-        h('span.spacer'), h('span.pw-controls'), h('span.pw-status-box')),
+        h('span.pw-switch-box'), h('span.pw-reading'),
+        h('span.spacer'), h('span.pw-status-box'), h('span.pw-menu-box')),
       h('div.pw-chart'));
   }
-  keyed(el.querySelector('.pw-switch-box'), JSON.stringify([model.running, model.wanted, model.available, model.interval_s]),
+  // Off: the switch and, muted, the last spot check. Nothing to configure
+  // until there is something running to configure.
+  const live = model.running || model.wanted;
+  el.classList.toggle('off', !live);
+  keyed(el.querySelector('.pw-switch-box'), JSON.stringify([model.running, model.wanted, model.available]),
     () => switchRow(model, handlers));
-  keyed(el.querySelector('.pw-reading'), JSON.stringify([model.value, model.sub, model.level, model.reason]),
-    () => readingEl(model));
-  keyed(el.querySelector('.pw-stats-box'), JSON.stringify([model.stats, model.window.key]),
-    () => statsEl(model));
-  keyed(el.querySelector('.pw-controls'), JSON.stringify([model.window.key, model.chart, model.fromZero, model.count]),
-    () => controls(model, handlers));
-  keyed(el.querySelector('.pw-status-box'), JSON.stringify(status), () => (status
+  keyed(el.querySelector('.pw-reading'), JSON.stringify([model.value, model.sub, model.level, model.reason, live]),
+    () => readingEl(model, live));
+  keyed(el.querySelector('.pw-status-box'), JSON.stringify([status, live]), () => (status && live
     ? h('span', { class: 'pw-status ' + (status.level || ''), text: status.text }) : []));
+  keyed(el.querySelector('.pw-menu-box'), JSON.stringify([live, model.interval_s, model.window.key, model.chart, model.fromZero, model.count]),
+    () => (live ? menu(model, handlers) : []));
   const chartEl = el.querySelector('.pw-chart');
-  chartEl.hidden = !model.chart;
-  if (model.chart) {
+  chartEl.hidden = !(live && model.chart);
+  if (live && model.chart) {
     const last = model.points.length ? model.points[model.points.length - 1].ts : null;
     keyed(chartEl, JSON.stringify([last, model.points.length, model.window.key, model.fromZero]),
       () => chart(powerModel(state.powerLog || [], { seconds: model.window.seconds, fromZero: model.fromZero })));
@@ -148,7 +165,7 @@ export function renderPowerPanel(el, state, ui, handlers = {}) {
   return model;
 }
 
-function switchRow(model, { onToggle, onInterval }) {
+function switchRow(model, { onToggle }) {
   const box = h('input', {
     type: 'checkbox', role: 'switch', 'aria-label': 'monitor the power meter',
     checked: model.running || null,
@@ -158,66 +175,63 @@ function switchRow(model, { onToggle, onInterval }) {
   const title = model.available === false
     ? model.reason
     : model.running ? 'stop reading the meter — the trace stays'
-      : 'the service reads the meter at this interval, whether or not this page is open';
+      : `the service reads the meter every ${model.interval_s} s, whether or not this page is open`;
   return [
     h('label.pw-switch', { title }, box, h('span', 'power monitor')),
-    h('span.seg', { role: 'group', 'aria-label': 'interval' }, INTERVALS.map((s) => h('button.opt', {
-      class: s === model.interval_s ? 'on' : '',
-      title: `read the meter every ${s} s`,
-      onclick: () => onInterval && onInterval(s),
-    }, `${s} s`))),
     model.wanted && !model.running && model.available !== false
-      ? h('span.pw-note', { text: 'switched on · starting' }) : null,
+      ? h('span.pw-note', { text: 'starting' }) : null,
   ];
 }
 
-function readingEl(model) {
+function readingEl(model, live) {
   if (!model.value) {
-    return [
+    return live ? [
       h('span', { class: 'pw-value off', text: fmt.ABSENT }),
       h('span.pw-sub', { text: model.reason || 'no reading yet' }),
-    ];
+    ] : [h('span.pw-sub', { text: model.reason || 'off' })];
   }
-  return [
-    h('span', { class: 'pw-value' + (model.level ? ' ' + model.level : ''), text: model.value.text,
-      title: 'watts at the meter, on the beam splitter — never an irradiance' }),
-    h('span.pw-sub', { text: model.sub }),
-  ];
+  const value = h('span', { class: 'pw-value' + (model.level ? ' ' + model.level : ''), text: model.value.text,
+    title: 'watts at the meter, on the beam splitter — never an irradiance' });
+  return live ? [value, h('span.pw-sub', { text: model.sub })] : [value];
 }
 
-function statsEl(model) {
-  const s = model.stats;
-  if (!s.n) return [];
-  const [, prefix] = fmt.prefixed(Math.abs(s.mean) || 1);
-  const factor = s.mean === 0 ? 1 : Math.abs(s.mean) / fmt.prefixed(Math.abs(s.mean))[0];
-  const num = (w) => fmt.sig(w / factor, 3);
-  const cell = (label, text) => h('span', h('i', { text: label }), ' ', h('span', { text }));
-  return [
-    cell(`${model.window.label} mean`, `${num(s.mean)} ${prefix}W`),
-    cell('min', num(s.min)),
-    cell('max', num(s.max)),
-    s.std !== null ? cell('σ', `${num(s.std)}${s.mean ? ` (${fmt.sig(Math.abs(s.std / s.mean) * 100, 2)} %)` : ''}`) : null,
-    cell('n', String(s.n)),
-  ];
-}
-
-function controls(model, { onWindow, onChart, onZero, onClear, onExportCsv, onExportSvg }) {
-  return [
-    h('span.seg', { role: 'group', 'aria-label': 'window' }, WINDOWS.map((w) => h('button.opt', {
-      class: w.key === model.window.key ? 'on' : '',
-      onclick: () => onWindow && onWindow(w.key),
-    }, w.label))),
-    h('button.btng', { class: model.fromZero ? 'on' : '', title: 'pin the y axis to zero, so an LED that is off reads as off',
-      onclick: () => onZero && onZero(!model.fromZero) }, 'from 0'),
-    h('button.btng', { class: model.chart ? 'on' : '', title: 'show or hide the trace',
-      onclick: () => onChart && onChart(!model.chart) }, model.chart ? 'trace ▾' : 'trace ▸'),
-    h('button.btns', { title: 'every reading the service holds, not only what this page saw',
-      disabled: !model.count || null, onclick: () => onExportCsv && onExportCsv() }, 'Export CSV'),
-    h('button.btns', { title: 'the trace on screen, as an SVG file',
-      disabled: !model.points.length || !model.chart || null, onclick: () => onExportSvg && onExportSvg() }, 'Export SVG'),
-    h('button.btns', { title: 'forget the readings held; the journal keeps them',
-      disabled: !model.count || null, onclick: () => onClear && onClear() }, 'Clear'),
-  ];
+/**
+ * Everything the operator touches less than once a session, behind one
+ * `⋯`: the interval and the window (with the defaults that suit a scan),
+ * the two chart toggles, and the three actions. `<details>` so it needs no
+ * script to open, and closes itself when the pointer leaves it.
+ */
+function menu(model, { onInterval, onWindow, onChart, onZero, onClear, onExportCsv, onExportSvg }) {
+  const pick = (label, opts, current, onPick, title) => h('div.pw-opt',
+    h('span.pw-optl', { text: label, title }),
+    h('span.filt', { role: 'group', 'aria-label': label }, opts.map(([key, text]) => h('button.opt', {
+      type: 'button', class: key === current ? 'on' : '', 'aria-pressed': key === current ? 'true' : 'false',
+      onclick: () => onPick(key),
+    }, text))));
+  const toggle = (label, on, onPick, title) => h('label.pw-tog', { title },
+    h('input', { type: 'checkbox', checked: on || null, onchange: (e) => onPick(e.target.checked) }),
+    h('span', { text: label }));
+  const action = (label, title, disabled, onPick) => h('button.btns', { title, disabled: disabled || null, onclick: onPick }, label);
+  const details = h('details.pw-menu',
+    h('summary', { title: 'interval, window, export …', 'aria-label': 'power monitor options' }, '⋯'),
+    h('div.pw-menu-body',
+      pick('every', INTERVALS.map((s) => [s, `${s} s`]), model.interval_s, (s) => onInterval && onInterval(s),
+        'how often the service reads the meter'),
+      pick('window', [['auto', 'auto'], ...WINDOWS.map((w) => [w.key, w.label])], model.window.auto ? 'auto' : model.window.key,
+        (k) => onWindow && onWindow(k),
+        'how much of the trace is drawn; the statistics under it are over the same span'),
+      h('div.pw-opt.togs',
+        toggle('trace', model.chart, (v) => onChart && onChart(v), 'show or hide the trace'),
+        toggle('y from 0', model.fromZero, (v) => onZero && onZero(v), 'pin the y axis to zero, so an LED that is off reads as off')),
+      h('div.pw-opt.acts',
+        action('Export CSV', 'every reading the service holds, not only what this page saw',
+          !model.count, () => onExportCsv && onExportCsv()),
+        action('Export SVG', 'the trace on screen, as an SVG file',
+          !model.points.length || !model.chart, () => onExportSvg && onExportSvg()),
+        action('Clear', 'forget the readings held; the journal keeps them',
+          !model.count, () => onClear && onClear()))));
+  details.addEventListener('mouseleave', () => { details.open = false; });
+  return details;
 }
 
 /**
