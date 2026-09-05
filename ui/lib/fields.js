@@ -145,7 +145,14 @@ export const LAYOUT = {
   },
 
   power: { above: ['wavelength_nm', 'samples'], run: [{ label: 'Read', kind: 'run' }] },
-  temperature: { above: ['setpoint_k', 'tolerance_k', 'hold_s', 'timeout_s'], run: { label: 'Hold', kind: 'run' } },
+  // `Settle` is the service's own word for what this run does
+  // (`service.temperature.settle`: write the setpoint, wait for the band, dwell
+  // `hold_s`) and the word the card's subtitle already uses. `Hold` read as the
+  // dwell alone, and collided with `hold_s` two rows above it.
+  temperature: {
+    above: ['setpoint_k', 'tolerance_k', 'hold_s', 'timeout_s'],
+    run: { label: 'Settle', kind: 'run' },
+  },
 };
 
 /** Which modules get a bench card, in the order the artboard lays them out. */
