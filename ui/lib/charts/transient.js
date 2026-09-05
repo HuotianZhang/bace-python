@@ -181,16 +181,48 @@ export function transientModel(input, options = {}) {
     offset_corrected = null, dark_reference = null,
   } = options;
   const set = traceSet(input, { t0_int_s, t0_int_reference, pulse_delay_s });
-  if (set.absent) return { key: 'transient', absent: set.absent, notes: [], panels: [] };
+  if (set.absent) {
+    return {
+      key: 'transient',
+      // The slot keeps the shape of the chart that will land in it: the two
+      // panels every shot has, named, over the axis they share. The running
+      // integral is not drawn, because whether there is one depends on a
+      // window this shot has not resolved yet.
+      absent: {
+        ...set.absent,
+        frame: {
+          width,
+          height,
+          panels: [
+            { key: 'traces', weight: 1.25, label: 'light and dark  ·  I / mA' },
+            { key: 'photo', weight: 1, label: 'photocurrent = light − dark  ·  I / mA' },
+          ],
+          xLabel: 't / ns  →  record time',
+        },
+      },
+      notes: [],
+      panels: [],
+    };
+  }
 
   const photo = set.photo;
   const hasCumulative = Boolean(set.cumulative && set.cumulative.length);
   const derived = !hasCumulative && photo && set.window !== null && set.window !== undefined;
   const integral = derived ? runningIntegral(photo, set.x, set.window) : null;
 
+  // Two of the notes under this chart were settings restated as prose, about a
+  // curve drawn a few pixels above them. They belong **on** the panel they
+  // define: `dark_reference` is what the photocurrent *is* (`ui-rules` §7 —
+  // `translated` and `same` are not interchangeable), and the offset
+  // correction is what the light and dark baselines have already had done to
+  // them. A reader who has to carry a line from below the axis back up to the
+  // trace has been given a footnote where a label was wanted.
   const panels = [
-    { key: 'traces', weight: 1.25, label: 'light and dark  ·  I / mA' },
-    { key: 'photo', weight: 1, label: 'photocurrent = light − dark  ·  I / mA' },
+    { key: 'traces', weight: 1.25, label: 'light and dark  ·  I / mA' + offsetClause(offset_corrected) },
+    // `suffix`, not a baked-in label: `photoPanel` swaps the whole label for
+    // `set.photoLabel` when the run stored loop averages, and a clause written
+    // into the base label would be dropped in exactly that case.
+    { key: 'photo', weight: 1, label: 'photocurrent = light − dark  ·  I / mA', suffix: darkClause(dark_reference) },
   ];
   if (hasCumulative || derived) {
     panels.push({ key: 'charge', weight: 0.8, label: 'running integral  ·  Q / C' });
@@ -232,7 +264,13 @@ export function transientModel(input, options = {}) {
     }, {
       x: x0 + 5, y: built[0].rect.y + 22, halo: true,
       text: `${fmt.sig(set.window * NS, 4)} ns of record time`, colour: 'accent', size: 8.5,
-    }];
+    },
+    // Where the window came from, beside the window — it was a note under the
+    // chart, which is the one place it cannot be read against the line it dates.
+    ...(set.windowSource ? [{
+      x: x0 + 5, y: built[0].rect.y + 32, halo: true,
+      text: set.windowSource, colour: 'grey', size: 8.5,
+    }] : [])];
   }
   if (set.trigger !== null && set.trigger !== undefined && set.trigger > 0) {
     const x0 = X(set.trigger * NS);
@@ -262,8 +300,12 @@ export function transientModel(input, options = {}) {
       { label: 'photocurrent', colour: 'ink', width: 1.4 },
       ...(hasCumulative || derived ? [{ label: 'running integral', colour: 'accent', width: 1.6, dash: '3 2' }] : []),
     ],
-    readout: readoutLine(set),
-    notes: notes(set, { hasCumulative, derived, offset_corrected, dark_reference }),
+    // The readout row belongs to the crosshair, and at rest it used to restate
+    // Q, the running mean and σ — the same three numbers the shot block prints
+    // above the chart, there with the shot and the point they belong to. One
+    // statement of a number, in the place that can say which number it is.
+    readout: '',
+    notes: notes(set, { hasCumulative, derived }),
   };
 }
 
@@ -311,7 +353,7 @@ function photoPanel(panel, set, X, cols, at) {
   const Y = scale.linear([domain[0] * MA, domain[1] * MA], [panel.rect.y + panel.rect.h, panel.rect.y]);
   return {
     ...panel,
-    label: set.photoLabel || panel.label,
+    label: (set.photoLabel || panel.label) + (panel.suffix || ''),
     note: 'Q = ∫ (light − dark) dt',
     y: { scale: Y, ticks: axisTicks(Y, { count: 3 }) },
     series: set.photo ? [{
@@ -375,28 +417,40 @@ function readoutLine(set) {
   return parts.join('  ·  ');
 }
 
-function notes(set, { hasCumulative, derived, offset_corrected, dark_reference }) {
+/** `dark_reference`, as the clause that says what the photocurrent curve is. */
+function darkClause(dark_reference) {
+  if (!dark_reference) return '';
+  return dark_reference === 'same'
+    ? '  ·  dark held at the light levels'
+    : '  ·  dark translated to zero';
+}
+
+/** What has already been taken off the light and dark baselines, if anything. */
+function offsetClause(offset_corrected) {
+  if (offset_corrected === true) return '  ·  offset corrected, last 10 % of the record';
+  if (offset_corrected === false) return '  ·  no offset correction';
+  return '';
+}
+
+/**
+ * What is left for the notes: the two statements that are about the **data**
+ * rather than about any one panel.
+ *
+ * Everything else moved onto the thing it describes. `dark_reference` and the
+ * offset correction became panel labels; `windowSource` became the third line
+ * of the `t_0,int` mark, beside the window it dates; and the two "the running
+ * integral is …" lines were already the charge panel's own label, printed
+ * again four pixels below it.
+ */
+function notes(set, { hasCumulative, derived }) {
   const out = [];
   if (set.stride > 1) {
     out.push(`decimated for the wire · 1 in ${set.stride} of ${set.nFull} · the file keeps full precision`);
   }
   if (set.loopAveraged) out.push('traces are the loop averages the run stored, not one shot');
-  if (hasCumulative) {
-    out.push('the running integral is the service\'s own, of the last stored photocurrent — '
-      + 'so it ends on that trace\'s charge, which is the loop mean when the run stored '
-      + 'loop averages rather than shots');
-  } else if (derived) {
-    out.push('the running integral is computed here, from the trace on screen');
-  } else {
+  // The one case with no panel to label, because the panel is not drawn at all.
+  if (!hasCumulative && !derived) {
     out.push('no integration window: t0_int is unresolved, so there is no running integral to draw');
   }
-  if (set.windowSource) out.push(set.windowSource);
-  if (dark_reference) {
-    out.push(dark_reference === 'same'
-      ? 'dark_reference = same · the dark trace stays at the light levels'
-      : 'dark_reference = translated · the same swing referenced to zero');
-  }
-  if (offset_corrected === true) out.push('offset corrected · the mean of the last 10 % taken off the record');
-  if (offset_corrected === false) out.push('no offset correction · the baseline is the instrument\'s');
   return out;
 }
