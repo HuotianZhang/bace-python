@@ -97,8 +97,11 @@ def test_step_done_is_decimated_on_the_ws_and_scalar_only_in_the_journal():
     verdict = ws["data"]["verdict"]
     assert verdict["level"] == "ok" and verdict["shared_extreme"] is False
     assert verdict["autorange_passes"] == 2
-    assert verdict["text"] == "autorange pass 2 · no shared extreme · 1 rail sample"
+    assert verdict["text"].startswith("autorange pass 2 · no shared extreme · 1 rail sample")
     assert set(W.VERDICT_KEYS) <= set(verdict)
+    # the alignment fields ride along (2026-09-05); this stand-in dark has no
+    # spike in common with the light, so the lag is honestly None
+    assert verdict["spike_lag_ns"] is None and verdict["averages_light"] is None
     assert verdict["peak_light_a"] == pytest.approx(float(ev.light.y.min()))
 
     for payload in (ws, journal):
@@ -119,7 +122,7 @@ def test_the_verdict_is_on_the_wire_data_and_not_on_the_dataclass():
     ev = step_done()
     ws = W.ws_payload(env(ev))
     assert "verdict" not in ws["data"]
-    returned = W.attach_verdict(ws["data"], ev.light.y, ev.dark.y, {"autorange_passes": 1})
+    returned = W.attach_verdict(ws["data"], ev, {"autorange_passes": 1})
     assert ws["data"]["verdict"] is returned
     assert not hasattr(ev, "verdict")
     roundtrip(ws)

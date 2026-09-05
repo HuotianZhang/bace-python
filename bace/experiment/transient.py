@@ -560,6 +560,7 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                                          sweep=config.trigger_sweep)
 
         # -- the loop ------------------------------------------------------
+        sync_failed = False
         for s in plan:
             if abort is not None and abort():
                 aborted = True
@@ -606,6 +607,13 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
             light = rig.scope.acquire(config.n_averages, source=cfg.current_source,
                                       autorange_first=True,
                                       timeout_s=config.acquisition_timeout_s)
+            sync_light, note = _sync_trace(rig, cfg, sync_failed)
+            if note:
+                sync_failed = True
+                yield note
+            note = _averages_notice(light, config.n_averages, s.index, "light")
+            if note:
+                yield note
 
             # dark: shutter closed, range inherited. With `dark_reference =
             # "same"` nothing but the shutter moves, so the levels are not
@@ -626,6 +634,13 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
             dark = rig.scope.acquire(config.n_averages, source=cfg.current_source,
                                      autorange_first=False,
                                      timeout_s=config.acquisition_timeout_s)
+            sync_dark, note = _sync_trace(rig, cfg, sync_failed)
+            if note:
+                sync_failed = True
+                yield note
+            note = _averages_notice(dark, config.n_averages, s.index, "dark")
+            if note:
+                yield note
             yield phase("process")
 
             # -- process ---------------------------------------------------
@@ -685,7 +700,8 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                            # rig. `clipped` is in the `Digitizer` protocol now,
                            # so a driver that lacks it fails loudly here and in
                            # `test_every_real_driver_satisfies_its_protocol`.
-                           clipped=bool(rig.scope.clipped))
+                           clipped=bool(rig.scope.clipped),
+                           sync_light=sync_light, sync_dark=sync_dark)
 
             elapsed = time.monotonic() - t_start
             per = elapsed / done if done else 0.0
@@ -716,3 +732,41 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
         except Exception:
             pass
         _ = aborted
+
+
+def _sync_trace(rig: Rig, cfg: RigConfig, already_failed: bool):
+    """The trigger channel out of the record just acquired, or None -- and,
+    the first time it cannot be fetched, a Notice saying so (2026-09-05).
+
+    Fetched after `acquire` has stopped the scope, so it is the same record
+    as the current trace: what the edge the scope triggered on looked like,
+    for the shot's verdict and its file. A digitiser without `fetch_volts`,
+    or a channel the scope will not hand over, costs one line, not the run.
+    """
+    fetch = getattr(rig.scope, "fetch_volts", None)
+    if fetch is None:
+        return None, None
+    try:
+        return fetch(cfg.trigger_source), None
+    except Exception as exc:                                # noqa: BLE001
+        if already_failed:
+            return None, None
+        return None, Notice("warning",
+                            f"the sync trace on {cfg.trigger_source} could not be fetched "
+                            f"beside the current trace ({type(exc).__name__}: {exc}); "
+                            "the shots of this run carry no sync edge and the "
+                            "verdict cannot say which side of the trigger chain "
+                            "jitters. Check that the channel is displayed")
+
+
+def _averages_notice(trace: Trace, asked: int, index: int, which: str):
+    """A warning when the digitiser folded fewer acquisitions into `trace`
+    than the recipe asked for; None when it folded them all or cannot say."""
+    count = getattr(trace, "count", None)
+    if count is None or count >= int(asked):
+        return None
+    return Notice("warning",
+                  f"shot {index}: the {which} trace averages {count} acquisitions, not "
+                  f"the {int(asked)} asked for -- the scope reported done before the "
+                  "averager had finished. Its noise is higher than the recipe's and "
+                  "its Q is a single shot's, not an average's")
