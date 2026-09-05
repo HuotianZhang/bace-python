@@ -58,6 +58,7 @@ from starlette.routing import Mount
 
 from ..params import ParamError
 from .modules import ModuleError, jsonable
+from . import pipeline
 from .pipeline import TreeError
 from .rigs import ACTIONS, BenchActionRefused
 from .session import (Busy, Conflict, DataUnavailable, NodeRequired, NotPaused, Session,
@@ -247,6 +248,28 @@ def _hello(session: Session) -> dict:
     data = session.hello()
     return {"seq": None, "ts": time.time(), "run_id": None, "node_path": "",
             "type": "Hello", "data": data, "decimated": {}}
+
+
+def _bench_snapshot(session: Session, tree_obj: dict) -> dict[str, dict[str, dict]]:
+    """`{module: {param: {value, source}}}` for every module the tree names,
+    as the bench has them now -- the layer a node's own overrides sit on. A
+    tree that does not parse records nothing: the save still succeeds, as it
+    did before, and the file says so by having no `bench`."""
+    try:
+        root = pipeline.parse_tree(tree_obj)
+    except Exception:
+        return {}
+    names: list[str] = []
+    for node, _ancestors in pipeline.walk(root):
+        module = getattr(node, "module", None)
+        if module and module not in names and module in session.catalogue.names():
+            names.append(module)
+    out: dict[str, dict[str, dict]] = {}
+    for module in names:
+        resolved = session.catalogue.param_set(module).resolve()
+        out[module] = {n: {"value": jsonable(pv.value), "source": pv.source.value}
+                       for n, pv in resolved.items()}
+    return out
 
 
 def _stem(name: str) -> str:
@@ -518,7 +541,16 @@ def create_app(session: Session, *, ui_dir: str | None = None,
         folder = os.path.join(session.out, "recipes")
         os.makedirs(folder, exist_ok=True)
         path = os.path.join(folder, f"{stem}.json")
-        record = {"name": stem, "saved_at": time.time(), "tree": body.tree}
+        # The tree carries only what its nodes override; everything else a
+        # node runs with is the module's bench value *at start time*. A file
+        # that held the tree alone was an instance without its main
+        # component -- the same recipe would run differently after a bench
+        # edit, with no diff in the file. So the save also records the bench
+        # values of every module in the tree, value and source, as the
+        # complete statement of what this recipe meant when it was saved.
+        # The UI compares them with the bench when the recipe is reopened.
+        record = {"name": stem, "saved_at": time.time(), "tree": body.tree,
+                  "bench": _bench_snapshot(session, body.tree)}
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(record, fh, indent=1, allow_nan=False)
         return {"name": stem, "path": path}
@@ -539,6 +571,8 @@ def create_app(session: Session, *, ui_dir: str | None = None,
                     record = {"error": f"{type(exc).__name__}: {exc}"}
                 out.append({"name": entry.name[:-5], "path": entry.path,
                             "saved_at": record.get("saved_at"), "tree": record.get("tree"),
+                            # Absent on a recipe saved before the bench was recorded.
+                            "bench": record.get("bench"),
                             **({"error": record["error"]} if "error" in record else {})})
         out.sort(key=lambda r: r.get("saved_at") or 0, reverse=True)
         return {"recipes": out}

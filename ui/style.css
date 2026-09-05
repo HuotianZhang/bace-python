@@ -796,6 +796,19 @@ button.link:hover { color: var(--accent-dark); }
 
 .pipe-actions { display: flex; flex-direction: column; gap: 8px; }
 .namerow { display: flex; align-items: center; gap: 8px; }
+/* Where the bench has moved since a recipe was saved (`lib/recipe.js`). */
+.recipe-note {
+  display: flex; flex-direction: column; gap: 4px;
+  border-left: 2px solid var(--warn); background: #fff8ef; padding: 5px 8px;
+  font-size: 12px;
+}
+.recipe-note .rn-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.recipe-note .rn-list { display: grid; grid-template-columns: max-content max-content max-content auto; gap: 1px 14px; }
+.recipe-note .rn-row { display: contents; }
+.recipe-note .rn-row .l { color: var(--grey); font-family: var(--font-num); font-size: 11px; }
+.recipe-note .rn-row .v { font-family: var(--font-num); font-size: 11px; color: var(--grey); }
+.recipe-note .rn-row .v.now { color: var(--ink); font-weight: 500; }
+.recipe-note .rn-row i { font-style: normal; color: var(--grey); font-size: 11px; }
 .namerow .l { color: var(--grey); font-size: 12px; }
 .namerow input.v, .namerow select.v {
   border: 1px solid var(--rule); background: var(--paper); padding: 3px 6px;

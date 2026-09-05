@@ -650,7 +650,18 @@ def test_recipes_are_saved_under_out(service):
     path = r.json()["path"]
     assert os.path.dirname(path) == os.path.join(session.out, "recipes")
     with open(path, encoding="utf-8") as fh:
-        assert json.load(fh)["tree"] == canonical()
+        record = json.load(fh)
+    assert record["tree"] == canonical()
+    # The file is complete: the bench values every module in the tree sits
+    # on, value and source, so a recipe reopened after a bench edit can say
+    # where the bench moved -- the tree alone is an instance with no main.
+    assert set(record["bench"]) == {"jv_bace", "bace"}, "only the modules the tree names"
+    vpre = record["bench"]["bace"]["vpre"]
+    assert set(vpre) == {"value", "source"}
+    assert vpre["value"] == session.catalogue.param_set("bace").get("vpre").value
+    assert vpre["source"] in ("default", "run.toml", "last-used", "edited")
+    listed = client.get("/pipelines/saved").json()["recipes"][0]
+    assert listed["bench"] == record["bench"], "the list carries it too"
     r = client.post("/pipelines/save", json={"tree": {"kind": "module", "module": "note",
                                                       "name": "hello"}})
     assert r.status_code == 200 and r.json()["name"] == "hello", "the root name serves"
