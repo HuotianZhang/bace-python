@@ -146,6 +146,39 @@ def test_sweep_is_one_point_at_a_time_and_unpacks_each_reading():
     np.testing.assert_allclose(i, [-2e-4, -1.5e-4, 1e-4])
 
 
+def test_the_sweep_ranges_once_and_settles_in_the_instrument():
+    """What the 2400's own sweep did and the first point-by-point version
+    lost (2026-09-05, rougher curves): one source range from the curve's
+    ends, fixed before the output comes on, and the settle as `:SOUR:DEL`
+    in the trigger model rather than a host-side sleep -- so no range
+    change lands mid-sweep, and every point gets exactly `settle_s`
+    whatever the stream and the recorder add between two points."""
+    io = FakeIO(reads=["-0.2,-2.0E-4", "0.5,-1.5E-4", "1.2,1.0E-4"])
+    k = Keithley2400(io)
+    list(k.sweep_points(-0.2, 1.2, 3, settle_s=0.05))
+    assert ":SOUR:VOLT:RANG 1.2;" in io.log, "the larger end, so 2 V, not auto"
+    assert io.log.index(":SOUR:VOLT:RANG 1.2;") < io.log.index(":OUTP ON;")
+    assert not any("RANG:AUTO" in c for c in io.log)
+    assert ":SOUR:DEL 0.05;" in io.log
+    assert io.log.index(":SOUR:DEL 0.05;") < io.log.index(":OUTP ON;")
+
+    io = FakeIO(reads=["0.0,-2.0E-4", "-1.0,-1.5E-4"])
+    list(Keithley2400(io).sweep_points(0.0, -1.0, 2))
+    assert ":SOUR:VOLT:RANG 1;" in io.log, "magnitude: a reverse sweep ranges too"
+    assert ":SOUR:DEL 0;" in io.log, "no settle asked for is 0, not the auto delay"
+
+
+def test_four_wire_is_sent_after_the_reset_that_would_undo_it():
+    """`*RST` puts the sense back to two-wire. Until 2026-09-05 `:SYST:RSEN`
+    was sent once in `default_setup` and every measurement reset it away."""
+    io = FakeIO(reads=["-2.00E-4"])
+    Keithley2400(io, config=SourceMeterConfig(four_wire=True)).measure_jsc(settle_ms=0)
+    assert io.log.index("*RST") < io.log.index(":SYST:RSEN ON;") < io.log.index(":OUTP ON;")
+    io = FakeIO(reads=["0.0,-2.0E-4", "1.0,1.0E-4"])
+    list(Keithley2400(io, config=SourceMeterConfig(four_wire=True)).sweep_points(0.0, 1.0, 2))
+    assert io.log.index("*RST") < io.log.index(":SYST:RSEN ON;") < io.log.index(":OUTP ON;")
+
+
 def test_a_sweep_left_half_way_switches_the_output_off():
     """The consumer may stop iterating -- an abort between two points -- and
     the source it switched on into the device must not stay on."""
