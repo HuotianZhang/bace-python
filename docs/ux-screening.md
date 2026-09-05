@@ -39,8 +39,9 @@ It just stopped at the edge of the person. The pipeline tree — the one thing o
 screen that is composed by hand, and the only thing the service holds no layer
 underneath — could be destroyed in one click three different ways with nothing
 offering it back; the only file this console writes was overwritten without
-being mentioned; and a run that had stopped and was waiting for somebody had no
-way at all to reach the somebody.
+being mentioned; a run that had stopped and was waiting for somebody had no way
+at all to reach the somebody; and the console said `no sample named` in the top
+bar while giving nobody any way to name it.
 
 That asymmetry is backwards. The sample is expensive and *not* recoverable, so
 it is worth arming. The operator's work is cheap and *is* recoverable — which
@@ -173,39 +174,85 @@ not a milder version of it.
 
 ---
 
+### 5 · The device could not be named from the console
+
+`GET /session` answered `"sample": {"sample": "", "material": "", "pixel": "",
+"operator": "", "comment": ""}` on a fresh checkout, because `run.toml`'s
+`[sample]` block is empty by design (`run.toml:131`) and **there was no route
+that set it** — `session.py:494` read `self.run_toml["sample"]`, and `app.py`
+had no `PUT`. The top bar knew: it said `no sample named` (`app.js:111`), and
+offered nothing.
+
+So an operator who mounted a device and started measuring filed every run of
+that session under a name with no device in it — `290K_1000mVLED_offsetcorr_
+20260905_…` — and the only way to fix it was to edit `run.toml` on disk and
+restart the process that owns every instrument. `naming-plan.md` is explicit
+that the folder name is the record and that renaming afterwards is a hazard,
+so this was the one finding whose cost was **permanent**.
+
+**Now:** `PUT /session/sample` (contract §3a) and `ui/lib/identity.js` — the
+chip in the bar is the button that answers it, and the panel under the bar is
+where the block is typed. It opens itself once when nothing names the device,
+because a console that knows the next runs are about to be filed under no name
+and waits to be asked is the finding, not a smaller version of it.
+
+Five decisions, and the input box is none of them:
+
+- **It shows the consequence, not the field.** Three of the five go into every
+  folder name this session writes, in that order, so the panel draws the stem
+  the next run will be filed under — `s4_PTQ10IT4F_pxa_…`, or, with nothing
+  named, `290K_… — no device in the name`. The operator is typing a filename;
+  the panel says so.
+- **It warns where the archive has already been bitten.** `naming-plan.md`
+  §"Fields collide" carries both hazards — `sample = "a_b"` forges a field
+  boundary, `sample = "s4 pixel a"` puts a space in a directory name, the
+  2026-09-01 bug `slug()` was written to stop and which this path still does
+  not stop. Nothing below the console refuses either, so the warning at the
+  field is the whole of the protection. **Whether the service should reduce
+  these with `slug()` on the way in is still open** — `naming-plan.md` says the
+  change breaks no existing test, and it is a data-format decision rather than
+  a UX one, so it is not taken here.
+- **`temperature_k` is not offered**, though the route accepts it. `run.toml`'s
+  own comment (2026-09-04) says why: every recipe said 290, and a run at 220 K
+  was filed as "290 K, typed". A field here would rebuild that defect with a
+  nicer surface, so the panel says the number is read from the 331 instead.
+- **A merge, and `null` is the way back** — to what `run.toml` opened with, the
+  same meaning `null` has for a parameter. `sample_file` is on the wire so the
+  panel can offer the `↺` on exactly the rows where it would change something.
+- **Allowed while a run is going, and it says what that means.** An operator
+  who notices at hour one should not have to choose between abandoning the
+  sweep and mislabelling everything after it, so the answer reads
+  `sample · …-003 keeps the name it was queued under`.
+
+That last one needed a change under the console: `_ctx_factory` built each
+node's `RunMetadata` from `catalogue.base_metadata()` — **the session's block
+as it is when that node runs**. Nothing mutated the block before now, so it
+could not disagree with `RunQueued.sample`; the moment a rename exists it can,
+and a four-hour sweep renamed at hour one would have filed its remaining nodes
+under the new name inside a folder named for the old one. A run's identity is
+now fixed when it is queued (`base_metadata(rec.sample)`), which is what
+`RunQueued.sample` already claimed to be.
+
+---
+
 ## Found, and left for you
 
-### 5 · The device cannot be named from the console
+### 6 · Naming the device is not the same as naming a *run*
 
-`GET /session` answers `"sample": {"sample": "", "material": "", "pixel": "",
-"operator": "", "comment": ""}` on a fresh checkout, because `run.toml`'s
-`[sample]` block is empty by design (`run.toml:131`) and **there is no route
-that sets it** — `session.py:494` reads `self.run_toml["sample"]`, and
-`app.py` has no `PUT`. The top bar knows: it says `no sample named`
-(`app.py`'s console counterpart, `app.js:111`), and offers nothing.
+The block is per **session**, and a session is one process lifetime. Mounting
+a second device without restarting the service is now possible — type the new
+name, keep measuring — and the journal says exactly when it changed. What it
+does not do is *stop* you doing it halfway through a tree that was composed for
+the first device, and nothing checks that a recipe reopened three days later is
+being run on what it was saved against (`lib/recipe.js` compares the bench
+values, not the identity).
 
-So an operator who mounts a device and starts measuring files every run of that
-session under a name with no device in it — `290K_1000mVLED_offsetcorr_
-20260905_…` — and the only way to fix it is to edit `run.toml` on disk and
-restart the process that owns every instrument. `naming-plan.md` is explicit
-that the folder name is the record and that renaming afterwards is a hazard, so
-this is the one finding in the list whose cost is **permanent**.
+Whether that wants a check at Start ("this recipe was saved against `s4`, the
+bench says `s7`") is a question about how the recipes are actually used, which
+is yours. It is cheap once asked: `POST /pipelines/save` already records the
+bench block beside the tree, and adding the identity to it is one line.
 
-It is left because it is not the console's to decide alone:
-
-- it needs a service route (`PUT /session/sample`) and a line in
-  `service-contract.md`, which is the authority on every shape;
-- `catalogue.sample` is read at queue time (`session.py:706, 742`), so a name
-  typed mid-session would apply to runs queued after it and not to those
-  before — a provenance statement of exactly the kind the contract's
-  `temperature_how` / `temperature_source` table exists to make explicit, and
-  it should be written down before it is shipped, not after.
-
-The shape it wants is small: a route that replaces the session's `[sample]`
-block and journals the change as its own entry, and a field in the top bar
-where the `no sample named` chip already is.
-
-### 6 · A run that ends well says nothing on screen
+### 7 · A run that ends well says nothing on screen
 
 `RunFailed` and `RunAborted` reach the strip (`app.js: afterFrame`); a clean
 finish does not. The monitor simply disappears when the bench parks, and the

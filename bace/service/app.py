@@ -57,7 +57,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.routing import Mount
 
 from ..params import ParamError
-from .modules import ModuleError, jsonable
+from .modules import SAMPLE_KEYS, ModuleError, jsonable
 from . import pipeline
 from .pipeline import TreeError
 from .rigs import ACTIONS, BenchActionRefused
@@ -323,6 +323,19 @@ def create_app(session: Session, *, ui_dir: str | None = None,
     async def session_info():
         """Who this process is: id, mode, sample, paths, fingerprint."""
         return session.session_info()
+
+    @app.put("/session/sample")
+    async def set_sample(values: dict[str, Any] = Body(...)):
+        """Name the device: the `[sample]` block, merged; a null puts a key back to run.toml.
+
+        Touches no instrument and takes no worker job, so it is allowed while
+        a run is going -- and binds the runs queued *after* it only, which is
+        what `run_active` in the answer is there to let the console say.
+        """
+        try:
+            return session.set_sample(values)
+        except ValueError as exc:
+            return _error(422, str(exc), param="sample", accepted=sorted(SAMPLE_KEYS))
 
     # -- /bench --------------------------------------------------------------
     @app.get("/bench")

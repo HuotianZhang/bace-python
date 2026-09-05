@@ -65,6 +65,11 @@ export function createApi({ base = '', fetch: fetchImpl = globalThis.fetch } = {
     // -- the catalogue -----------------------------------------------------
     modules: () => call('GET', '/modules'),
     /** The `edited` layer. A `null` value resets that one parameter. */
+    // One `[sample]` key at a time, merged in the service; `null` is the way
+    // back to what `run.toml` opened with. The answer carries the whole
+    // session block, what changed, and the run holding the bench — which
+    // keeps the identity it was queued under, and which the panel says.
+    setSample: (values) => call('PUT', '/session/sample', values),
     setParams: (module, params) => call('PUT', `/modules/${encodeURIComponent(module)}/params`, params),
     /** Drop the whole edited layer. */
     resetParams: (module) => call('POST', `/modules/${encodeURIComponent(module)}/params/reset`),
