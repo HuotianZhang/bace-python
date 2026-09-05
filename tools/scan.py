@@ -95,8 +95,9 @@ def main(argv=None) -> int:
           f"{run_cfg.pulse_frequency_hz:g} Hz  {run_cfg.duty_percent:g} %")
     print(f"acquisition        {run_cfg.n_averages} averages, "
           f"{run_cfg.timebase_ns_per_div:g} ns/div, {run_cfg.record_length} pts")
-    print(f"integration        t0_int {run_cfg.t0_int_s * 1e9:g} ns "
-          f"({run_cfg.t0_int_reference})")
+    print(f"integration        t0_int {run_cfg.t0_int_s * 1e9:+g} ns from the field "
+          f"(delay + {rig_cfg.trigger_offset_s * 1e9:g} ns latency), "
+          f"{run_cfg.t_int_width_s * 1e9:g} ns wide")
     instr = run_cfg.polarity_instruction()
     print(f"polarity           :OUTP1:POL "
           + ("left as found, not written" if instr is None
@@ -213,8 +214,7 @@ def main(argv=None) -> int:
         asked = []
         for v in (float(plan.values.min()), float(plan.values.max())):
             lv = pulse_levels(spec.vpre, spec.vcoll, rig_cfg.pulse_amp, v,
-                              run_cfg.pulse_width_ns,
-                              trigger_offset_s=rig_cfg.trigger_offset_s)
+                              run_cfg.pulse_width_ns)
             bias_res.write(f":PULS:DEL1 {lv.delay_s:g};")
             got = float(str(bias_res.query(":PULS:DEL1?")).strip())
             err = str(bias_res.query(":SYST:ERR?")).strip()

@@ -107,8 +107,16 @@ def baseline_is_flat(light: np.ndarray, dark: np.ndarray, *,
     return abs(tail - head) <= tolerance * peak, head, tail, peak
 
 
-def charge(photo: np.ndarray, dt: float, t0_int: float) -> float:
-    """Extracted charge: the rectangular sum of the transient after `t0_int`.
+def charge(photo: np.ndarray, dt: float, t0_int: float,
+           t1_int: float | None = None) -> float:
+    """Extracted charge: the rectangular sum of the transient over the window
+    `(t0_int, t1_int]` of record time. `t1_int = None` integrates to the end of
+    the record, which is what the original engine did.
+
+    Both edges are in **record** time, from the first sample. Where the window
+    sits relative to the pulse is the caller's business
+    (`experiment.transient.resolve_window`); this function is validated
+    numerics and integrates on `arange(n) * dt`, full stop.
 
     Kept as `sum(...)*dt` rather than a trapezoid so it matches the original
     exactly; with thousands of samples the difference is far below the noise,
@@ -116,7 +124,10 @@ def charge(photo: np.ndarray, dt: float, t0_int: float) -> float:
     """
     photo = np.asarray(photo, dtype=float)
     t = np.arange(photo.size) * dt
-    return float(photo[t > t0_int].sum() * dt)
+    inside = t > t0_int
+    if t1_int is not None:
+        inside &= t <= t1_int
+    return float(photo[inside].sum() * dt)
 
 
 @dataclass

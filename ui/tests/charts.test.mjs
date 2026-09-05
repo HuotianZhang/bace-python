@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import { createStore, currentRun } from '../lib/store.js';
-import { transientModel, traceSet, sampleTime, windowRecordS } from '../lib/charts/transient.js';
+import { transientModel, traceSet, sampleTime, windowRecordS, windowEndRecordS, runningIntegral } from '../lib/charts/transient.js';
 import { jvModel, currentOf, ramp, RAMP } from '../lib/charts/jv.js';
 import { timingModel, shotSegments, cyclePlan, biasLevels, timingAlerts, recordPlan } from '../lib/charts/timing.js';
 import { runFor, shotRows } from '../lib/results.js';
@@ -57,12 +57,26 @@ test('the integration window is a region on every panel, not a number in a capti
   }
 });
 
-test('t0_int is resolved into record time the way the service resolves it', () => {
-  // `experiment/transient.py`: record → as given, trigger → minus the trace's
-  // t0, pulse → and plus :PULS:DEL1.
-  assert.equal(windowRecordS(1.185e-7, 'record'), 1.185e-7);
-  assert.ok(Math.abs(windowRecordS(1.185e-7, 'trigger', { traceT0: -1.995e-7 }) - 3.18e-7) < 1e-12);
-  assert.ok(Math.abs(windowRecordS(0, 'pulse', { traceT0: -2e-7, pulseDelayS: 9e-8 }) - 2.9e-7) < 1e-12);
+test('the window is resolved into record time the way the service resolves it', () => {
+  // `experiment/transient.py` `resolve_window`: t0_int_s is from the field's
+  // arrival (`:PULS:DEL1` + trigger_offset_s after the trigger), record time
+  // is that minus the trace's t0, and the end is t_int_width_s later.
+  assert.ok(Math.abs(windowRecordS(0, { traceT0: -2e-7, pulseDelayS: 9e-8 }) - 2.9e-7) < 1e-12);
+  assert.ok(Math.abs(windowRecordS(-2e-9, { traceT0: -1.995e-7, pulseDelayS: 1.371e-7 }) - 3.346e-7) < 1e-12);
+  assert.equal(windowRecordS(null, {}), null);
+  assert.ok(Math.abs(windowEndRecordS(2.9e-7, 1.5e-6) - 1.79e-6) < 1e-12);
+  assert.equal(windowEndRecordS(2.9e-7, null), null, 'no width, no end');
+  assert.equal(windowEndRecordS(null, 1.5e-6), null);
+});
+
+test('the running integral stops where the window ends', () => {
+  const photo = [1, 1, 1, 1, 1, 1];
+  const x = (i) => i;                             // one second per sample
+  const whole = runningIntegral(photo, x, 1);
+  const cut = runningIntegral(photo, x, 1, 3);
+  assert.equal(whole.values[5], 4);
+  assert.equal(cut.values[3], 2, 'integrated up to the end');
+  assert.equal(cut.values[4], null, 'and not past it');
 });
 
 test('a decimated trace puts its last sample at the end of the record, not one stride on', () => {
@@ -88,7 +102,7 @@ test('a shot with no arrays states the absence rather than drawing an empty char
 test('the running integral is the service\'s where there is one, and says so where it is not', () => {
   const fromService = transientModel(TRANSIENT);
   assert.match(fromService.panels[2].label, /the run's own record/);
-  const live = transientModel(liveRun().lastShot, { t0_int_s: 1.205e-7, t0_int_reference: 'trigger' });
+  const live = transientModel(liveRun().lastShot, { t0_int_s: -2e-9, pulse_delay_s: 1.371e-7 });
   assert.match(live.panels[2].label, /computed from the trace above/);
   assert.match(live.panels[2].note, /not the run's Q/);
 });
@@ -108,7 +122,7 @@ test('σ_Q of zero is read as an absence, not as a zero', () => {
 test('the settings under the transient became labels on the panel they define', () => {
   const shot = liveRun().lastShot;
   const model = transientModel(shot, {
-    t0_int_s: 1.205e-7, t0_int_reference: 'trigger',
+    t0_int_s: -2e-9, t_int_width_s: 1.5e-6, pulse_delay_s: 1.371e-7,
     dark_reference: 'translated', offset_corrected: true,
   });
   // `dark_reference` is what the photocurrent *is*, and the offset correction
@@ -123,7 +137,11 @@ test('the settings under the transient became labels on the panel they define', 
   assert.ok(!model.notes.some((n) => /running integral/.test(n)), model.notes.join(' | '));
   // Where the window came from now sits beside the window it dates.
   const marks = model.panels[0].marks || [];
-  assert.ok(marks.some((m) => /t0_int_reference|trigger/.test(m.text)), JSON.stringify(marks));
+  assert.ok(marks.some((m) => /pinned to the pulse|the window the run integrated/.test(m.text)), JSON.stringify(marks));
+  // And the window has an end: the shade stops at t0 + width, not at the record's edge.
+  const shade = model.panels[0].shades[0];
+  const plotRight = model.panels[0].rect.x + model.panels[0].rect.w;
+  assert.ok(shade.x + shade.w < plotRight - 1, `the shade ends before the record: ${shade.x + shade.w} vs ${plotRight}`);
 });
 
 test('every chart is built to one of the three stated aspects', () => {
@@ -367,16 +385,31 @@ test('output_polarity = leave reports the read-back, and says so when there is n
 });
 
 test('a delay before the trigger is refused on the form, as the generator refuses it', () => {
-  const alerts = timingAlerts({ ...RESOLVED, delay_ns: -10 }, { ...RIG, trigger_offset_s: 0 }, BENCH.chain);
+  const alerts = timingAlerts({ ...RESOLVED, delay_ns: -10 }, { ...RIG, trigger_offset_s: 47e-9 }, BENCH.chain);
   const delay = alerts.find((a) => a.key === 'delay');
   assert.equal(delay.level, 'invalid');
   assert.match(delay.text, /before its own trigger/);
 });
 
 test('an integration window past the end of the record is empty, and is called that', () => {
-  const alerts = timingAlerts({ ...RESOLVED, t0_int_s: 9e-6, t0_int_reference: 'trigger' }, RIG, BENCH.chain);
+  const alerts = timingAlerts({ ...RESOLVED, t0_int_s: 9e-6 }, RIG, BENCH.chain);
   const window = alerts.find((a) => a.key === 'window');
   assert.equal(window.level, 'invalid');
+});
+
+test('a window the record cuts short is a warning that names the cure', () => {
+  // 200 ns/div: the record runs to 1800 ns after the trigger. A window from
+  // the field's arrival (~90 ns) that is 1.9 us long runs off the end.
+  const cut = timingAlerts({ ...RESOLVED, timebase_ns_per_div: 200, delay_ns: 90, t0_int_s: -2e-9,
+    t_int_width_s: 1.9e-6 }, RIG, BENCH.chain).find((a) => a.key === 'window-end');
+  assert.ok(cut, 'the window past the record is said');
+  assert.equal(cut.level, 'warn');
+  assert.match(cut.text, /t_int_width_s/);
+  const whole = timingAlerts({ ...RESOLVED, timebase_ns_per_div: 200, delay_ns: 90, t0_int_s: -2e-9,
+    t_int_width_s: 1.5e-6 }, RIG, BENCH.chain).find((a) => a.key === 'window-end');
+  assert.equal(whole, undefined, '1.5 us from ~90 ns fits inside 1800 ns');
+  const empty = timingAlerts({ ...RESOLVED, t_int_width_s: 0 }, RIG, BENCH.chain).find((a) => a.key === 'window-width');
+  assert.equal(empty.level, 'invalid');
 });
 
 test('the chain read-back is what the diagram draws, not the form\'s hope', () => {
@@ -476,12 +509,15 @@ test('the record runs one division before the trigger and nine after it', () => 
 test('a t0_int in the last division of the record is not called empty', () => {
   // Nine and a half divisions after the trigger is inside a record that runs
   // to nine — and was inside a record the diagram thought ran to ten.
-  const late = { ...RESOLVED, timebase_ns_per_div: 200, t0_int_s: 1900e-9, t0_int_reference: 'trigger' };
+  // The window is measured from the field's arrival, so subtract the form's
+  // delay (and the rig's latency) to place it against the trigger.
+  const fieldS = (Number(RESOLVED.delay_ns) || 0) * 1e-9 + (Number(RIG.trigger_offset_s) || 0);
+  const late = { ...RESOLVED, timebase_ns_per_div: 200, t0_int_s: 1900e-9 - fieldS };
   assert.ok(timingAlerts(late, RIG, BENCH.chain).some((a) => a.key === 'window'),
     '1900 ns is past the record\'s 1800 ns end');
-  const inside = { ...late, t0_int_s: 1700e-9 };
+  const inside = { ...late, t0_int_s: 1700e-9 - fieldS };
   assert.ok(!timingAlerts(inside, RIG, BENCH.chain).some((a) => a.key === 'window'));
-  const before = { ...late, t0_int_s: -150e-9 };
+  const before = { ...late, t0_int_s: -150e-9 - fieldS };
   assert.ok(!timingAlerts(before, RIG, BENCH.chain).some((a) => a.key === 'window'),
     'and the division before the trigger is in the record too');
 });
@@ -518,14 +554,14 @@ test('a null in a dark sweep is a gap, not a point on the log floor', () => {
 });
 
 test('the integration window travels with the shot\'s own delay, not the form\'s', async () => {
-  // `t0_int_reference = pulse` recomputes the window from `levels.delay_s`
-  // every step, and `recipes/run-bace.toml` sweeps exactly that axis. Pinned
-  // to the form, the shaded window stood still while the real one moved.
+  // The service resolves the window from each shot's own delay every step,
+  // and `recipes/run-bace.toml` sweeps exactly that axis. Pinned to the form,
+  // the shaded window stood still while the real one moved.
   const { pulseDelayS } = await import('../lib/results.js');
   const values = { delay_ns: 90 };
   const rig = { trigger_offset_s: 5e-9 };
   const near = (a, b, why) => assert.ok(Math.abs(a - b) < 1e-15, `${why}: ${a} vs ${b}`);
-  near(pulseDelayS(null, values, rig), 95e-9, 'the form, plus the rig offset');
+  near(pulseDelayS(null, values, rig), 95e-9, 'the form, plus the rig\'s sync-to-field latency');
   near(pulseDelayS({ setpoint: { delay_ns: 200 } }, values, rig), 205e-9,
     'the shot on screen, not the pinned value');
   near(pulseDelayS({ setpoint: {} }, values, rig), 95e-9,
@@ -537,7 +573,7 @@ test('the integration window travels with the shot\'s own delay, not the form\'s
   const shot = liveRun().lastShot;
   assert.equal(shot.setpoint.delay_ns, 200, 'the shot on screen is not the pinned point');
   const window = (delay) => transientModel(shot, {
-    t0_int_s: 0, t0_int_reference: 'pulse', pulse_delay_s: delay,
+    t0_int_s: 0, pulse_delay_s: delay,
   }).panels[0].shades[0].x;
   assert.notEqual(window(pulseDelayS(shot, { delay_ns: 0 }, {})),
     window(pulseDelayS(null, { delay_ns: 0 }, {})),

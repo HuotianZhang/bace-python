@@ -60,7 +60,7 @@ from ..drivers.keithley2400 import SourceMeterConfig
 from ..experiment import events as E
 from ..experiment.jv import (JVConfig, JVCurveDone, illumination_state, run_jv)
 from ..experiment.rig import Rig, RigConfig
-from ..experiment.transient import RunConfig, resolve_t0_int, run_transient_scan
+from ..experiment.transient import RunConfig, run_transient_scan
 from ..params import (ParamError, ParamSet, ParamSpec, Source, field_docs,
                       specs_from_dataclass, toml_layer)
 from ..storage import jv as jv_storage
@@ -335,7 +335,6 @@ class RunContext:
 
 # -- the specs --------------------------------------------------------------
 RUN_CHOICES: dict[str, tuple[str, ...]] = {
-    "t0_int_reference": ("record", "trigger", "pulse"),
     "dark_reference": ("translated", "same"),
     "output_polarity": ("auto", "NORM", "INV", "leave"),
     "trigger_sweep": ("AUTO", "TRIG"),
@@ -344,7 +343,8 @@ RUN_CHOICES: dict[str, tuple[str, ...]] = {
 validates in code rather than in its annotations, so the catalogue says it."""
 
 RUN_UNITS: dict[str, str] = {
-    "timebase_ns_per_div": "ns/div", "t0_int_s": "s", "pulse_width_ns": "ns",
+    "timebase_ns_per_div": "ns/div", "t0_int_s": "s", "t_int_width_s": "s",
+    "pulse_width_ns": "ns",
     "pulse_frequency_hz": "Hz", "duty_percent": "%", "settle_s": "s",
     "dark_settle_s": "s", "shutter_settle_s": "s", "acquisition_timeout_s": "s",
 }
@@ -352,7 +352,7 @@ RUN_UNITS: dict[str, str] = {
 RUN_GROUPS: dict[str, str] = {
     **{f: "acquisition" for f in ("n_averages", "timebase_ns_per_div", "record_length",
                                   "read_intensity", "acquisition_timeout_s")},
-    **{f: "processing" for f in ("t0_int_s", "t0_int_reference", "offset_correct",
+    **{f: "processing" for f in ("t0_int_s", "t_int_width_s", "offset_correct",
                                  "invert_polarity", "dark_reference")},
     **{f: "timing" for f in ("settle_s", "dark_settle_s", "shutter_settle_s",
                              "pulse_width_ns", "pulse_frequency_hz", "duty_percent")},
@@ -394,9 +394,10 @@ PINNED_DOCS: dict[str, str] = {
     "vcoll": "Collection bias at the device, sourced by the 81150A through the same "
              "gain division, when it is not the swept axis.",
     "delay_ns": "The wait from the LED falling edge to the collection pulse, as the "
-                "axis programs it. The 81150A is given `delay_ns + trigger_offset_s` "
-                "as `:PULS:DEL1` -- the rig's sync-to-field latency, measured as 0 on "
-                "this bench, so the two agree here and need not on another.",
+                "axis programs it: the 81150A is given `delay_ns` as `:PULS:DEL1`. "
+                "The field reaches the device `trigger_offset_s` later, and the "
+                "integration window is measured from there, so it travels with "
+                "this value.",
     "n_loops": "How many times the axis is swept; the statistics tighten with each.",
 }
 
@@ -1235,8 +1236,7 @@ class Catalogue:
             spec = ScanSpec(axis=axis, vpre=p["vpre"], vcoll=p["vcoll"],
                             delay_ns=p["delay_ns"], n_loops=int(p["n_loops"]))
             pulse_levels(spec.vpre, spec.vcoll, self.rig_config.pulse_amp, spec.delay_ns,
-                         run_cfg.pulse_width_ns, invert=run_cfg.invert_polarity,
-                         trigger_offset_s=self.rig_config.trigger_offset_s)
+                         run_cfg.pulse_width_ns, invert=run_cfg.invert_polarity)
         except (AxisError, ValueError) as exc:
             raise ModuleError(f"{name}: {exc}") from None
         try:
@@ -1637,24 +1637,22 @@ class _BaceData:
             self.finished = ev
 
     def _shot(self, ev: E.StepDone) -> dict:
-        """The last shot with its running integral from `t0_int` -- the
-        LabVIEW "Integrated PhotoCurrent" plot. The window starts where
-        `core.process.charge` starts it (`t > t0` in record time), so the
-        curve's last value is the shot's `q`."""
-        sp = ev.setpoint
-        try:
-            delay_s = pulse_levels(sp.vpre, sp.vcoll, self.rig_cfg.pulse_amp, sp.delay_ns,
-                                   self.run_cfg.pulse_width_ns,
-                                   invert=self.run_cfg.invert_polarity,
-                                   trigger_offset_s=self.rig_cfg.trigger_offset_s).delay_s
-        except ValueError:
-            delay_s = 0.0
-        t0 = resolve_t0_int(self.run_cfg, ev.light.t0, pulse_delay_s=delay_s)
+        """The last shot with its running integral over its own window -- the
+        LabVIEW "Integrated PhotoCurrent" plot. The window is the one the run
+        resolved for this shot (`StepDone.t0_int_record_s` .. `t1_int_record_s`,
+        pinned to the pulse), so the curve's last value is the shot's `q`."""
         dt = ev.light.dt
-        after = (np.arange(ev.photo.size) * dt) > t0
+        t0 = ev.t0_int_record_s
+        t1 = ev.t1_int_record_s
+        t = np.arange(ev.photo.size) * dt
+        inside = t > (t0 if t0 is not None else -np.inf)
+        if t1 is not None:
+            inside &= t <= t1
         return {"light": ev.light.y, "dark": ev.dark.y, "photo": ev.photo,
-                "cumulative_q": np.cumsum(ev.photo[after]) * dt,
-                "t0_int_record_s": float(t0), "index": ev.index, "loop": ev.loop,
+                "cumulative_q": np.cumsum(ev.photo[inside]) * dt,
+                "t0_int_record_s": None if t0 is None else float(t0),
+                "t1_int_record_s": None if t1 is None else float(t1),
+                "index": ev.index, "loop": ev.loop,
                 "step": ev.step, "axis_value": ev.axis_value, "q": ev.q}
 
     def data(self) -> dict:

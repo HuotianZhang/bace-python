@@ -65,13 +65,24 @@ class RigConfig:
 
     trigger_positive: bool = True
     trigger_offset_s: float = 0.0
-    """Latency between the sync edge and the field reaching the device."""
+    """Latency between the 81150A's Sync edge (what the scope triggers on) and
+    the field reaching the device, **after** `:PULS:DEL1`: the field arrives
+    at `trigger + :PULS:DEL1 + trigger_offset_s`. Measured 47.1 ns on this
+    bench (2026-09-03 delay scan, 49 points fitted, 1.5 ns residual), which
+    is what `rig.toml` carries.
+
+    It is *not* added to what the generator is told -- `:PULS:DEL1` gets
+    `delay_ns` as it is, as the LabVIEW looping path did (2026-09-02). It
+    positions the integration window (`experiment.transient.resolve_window`),
+    so that `RunConfig.t0_int_s` is measured from the field, not from a
+    command. 0 means the latency has not been measured on this bench, and the
+    window is then measured from `:PULS:DEL1` itself."""
 
     light_path_delay_ns: float = 0.0
     """From the 33220A's drive edge to the light actually going off at the
     sample: measured 502 ns on this bench (2026-09-01, `docs/bace-timing.html`),
-    419 ns of it the 85 m fibre. Informational -- the delay axis is zeroed by
-    `trigger_offset_s`, not by this -- and shown on the rig tab beside it so
+    419 ns of it the 85 m fibre. Informational -- it does not enter the delay
+    axis or the window -- and shown on the rig tab beside `trigger_offset_s` so
     the two constants of the chain's timing are on record together. 0 means
     it has not been measured on this bench."""
 

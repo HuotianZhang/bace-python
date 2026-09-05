@@ -268,27 +268,24 @@ def test_acquire_reports_the_geometry(rm, rig):
     assert "4000" in c.detail and "5000" in c.detail
 
 
-def test_acquire_resolves_t0_int_against_its_reference(rm, rig):
+def test_acquire_resolves_the_window_into_record_time(rm, rig):
     """The lab PC's pass 3 (2026-09-04) said t0_int sat 79 ns *before* the
     trigger, for a recipe whose t0_int is 120.5 ns *after* it: the report
     added a trigger-referenced number to the record's origin as if it were
     record time. The fake scope puts its trigger 800 ns in (the rig's sits
-    at 199.5 ns), so a trigger-referenced window must report the same
-    number whatever the record's origin, and a record-referenced one moves."""
+    at 199.5 ns). This stage drives no generator, so the window is shown at
+    `:PULS:DEL1 = 0`: `t0_int_s` plus the rig's latency after the trigger,
+    whatever the record's origin, and `t_int_width_s` long."""
+    from dataclasses import replace
     r = Report()
-    checks.stage_acquire(r, rm, rig, RunConfig(record_length=5000, t0_int_s=1.205e-7,
-                                               t0_int_reference="trigger"), averages=16)
+    checks.stage_acquire(r, rm, replace(rig, trigger_offset_s=47e-9),
+                         RunConfig(record_length=5000, t0_int_s=-2e-9,
+                                   t_int_width_s=1.0e-6), averages=16)
     c = [x for x in r.checks if "one acquisition" in x.name][0]
     into = c.data["trigger sits this far into the record (ns)"]
-    assert c.data["t0_int, relative to the trigger (ns)"] == 120.5
-    assert c.data["t0_int in record time (ns)"] == round(into + 120.5, 1)
-
-    r = Report()
-    checks.stage_acquire(r, rm, rig, RunConfig(record_length=5000, t0_int_s=3.18e-7,
-                                               t0_int_reference="record"), averages=16)
-    c = [x for x in r.checks if "one acquisition" in x.name][0]
-    assert c.data["t0_int in record time (ns)"] == 318.0
-    assert c.data["t0_int, relative to the trigger (ns)"] == round(318.0 - into, 1)
+    assert c.data["t0_int, relative to the trigger (ns)"] == 45.0
+    assert c.data["integration window in record time at delay 0 (ns)"] == (
+        f"{into + 45.0:.1f} .. {into + 1045.0:.1f}")
 
 
 def test_configure_sets_the_81150a_from_the_recipes_pinned_point(rm, rig):
@@ -303,7 +300,7 @@ def test_configure_sets_the_81150a_from_the_recipes_pinned_point(rm, rig):
     c = [x for x in r.checks if "81150A" in x.name][0]
     assert c.status == OK, c.detail
     want = pulse_levels(0.0, -1.0, rig.pulse_amp, 90.0, RunConfig().pulse_width_ns,
-                        invert=True, trigger_offset_s=rig.trigger_offset_s)
+                        invert=True)
     assert c.data["set high/low (V at generator)"] == f"{want.high_light:g} / {want.low_light:g}"
     assert c.data["delay_s"] == f"{want.delay_s:g}"
     assert c.data["pinned (vpre / vcoll / delay_ns at the device)"] ==         "0 V / -1 V / 90 ns, invert_polarity"

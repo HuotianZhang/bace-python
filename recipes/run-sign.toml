@@ -28,9 +28,9 @@
 
 [axis]
 name = "delay_ns"
-start = -40.0
-stop = 200.0
-step = 120.0                    # 3 点：−40 / 80 / 200，其中 +80 和 18:11 直接可比
+start = 0.0                     # delay_ns 就是 :PULS:DEL1，不能为负
+stop = 240.0
+step = 120.0                    # 3 点：0 / 120 / 240（之前 −40/80/200 加 47 ns 命令偏移 = 7/127/247）
 centre_on_voc = false
 
 [pinned]
@@ -44,8 +44,8 @@ n_averages = 20
 timebase_ns_per_div = 500.0
 record_length = 5000
 
-t0_int_reference = "trigger"
-t0_int_s = 0.0
+t0_int_s = -2e-9                # 从场到达（trigger + :PULS:DEL1 + trigger_offset_s）前 2 ns 起
+t_int_width_s = 1.5e-6          # 判符号够用；窗口起止都跟着 delay 走
 
 # 关掉基线校正：光没关的时候，尾部 10 % 是稳态信号而不是基线，校正会把信号减掉、
 # 把波形变成自己的镜像（18:15 那一轮就是这样，Q 还是个像样的 −3.0e−10 C）。

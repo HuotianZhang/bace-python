@@ -714,6 +714,45 @@ def test_run_toml_builds_a_usable_plan():
     assert meta.temperature_k is None and meta.temperature_how == ""
 
 
+def test_the_rig_carries_the_measured_sync_to_field_latency():
+    """47.1 ns (2026-09-03, 49-point fit). It positions the integration window
+    and is not added to `:PULS:DEL1`: `pulse_levels` no longer takes it."""
+    import inspect
+
+    from bace.core.pulses import pulse_levels
+    rig = load_rig("rig.toml")
+    assert rig.trigger_offset_s == pytest.approx(47.1e-9)
+    assert "trigger_offset_s" not in inspect.signature(pulse_levels).parameters
+
+
+def test_every_recipe_loads_and_puts_its_window_on_the_pulse():
+    """No recipe names `t0_int_reference` any more, every one has a positive
+    window, and no delay axis asks for a negative `:PULS:DEL1`."""
+    import glob
+
+    for path in ["run.toml", "tests/run-quickcheck.toml", *sorted(glob.glob("recipes/run-*.toml"))]:
+        spec, run, *_ = load_run(path)
+        assert run.t_int_width_s > 0, path
+        if spec.axis.name == "delay_ns":
+            assert min(spec.axis.start, spec.axis.stop) >= 0, f"{path}: negative :PULS:DEL1"
+        else:
+            assert spec.delay_ns >= 0, path
+
+
+def test_a_run_file_naming_the_old_window_reference_is_refused_with_the_conversion(tmp_path):
+    """`t0_int_reference = record | trigger | pulse` is gone: the window is
+    measured from the field's arrival, full stop. An old file must not be read
+    with its `t0_int_s` silently reinterpreted as a different quantity."""
+    p = tmp_path / "run.toml"
+    p.write_text('[acquisition]\nt0_int_reference = "trigger"\nt0_int_s = 1.205e-7\n')
+    with pytest.raises(ConfigError, match=r"t0_int_reference is gone.*'trigger'.*1.205e-07") as exc:
+        load_run(p)
+    assert "docs/integration-window.md" in str(exc.value)
+    p.write_text('[acquisition]\nt0_int_s = -2e-9\nt_int_width_s = 0\n')
+    with pytest.raises(ConfigError, match="t_int_width_s must be positive"):
+        load_run(p)
+
+
 def test_compliance_is_a_run_setting_under_a_bench_ceiling():
     """Adjustable, because the right compliance depends on the pixel. Bounded,
     because no measurement recipe should be able to authorise 1 A."""

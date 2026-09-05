@@ -606,7 +606,7 @@ def specs_from_dataclass(cls: type, *, group: str = "", exclude: Iterable[str] =
     `intensity_factor_mw_cm2_per_w` ends in `_w` and is not in watts.
 
     `choices` turns a `str` field into an enum -- `RunConfig` validates
-    `t0_int_reference` in `__post_init__` rather than in its annotation, so
+    `dark_reference` in `__post_init__` rather than in its annotation, so
     the catalogue says the choices here. Docs come from `field_docs`.
     """
     if not dataclasses.is_dataclass(cls):

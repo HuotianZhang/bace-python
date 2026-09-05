@@ -2,35 +2,22 @@
 
 Ported from the pulse-level MathScript node of TDCF-BACE_20160223.vi.
 
-Two nodes in the original disagreed on the trigger-delay offset `T`
-(47 ns in the single-step path, 0 ns in the looping path). Huotian confirmed
-47 ns is the physical one, so it is the default here and lives in exactly
-one place.
+`delay_ns` reaches `:PULS:DEL1` as it is. The original had two nodes that
+disagreed on an offset `T` to add first (47 ns in the single-step path, 0 ns in
+the looping path); this port carried 47 ns until 2026-09-02, when the LabVIEW
+engine and the port were run back to back on the same device with the same
+`Delay(ns) = 90` and the dark trace's displacement spike -- the voltage step
+arriving, no light in it -- landed 48 ns apart. The looping path is the one a
+scan takes, and its offset is 0, so no offset is added here at all.
+
+The 47 ns is real, but it is not a command offset: it is the latency between
+the 81150A's Sync (which the scope triggers on) and the field reaching the
+device, and it belongs to the *integration window*, not to the generator. That
+is `RigConfig.trigger_offset_s`, used by `experiment.transient.resolve_window`.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-
-TRIGGER_OFFSET_S = 0.0
-"""Added to `delay_ns` before it reaches `:PULS:DEL1`. **Zero, measured.**
-
-The original had two nodes that disagreed: 47 ns in the single-step path, 0 ns
-in the looping path. This was 47e-9 until 2026-09-02 on the strength of the
-single-step node. Then the LabVIEW engine and this port were run back to back on
-the same device with the same `Delay(ns) = 90`, and the displacement spike in
-the *dark* trace — which contains no light at all, so it is purely the voltage
-step arriving — landed at:
-
-    LabVIEW  -25.49 mA @ 328 ns
-    port     -25.18 mA @ 376 ns
-
-48 ns apart, 1 % apart in height. The port was writing `:PULS:DEL1 = 137 ns`
-where LabVIEW wrote 90. **The looping path is the one a scan takes, and its
-offset is 0.** Every delay quoted before that date is 47 ns high.
-
-Left as a named constant, and overridable per rig through `rig.toml`, because
-it is a property of the cabling: if the field really does arrive late on some
-other bench, that is where to say so — measured, the way this one was."""
 
 
 @dataclass(frozen=True)
@@ -48,8 +35,7 @@ class PulseLevels:
 
 def pulse_levels(vpre: float, vcoll: float, pulse_amp: float,
                  delay_ns: float, width_ns: float, *,
-                 invert: bool = False,
-                 trigger_offset_s: float = TRIGGER_OFFSET_S) -> PulseLevels:
+                 invert: bool = False) -> PulseLevels:
     """Levels for one step.
 
     Light trace: the device sits at `vpre` under illumination, then steps to
@@ -59,11 +45,15 @@ def pulse_levels(vpre: float, vcoll: float, pulse_amp: float,
 
     `invert` corresponds to the original's `NewSample` flag: it swaps and
     negates both levels for devices of the opposite polarity.
+
+    `delay_s` is what `:PULS:DEL1` is given, from the arm. The field reaches
+    the device `RigConfig.trigger_offset_s` later than that; the integration
+    window accounts for it, the generator never sees it.
     """
     if pulse_amp == 0:
         raise ValueError("pulse_amp must be non-zero")
 
-    delay_s = delay_ns * 1e-9 + trigger_offset_s
+    delay_s = delay_ns * 1e-9
     if delay_s < 0:
         # A generator cannot fire before it is armed. Left unchecked this reaches
         # the instrument as a negative `:PULS:DEL1`, which is rejected into the
@@ -71,10 +61,9 @@ def pulse_levels(vpre: float, vcoll: float, pulse_amp: float,
         # the affected steps would silently keep the previous delay and draw a
         # flat stretch in Q(delay) that looks like physics.
         raise ValueError(
-            f"delay_ns = {delay_ns:g} with a trigger offset of "
-            f"{trigger_offset_s * 1e9:g} ns asks the generator for "
-            f"{delay_s * 1e9:g} ns of delay, which is before its own trigger. "
-            f"The axis cannot go below {-trigger_offset_s * 1e9:g} ns."
+            f"delay_ns = {delay_ns:g} asks the generator to fire "
+            f"{-delay_s * 1e9:g} ns before its own trigger. The axis cannot go "
+            "below 0 ns."
         )
 
     span = abs(vpre - vcoll)

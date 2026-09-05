@@ -531,11 +531,13 @@ the instrument rather than in how they draw:
 * **`Math.abs(null)` is 0, and 0 is finite.** A sample the instrument never
   returned became a point on the log floor with the dark curve drawn through
   it: a leakage measurement out of an absence.
-* **The integration window was pinned to the form.** With
-  `t0_int_reference = "pulse"` the service recomputes it from each shot's own
-  `:PULS:DEL1`, and `run-bace.toml` sweeps exactly that axis — so the shading
-  stood still while the real window moved with every point. It takes the
-  shot's setpoint now, and `trigger_offset_s` with it.
+* **The integration window was pinned to the form.** The service resolves it
+  from each shot's own `:PULS:DEL1` (the window is measured from the field's
+  arrival, always), and `run-bace.toml` sweeps exactly that axis — so the
+  shading stood still while the real window moved with every point. It takes
+  the shot's setpoint now, and the rig's sync-to-field `trigger_offset_s`
+  with it; a `StepDone` also carries the window the run actually integrated
+  (`t0_int_record_s`, `t1_int_record_s`), which wins over the arithmetic.
 * **A pipeline's results never reached the card that produced them.** A
   pipeline's `RunQueued.module` is `null` and the module names live on the
   nodes, as `NodeStarted.data.kind` — so the result panel is per *node* now,

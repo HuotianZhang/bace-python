@@ -41,7 +41,7 @@ NO_SLEEP = lambda s: None                                      # noqa: E731
 RUN_ID = "20260902_210000-001"
 
 FAST = {"n_averages": 8, "settle_s": 0.0, "dark_settle_s": 0.0, "record_length": 400,
-        "t0_int_s": 2.71e-7, "t0_int_reference": "record", "calibrate_trigger": False,
+        "t0_int_s": -2e-9, "calibrate_trigger": False,
         "led_settle_s": 0.0}
 """The bace overrides every tree here types: the simulator's geometry (see
 `test_transient_sim.run`) and no settling."""

@@ -33,7 +33,7 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 RECIPE = REPO / "tests" / "run-quickcheck.toml"   # the frozen quick-check recipe these tests pin
 TIMEOUT = 20.0
 FAST = {"n_averages": 8, "settle_s": 0.0, "dark_settle_s": 0.0, "record_length": 400,
-        "t0_int_s": 2.71e-7, "t0_int_reference": "record", "calibrate_trigger": False,
+        "t0_int_s": -2e-9, "calibrate_trigger": False,
         "led_settle_s": 0.0}
 
 

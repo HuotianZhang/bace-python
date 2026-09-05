@@ -151,10 +151,13 @@ export function recordPlan(values = {}, rig = {}) {
   const span = perDiv * 10;                       // the Infiniium's ten divisions
   const points = Number(values.record_length) || 0;
   const dt = points > 0 ? span / points : 0;
+  // The field reaches the device `trigger_offset_s` after `:PULS:DEL1` elapses
+  // — the rig's sync-to-field latency, not something the generator is told —
+  // and the integration window is measured from there.
   const delayS = (Number(values.delay_ns) || 0) * 1e-9 + (Number(rig.trigger_offset_s) || 0);
   const widthS = (Number(values.pulse_width_ns) || 0) * 1e-9;
-  const reference = values.t0_int_reference || 'record';
   const t0 = numberOr(values.t0_int_s, null);
+  const intWidth = numberOr(values.t_int_width_s, null);
   // **The record does not begin at the trigger.** `Infiniium.configure_timebase`
   // writes `:TIM:RANG` of ten divisions and `:TIM:POS` of *four*, which puts
   // the horizontal reference four divisions after the trigger — so the record
@@ -167,16 +170,10 @@ export function recordPlan(values = {}, rig = {}) {
   // and the rig day's `−199.5 ns`, the instrument's own sample grid apart.
   const start = -perDiv;
   const end = perDiv * 9;
-  const fromTrigger = t0 === null ? null
-    : reference === 'pulse' ? t0 + delayS
-      : reference === 'trigger' ? t0
-        // `record` is measured from the first sample, so it is that sample's
-        // own offset away — nominally one division, and exactly whatever
-        // `Trace.t0` (`:WAV:XOR?`) turns out to be once a shot has run.
-        : t0 + start;
+  const fromTrigger = t0 === null ? null : t0 + delayS;
+  const toTrigger = fromTrigger === null || intWidth === null ? null : fromTrigger + intWidth;
   return {
-    span, points, dt, delayS, widthS, reference, t0, fromTrigger, start, end,
-    nominal: reference === 'record',
+    span, points, dt, delayS, widthS, t0, intWidth, fromTrigger, toTrigger, start, end,
   };
 }
 
@@ -226,10 +223,10 @@ export function timingAlerts(values = {}, rig = {}, chain = {}) {
       text: `duty_percent ${fmt.sig(values.duty_percent, 3)} % under INV lights the device for `
         + `${fmt.sig(cycle.litFraction * 100, 3)} % of the period — raising it shortens the illumination` });
   }
-  if (cycle.delayS < 0) {
+  if ((Number(values.delay_ns) || 0) < 0) {
     out.push({ level: 'invalid', key: 'delay',
-      text: `delay_ns ${fmt.sig(values.delay_ns, 4)} with a trigger offset of `
-        + `${fmt.sig((rig.trigger_offset_s || 0) * 1e9, 3)} ns asks the generator to fire before its own trigger` });
+      text: `delay_ns ${fmt.sig(values.delay_ns, 4)} asks the generator to fire before its own trigger: `
+        + '`:PULS:DEL1` is given delay_ns as it is, and cannot go below 0' });
   }
   if (record.span > 0 && cycle.widthS > 0 && cycle.delayS + cycle.widthS < record.end) {
     out.push({ level: 'warn', key: 'width',
@@ -244,11 +241,17 @@ export function timingAlerts(values = {}, rig = {}, chain = {}) {
         + `runs ${fmt.sig(record.start * 1e9, 4)} … ${fmt.sig(record.end * 1e9, 4)} ns `
         + '(`:TIM:POS` is four of its ten divisions): the integration window is empty' });
   }
-  if (record.reference === 'record') {
-    out.push({ level: 'info', key: 'window-reference',
-      text: 't0_int_reference = record measures from the first sample, which sits one division '
-        + 'before the trigger — so this window slides against the signal whenever '
-        + 'timebase_ns_per_div changes. Drawn here at its nominal place; the trace reports its own' });
+  if (record.toTrigger !== null && record.span > 0 && record.fromTrigger < record.end
+      && record.toTrigger > record.end) {
+    out.push({ level: 'warn', key: 'window-end',
+      text: `the integration window ends ${fmt.sig(record.toTrigger * 1e9, 4)} ns after the trigger `
+        + `and the record ends at ${fmt.sig(record.end * 1e9, 4)} ns: the window is cut short — and `
+        + 'along a delay axis by a different amount at each point. A longer timebase or a shorter '
+        + 't_int_width_s makes it whole' });
+  }
+  if (record.fromTrigger !== null && !(Number(values.t_int_width_s) > 0)) {
+    out.push({ level: 'invalid', key: 'window-width',
+      text: 't_int_width_s must be positive: an empty integration window still produces a number' });
   }
   if (values.dark_reference === 'same') {
     out.push({ level: 'info', key: 'dark-reference',
@@ -498,11 +501,17 @@ function recordRows(panel, cycle, record, swept) {
   marks.push({ x: X(0) + 4, y: rect.y + 24, colour: 'grey', size: 8.5, halo: true, text: 'trigger' });
   if (record.fromTrigger !== null && record.fromTrigger >= start && record.fromTrigger < end) {
     const wx = X(record.fromTrigger);
-    shades.push({ x: wx, w: rect.x + rect.w - wx, colour: 'accent', opacity: 0.07 });
+    const wend = record.toTrigger === null ? end : Math.min(end, record.toTrigger);
+    const wx1 = X(wend);
+    shades.push({ x: wx, w: Math.max(0, wx1 - wx), colour: 'accent', opacity: 0.07 });
     rules.push({ x1: wx, colour: 'accent', width: 1.5 });
+    if (record.toTrigger !== null && record.toTrigger <= end) {
+      rules.push({ x1: wx1, colour: 'accent', width: 1, dash: '4 3' });
+    }
     marks.push({ x: wx + 5, y: rect.y + rect.h - 8, mono: true, weight: 600, colour: 'accent', size: 9,
       text: `t0_int ${fmt.sig(record.fromTrigger * 1e9, 4)} ns from the trigger`
-        + (record.nominal ? ' · nominal' : '') });
+        + (record.toTrigger === null ? '' : ` → ${fmt.sig(record.toTrigger * 1e9, 4)} ns`)
+        + ' · with the pulse' });
     marks.push({ x: rect.x + rect.w - 5, y: rect.y + rect.h - 8, anchor: 'end', colour: 'accent', size: 8.5,
       text: 'Q = ∫ (light − dark) dt over the shaded part' });
   } else {

@@ -74,6 +74,14 @@ class RunRecorder:
     edges (`core.diagnostics`, 2026-09-05). NaN where a shot could not say."""
     _photo: np.ndarray | None = None
     _shots: np.ndarray | None = None
+    _window: np.ndarray | None = None
+    """(n_steps, 2): the integration window each step's charge was taken over,
+    in record time. Pinned to the pulse, so along a delay axis every row
+    differs -- the file has to say which slice of which record became Q."""
+    _trace_t0: np.ndarray | None = None
+    """(n_steps,): each step's `:WAV:XOR?`, where the record begins relative
+    to the trigger. With it and `axis/delay_ns` an offline reader can put a
+    different window on the stored traces (`tools/reintegrate.py`)."""
     _intensity: np.ndarray | None = None
     _dt: float = field(init=False, default=float("nan"))
     _finished: bool = field(init=False, default=False)
@@ -110,6 +118,8 @@ class RunRecorder:
             self._light = RunningAverage(self._n_steps, n)
             self._dark = RunningAverage(self._n_steps, n)
             self._photo = np.full((self._n_steps, n), np.nan)
+            self._window = np.full((self._n_steps, 2), np.nan)
+            self._trace_t0 = np.full(self._n_steps, np.nan)
             if self.store_shots:
                 self._shots = np.full((self._n_loops, self._n_steps, n), np.nan)
 
@@ -120,6 +130,9 @@ class RunRecorder:
         self._diagnose(ev, loop - 1, i)
         self._photo[i] = ev.photo_averaged
         self._q[loop - 1, i] = ev.q
+        if ev.t0_int_record_s is not None and ev.t1_int_record_s is not None:
+            self._window[i] = (ev.t0_int_record_s, ev.t1_int_record_s)
+        self._trace_t0[i] = ev.light.t0
         if ev.intensity_w is not None:
             self._intensity[loop - 1, i] = ev.intensity_w
         if self._shots is not None:
@@ -228,6 +241,7 @@ class RunRecorder:
             sync_light=None if self._sync_light is None else self._sync_light.traces,
             sync_dark=None if self._sync_dark is None else self._sync_dark.traces,
             diagnostics=self._diag,
+            window_s=self._window, trace_t0_s=self._trace_t0,
         )
         self.written.append(path)
 

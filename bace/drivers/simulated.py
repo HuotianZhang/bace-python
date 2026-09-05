@@ -151,6 +151,11 @@ class Bench:
     bias_high_v: float = 0.0           # at the generator output
     bias_low_v: float = 0.0
     bias_delay_s: float = 0.0
+    field_latency_s: float = 0.0
+    """Sync-to-field latency the simulated bench adds after `:PULS:DEL1`, the
+    counterpart of `RigConfig.trigger_offset_s`; `Bench.build_simulated`
+    copies the rig's value in so a window measured from the field lands on
+    the simulated transient the way it lands on the real one."""
     bias_width_s: float = 5e-6
     bias_inverted: bool = False        # :OUTP1:POL INV on the 81150A
     bias_output: bool = False
@@ -362,7 +367,7 @@ class SimulatedDigitizer:
         b = self.bench
         n, dt = self.n_points, self.dt
         t = np.arange(n) * dt
-        t_arrive = self.trigger_position_s + b.bias_delay_s
+        t_arrive = self.trigger_position_s + b.bias_delay_s + b.field_latency_s
         tau = b.device.tau_ext
         q = b.extracted_charge()
 

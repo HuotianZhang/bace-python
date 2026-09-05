@@ -46,9 +46,11 @@ centre_on_voc = false           # 面板是手填的绝对值，不是围绕 V_o
 vpre = 1.00354                  # 被轴覆盖
 vcoll = -1.00                   # 面板 Vcoll(V) = −1
 delay_ns = 90.0                 # 面板 Delay(ns) = 90。
-                                # 2026-09-02 起 trigger_offset_s = 0（rig.toml），
-                                # 所以 :PULS:DEL1 收到的就是 90，和 VI 一样。
-                                # 之前加了 47 ns，实测两边的位移尖峰差 48 ns。
+                                # :PULS:DEL1 收到的就是 90，和 VI 一样——程序
+                                # 不再往命令上加偏移（2026-09-02 之前加过 47 ns，
+                                # 实测两边的位移尖峰差 48 ns）。rig.toml 里的
+                                # trigger_offset_s 现在是 sync→场的物理延迟，只
+                                # 用来放积分窗口。
 
 [acquisition]
 n_loops = 1                     # 面板 # of Loops = 1
@@ -63,14 +65,14 @@ n_averages = 200                # 面板 # Averages = 200
 timebase_ns_per_div = 200.0
 record_length = 5000
 
-# --- 积分窗口：照抄面板的记录参考 ---------------------------------------------
-# 面板的 t0 Integration 是从**记录第一个样本**算起的 320 ns，不是从触发算起。
-# 200 ns/div 时 :TIM:POS = 800 ns，触发落在记录的 200 ns 处，所以 320 ns 相当于
-# 触发后 120 ns；而 delay 90 + trigger_offset 47 = 137 ns。窗口比场早 17 ns，
-# 和归档里那 16.5 ns 的关系一致。
-# 这一轮就用 record + 320 ns，才是"照抄"；等对上了再换成 pulse 参考。
-t0_int_reference = "record"
-t0_int_s = 320e-9
+# --- 积分窗口：换算面板的记录参考 ---------------------------------------------
+# 面板的 t0 Integration 是从**记录第一个样本**算起的 320 ns，积到记录末尾（2 µs）。
+# 这里的窗口一律从场到达算起（trigger + :PULS:DEL1 + rig.toml 的 trigger_offset_s），
+# 200 ns/div 时触发落在记录 200 ns 处，delay 90，latency 47.1：
+#   320 − 200 − 90 − 47.1 = −17.1 ns，宽 2000 − 320 = 1680 ns。窗口比场早 17 ns，
+# 和归档里那 16.5 ns 的关系一致。只在 delay = 90、200 ns/div 下和面板等价。
+t0_int_s = -17.1e-9
+t_int_width_s = 1.68e-6
 
 offset_correct = true           # 面板 offset corr? ON
 

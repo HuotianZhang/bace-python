@@ -153,13 +153,13 @@ def test_a_delay_before_the_trigger_is_refused_not_sent():
     physics. A delay scan is exactly where someone reaches past the limit."""
     import pytest
 
-    from bace.core.pulses import TRIGGER_OFFSET_S, pulse_levels
+    from bace.core.pulses import pulse_levels
 
-    ok = pulse_levels(0.92, -1.0, 4.0, -TRIGGER_OFFSET_S * 1e9 + 1.0, 5000.0)
-    assert ok.delay_s > 0
+    ok = pulse_levels(0.92, -1.0, 4.0, 1.0, 5000.0)
+    assert ok.delay_s == pytest.approx(1e-9), "`:PULS:DEL1` gets delay_ns as it is"
 
     with pytest.raises(ValueError, match="before its own trigger"):
-        pulse_levels(0.92, -1.0, 4.0, -TRIGGER_OFFSET_S * 1e9 - 1.0, 5000.0)
+        pulse_levels(0.92, -1.0, 4.0, -1.0, 5000.0)
 
 
 def test_voc_flags_apply_to_one_side_of_the_axis_each():

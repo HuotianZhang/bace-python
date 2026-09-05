@@ -1283,11 +1283,9 @@ def _c_axis_geometry(f: _Facts) -> list[Verdict]:
         delay = (min(axis.start, axis.stop) if axis.name == "delay_ns" else spec.delay_ns)
         try:
             pulse_levels(spec.vpre, spec.vcoll, f.rig.pulse_amp, delay,
-                         float(v.get("pulse_width_ns", 5000.0)),
-                         trigger_offset_s=f.rig.trigger_offset_s)
+                         float(v.get("pulse_width_ns", 5000.0)))
         except ValueError as exc:
-            failures.append((s, f"{s.module}: {exc}",
-                             {"delay_ns": delay, "trigger_offset_s": f.rig.trigger_offset_s}))
+            failures.append((s, f"{s.module}: {exc}", {"delay_ns": delay}))
             continue
         described.append(f"{axis} x {spec.n_loops}")
     if failures:

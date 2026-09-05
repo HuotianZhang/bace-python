@@ -23,8 +23,7 @@ from bace.params import (LOCKED, PRECEDENCE, ParamError, ParamSet, ParamSpec,
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 
-RUN_CHOICES = {"t0_int_reference": ("record", "trigger", "pulse"),
-               "dark_reference": ("translated", "same"),
+RUN_CHOICES = {"dark_reference": ("translated", "same"),
                "output_polarity": ("auto", "NORM", "INV", "leave")}
 """What `RunConfig.__post_init__` accepts. The dataclass validates these in
 code rather than in its annotations, so the catalogue has to say them."""
@@ -36,8 +35,8 @@ def small_set() -> ParamSet:
         ParamSpec("led_v", "float", 1.0, unit="V"),
         ParamSpec("voc", "float", None, unit="V", nullable=True),
         ParamSpec("offset_correct", "bool", True),
-        ParamSpec("t0_int_reference", "enum", "record",
-                  choices=("record", "trigger", "pulse")),
+        ParamSpec("dark_reference", "enum", "translated",
+                  choices=("translated", "same")),
         ParamSpec("led_levels_v", "list[float]", ()),
         ParamSpec("sample", "str", ""),
         ParamSpec("max_current_a", "float", 0.05, unit="A", editable=False),
@@ -209,13 +208,13 @@ def test_json_and_form_values_are_coerced_on_the_way_in():
     ps.set_edited("led_v", "1.02")
     ps.set_edited("offset_correct", "false")
     ps.set_edited("led_levels_v", "1.02, 1.06,1.10")
-    ps.set_edited("t0_int_reference", "TRIGGER")
+    ps.set_edited("dark_reference", "SAME")
     v = ps.values()
     assert v["n_averages"] == 20 and isinstance(v["n_averages"], int)
     assert v["led_v"] == 1.02 and isinstance(v["led_v"], float)
     assert v["offset_correct"] is False
     assert v["led_levels_v"] == (1.02, 1.06, 1.10)
-    assert v["t0_int_reference"] == "trigger"          # canonical spelling
+    assert v["dark_reference"] == "same"                # canonical spelling
 
 
 def test_the_string_false_is_false():
@@ -237,7 +236,7 @@ def test_coercion_errors_name_the_parameter():
         ("n_averages", 0),                                  # below minimum 1
         ("led_v", "nan"), ("led_v", "1,02"), ("led_v", False),
         ("offset_correct", "maybe"), ("offset_correct", 2), ("offset_correct", 1.0),
-        ("t0_int_reference", "record time"),
+        ("dark_reference", "the same"),
         ("led_levels_v", "1.02, abc"), ("led_levels_v", 1.02),
         ("sample", 7), ("n_averages", None),
     ]
@@ -254,7 +253,7 @@ def test_numpy_scalars_are_accepted_as_the_numbers_they_wrap():
     ps.update_layer(Source.LAST_USED, {
         "n_averages": np.int64(20), "led_v": np.float32(1.02), "offset_correct": np.bool_(False),
         "led_levels_v": np.array([1.02, 1.06]), "sample": np.str_("px3"),
-        "t0_int_reference": np.str_("trigger"), "voc": np.float64(0.86)},
+        "dark_reference": np.str_("same"), "voc": np.float64(0.86)},
         detail="run 003 /config")
     v = ps.values()
     assert v["n_averages"] == 20 and type(v["n_averages"]) is int
@@ -262,7 +261,7 @@ def test_numpy_scalars_are_accepted_as_the_numbers_they_wrap():
     assert v["offset_correct"] is False
     assert v["led_levels_v"] == (1.02, 1.06) and all(type(x) is float for x in v["led_levels_v"])
     assert v["sample"] == "px3" and type(v["sample"]) is str
-    assert v["t0_int_reference"] == "trigger" and v["voc"] == 0.86
+    assert v["dark_reference"] == "same" and v["voc"] == 0.86
     json.dumps(ps.as_wire())                            # nothing numpy leaks out
     with pytest.raises(ParamError, match="^n_averages: .* not a whole number"):
         ps.set_edited("n_averages", np.float64(20.5))
@@ -339,8 +338,8 @@ def test_a_default_the_spec_itself_would_refuse_is_refused():
     assert ParamSpec("x", "float", None, nullable=True).default is None
 
     from bace.experiment.transient import RunConfig
-    with pytest.raises(ParamError, match="^t0_int_reference: the default 'record' would be refused"):
-        specs_from_dataclass(RunConfig, choices={"t0_int_reference": ("trigger", "pulse")})
+    with pytest.raises(ParamError, match="^dark_reference: the default 'translated' would be refused"):
+        specs_from_dataclass(RunConfig, choices={"dark_reference": ("same",)})
 
 
 def test_the_default_is_canonicalised_like_any_other_value():
@@ -378,8 +377,8 @@ def test_as_wire_is_json_serialisable_and_in_spec_order():
                      "default", "doc", "doc_full", "choices", "group", "nullable",
                      "minimum", "maximum"}
     assert all(set(w) == expected_keys for w in back)
-    enum = next(w for w in back if w["name"] == "t0_int_reference")
-    assert enum["choices"] == ["record", "trigger", "pulse"]
+    enum = next(w for w in back if w["name"] == "dark_reference")
+    assert enum["choices"] == ["translated", "same"]
     assert json.loads(json.dumps(ps.get("voc").as_dict())) == {
         "value": None, "source": "default", "detail": ""}
 
@@ -418,10 +417,11 @@ def test_specs_from_runconfig_say_what_runconfig_says():
     assert (specs["timebase_ns_per_div"].type,
             specs["timebase_ns_per_div"].default) == ("float", 200.0)
     assert (specs["offset_correct"].type, specs["offset_correct"].default) == ("bool", True)
-    assert specs["t0_int_reference"].type == "enum"
-    assert specs["t0_int_reference"].choices == ("record", "trigger", "pulse")
-    assert specs["t0_int_reference"].default == "record"
+    assert (specs["t0_int_s"].type, specs["t0_int_s"].default) == ("float", 0.0)
+    assert (specs["t_int_width_s"].type, specs["t_int_width_s"].default) == ("float", 1.5e-6)
+    assert specs["dark_reference"].type == "enum"
     assert specs["dark_reference"].choices == ("translated", "same")
+    assert specs["dark_reference"].default == "translated"
     assert specs["output_polarity"].choices == ("auto", "NORM", "INV", "leave")
     assert specs["trigger_sweep"].type == "str"           # no choices given: text
     assert all(s.group == "acquisition" for s in specs.values())
@@ -618,8 +618,7 @@ def test_field_docs_returns_the_first_sentence():
     docs = field_docs(RunConfig)
     assert docs["n_averages"] == (
         "How many traces the scope averages in hardware before it hands one back.")
-    assert docs["t0_int_reference"] == (
-        "`record`, `trigger` or `pulse` — what `t0_int_s` is measured from.")
+    assert docs["t_int_width_s"] == "How long the integration window is, in seconds."
     # Absent, not "": a field with no string under it is missing from the map
     # rather than mapping to empty. `RunConfig` has none left -- every one of
     # its fields is documented -- so the case is made on a dataclass that does.
@@ -627,7 +626,7 @@ def test_field_docs_returns_the_first_sentence():
     assert "start" not in field_docs(Axis)
     full = field_docs(RunConfig, full=True)
     assert "Noise falls as 1/sqrt(n)" in full["n_averages"]
-    assert "**`record`** measures from the first sample." in full["t0_int_reference"]
+    assert "travels with `:PULS:DEL1` along a\ndelay axis" in full["t0_int_s"]
 
 
 def test_field_docs_works_on_every_config_and_never_raises():
@@ -694,7 +693,7 @@ def test_run_toml_layer_reads_the_repo_recipe_raw():
     ps = small_set()
     ps.set_layer(Source.RUN_TOML,
                  toml_layer(raw, {"acquisition.n_averages": "n_averages",
-                                  "acquisition.t0_int_reference": "t0_int_reference",
+                                  "acquisition.dark_reference": "dark_reference",
                                   "acquisition.offset_correct": "offset_correct"}),
                  detail="run.toml [acquisition]")
     ps.update_layer(Source.RUN_TOML,
@@ -702,7 +701,7 @@ def test_run_toml_layer_reads_the_repo_recipe_raw():
                     detail="run.toml [illumination]")
     assert ps.get("n_averages") == ParamValue(200, Source.RUN_TOML, "run.toml [acquisition]")
     assert ps.get("led_v") == ParamValue(1.0, Source.RUN_TOML, "run.toml [illumination]")
-    assert ps.get("t0_int_reference").value == "trigger"
+    assert ps.get("dark_reference").value == "translated"
     assert ps.get("offset_correct").value is True
 
     with pytest.raises(ParamError, match="no such run file"):

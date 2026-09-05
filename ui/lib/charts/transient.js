@@ -19,20 +19,33 @@
 // Two sources, one model. A live `StepDone` carries traces decimated for the
 // wire; `GET /runs/{id}/data` carries them whole with the service's own
 // `cumulative_q` beside them. `traceSet` folds both into record time, which is
-// the axis the design's own chart uses and the axis `t0_int` is resolved into
-// (`experiment/transient.py`: `record` → as given, `trigger` → minus the
-// trace's `t0`, `pulse` → and plus `:PULS:DEL1`).
+// the axis the design's own chart uses and the axis the window is resolved
+// into (`experiment/transient.py` `resolve_window`: `t0_int_s` is measured
+// from the field's arrival — `:PULS:DEL1` plus the rig's `trigger_offset_s`
+// after the trigger — so record time is that plus minus the trace's `t0`, and
+// the window ends `t_int_width_s` later). A `StepDone` carries the window the
+// service actually integrated over (`t0_int_record_s`, `t1_int_record_s`);
+// the arithmetic here is only for a shot that has not reported one.
 
 import * as scale from '../scale.js';
 import * as fmt from '../format.js';
 import { layout, axisTicks, heightFor, headLines, HEAD_LINE, ASPECT, MARGIN } from './frame.js';
 
-/** Where the integration window starts, **in record time** — the service's own arithmetic. */
-export function windowRecordS(t0IntS, reference, { traceT0 = 0, pulseDelayS = 0 } = {}) {
+/**
+ * Where the integration window starts, **in record time** — the service's own
+ * arithmetic. `pulseDelayS` is the field's arrival after the trigger:
+ * `:PULS:DEL1` plus the rig's `trigger_offset_s` (`results.js` `pulseDelayS`).
+ */
+export function windowRecordS(t0IntS, { traceT0 = 0, pulseDelayS = 0 } = {}) {
   if (t0IntS === null || t0IntS === undefined) return null;
-  if (reference === 'pulse') return t0IntS + pulseDelayS - traceT0;
-  if (reference === 'trigger') return t0IntS - traceT0;
-  return t0IntS;                                   // 'record', and the default
+  return t0IntS + pulseDelayS - traceT0;
+}
+
+/** Where it ends: `t_int_width_s` after the start, or null when either is unknown. */
+export function windowEndRecordS(startS, widthS) {
+  if (startS === null || startS === undefined) return null;
+  if (widthS === null || widthS === undefined || !(widthS > 0)) return null;
+  return startS + widthS;
 }
 
 /**
@@ -58,8 +71,10 @@ export function sampleTime(i, { dt, stride, n, kept }) {
  * `tracesGone`; they differ only in the sentence, and both mean *no curve, the
  * loop point comes from the scalars* rather than *nothing happened*.
  */
-export function traceSet(input, { t0_int_s = null, t0_int_reference = 'record', pulse_delay_s = 0 } = {}) {
+export function traceSet(input, { t0_int_s = null, t_int_width_s = null, pulse_delay_s = 0 } = {}) {
   if (!input) return { absent: { text: 'no shot yet', detail: null } };
+  const source = (start) => (start === null || start === undefined ? null
+    : `pinned to the pulse · ${fmt.sig(pulse_delay_s * 1e9, 4)} ns after the trigger`);
 
   // -- `GET /runs/{id}/data`: full precision, and the service's own integral.
   if (input.time_s && input.light) {
@@ -76,8 +91,11 @@ export function traceSet(input, { t0_int_s = null, t0_int_reference = 'record', 
       photo: last.photo || row(input.photo),
       cumulative: last.cumulative_q || null,
       cumulativeFrom: last.t0_int_record_s ?? null,
-      window: last.t0_int_record_s ?? windowRecordS(t0_int_s, t0_int_reference, { pulseDelayS: pulse_delay_s }),
-      windowSource: last.t0_int_record_source || null,
+      window: last.t0_int_record_s ?? windowRecordS(t0_int_s, { pulseDelayS: pulse_delay_s }),
+      windowEnd: last.t1_int_record_s
+        ?? windowEndRecordS(last.t0_int_record_s ?? windowRecordS(t0_int_s, { pulseDelayS: pulse_delay_s }), t_int_width_s),
+      windowSource: last.t0_int_record_source || (last.t0_int_record_s !== undefined && last.t0_int_record_s !== null
+        ? 'the window the run integrated' : source(t0_int_s)),
       stride: 1,
       nFull: time.length,
       q: last.q ?? null,
@@ -122,8 +140,14 @@ export function traceSet(input, { t0_int_s = null, t0_int_reference = 'record', 
       ? 'photocurrent = light − dark  ·  I / mA  ·  averaged over the loops so far'
       : null,
     cumulative: null,
-    window: windowRecordS(t0_int_s, t0_int_reference, { traceT0: env.t0 ?? 0, pulseDelayS: pulse_delay_s }),
-    windowSource: t0_int_reference ? `t0_int_reference = ${t0_int_reference}` : null,
+    // The event says which window it integrated; the form's numbers are the
+    // fallback for a shot that arrived without one.
+    window: input.t0_int_record_s
+      ?? windowRecordS(t0_int_s, { traceT0: env.t0 ?? 0, pulseDelayS: pulse_delay_s }),
+    windowEnd: input.t1_int_record_s
+      ?? windowEndRecordS(windowRecordS(t0_int_s, { traceT0: env.t0 ?? 0, pulseDelayS: pulse_delay_s }), t_int_width_s),
+    windowSource: input.t0_int_record_s !== undefined && input.t0_int_record_s !== null
+      ? 'the window the run integrated' : source(t0_int_s),
     trigger: env.t0 === undefined || env.t0 === null ? null : -env.t0,
     stride,
     nFull,
@@ -149,13 +173,14 @@ export function traceSet(input, { t0_int_s = null, t0_int_reference = 'record', 
  * Trapezoidal, on the samples' own spacing, because the last kept sample is
  * not one stride from the one before it.
  */
-export function runningIntegral(photo, x, from) {
+export function runningIntegral(photo, x, from, to = null) {
   const out = new Array(photo.length).fill(null);
   let sum = 0;
   let started = -1;
   for (let i = 0; i < photo.length; i += 1) {
     const xi = x(i);
     if (from !== null && from !== undefined && xi < from) continue;
+    if (to !== null && to !== undefined && xi > to) break;
     if (started === -1) { started = i; out[i] = 0; continue; }
     const dx = xi - x(i - 1);
     const a = photo[i - 1];
@@ -190,10 +215,10 @@ const ABSENT_PANELS = [
 export function transientModel(input, options = {}) {
   const {
     width = 560, height = null, columns = null,
-    t0_int_s = null, t0_int_reference = 'record', pulse_delay_s = 0,
+    t0_int_s = null, t_int_width_s = null, pulse_delay_s = 0,
     offset_corrected = null, dark_reference = null,
   } = options;
-  const set = traceSet(input, { t0_int_s, t0_int_reference, pulse_delay_s });
+  const set = traceSet(input, { t0_int_s, t_int_width_s, pulse_delay_s });
   if (set.absent) {
     return {
       key: 'transient',
@@ -218,7 +243,7 @@ export function transientModel(input, options = {}) {
   const photo = set.photo;
   const hasCumulative = Boolean(set.cumulative && set.cumulative.length);
   const derived = !hasCumulative && photo && set.window !== null && set.window !== undefined;
-  const integral = derived ? runningIntegral(photo, set.x, set.window) : null;
+  const integral = derived ? runningIntegral(photo, set.x, set.window, set.windowEnd) : null;
 
   // Two of the notes under this chart were settings restated as prose, about a
   // curve drawn a few pixels above them. They belong **on** the panel they
@@ -276,15 +301,25 @@ export function transientModel(input, options = {}) {
   // integrated over something else.
   if (set.window !== null && set.window !== undefined) {
     const x0 = X(set.window * NS);
+    // The window has an end as well as a start: it is `t_int_width_s` long and
+    // both edges travel with the pulse. A window that runs past the record is
+    // drawn to the record's edge, and the mark says where it would have ended.
+    const endS = set.windowEnd;
+    const plotRight = plot.x + plot.w;
+    const x1 = endS === null || endS === undefined ? plotRight : Math.min(plotRight, X(endS * NS));
     for (const panel of built) {
-      panel.shades = [{ x: x0, w: plot.x + plot.w - x0, colour: 'accent', opacity: 0.055 }];
-      panel.rules = [...(panel.rules || []), { x1: x0, colour: 'accent', width: 1.5 }];
+      panel.shades = [{ x: x0, w: Math.max(0, x1 - x0), colour: 'accent', opacity: 0.055 }];
+      panel.rules = [...(panel.rules || []), { x1: x0, colour: 'accent', width: 1.5 },
+        ...(endS === null || endS === undefined || X(endS * NS) > plotRight ? []
+          : [{ x1, colour: 'accent', width: 1, dash: '4 3' }])];
     }
     built[0].marks = [...(built[0].marks || []), {
       x: x0 + 5, y: built[0].rect.y + 12, text: 't_0,int', colour: 'accent', weight: 600, mono: true, halo: true,
     }, {
       x: x0 + 5, y: built[0].rect.y + 22, halo: true,
-      text: `${fmt.sig(set.window * NS, 4)} ns of record time`, colour: 'accent', size: 8.5,
+      text: `${fmt.sig(set.window * NS, 4)} ns of record time`
+        + (endS === null || endS === undefined ? '' : ` → ${fmt.sig(endS * NS, 4)} ns`),
+      colour: 'accent', size: 8.5,
     },
     // Where the window came from, beside the window — it was a note under the
     // chart, which is the one place it cannot be read against the line it dates.

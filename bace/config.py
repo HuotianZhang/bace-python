@@ -154,9 +154,23 @@ def load_run(path: str | Path = "run.toml"
                     delay_ns=pin.get("delay_ns", 90.0),
                     n_loops=acq.get("n_loops", 1))
 
+    if "t0_int_reference" in acq:
+        raise ConfigError(
+            "[acquisition] t0_int_reference is gone: the integration window is "
+            "always measured from the field's arrival at the device (`:PULS:DEL1` "
+            "plus the rig's trigger_offset_s), so it travels with the delay. "
+            f"This file says {acq['t0_int_reference']!r} with t0_int_s = "
+            f"{acq.get('t0_int_s', 'unset')}. Convert: from `pulse`, subtract the "
+            "rig's trigger_offset_s; from `trigger`, subtract delay_ns and "
+            "trigger_offset_s; from `record`, also subtract where the trigger sits "
+            "in the record (timebase_ns_per_div, at :TIM:POS of four divisions). "
+            "docs/integration-window.md has the worked numbers.")
     known = {f.name for f in fields(RunConfig)}
     _check(acq, known | {"n_loops", "store_shots"}, "acquisition")
-    run = RunConfig(**{k: v for k, v in acq.items() if k in known})
+    try:
+        run = RunConfig(**{k: v for k, v in acq.items() if k in known})
+    except ValueError as exc:                 # RunConfig's own validation
+        raise ConfigError(f"[acquisition] {exc}") from exc
 
     drive = LedDrive(level=ill.get("level_v", 1.0),
                      low_level=ill.get("low_level_v", 0.4),

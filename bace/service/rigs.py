@@ -491,6 +491,7 @@ class Bench:
         sim = make_bench(seed=seed, current_sign=rig_config.current_sign)
         sim.bench.sense_resistor_ohm = rig_config.sense_resistor_ohm
         sim.bench.pulse_amp = rig_config.pulse_amp
+        sim.bench.field_latency_s = rig_config.trigger_offset_s
         rig = Rig(bias=sim.bias, scope=sim.scope, shutter=sim.shutter,
                   config=rig_config, router=sim.router, smu=sim.smu,
                   power=sim.power, led=sim.led,

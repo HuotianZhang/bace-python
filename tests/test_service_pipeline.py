@@ -53,8 +53,7 @@ except ImportError:                                   # modules.py not landed ye
         pass
 
 
-RUN_CHOICES = {"t0_int_reference": ("record", "trigger", "pulse"),
-               "dark_reference": ("translated", "same"),
+RUN_CHOICES = {"dark_reference": ("translated", "same"),
                "output_polarity": ("auto", "NORM", "INV", "leave")}
 RIG = RigConfig()
 NOW = 1_788_390_000.0
@@ -645,7 +644,7 @@ def test_axis_geometry_is_judged_by_axis_scanspec_and_pulse_levels():
     assert levels(v, "axis.geometry") == ["invalid"]
     v = validate(module("bace", measure_dc=True, centre_on_voc=False,
                         axis_name="delay_ns", axis_start=-50.0, axis_stop=50.0,
-                        axis_step=10.0), rig=RigConfig(trigger_offset_s=0.0))
+                        axis_step=10.0))
     [bad] = v.by_code("axis.geometry")
     assert bad.level == "invalid" and "before its own trigger" in bad.text
     v = validate(module("bace", measure_dc=True))

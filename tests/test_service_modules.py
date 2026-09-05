@@ -33,7 +33,7 @@ RECIPE = REPO / "tests" / "run-quickcheck.toml"
 NO_SLEEP = lambda s: None                                      # noqa: E731
 
 FAST = {"n_averages": 8, "settle_s": 0.0, "dark_settle_s": 0.0, "record_length": 400,
-        "t0_int_s": 2.71e-7, "t0_int_reference": "record", "calibrate_trigger": False,
+        "t0_int_s": -2e-9, "calibrate_trigger": False,
         "led_settle_s": 0.0}
 """What a bace test overrides on top of the recipe: the sim's geometry (see
 `test_transient_sim.run` for why `t0_int_s` is pinned) and no settling."""
@@ -139,7 +139,7 @@ def test_bace_params_layer_default_run_toml_last_used_edited_and_inherited():
 
     # run.toml, table by table
     assert ps.get("n_averages") == ParamValue(20, Source.RUN_TOML, "run.toml [acquisition]")
-    assert ps.get("t0_int_reference").value == "trigger"
+    assert ps.get("t0_int_s").value == -2e-9
     assert ps.get("centre_on_voc") == ParamValue(True, Source.RUN_TOML, "run.toml [axis]")
     assert ps.get("delay_ns") == ParamValue(88.0, Source.RUN_TOML, "run.toml [pinned]")
     assert ps.get("led_v") == ParamValue(1.02, Source.RUN_TOML, "run.toml [illumination]")
@@ -771,7 +771,8 @@ def test_build_refuses_bad_parameters_by_name_and_touches_nothing(tmp_path):
                         r"^bace: smu_current_compliance_a: .*ceiling"),
                        ({"axis_start": 0.0, "axis_stop": 0.1, "axis_step": 0.0}, r"^bace: axis: .*positive step"),
                        ({"delay_ns": -5.0}, r"^bace: delay_ns = -5"),
-                       ({"t0_int_reference": "start"}, r"^bace: t0_int_reference: 'start' is not one of")):
+                       ({"t_int_width_s": 0.0}, r"^bace: t_int_width_s must be positive"),
+                       ({"dark_reference": "start"}, r"^bace: dark_reference: 'start' is not one of")):
         with pytest.raises(ModuleError, match=match):
             cat.build("bace", {**ok, **bad}, ctx, b.rig)
     assert b.sim.bench.shots == 0 and not b.sim.led.output_enabled

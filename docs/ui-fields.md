@@ -235,7 +235,7 @@ Folded, by group: `illumination · 4` (`led_low_v` `led_settle_s`
 `led_settle_max_s` `led_settle_tolerance`), `acquisition · 5`
 (`timebase_ns_per_div` `record_length` `read_intensity`
 `acquisition_timeout_s` `store_shots`), `timing · 6`, `trigger · 4`,
-`processing · 4` (`t0_int_s` `t0_int_reference` `offset_correct`
+`processing · 4` (`t0_int_s` `t_int_width_s` `offset_correct`
 `dark_reference`), `sourcemeter · 9`. The `output` group is not in that list
 and has no entry of its own: `inverted_output` is drawn inside the polarity
 control above, so the group empties itself. That is what a computed count
