@@ -610,8 +610,12 @@ def create_app(session: Session, *, ui_dir: str | None = None,
 
     @app.post("/monitors/temperature", status_code=202)
     async def start_temperature_monitor(body: MonitorRequest | None = Body(default=None)):
-        """Start the temperature monitor (the 331 console over HTTP, beside a run). One at most."""
-        return session.start_temperature_monitor(body.interval_s if body is not None else 5.0)
+        """Start the temperature monitor (the 331, beside a run). One at most, and
+        the session has already started it on a bench that has a 331 -- so this is
+        the interval change and the restart, not the switch-on."""
+        if body is None:
+            return session.start_temperature_monitor()
+        return session.start_temperature_monitor(body.interval_s)
 
     @app.delete("/monitors/temperature")
     async def stop_temperature_monitor():

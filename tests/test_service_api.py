@@ -1063,6 +1063,18 @@ def test_the_cli_builds_a_sim_session_without_pyvisa_and_refuses_fast_on_the_rig
     assert main(["--sim", "--run", str(tmp_path / "nope.toml")]) == 2
     assert parse_args(["--sim"]).power_monitor is None
     assert parse_args(["--sim", "--power-monitor", "0.5"]).power_monitor == 0.5
+    # The temperature monitor is the other way round: on unless refused, so
+    # the flag that has to exist is the one that turns it off.
+    assert parse_args(["--sim"]).temperature_monitor == 5.0
+    assert parse_args(["--sim"]).no_temperature_monitor is False
+    assert parse_args(["--sim", "--no-temperature-monitor"]).no_temperature_monitor is True
+    assert parse_args(["--sim", "--temperature-monitor", "30"]).temperature_monitor == 30.0
+    assert main(["--sim", "--temperature-monitor", "0"]) == 2, "the interval is in seconds"
+    assert cli.build_session(parse_args(
+        ["--sim", "--out", str(tmp_path / "runs")])).temperature_monitor_s == 5.0
+    assert cli.build_session(parse_args(
+        ["--sim", "--no-temperature-monitor", "--temperature-monitor", "30",
+         "--out", str(tmp_path / "runs")])).temperature_monitor_s is None
     a = parse_args(["--sim", "--fast", "--out", str(tmp_path / "runs"), "--seed", "3"])
     assert (a.sim, a.fast, a.port, a.host, a.seed) == (True, True, 8900, "127.0.0.1", 3)
 
