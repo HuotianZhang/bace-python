@@ -1071,7 +1071,7 @@ table.qgrid td { padding: 0; }
   font-family: var(--font-num); font-size: 11.5px;
 }
 .pw-row > span { display: inline-flex; align-items: center; gap: 8px; }
-.pw-row > span:empty { display: none; }
+.pw-row > span:empty:not(.spacer) { display: none; }
 .power .spacer { flex: 1 1 auto; }
 .pw-switch {
   display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
@@ -1099,10 +1099,33 @@ table.qgrid td { padding: 0; }
 .pw-value.warn { color: var(--warn); }
 .pw-value.stale, .pw-value.off { color: var(--grey); }
 .pw-sub { color: var(--grey); font-size: 10.5px; }
-.pw-stats-box { gap: 12px; color: var(--ink); }
-.pw-stats-box i { font-style: normal; color: var(--grey); }
-.pw-controls { gap: 6px; }
-.power .filt .opt, .power button.filt { line-height: 1.7; }
+/* Off: one quiet line — the switch and the last spot check, muted. The rail's
+   cell already carries the number; this is only where it is switched on. */
+.power.off .pw-row { padding: 2px 12px; }
+.power.off .pw-value { font-size: 12px; font-weight: 400; color: var(--grey); letter-spacing: 0; }
+.power.off .pw-switch { color: var(--grey); }
+/* The `⋯` menu: everything touched less than once a session. */
+.pw-menu { position: relative; }
+.pw-menu summary {
+  list-style: none; cursor: pointer; color: var(--grey); font-size: 14px; line-height: 1;
+  padding: 2px 6px; border: 1px solid transparent; user-select: none;
+}
+.pw-menu summary::-webkit-details-marker { display: none; }
+.pw-menu summary:hover, .pw-menu[open] summary { color: var(--ink); border-color: var(--rule); }
+.pw-menu summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pw-menu-body {
+  position: absolute; right: 0; top: 100%; z-index: 20; margin-top: 2px;
+  min-width: 22em; padding: 6px 10px 8px;
+  background: var(--paper); border: 1px solid var(--rule); box-shadow: 0 2px 8px rgba(32, 30, 29, .12);
+  display: flex; flex-direction: column; gap: 5px;
+  font-family: var(--font-num); font-size: 11px;
+}
+.pw-opt { display: flex; align-items: baseline; gap: 10px; white-space: nowrap; }
+.pw-optl { flex: 0 0 4.5em; color: var(--grey); }
+.pw-opt.togs { gap: 14px; padding-top: 2px; }
+.pw-opt.acts { gap: 6px; border-top: 1px solid var(--rule); margin-top: 3px; padding-top: 7px; }
+.pw-tog { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; color: var(--ink); }
+.pw-tog input { margin: 0; accent-color: var(--ink); }
 .pw-status.ok { color: var(--ok); }
 .pw-status.bad { color: var(--alert); }
 .pw-chart { padding: 0 12px 6px; }
