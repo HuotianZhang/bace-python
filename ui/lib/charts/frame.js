@@ -68,8 +68,7 @@ export function layout({ width, height, panels, margin = {} }) {
 export function chart(model) {
   const figure = h('figure.chart', { dataset: { chart: model.key || '' } });
   if (model.absent) {
-    fill(figure, h('div.chart-absent', h('p.absent', { text: model.absent.text }),
-      model.absent.detail ? h('p.chart-note', { text: model.absent.detail }) : null));
+    fill(figure, absent(model.absent));
     return figure;
   }
   const readout = h('div.chart-readout', { text: model.readout || '' });
@@ -81,6 +80,57 @@ export function chart(model) {
       ? h('div.chart-notes', model.notes.map((n) => h('span.chart-note', { text: n })))
       : null);
   return figure;
+}
+
+/**
+ * The empty state, as the chart's **own footprint** rather than a sentence.
+ *
+ * R3·1 draws every unrun card's result slot as a named rectangle the size of
+ * the chart that will land in it — `transient`, `Q · loop`, `not run this
+ * session` — so the card has one geometry, not two, and the eye learns where
+ * to look before there is anything to look at. A model that carries `frame`
+ * gets that: the panels it will have, dashed, with their labels and the x
+ * axis's, and the message inside the first one. A model without `frame` keeps
+ * the plain box, which is all a note-sized absence needs.
+ */
+function absent(spec) {
+  const box = h('div.chart-absent' + (spec.frame ? '.framed' : ''));
+  if (spec.frame) box.append(absentSvg(spec));
+  else box.append(h('p.absent', { text: spec.text }));
+  if (spec.detail) box.append(h('p.chart-note', { text: spec.detail }));
+  return box;
+}
+
+function absentSvg(spec) {
+  const f = spec.frame;
+  const frame = layout({ width: f.width, height: f.height, panels: f.panels, margin: f.margin });
+  const kids = [];
+  for (const panel of frame.panels) {
+    const { rect } = panel;
+    kids.push(s('rect', {
+      x: rect.x, y: rect.y, width: rect.w, height: rect.h,
+      fill: 'none', stroke: paint('rule'), 'stroke-width': 1, 'stroke-dasharray': '3 3',
+    }));
+    if (panel.label) {
+      kids.push(s('text', {
+        x: rect.x, y: rect.y - 5,
+        style: { font: `600 9px ${FONT_S}`, fill: paint('grey') }, text: panel.label,
+      }));
+    }
+  }
+  const first = frame.panels[0].rect;
+  kids.push(s('text', {
+    x: first.x + first.w / 2, y: first.y + first.h / 2 + 4, 'text-anchor': 'middle',
+    style: { font: `400 11px ${FONT_S}`, fill: paint('grey') }, text: spec.text,
+  }));
+  if (f.xLabel) {
+    const last = frame.panels[frame.panels.length - 1].rect;
+    kids.push(s('text', {
+      x: last.x + last.w, y: last.y + last.h + 14, 'text-anchor': 'end',
+      style: { font: `400 9px ${FONT_S}`, fill: paint('grey') }, text: f.xLabel,
+    }));
+  }
+  return root(frame.width, frame.height, { class: 'chart-svg' }, ...kids);
 }
 
 function legend(entries) {
@@ -167,7 +217,13 @@ function renderPanel(panel, model) {
       stroke: paint(tick.zero ? 'rule' : 'grid'), 'stroke-width': 1,
     }));
     kids.push(s('text', {
-      x: rect.x - 4, y: tick.y + 3, 'text-anchor': 'end',
+      // `scale.fixed()` returns a **string**, so `tick.y + 3` concatenated
+      // rather than added: a label at y "124" was written to y "1243". Where
+      // the tick rounds to a fraction the extra digit only lands after the
+      // decimal point ("190.8" → "190.83") and every label sat 3 px high, on
+      // its own gridline; where it rounds to an integer — as the power
+      // chart's do — the labels left the panel entirely.
+      x: rect.x - 4, y: Number(tick.y) + 3, 'text-anchor': 'end',
       style: { font: `400 9.5px ${FONT_N}`, fill: paint('grey') }, text: tick.text,
     }));
   }

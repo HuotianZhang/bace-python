@@ -24,6 +24,7 @@
 // invents no value of its own — an absent reading renders as an absence.
 
 import { h, fill, keyed } from './dom.js';
+import { icon } from './icons.js';
 import * as fmt from './format.js';
 
 /** The relay's three nodes, left to right, as `design/BenchRail.dc.html` draws them. */
@@ -476,12 +477,34 @@ export function renderRail(el, state) {
   keyed(el, JSON.stringify(model), () => model.map(cellEl));
 }
 
+/**
+ * Which glyph belongs to which cell, from `design/icons.js` — the pack drew one
+ * per rail cell and R3·1 places them exactly here, on the label.
+ *
+ * A cell with no icon would be the odd one out in a row of eight, so every key
+ * is named rather than defaulted; a cell this map does not know falls back to
+ * the dashed ring, which reads as *nothing identified* instead of borrowing
+ * some other instrument's mark.
+ */
+const CELL_ICON = {
+  relay: 'relay',
+  bias: 'bias',
+  smu: 'smu',
+  shutter: 'shutter',
+  led: 'led',
+  voc: 'voc',
+  power: 'power',
+  temperature: 'temp',
+};
+
 function cellEl(cell) {
   const classes = ['brc'];
   if (cell.level) classes.push('lv-' + cell.level);
   if (cell.inferred) classes.push('inferred');
   return h('div', { class: classes.join(' ') },
-    h('span.brl', { text: cell.label },
+    h('span.brl',
+      icon(CELL_ICON[cell.key] || 'blank'),
+      h('span', { text: cell.label }),
       // The inferred mark rides on the label, so the value keeps the register
       // of a number: this cell is what the run implies, not what was read.
       cell.inferred ? h('span.tag-inferred', { title: 'implied by the running step, not read back', text: 'inferred' }) : null),
@@ -518,7 +541,13 @@ export function renderChainStrip(el, state, { onFix, onPark, onDismiss, status, 
     h('span.sk', { text: model.total === null ? 'trigger chain' : `trigger chain ${model.ok} / ${model.total}` }),
     model.items.map((item) => h('span', { class: 'st ' + (item.level === 'ok' ? '' : 'bad') },
       h('span', { text: `${item.label} ${item.value}` }),
-      h('span.mark', { text: item.level === 'ok' ? '✓' : '⚠' }),
+      // The verdict was a `✓` / `⚠` text character: 106 px² of glyph for the
+      // one thing on the strip that decides whether a result means anything.
+      // The pack's `ok` / `warn` are drawn to the same optical weight as the
+      // number beside them, and take the cell's colour through `currentColor`.
+      icon(item.level === 'ok' ? 'ok' : 'warn', {
+        cls: 'mark', size: 13, title: item.level === 'ok' ? 'reads as configured' : 'reads wrong',
+      }),
       item.action
         ? h('button.btns', {
           disabled: model.busy,

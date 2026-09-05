@@ -215,7 +215,17 @@ function baceResult(entry, found, bench) {
   const diagram = [timingFold(entry.name, timing)];
 
   const shot = found && found.node.lastShot;
-  if (!shot) return [...diagram, h('p.absent', 'no shot yet — the transient appears with the first one')];
+  // No early return for the unrun card. `transientModel(null)` and
+  // `loopsModel(null)` both answer with an `absent` model, and `chart()` draws
+  // that as the panels the run will fill — so the card has one geometry either
+  // side of a run rather than a sentence before and three charts after.
+  if (!shot) {
+    return [
+      chart(transientModel(null)),
+      chart(loopsModel(null)),
+      ...diagram,
+    ];
+  }
 
   const config = ((found.node.config || found.record.config || {}).run) || {};
   return [
@@ -240,6 +250,35 @@ function baceResult(entry, found, bench) {
  * trigger arrives, and a loose sync cable then produces a plausible
  * near-zero Q from untriggered noise.
  */
+/**
+ * The rows themselves, as `[label, value]` pairs — the model beside the DOM,
+ * the same split the rail and the charts have.
+ *
+ * It is these rows, and no longer the chart's readout, that state Q, the
+ * running mean and σ: the readout row belongs to the crosshair, and printing
+ * the three numbers there as well said them twice on one card, the second time
+ * without the shot or the point they belong to. So `ui-rules` §2's rule about
+ * the σ that is not a zero is this function's to keep, and
+ * `ui/tests/charts.test.mjs` holds it here.
+ */
+export function shotRows(shot, found) {
+  const v = shot.verdict || null;
+  const sigma = fmt.sigmaQ(shot.q_std);
+  // `StepDone.index` counts from zero; the operator counts shots from one,
+  // as the monitor's `shot 4 of 24` and the record's `kept` do.
+  const nth = shot.index + 1;
+  const rows = [
+    ['Q · shot ' + nth, fmt.charge(shot.q)],
+    [`running mean · point ${shot.step}`, fmt.charge(shot.q_mean)],
+    [`σ · point ${shot.step}`, sigma ? `${sigma} C` : 'σ_Q not recorded'],
+  ];
+  if (v) {
+    rows.push(['peak · light', fmt.amps(v.peak_light_a)]);
+    rows.push(['peak · dark', fmt.amps(v.peak_dark_a)]);
+  }
+  return rows;
+}
+
 export function shotBlock(shot, found, config) {
   const v = shot.verdict || null;
   const axis = (found && found.node && found.node.axis) || null;
@@ -248,21 +287,10 @@ export function shotBlock(shot, found, config) {
     ? ` · ${axis.name} ${fmt.sig(shot.axis_value, 4)}${unit ? ' ' + unit : ''}`
     : '';
   const level = v && v.level === 'warn' ? 'alert' : v ? 'ok' : '';
-  const sigma = fmt.sigmaQ(shot.q_std);
   const nearZero = v && Number.isFinite(shot.q) && Number.isFinite(v.peak_light_a)
     && Math.abs(shot.q) < 1e-13;
-  // `StepDone.index` counts from zero; the operator counts shots from one,
-  // as the monitor's `shot 4 of 24` and the record's `kept` do.
   const nth = shot.index + 1;
-  const rows = [
-    ['Q · shot ' + nth, fmt.charge(shot.q)],
-    [`running mean · point ${shot.step}`, fmt.charge(shot.q_mean)],
-    [`σ · point ${shot.step}`, sigma ? `${sigma} C` : 'not recorded'],
-  ];
-  if (v) {
-    rows.push(['peak · light', fmt.amps(v.peak_light_a)]);
-    rows.push(['peak · dark', fmt.amps(v.peak_dark_a)]);
-  }
+  const rows = shotRows(shot, found);
   const trigger = config.trigger_sweep ? String(config.trigger_sweep).toUpperCase() : null;
   return h('div.shot', { class: level },
     h('div.shot-head',
@@ -305,7 +333,9 @@ function jvResult(found) {
   // The curve being swept, drawn with the finished ones — point by point,
   // as the service streams them (`JVPoint`, live-only).
   if (node && node.partial && node.partial.voltage.length) curves.push(node.partial);
-  if (!curves.length) return [h('p.absent', 'no curves yet — a sweep draws here point by point as it is read')];
+  // As in `baceResult`: `jvModel([])` is an `absent` model, and the frame it
+  // carries is the sweep's own, so the slot holds its shape before the run.
+  if (!curves.length) return [chart(jvModel([]))];
   // The planned sweep range, so the axis does not grow with the curve.
   const jv = found.record && found.record.jv;
   const cfg = jv && jv.config && jv.config.jv;
