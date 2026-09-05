@@ -96,19 +96,26 @@ export function panelModel(bench, light) {
 
 /**
  * The panel. `ctx` is `{busy, act(action, args), edit(module, params),
- * park()}`; `park` is the strip's own, so the arm-then-confirm it does while
- * a run holds the worker is one implementation.
+ * park(), parkArmed}`; `park` is the strip's own, so the arm-then-confirm it
+ * does while a run holds the worker is one implementation — and `parkArmed`
+ * is that same flag, so the button that was clicked is the button that asks
+ * (#42). Without it the first click on a busy bench changed nothing here and
+ * put the question at the foot of the page, where nobody was looking.
  */
 export function renderInstruments(model, ctx) {
   const busy = Boolean(ctx.busy);
+  const armed = Boolean(ctx.parkArmed);
   return h('div.inst',
     h('div.zh',
       h('span.zt', 'Instruments'),
       h('span', { style: { flex: '1' } }),
-      h('button.btnd', {
-        title: busy ? 'abort the run and park — the chain strip asks first' : 'outputs off, shutter shut, relay parked',
+      h('button', {
+        class: armed ? 'btnd armed' : 'btnd',
+        title: busy
+          ? 'park aborts the run and cancels the queue — the bench is safe now, not after the queue'
+          : 'outputs off, shutter shut, relay parked',
         onclick: () => ctx.park(),
-      }, 'Park')),
+      }, armed ? 'abort the run and park?' : 'Park')),
     model.rows.map((row) => h('div.irow', { class: row.inferred ? 'inferred' : '' },
       h('span.n', { text: row.label }),
       h('span.sw', { role: 'group', 'aria-label': row.label, title: row.inferred ? 'inferred from the running step, not read back' : '' },

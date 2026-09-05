@@ -148,8 +148,8 @@ export function scheduleModel({ blocks, cost, width = 900, height = 118, now = n
   const totalText = (lower ? 'at least ' : '') + fmt.duration(total);
   const notes = [];
   notes.push(`${spans.length} ${spans.length === 1 ? 'block' : 'temperatures'} · `
-    + `${list.reduce((n, b) => n + (b.modules || 0), 0)} module runs · `
-    + `${list.reduce((n, b) => n + (b.shots || 0), 0)} shots`);
+    + `${fmt.plural(list.reduce((n, b) => n + (b.modules || 0), 0), 'module run')} · `
+    + `${fmt.plural(list.reduce((n, b) => n + (b.shots || 0), 0), 'shot')}`);
   notes.push(startAt
     ? `start ${fmt.clock(startAt)} · finish ${fmt.clock(finishAt)} · ${totalText}`
     : `${totalText} from Start · the axis is elapsed time, because no finish time is knowable yet`);

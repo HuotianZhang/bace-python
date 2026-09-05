@@ -141,7 +141,7 @@ function provSummary(model) {
   // a loop's, measured) keep their own tag and are not counted as "the rest".
   const order = ['run.toml', 'last-used', 'default'];
   const text = order.filter((k) => counted.has(k))
-    .map((k) => (k === 'default' ? `${counted.get(k)} default${counted.get(k) === 1 ? '' : 's'}` : `${counted.get(k)} from ${k}`))
+    .map((k) => (k === 'default' ? fmt.plural(counted.get(k), 'default') : `${counted.get(k)} from ${k}`))
     .join(' · ');
   return h('div.provsum', { text });
 }
@@ -188,9 +188,12 @@ export function field(spec, ctx, model, { segmented = false, accent = false, lab
   if (spec.inert) cls.push('inert');
 
   const commit = (value) => ctx.edit(model.name, { [spec.name]: value });
+  // `input` answers the non-editable and inert cases itself — it has to, for
+  // the composite rows that reach it directly — so there is one path to the
+  // control, and a boolean is a checkbox on all of them.
   return h('div.pw', h('div.' + cls.join('.'), help(spec),
     label(spec, ctx, model, text),
-    editable ? input(spec, commit, segmented) : h('span.v', { text: display(spec) }),
+    input(spec, commit, segmented),
     spec.inert
       ? h('span.src', h('span.tag.off', { title: spec.inert, text: 'not read' }))
       : provenance(spec, ctx, model, editable)), docLine(spec, ctx, model));
@@ -199,7 +202,6 @@ export function field(spec, ctx, model, { segmented = false, accent = false, lab
 /** The value as text, for a field the operator may not type into. */
 function display(spec) {
   if (spec.value === null || spec.value === undefined) return fmt.ABSENT;
-  if (spec.type === 'bool') return spec.value ? 'true' : 'false';
   return typed(spec);
 }
 
@@ -236,25 +238,60 @@ function option(label, on, commit) {
   }, label);
 }
 
+/**
+ * A boolean is a checkbox.
+ *
+ * It was a `true | false` pair in the setting family's look, which is
+ * programmer vocabulary wearing a control's clothes (#42): every operator
+ * alive already knows a tick means on, and nobody outside this repository
+ * reads `false` as "the LED does not invert". The row's label is the name of
+ * the thing, so the box carries no text of its own — `aria-label` gives a
+ * screen reader the same name the row shows.
+ *
+ * A boolean that is `null` is neither: the service has not said, and a box
+ * drawn empty would claim `false`. `indeterminate` is a property and not an
+ * attribute, so it is set after the element exists.
+ */
+function checkbox(spec, commit, { disabled = false, title = null } = {}) {
+  const el = h('input.cbx', {
+    type: 'checkbox',
+    'aria-label': spec.name,
+    checked: spec.value === true,
+    disabled: disabled || null,
+    title,
+    onchange: commit ? (e) => commit(e.target.checked) : null,
+  });
+  el.indeterminate = spec.value === null || spec.value === undefined;
+  return el;
+}
+
 function input(spec, commit, segmented, { blank = false } = {}) {
-  // **Not editable is not an input, wherever the value is drawn.** `field`
-  // branches on this too, but the composite rows — the range, the V_oc row's
-  // `led_v`, the polarity pair — reach `input` directly, and the pipeline
-  // tab's node form is where that matters: `led_v` inside an illumination
-  // loop resolves `inherited`, which `params.LOCKED` makes non-editable on
-  // the wire whatever the spec says, and `ParamSet.set_edited` refuses. An
-  // input there offered an override that could only ever end in
-  // `tree.owned-param` refusing the tree. `ui-rules` §6: an inherited value
-  // reads as inherited, showing the value it will get.
-  if (spec.editable === false) return h('span.v', { text: display(spec) });
+  // **Not editable is not an input, wherever the value is drawn.** Every row
+  // reaches this — `field`, and the composites that build their own controls:
+  // the range, the V_oc row's `led_v`, the polarity pair. The pipeline tab's
+  // node form is where that matters: `led_v` inside an illumination loop
+  // resolves `inherited`, which `params.LOCKED` makes non-editable on the wire
+  // whatever the spec says, and `ParamSet.set_edited` refuses. An input there
+  // offered an override that could only ever end in `tree.owned-param`
+  // refusing the tree. `ui-rules` §6: an inherited value reads as inherited,
+  // showing the value it will get.
+  // A boolean stays a checkbox when it may not be typed into — a disabled box
+  // still reads as on or off, where `false` in a value column reads as a word
+  // somebody wrote.
+  if (spec.editable === false) {
+    return spec.type === 'bool'
+      ? checkbox(spec, null, { disabled: true })
+      : h('span.v', { text: display(spec) });
+  }
   // Not read in this configuration (`fields.inertReason`): shown, not typed
   // into. The value stays so it is there when the setting that reads it is
   // turned back on; the reason is on the row's tag and on hover here.
-  if (spec.inert) return h('span.v.off', { text: display(spec), title: spec.inert });
-  if (spec.type === 'bool') {
-    return h('span.bool', { role: 'group', 'aria-label': spec.name },
-      ...[true, false].map((v) => option(v ? 'true' : 'false', spec.value === v, () => commit(v))));
+  if (spec.inert) {
+    return spec.type === 'bool'
+      ? checkbox(spec, null, { disabled: true, title: spec.inert })
+      : h('span.v.off', { text: display(spec), title: spec.inert });
   }
+  if (spec.type === 'bool') return checkbox(spec, commit);
   if (spec.type === 'enum' && segmented) {
     return h('span.seg', { role: 'group', 'aria-label': spec.name },
       ...spec.choices.map((choice) => option(choice, spec.value === choice, () => commit(choice))));
@@ -482,8 +519,12 @@ function polarityRow(row, ctx, model) {
     h('span.v',
       h('span.seg', { role: 'group', 'aria-label': mode.name },
         ...mode.choices.map((choice) => option(choice, mode.value === choice, () => commit(choice)))),
+      // `inverted_output` is a boolean on the wire and *not* a checkbox on the
+      // screen: what it selects is a polarity, and the two positions have
+      // names the operator already reads on the instrument. A tick beside
+      // `inverted_output` would be a box whose meaning is the word next to it.
       auto
-        ? h('span.bool', { role: 'group', 'aria-label': row.fallback.name },
+        ? h('span.seg', { role: 'group', 'aria-label': row.fallback.name },
           ...[true, false].map((v) => option(v ? 'INV' : 'NORM', row.fallback.value === v,
             () => ctx.edit(model.name, { inverted_output: v }))))
         : null,

@@ -56,7 +56,7 @@ export function shotSegments(values = {}) {
       detail: `settle_s ${seconds(settle)} + shutter_settle_s ${seconds(shutter)}`,
       mark: values.read_intensity ? 'power read' : null },
     { key: 'acquire-light', phase: 'acquire light', label: 'acquire light', seconds: acquire,
-      detail: `${averages} averages at ${fmt.sig(frequency, 3)} Hz · autoranging`, accent: true },
+      detail: `${fmt.plural(averages, 'average')} at ${fmt.sig(frequency, 3)} Hz · autoranging`, accent: true },
     { key: 'dark-levels', phase: 'dark levels', label: 'dark levels', seconds: same ? 0 : darkSettle,
       detail: same
         ? 'skipped · dark_reference = same leaves the levels alone, and dark_settle_s never sleeps'
@@ -65,7 +65,7 @@ export function shotSegments(values = {}) {
     { key: 'dark-settle', phase: 'dark settle', label: 'dark settle', seconds: shutter,
       detail: `close the shutter, then shutter_settle_s ${seconds(shutter)}`, mark: 'shutter shuts' },
     { key: 'acquire-dark', phase: 'acquire dark', label: 'acquire dark', seconds: acquire,
-      detail: `${averages} averages · the range is inherited, not re-found`, accent: true },
+      detail: `${fmt.plural(averages, 'average')} · the range is inherited, not re-found`, accent: true },
     { key: 'process', phase: 'process', label: 'process', seconds: 0,
       detail: 'subtract, baseline-correct, integrate — one Q' },
   ];

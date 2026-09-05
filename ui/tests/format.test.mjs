@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { charge, sigmaQ, volts, kelvin, intensity, duration, keptOf, sig, ABSENT } from '../lib/format.js';
+import { charge, sigmaQ, volts, kelvin, intensity, duration, keptOf, plural, sig, ABSENT } from '../lib/format.js';
 
 test('a charge keeps five to six significant figures, in the archive\'s own spelling', () => {
   assert.equal(charge(3.65257e-10), '3.65257e-10 C');
@@ -43,4 +43,12 @@ test('significant figures, not decimal places', () => {
   assert.equal(sig(0.55051, 3), '0.551', 'FF, to three');
   assert.equal(sig(126.127, 3), '126', 'J_sc in A/m², to three');
   assert.equal(sig(0, 3), '0');
+});
+
+test('a count of one is singular — the schedule footer said "writes 1 folders"', () => {
+  assert.equal(plural(1, 'folder'), '1 folder');
+  assert.equal(plural(4, 'folder'), '4 folders');
+  assert.equal(plural(0, 'folder'), '0 folders', 'none of them is plural, as English has it');
+  assert.equal(plural(1, 'module run'), '1 module run', 'the noun is the whole phrase');
+  assert.equal(plural(2, 'module run'), '2 module runs');
 });

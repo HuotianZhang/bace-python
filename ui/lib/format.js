@@ -146,3 +146,20 @@ export function keptOf(kept, requested) {
   if (requested === null || requested === undefined) return String(kept);
   return `${kept}/${requested}`;
 }
+
+/**
+ * `1 folder`, `4 folders` — a count and the thing it counts.
+ *
+ * The schedule footer said "writes 1 folders" (#42), and it was not alone:
+ * every counter on the pipeline tab was a template literal with a hard `s`
+ * on the end. A count of one is the ordinary case for most of them — one
+ * module, one level, one shot — so it is not a corner worth spelling out
+ * inline eight times.
+ *
+ * English, and only where English already agrees with itself: the irregular
+ * plurals this console needs are none, so the rule is the `s`, with `many`
+ * there for a word that would not take it.
+ */
+export function plural(n, one, many = `${one}s`) {
+  return `${n} ${Math.abs(n) === 1 ? one : many}`;
+}

@@ -350,9 +350,8 @@ export default {
       keyed(headEl, JSON.stringify([s, runs, v.moduleNames, Boolean(typed), selected, recipes.length, inflight]), () => [
         h('span.cn', 'structure'),
         h('span.cs', {
-          text: `${s.loops} ${s.loops === 1 ? 'loop' : 'loops'} · ${s.modules} `
-            + `${s.modules === 1 ? 'module' : 'modules'}`
-            + (runs === undefined ? '' : ` · ${runs} runs`),
+          text: `${fmt.plural(s.loops, 'loop')} · ${fmt.plural(s.modules, 'module')}`
+            + (runs === undefined ? '' : ` · ${fmt.plural(runs, 'run')}`),
         }),
         inflight ? h('span.cs', { text: '· checking' }) : null,
         h('span', { style: { flex: '1' } }),
@@ -427,8 +426,8 @@ export default {
         v.rows.map((r) => [r.runs, r.shots, r.needs_operator, r.relay_transition, r.estimate_s, r.measure_s])]);
       keyed(treeEl, key, () => {
         if (!typed) {
-          return h('p.absent', 'no nodes yet — a pipeline with nothing in it runs nothing. '
-            + 'Add a loop or a module above, or reopen one of the saved recipes below.');
+          return h('p.absent', 'no nodes yet — add a loop or a module above, '
+            + 'or reopen one of the saved recipes below.');
         }
         return v.rows.map((row) => treeRow(row, v));
       });
@@ -463,7 +462,7 @@ export default {
           tags.push(h('span.cs', { title: 'the router moves at this boundary; the interlock refuses while a source is live', text: `relay → ${row.relay}` }));
         }
         if (row.runs > 1) tags.push(h('span.cs', { text: `× ${row.runs}` }));
-        if (row.shots) tags.push(h('span.cs', { text: `${row.shots} shots` }));
+        if (row.shots) tags.push(h('span.cs', { text: fmt.plural(row.shots, 'shot') }));
         if (row.estimate_s !== null && row.estimate_s !== undefined) {
           tags.push(h('span.cs', { text: fmt.duration(row.estimate_s) }));
         }
@@ -590,7 +589,7 @@ export default {
               onchange: (e) => commitField(n, e.target.value),
             })) : null,
             form === 'range' && row && row.values
-              ? h('i.pts', { text: `${row.values.length} values` })
+              ? h('i.pts', { text: fmt.plural(row.values.length, 'value') })
               : null),
           h('span.src')));
         if (form === 'range') {
@@ -842,7 +841,7 @@ export default {
           const settles = row.loop === 'temperature' ? row.iterations.map((it) => it.settle_s) : null;
           return h('div.vlist-block',
             h('div.cs', {
-              text: `${row.loop} · ${row.values.length} values`
+              text: `${row.loop} · ${fmt.plural(row.values.length, 'value')}`
                 + (settles ? ' · settle measured on this bench at each' : spec && spec.owns ? ` · ${spec.owns}` : ''),
             }),
             h('div.lst', { style: { gridTemplateColumns: `repeat(${row.values.length}, auto)` } },
@@ -877,10 +876,10 @@ export default {
             num('waiting for T', c.waiting_s, c.waiting_s === null ? '' : c.prefix)),
           h('div.cs', {
             text: [
-              counters.temperatures ? `${counters.temperatures} temperatures` : null,
-              counters.levels ? `${counters.levels} levels` : null,
-              counters.modules ? `${counters.modules} module runs` : null,
-              counters.shots ? `${counters.shots} shots` : null,
+              counters.temperatures ? fmt.plural(counters.temperatures, 'temperature') : null,
+              counters.levels ? fmt.plural(counters.levels, 'level') : null,
+              counters.modules ? fmt.plural(counters.modules, 'module run') : null,
+              counters.shots ? fmt.plural(counters.shots, 'shot') : null,
               c.t_shot_s ? `shot ${fmt.duration(c.t_shot_s)} (${c.t_shot_source})` : null,
               c.finish_at ? `finish ${fmt.clock(c.finish_at)}` : null,
             ].filter(Boolean).join(' · '),
@@ -891,7 +890,7 @@ export default {
                 ? `a floor, not an estimate: ${c.unmeasured.length} of ${c.per_temperature.length} `
                   + 'temperatures have no settle measured on this bench, and a settle is 14 minutes to '
                   + '2 hours. The journal fills them in as this bench measures them.'
-                : `a floor, not an estimate: ${c.unestimated} module runs cost nothing the catalogue can estimate.`,
+                : `a floor, not an estimate: ${fmt.plural(c.unestimated, 'module run')} cost nothing the catalogue can estimate.`,
             })
             : null,
         ];
@@ -914,7 +913,7 @@ export default {
         const shown = showAllChecks ? c.ordered : c.notable;
         return [
           h('div.cksum',
-            h('span.m', { text: `${c.total} checks` }),
+            h('span.m', { text: fmt.plural(c.total, 'check') }),
             ...tree.LEVELS.filter((l) => c.counts[l]).map((l) => h('span.tag.' + tagClass(l), { text: `${c.counts[l]} ${l}` })),
             v.stale ? h('span.cs', { text: '· the structure has changed since' }) : null,
             h('span', { style: { flex: '1' } }),
@@ -1192,7 +1191,7 @@ export default {
       keyed(gridEl, JSON.stringify([grid && grid.temperatures, grid && grid.levels, grid && grid.count]), () => {
         if (!grid) return null;
         return [
-          h('div.cs', { text: `the cells it fills · ${grid.count} module runs over ${grid.temperatures.length} × ${grid.levels.length}` }),
+          h('div.cs', { text: `the cells it fills · ${fmt.plural(grid.count, 'module run')} over ${grid.temperatures.length} × ${grid.levels.length}` }),
           h('div.lst', { style: { gridTemplateColumns: `auto repeat(${grid.levels.length}, 1fr)` } },
             h('span.h', 'T / K'),
             grid.levels.map((led) => h('span.h', { text: Number(led).toFixed(3) })),
@@ -1210,7 +1209,7 @@ export default {
       // The operator sees the folder's name under the out directory; the full
       // path is one hover away (#38).
       keyed(folderEl, JSON.stringify([folder, v.counters.modules]), () => (folder
-        ? [`writes ${v.counters.modules || 0} folders under `,
+        ? [`writes ${fmt.plural(v.counters.modules || 0, 'folder')} under `,
           h('span.path', { title: folder, text: folder.replace(/\/+$/, '').split('/').pop() + '/' }),
           ' — the stamp is taken at Start, so a Dry run cannot name it. '
           + 'A run that stops early says kept of requested.']
@@ -1234,7 +1233,7 @@ export default {
             : null,
           h('span', { style: { flex: '1' } }),
           node.relay_transition ? h('span.cs', { text: `relay ${node.relay_from} → ${node.relay}` }) : null,
-          node.shots ? h('span.cs', { text: `${node.shots} shots` }) : null,
+          node.shots ? h('span.cs', { text: fmt.plural(node.shots, 'shot') }) : null,
           h('span.cs', { text: fmt.duration(node.estimate_s) }));
       }
       const open = expanded.has(node.node_path);
@@ -1254,8 +1253,8 @@ export default {
             ? h('span.d', { text: `settle ${node.settle_s === null || node.settle_s === undefined ? fmt.ABSENT : fmt.duration(node.settle_s)}` })
             : null,
           h('span', { style: { flex: '1' } }),
-          h('span.cs', { text: `${node.modules} runs` }),
-          node.shots ? h('span.cs', { text: `${node.shots} shots` }) : null,
+          h('span.cs', { text: fmt.plural(node.modules, 'run') }),
+          node.shots ? h('span.cs', { text: fmt.plural(node.shots, 'shot') }) : null,
           h('span.cs', { text: fmt.duration(node.measure_s) + (spec && node.loop === 'temperature' ? ' measuring' : '') })),
         open ? node.children.map((child) => schedNode(child)) : null);
     }
@@ -1294,13 +1293,13 @@ export default {
       }
       const voc = leaves.filter((l) => l.voc && l.voc.how);
       if (voc.length) {
-        out.push(`V_oc ← ${voc[0].voc.how} at the same led_v · ${voc.length} centred scans`);
+        out.push(`V_oc ← ${voc[0].voc.how} at the same led_v · ${fmt.plural(voc.length, 'centred scan')}`);
       }
       const transitions = leaves.filter((l) => l.relay_transition).length;
-      if (transitions) out.push(`relay moves at ${transitions} jv ↔ bace boundaries`);
+      if (transitions) out.push(`relay moves at ${fmt.plural(transitions, 'jv ↔ bace boundary', 'jv ↔ bace boundaries')}`);
       const bound = leaves.filter((l) => l.temperature && l.temperature.how === 'module');
       if (bound.length) {
-        out.push(`a temperature node binds ${bound.length} later nodes — the rest of the run, not the rest of one iteration`);
+        out.push(`a temperature node binds ${fmt.plural(bound.length, 'later node')} — the rest of the run, not the rest of one iteration`);
       }
       return out;
     }

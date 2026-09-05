@@ -289,6 +289,13 @@ The dangerous class. `service-contract.md` §3 carries the saturation rule as
 - Empty states that need drawing: no device mounted · no run yet · a pipeline
   with zero nodes · a module never run this session · the power-meter console
   down · temperature not wired at all.
+- **An empty state says what is there, or what to do — never why the missing
+  thing is missing.** "no bace node in this run — the grid is one cell per
+  bace; the nodes are listed below" told the operator how this console is
+  built in order to explain an absence they had not asked about. "no bace node
+  in this run — its nodes are listed below" points at what they can read
+  instead, and "no nodes yet — add a loop or a module above" at what they can
+  do. The internals are the author's problem.
 
 ---
 
@@ -379,7 +386,7 @@ that answers:
 
 | a click… | family | in `style.css` | looks like |
 |---|---|---|---|
-| **changes a value a later Run reads** — a setting | `.seg` (enums), `.bool` | grey border, the chosen option white on ink; the swept axis's chooser is white on the accent | `true \| false`, `vpre \| vcoll \| delay_ns`, `auto \| NORM \| INV \| leave` |
+| **changes a value a later Run reads** — a setting | `.seg` (enums), `.cbx` (booleans) | grey border, the chosen option white on ink; the swept axis's chooser is white on the accent; a boolean is a checkbox in the same ink | `vpre \| vcoll \| delay_ns`, `auto \| NORM \| INV \| leave`, and a tick for `both_directions` |
 | **acts on the bench the moment it lands** — an instrument switch | `.sw` | ink border, a larger hit target, the lit position filled grey with the accent under it; dashed and grey-underlined when the position is inferred, not read back | Instruments: `open \| shut`, `off \| DC \| pulse`, `amplifier \| sourcemeter`; the power monitor's `every 0.2 s … 5 s`, which stops and restarts the service's polling of the meter |
 | **changes only what is drawn** — a view filter | `.filt` (a group of `.opt`s), or a lone `button.filt` toggle | no border, no fill; the chosen option is bold with a rule under it | the power monitor's `window auto … all`, inside its `⋯` menu; the results grid's `Q(led_v) per T \| Q(T) per led_v` |
 
@@ -388,6 +395,17 @@ relay is a switch even though it has two positions like a boolean; a chip
 that only re-plots is a filter even though it looks like an enum. A control
 that does not fit is a sign the action itself is unclear — settle that
 first.
+
+**Within the setting family, a boolean is a checkbox** (#42). It was a
+`true | false` pair in the family's own look, which is the wire's vocabulary
+wearing a control's clothes: everyone already reads a tick as on, and nobody
+outside this repository reads `false` as "the LED does not invert". A box
+that is neither — the service has not said — is drawn indeterminate rather
+than empty, because an empty box claims `false`. The exception is a boolean
+whose two positions have *names on the instrument*: `inverted_output` is a
+`bool` on the wire and `NORM | INV` on the screen, because that is what the
+81150A's own front panel says. A tick beside `inverted_output` would be a
+box whose meaning is the word next to it.
 
 **And a fourth question before the family: how often is it touched?** A
 control the operator reaches for less than once a session does not sit on

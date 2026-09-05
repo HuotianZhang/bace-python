@@ -83,9 +83,13 @@ function show() {
   if (mounted && mounted.dispose) mounted.dispose();
   viewEl.scrollTop = 0;
   mountedRoute = name;
-  // `park` is the strip's: the bench tab's Instruments panel offers the same
-  // button, and a busy bench arms it there exactly as it does on the strip.
-  mounted = BY_ROUTE[name].mount(viewEl, { store, api, stream, fmt, notify, park, query });
+  // `park` is the strip's, and `parkArmed` reads the *same* armed flag: the
+  // bench tab's Instruments panel offers the same button, so it must arm and
+  // confirm where it is clicked rather than send the operator to the strip to
+  // find out what their click did (#42).
+  mounted = BY_ROUTE[name].mount(viewEl, {
+    store, api, stream, fmt, notify, park, parkArmed: () => parkArmed, query,
+  });
   renderTabs();
 }
 
@@ -97,21 +101,22 @@ function renderTabs() {
   })));
 }
 
+/**
+ * The bar's chips. **The trigger chain is not among them** (#42): it was in
+ * the bar, on the rail cells as a ⚠, and on the strip with the button that
+ * fixes it — one state on three surfaces, which is three places to reconcile
+ * and two that can only say something is wrong. The strip is the one that
+ * carries the count *and* the fix, and it is at the foot of every view, so
+ * the bar's copy went and the rail's ⚠ stays as what it always was: evidence
+ * on the value it is about.
+ */
 function renderChips(state) {
   const session = state.session || {};
-  const sample = session.sample || {};
-  const chain = (state.bench && state.bench.chain) || null;
-  const bad = chain ? chain.total - chain.ok : 0;
   const ident = identityModel(state);
-  const model = [bad && chain ? [chain.ok, chain.total, worstChain(chain)] : null,
-                 ident.chip, ident.unnamed, ident.hazards.length, identOpen,
+  const model = [ident.chip, ident.unnamed, ident.hazards.length, identOpen,
                  session.mode, session.fast, currentRun(state) ? runLabel(state) : null,
                  state.queue.length, state.benchState];
   keyed(chipsEl, JSON.stringify(model), () => [
-    // The chain's own summary rides in the bar, so a check that reads wrong is
-    // visible from the pipeline and the results tabs too — the strip that
-    // fixes it is at the foot of whichever view is open.
-    bad ? h('span.chip.bad', { text: `chain ${chain.ok} / ${chain.total} · ${worstChain(chain)}` }) : null,
     // The identity is a control, not a label. It said `no sample named` for
     // as long as the console has existed and gave the operator nowhere to go
     // with that; now the sentence is the button that answers it.
@@ -199,11 +204,6 @@ async function setSample(name, value) {
   renderChips(store.getState());
 }
 
-function worstChain(chain) {
-  const bad = (chain.items || []).find((item) => item.level !== 'ok');
-  return bad ? `${bad.label} ${bad.value}` : '';
-}
-
 /**
  * The chain strip's two actions. Neither is ever taken by the console itself:
  * `ui-rules` §3 — a warn states evidence and never blocks, and the fix is the
@@ -245,12 +245,26 @@ function dismiss() {
   drawStrip(store.getState());
 }
 
-/** An armed Park disarms itself: it is a confirmation, not a mode. */
+/**
+ * An armed Park disarms itself: it is a confirmation, not a mode.
+ *
+ * The flag is not in the store — it is the shell's, and it is drawn in two
+ * places: the strip, and the Instruments panel's copy of the same button. The
+ * panel is a view, and a view redraws on a store notify, which this is not; so
+ * arming pokes it directly. A view that does not offer Park has no `redraw`
+ * and there is nothing to poke.
+ */
 function armPark(on) {
   parkArmed = on;
   clearTimeout(parkArmedTimer);
-  parkArmedTimer = on ? setTimeout(() => { parkArmed = false; drawStrip(store.getState()); }, 6000) : null;
+  parkArmedTimer = on ? setTimeout(() => { parkArmed = false; drawPark(); }, 6000) : null;
+  drawPark();
+}
+
+/** Both places the armed flag is drawn. */
+function drawPark() {
   drawStrip(store.getState());
+  if (mounted && mounted.redraw) mounted.redraw();
 }
 
 async function fix(name, item) {
@@ -486,7 +500,7 @@ async function clearPowerHistory() {
   try {
     const out = await api.clearPowerHistory();
     store.clearPowerLog();
-    powerSay('', `cleared ${out.cleared} readings · the journal keeps them`);
+    powerSay('', `cleared ${fmt.plural(out.cleared, 'reading')} · the journal keeps them`);
   } catch (error) {
     powerSay('bad', error.text || error.message);
   }
@@ -634,11 +648,11 @@ function renderBar(state) {
     h('span', { text: c.state || 'idle' }),
     h('span', { text: `session ${c.session || fmt.ABSENT}` }),
     h('span', { text: `seq ${c.lastSeq ?? c.seq ?? fmt.ABSENT}` }),
-    h('span', { text: `${stats.frames || 0} frames` }),
+    h('span', { text: fmt.plural(stats.frames || 0, 'frame') }),
     stats.duplicates ? h('span', { text: `${stats.duplicates} deduped` }) : null,
-    stats.gaps ? h('span', { text: `${stats.gaps} gaps` }) : null,
-    stats.drops ? h('span', { text: `${stats.drops} drops · ${stats.reconnects} reconnects` }) : null,
-    stats.tracesGone ? h('span', { text: `${stats.tracesGone} traces replayed without their arrays` }) : null,
+    stats.gaps ? h('span', { text: fmt.plural(stats.gaps, 'gap') }) : null,
+    stats.drops ? h('span', { text: `${fmt.plural(stats.drops, 'drop')} · ${fmt.plural(stats.reconnects, 'reconnect')}` }) : null,
+    stats.tracesGone ? h('span', { text: `${fmt.plural(stats.tracesGone, 'trace')} replayed without their arrays` }) : null,
   ]);
 }
 
