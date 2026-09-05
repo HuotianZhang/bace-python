@@ -174,8 +174,8 @@ function switchRow(model, { onToggle }) {
   });
   const title = model.available === false
     ? model.reason
-    : model.running ? 'DELETE /monitors/power — the thread stops; the trace stays'
-      : `POST /monitors/power — a thread in the service reads the meter every ${model.interval_s} s, whether or not this page is open`;
+    : model.running ? 'stop reading the meter — the trace stays'
+      : `the service reads the meter every ${model.interval_s} s, whether or not this page is open`;
   return [
     h('label.pw-switch', { title }, box, h('span', 'power monitor')),
     model.wanted && !model.running && model.available !== false
@@ -224,11 +224,11 @@ function menu(model, { onInterval, onWindow, onChart, onZero, onClear, onExportC
         toggle('trace', model.chart, (v) => onChart && onChart(v), 'show or hide the trace'),
         toggle('y from 0', model.fromZero, (v) => onZero && onZero(v), 'pin the y axis to zero, so an LED that is off reads as off')),
       h('div.pw-opt.acts',
-        action('Export CSV', 'GET /monitors/power/history.csv — every reading the service holds, not only what this page saw',
+        action('Export CSV', 'every reading the service holds, not only what this page saw',
           !model.count, () => onExportCsv && onExportCsv()),
         action('Export SVG', 'the trace on screen, as an SVG file',
           !model.points.length || !model.chart, () => onExportSvg && onExportSvg()),
-        action('Clear', 'DELETE /monitors/power/history — forget the readings held; the journal keeps them',
+        action('Clear', 'forget the readings held; the journal keeps them',
           !model.count, () => onClear && onClear()))));
   details.addEventListener('mouseleave', () => { details.open = false; });
   return details;

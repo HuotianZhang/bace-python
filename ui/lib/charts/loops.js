@@ -149,8 +149,7 @@ export function loopsModel(found, options = {}) {
       absent: {
         text: shots.length ? 'the axis is not known' : 'no shots yet',
         detail: shots.length
-          ? 'the run began before this console could see it, and its AxisResolved is not in the ring — '
-            + 'GET /runs/{id}/data fills it in'
+          ? 'the run began before this console could see it — the axis arrives with the run’s record'
           : 'Q per loop, or Q(axis), appears with the first shot',
       },
       panels: [], notes: [],

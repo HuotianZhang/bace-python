@@ -378,7 +378,7 @@ function readoutLine(set) {
 function notes(set, { hasCumulative, derived, offset_corrected, dark_reference }) {
   const out = [];
   if (set.stride > 1) {
-    out.push(`decimated for the wire · 1 in ${set.stride} of ${set.nFull} · full precision on GET /runs/{id}/data`);
+    out.push(`decimated for the wire · 1 in ${set.stride} of ${set.nFull} · the file keeps full precision`);
   }
   if (set.loopAveraged) out.push('traces are the loop averages the run stored, not one shot');
   if (hasCumulative) {

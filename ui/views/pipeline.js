@@ -128,9 +128,6 @@ export default {
     const body = h('div.pipe');
     fill(container,
       h('h1', 'pipeline'),
-      h('p.lede', 'Compose the run from the same modules the bench tab fires one at a time. '
-        + 'Every count, cost and check below the tree is POST /pipelines/validate’s answer — '
-        + 'it touches nothing, and it is asked again on every edit.'),
       body);
 
     const structureEl = h('div.card.pipe-col');
@@ -447,7 +444,7 @@ export default {
         if (row.measure_s) tags.push(h('span.cs', { text: fmt.duration(row.measure_s) }));
       } else {
         const entry = v.catalogue[row.module];
-        if (!entry) tags.push(h('span.tag.bad', { title: 'GET /modules does not list it', text: 'unknown module' }));
+        if (!entry) tags.push(h('span.tag.bad', { title: 'this service has no module by that name', text: 'unknown module' }));
         else if (entry.status !== 'built') tags.push(h('span.tag.nb', { text: entry.status }));
         if (row.centre_on_voc) {
           tags.push(h('span.inh', {
@@ -699,7 +696,7 @@ export default {
     function moduleForm(node, row, v, open) {
       const catalogue = v.catalogue[node.module];
       if (!catalogue) {
-        return h('p.absent', { text: `${node.module} is not in GET /modules — this tree cannot run here` });
+        return h('p.absent', { text: `this service has no module named ${node.module} — this structure cannot run here` });
       }
       const overrides = node.params || {};
       /**
@@ -764,7 +761,7 @@ export default {
       if (first && first.led_v !== null && first.led_v !== undefined) where.push(`LED ${fmt.volts(first.led_v)}`);
       return h('div',
         !resolved
-          ? h('p.chart-note', 'the tree does not resolve yet, so this is the module as it stands on '
+          ? h('p.chart-note', 'the structure does not resolve yet, so this is the module as it stands on '
             + 'the bench with this node’s own overrides on it — not what the loops above would bind. '
             + 'The check list says what is wrong.')
           : row && row.runs > 1
@@ -863,7 +860,7 @@ export default {
      */
     function renderCost(v) {
       keyed(costEl, JSON.stringify([v.cost, v.counters]), () => {
-        if (!v.cost) return h('p.absent', 'no cost yet — the tree has not been checked.');
+        if (!v.cost) return h('p.absent', 'no cost yet — the structure has not been checked.');
         const c = v.cost;
         const counters = v.counters;
         return [
@@ -912,7 +909,7 @@ export default {
           h('div.cksum',
             h('span.m', { text: `${c.total} checks` }),
             ...tree.LEVELS.filter((l) => c.counts[l]).map((l) => h('span.tag.' + tagClass(l), { text: `${c.counts[l]} ${l}` })),
-            v.stale ? h('span.cs', { text: '· the tree has changed since' }) : null,
+            v.stale ? h('span.cs', { text: '· the structure has changed since' }) : null,
             h('span', { style: { flex: '1' } }),
             h('button.btng', { onclick: () => { showAllChecks = !showAllChecks; render(); } },
               showAllChecks ? 'collapse' : 'show')),
@@ -977,7 +974,7 @@ export default {
             disabled: !history.canUndo || null,
             title: history.canUndo
               ? `Ctrl-Z — takes back: ${history.undoLabel || 'the last change'}`
-              : 'nothing to take back on this tree',
+              : 'nothing to take back on this structure',
             onclick: () => step('undo'),
           }, history.canUndo && history.undoLabel ? `↶ undo · ${history.undoLabel}` : '↶ undo'),
           history.canRedo
@@ -990,23 +987,23 @@ export default {
             disabled: blocked || null,
             title: blocked
               ? (v.busy ? 'a run holds the worker; this would queue behind it'
-                : v.stale || inflight ? 'the tree has changed — checking it again'
+                : v.stale || inflight ? 'the structure has changed — checking it again'
                   : !typed ? 'nothing to run'
-                    : 'the checks refuse this tree; the list above says why')
-              : 'POST /pipelines — validates again with a fresh chain read-back, then queues',
+                    : 'the checks refuse this structure; the list above says why')
+              : 'checks the structure once more against the bench as it is now, then queues the run',
             onclick: start,
           }, c ? `Start · ${c.prefix ? c.prefix + ' ' : ''}${fmt.duration(c.total_s)}` : 'Start'),
           h('button', {
             class: armed ? 'btns armed' : 'btns',
             disabled: !typed || null,
             title: overwrites
-              ? `${stem} already exists — POST /pipelines/save writes over it, and the file it replaces is not in the undo history`
-              : 'POST /pipelines/save — writes the tree and the bench values it was saved with',
+              ? `${stem} already exists — saving writes over it, and the file it replaces is not in the undo history`
+              : 'writes the structure to a file, with the bench values it was saved with',
             onclick: save,
           }, armed ? `overwrite ${stem}?` : 'Save recipe'),
           h('button.btns', {
             disabled: !typed || null,
-            title: 'POST /pipelines/validate — touches nothing',
+            title: 'checks the structure without touching the bench',
             onclick: () => { showAllChecks = true; showFlat = false; revalidate({ now: true }); },
           }, 'Dry run')),
       ]);
@@ -1061,7 +1058,7 @@ export default {
           h('span', { text: `the bench has moved since ${loaded.name} was saved — its nodes will run with the bench, not the file:` }),
           h('span', { style: { flex: '1' } }),
           h('button.btns', {
-            title: 'PUT the recipe’s values back onto the bench, one module at a time',
+            title: 'put the recipe’s values back onto the bench, one module at a time',
             onclick: () => restoreBench(moved),
           }, '↺ bench to recipe'),
           h('button.btng', { title: 'keep the bench as it is', onclick: () => { loaded = null; render(); } }, 'keep bench')),
@@ -1151,7 +1148,7 @@ export default {
           text: v.cost
             ? `shot time from the ${v.cost.t_shot_source === 'journal' ? 'journal' : 'default'} · `
               + 'settle from what this bench has measured'
-            : 'from POST /pipelines/validate',
+            : 'from the last check of the structure',
         }),
         v.stale ? h('span.tag.nb', { text: 'stale' }) : null,
       ]);
@@ -1202,9 +1199,13 @@ export default {
       });
 
       const folder = v.shown && v.shown.folder_pattern;
+      // The operator sees the folder's name under the out directory; the full
+      // path is one hover away (#38).
       keyed(folderEl, JSON.stringify([folder, v.counters.modules]), () => (folder
-        ? `writes ${v.counters.modules || 0} folders under ${folder}/ — the stamp is taken at Start, `
-          + 'so a Dry run cannot name it. A run that stops early says kept of requested.'
+        ? [`writes ${v.counters.modules || 0} folders under `,
+          h('span.path', { title: folder, text: folder.replace(/\/+$/, '').split('/').pop() + '/' }),
+          ' — the stamp is taken at Start, so a Dry run cannot name it. '
+          + 'A run that stops early says kept of requested.']
         : ''));
     }
 
