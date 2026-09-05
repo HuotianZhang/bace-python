@@ -160,3 +160,14 @@ def test_a_delay_before_the_trigger_is_refused_not_sent():
 
     with pytest.raises(ValueError, match="before its own trigger"):
         pulse_levels(0.92, -1.0, 4.0, -TRIGGER_OFFSET_S * 1e9 - 1.0, 5000.0)
+
+
+def test_voc_flags_apply_to_one_side_of_the_axis_each():
+    """`centre_on_voc` is a swept vpre's, `vpre_on_voc` a pinned one's; the
+    other is inert. This is what lets the console hide the one that does not
+    apply and leave its value alone."""
+    from bace.core.axis import voc_flags
+    assert voc_flags({"axis_name": "vpre", "centre_on_voc": True, "vpre_on_voc": True}) == (True, False)
+    assert voc_flags({"axis_name": "delay_ns", "centre_on_voc": True, "vpre_on_voc": True}) == (False, True)
+    assert voc_flags({"axis_name": "vcoll", "centre_on_voc": True}) == (False, False)
+    assert voc_flags({"axis_name": "vpre"}) == (False, False)

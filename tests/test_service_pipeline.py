@@ -616,10 +616,12 @@ def test_a_compliance_above_the_bench_ceiling_is_crit():
 
 
 def test_axis_geometry_is_judged_by_axis_scanspec_and_pulse_levels():
+    # run.toml's `centre_on_voc = true` with the scan parameter switched to
+    # delay_ns is the bench's everyday case, not a fault: the flag is a swept
+    # vpre's and does not apply here (`core.axis.voc_flags`).
     v = validate(module("bace", measure_dc=True, axis_name="delay_ns", axis_start=0.0,
                         axis_stop=100.0, axis_step=10.0))
-    [bad] = v.by_code("axis.geometry")
-    assert bad.level == "invalid" and "centre_on_voc" in bad.text
+    assert levels(v, "axis.geometry") == ["ok"]
     v = validate(module("bace", measure_dc=True, axis_start=0.0, axis_stop=1.0,
                         axis_step=0.0, centre_on_voc=False))
     assert "positive step" in v.by_code("axis.geometry")[0].text
@@ -1037,11 +1039,24 @@ def test_a_pinned_prebias_on_voc_needs_a_source_and_a_pinned_vpre():
     assert step.params["voc"].source is Source.DERIVED and step.params["voc"].value == 0.906
     assert step.detail["voc_needed_by"] == ["vpre_on_voc"]
 
+    # The console hides `vpre_on_voc` when vpre is the swept axis, and a
+    # hidden flag is inert, not a fault: the swept tree is valid and V_oc is
+    # needed by `centre_on_voc` alone (`core.axis.voc_flags`).
     swept = dict(axis_name="vpre", axis_start=-0.1, axis_stop=0.1, axis_step=0.1,
                  centre_on_voc=True, vpre_on_voc=True)
     v = validate(module("bace", **swept), catalogue=cat, session_voc=voc)
-    [c] = v.by_code("axis.geometry")
-    assert c.level == "invalid" and "vpre_on_voc" in c.text and "swept axis" in c.text
+    assert v.valid, [c.text for c in v.checks if c.level != "ok"]
+    assert v.schedule.modules[0].detail["voc_needed_by"] == ["centre_on_voc"]
+
+    # And the mirror image, which is the one the bench hit: switch the scan
+    # parameter to delay_ns with `centre_on_voc` still true behind the hidden
+    # field. Shot and Scan were disabled by `axis.geometry` with nothing on
+    # screen to clear; now the flag does not apply and nothing needs a V_oc.
+    stale = dict(axis_name="delay_ns", axis_start=50.0, axis_stop=250.0, axis_step=50.0,
+                 centre_on_voc=True, vpre_on_voc=False, vpre=0.9)
+    v = validate(module("bace", **stale), catalogue=cat)
+    assert v.valid, [c.text for c in v.checks if c.level != "ok"]
+    assert v.schedule.modules[0].detail["voc_needed_by"] == []
 
 
 def test_the_temperature_check_tells_a_console_gone_since_start_from_an_instrument_silent():

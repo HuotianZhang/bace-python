@@ -212,8 +212,7 @@ function baceResult(entry, found, bench) {
   const rig = (bench && bench.rig && bench.rig.values) || {};
   const chain = (bench && bench.chain) || {};
   const timing = timingModel(values, { rig, chain });
-  const diagram = [chart(timing)];
-  if (timing.alerts.length) diagram.push(alertList(timing.alerts));
+  const diagram = [timingFold(entry.name, timing)];
 
   const shot = found && found.node.lastShot;
   if (!shot) return [...diagram, h('p.absent', 'no shot yet — the transient appears with the first one')];
@@ -315,6 +314,54 @@ function jvResult(found) {
   const out = [chart(model)];
   if (model.metrics.entries.length) out.push(metricsTable(model.metrics));
   return out;
+}
+
+/**
+ * Which timing diagrams are open, by module. Per session, not per rebuild:
+ * the panel is rebuilt on every edit and every shot, and a fold that closed
+ * on each of them would be a fold nobody could keep open.
+ */
+const openTiming = new Set();
+
+/** `2 alerts · 1 warn` — the counts a shut fold shows, worst level first. */
+export function alertSummary(alerts) {
+  const order = ['invalid', 'alert', 'warn', 'info'];
+  const counts = order.map((level) => [level, alerts.filter((a) => a.level === level).length])
+    .filter(([, n]) => n > 0);
+  return {
+    worst: counts.length ? counts[0][0] : null,
+    text: counts.length ? counts.map(([level, n]) => `${n} ${level}`).join(' · ') : 'nothing to flag',
+  };
+}
+
+/**
+ * The timing diagram behind one line. It is the form drawn (`ui-rules` §7),
+ * and the alerts under it are the reason the drawing is on the card at all —
+ * but before a run the card is the form, and the drawing is most of its
+ * height. Shut, the line still carries the count and the worst level, in
+ * that level's colour, so nothing the diagram would have said is silent.
+ */
+function timingFold(name, timing) {
+  const summary = alertSummary(timing.alerts);
+  const open = openTiming.has(name);
+  const body = h('div.tbody', { hidden: !open }, chart(timing),
+    timing.alerts.length ? alertList(timing.alerts) : null);
+  const button = h('button.btng', { type: 'button', class: open ? 'on' : '', 'aria-expanded': String(open) },
+    open ? 'hide' : 'show');
+  button.onclick = () => {
+    if (openTiming.has(name)) openTiming.delete(name); else openTiming.add(name);
+    const now = openTiming.has(name);
+    body.hidden = !now;
+    button.textContent = now ? 'hide' : 'show';
+    button.classList.toggle('on', now);
+    button.setAttribute('aria-expanded', String(now));
+  };
+  return h('div.tfold',
+    h('div.foldbar',
+      h('span.cs', 'timing diagram'),
+      h('span', { class: 'cs tsum ' + (summary.worst || 'none'), text: summary.text }),
+      button),
+    body);
 }
 
 function alertList(alerts) {

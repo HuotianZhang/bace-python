@@ -25,7 +25,7 @@ Nothing in this module knows about instruments.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Iterator, Literal
+from typing import Any, Iterator, Literal, Mapping
 
 import numpy as np
 
@@ -33,6 +33,23 @@ AxisName = Literal["vpre", "vcoll", "delay_ns"]
 
 UNITS: dict[str, str] = {"vpre": "V", "vcoll": "V", "delay_ns": "ns"}
 
+
+
+def voc_flags(values: Mapping[str, Any]) -> tuple[bool, bool]:
+    """`(centre_on_voc, vpre_on_voc)` **as they apply** to `axis_name`.
+
+    The two are one decision, and the axis decides which: `centre_on_voc`
+    belongs to a swept `vpre`, `vpre_on_voc` to a pinned one. The console
+    shows whichever applies and hides the other -- so a flag left `true`
+    behind a hidden field, after the axis was switched, is not a request. It
+    was refused as one (`Axis` raised on `centre_on_voc` under `delay_ns`),
+    which disabled Shot and Scan with no field on screen to clear. Read the
+    flags through this and the stale one is simply inert.
+    """
+    swept_vpre = values.get("axis_name") == "vpre"
+    centre = bool(values.get("centre_on_voc", False)) and swept_vpre
+    pinned = bool(values.get("vpre_on_voc", False)) and not swept_vpre
+    return centre, pinned
 
 class AxisError(ValueError):
     pass

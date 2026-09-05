@@ -164,8 +164,8 @@ export function renderRow(row, model, ctx) {
     case 'range': return rangeRow(row, ctx, model);
     case 'voc': return vocRow(row, ctx, model);
     case 'polarity': return polarityRow(row, ctx, model);
-    case 'segmented': return field(row.spec, ctx, model, { segmented: true, accent: row.accent });
-    default: return field(row.spec, ctx, model, { accent: row.accent });
+    case 'segmented': return field(row.spec, ctx, model, { segmented: true, accent: row.accent, label: row.label });
+    default: return field(row.spec, ctx, model, { accent: row.accent, label: row.label });
   }
 }
 
@@ -174,7 +174,7 @@ export function renderRow(row, model, ctx) {
  * wire and is rendered, the editability is the wire's, and `doc`/`doc_full`
  * are the engine's docstring rather than anything this file invents.
  */
-export function field(spec, ctx, model, { segmented = false, accent = false } = {}) {
+export function field(spec, ctx, model, { segmented = false, accent = false, label: text = null } = {}) {
   const editable = spec.editable !== false;
   const cls = ['pf'];
   if (!editable) cls.push('ro');
@@ -184,7 +184,7 @@ export function field(spec, ctx, model, { segmented = false, accent = false } = 
 
   const commit = (value) => ctx.edit(model.name, { [spec.name]: value });
   return h('div.pw', h('div.' + cls.join('.'), help(spec),
-    label(spec, ctx, model),
+    label(spec, ctx, model, text),
     editable ? input(spec, commit, segmented) : h('span.v', { text: display(spec) }),
     provenance(spec, ctx, model, editable)), docLine(spec, ctx, model));
 }

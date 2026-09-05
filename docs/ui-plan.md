@@ -1102,8 +1102,15 @@ row's alone; and the provenance line said *the rest are defaults* when the
 rest could be edited or inherited — it counts the defaults instead.
 
 Still open from that review, in its own words: the live power monitor
-(§8), the Cursor 1 alignment check (§12), a shortcut for the repeated dark
-J–V, and the timing diagram as a collapsible panel.
+(§8), the Cursor 1 alignment check (§12), and a shortcut for the repeated dark
+J–V. The timing diagram as a collapsible panel landed 2026-09-05: shut by
+default behind one line that carries the alert count in the worst level's
+colour, open per session (`lib/results.js`, `timingFold`). The same day the
+axis rows were relabelled *scan parameter* and *scan range* (the wire names
+stay `axis_*`), and the service stopped refusing a `centre_on_voc` left true
+behind the field the card hides when the scan parameter is not vpre — which
+had disabled Shot and Scan with nothing on screen to clear
+(`core.axis.voc_flags`).
 
 ### Alongside · The rig tab
 

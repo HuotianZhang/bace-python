@@ -49,7 +49,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping
 
 from ..config import ConfigError, check_smu_limits
-from ..core.axis import Axis, AxisError, ScanSpec
+from ..core.axis import Axis, AxisError, ScanSpec, voc_flags
 from ..core.illumination import IlluminationError, LedDrive, assert_axis_centre
 from ..core.pulses import pulse_levels
 from ..drivers.keithley2400 import SourceMeterConfig
@@ -620,8 +620,12 @@ class _Resolver:
         }
         # Which flags make a V_oc mandatory for this module: the spec's own
         # (`centre_on_voc`) and the pinned-offset one, whichever it has.
+        # `voc_flags`: `centre_on_voc` counts only on a swept vpre and
+        # `vpre_on_voc` only on a pinned one; a stale flag behind the field
+        # the console hid is inert, not a demand for a V_oc.
+        applies = dict(zip(VOC_FLAGS, voc_flags(ps.values())))
         flags = [n for n in (spec.needs_voc_param, *VOC_FLAGS)
-                 if n and n in ps and bool(ps.get(n).value)]
+                 if n and n in ps and applies.get(n, bool(ps.get(n).value))]
         detail["centre_on_voc"] = bool(flags)
         detail["voc_needed_by"] = sorted(set(flags))
         if VOC_PARAM in ps:
@@ -758,7 +762,7 @@ def _lookup(scopes: tuple[dict, ...], led_v: float) -> tuple[str, str] | None:
 def _axis_of(values: Mapping[str, Any]) -> Axis:
     return Axis(name=values["axis_name"], start=float(values["axis_start"]),
                 stop=float(values["axis_stop"]), step=float(values.get("axis_step", 0.0)),
-                centre_on_voc=bool(values.get("centre_on_voc", False)))
+                centre_on_voc=voc_flags(values)[0])
 
 
 def _shots(ps: ParamSet) -> int:
@@ -1275,14 +1279,6 @@ def _c_axis_geometry(f: _Facts) -> list[Verdict]:
             failures.append((s, f"{s.module}: {exc}", {"axis": {k: v.get(k) for k in
                              ("axis_name", "axis_start", "axis_stop", "axis_step",
                               "centre_on_voc", "n_loops")}}))
-            continue
-        if bool(v.get("vpre_on_voc")) and axis.name == "vpre":
-            # `centre_on_voc` is how a *swept* prebias follows V_oc; the
-            # pinned offset only means something when vpre is pinned.
-            failures.append((s, f"{s.module}: vpre_on_voc: vpre is the swept axis here, "
-                                "so there is no pinned prebias to offset from V_oc; "
-                                "centre_on_voc is the flag for a swept vpre",
-                             {"axis_name": axis.name, "vpre_on_voc": True}))
             continue
         delay = (min(axis.start, axis.stop) if axis.name == "delay_ns" else spec.delay_ns)
         try:

@@ -86,8 +86,11 @@ export const LAYOUT = {
       // §3: the accent is the swept quantity, and which quantity is swept *is*
       // the choice of experiment — `vpre` is BACE, `delay_ns` is TDCF. It was
       // spent on the polarity pair, which is a knob, not the experiment.
-      { kind: 'segmented', name: 'axis_name', accent: true },
-      { kind: 'range', label: 'axis', names: ['axis_start', 'axis_stop', 'axis_step'], accent: true },
+      // Labelled for the operator, not after the parameter: "scan parameter"
+      // is the question the control answers, and "scan range" what the three
+      // numbers under it are. The wire names stay `axis_*`.
+      { kind: 'segmented', name: 'axis_name', label: 'scan parameter', accent: true },
+      { kind: 'range', label: 'scan range', names: ['axis_start', 'axis_stop', 'axis_step'], accent: true },
       // Exactly one of these two is ever valid, and `axis_name` decides which:
       // with the vpre axis the whole sweep is centred on V_oc; with any other
       // the *pinned* vpre is an offset from it. The other is not folded, it is
@@ -256,7 +259,7 @@ function buildRow(row, wire, values, entry) {
   if (!spec) return null;
   const segmented = row.kind === 'segmented'
     || (spec.type === 'enum' && spec.choices.length <= SEGMENTED_MAX);
-  return { kind: segmented ? 'segmented' : 'field', spec, accent: Boolean(row.accent) };
+  return { kind: segmented ? 'segmented' : 'field', spec, accent: Boolean(row.accent), label: row.label || null };
 }
 
 /** What the 81150A will actually be told, given the pair. */

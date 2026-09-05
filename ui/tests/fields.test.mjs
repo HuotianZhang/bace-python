@@ -79,6 +79,18 @@ test('the jv card reads the light off the bench, and unknown is not dark', () =>
   }
 });
 
+test('the axis rows are labelled for the operator, and the wire names stay', () => {
+  const model = cardModel(entry('bace', { axis_name: 'vpre' }));
+  const seg = model.above.find((row) => row.kind === 'segmented' && row.spec.name === 'axis_name');
+  assert.equal(seg.label, 'scan parameter');
+  const range = model.above.find((row) => row.kind === 'range');
+  assert.equal(range.label, 'scan range');
+  assert.deepEqual([range.start.name, range.stop.name, range.step.name], ['axis_start', 'axis_stop', 'axis_step']);
+  // Any other field carries no label override: its name is its label.
+  const plain = model.above.find((row) => row.kind === 'field' && row.spec.name === 'n_loops');
+  assert.equal(plain.label, null);
+});
+
 test('bace reads the same length whichever axis is swept, and loses no parameter', () => {
   // Fifteen, not the fourteen `ui-fields.md` first counted: merging
   // `output_polarity` with `inverted_output` into one control brought the

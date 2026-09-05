@@ -143,8 +143,8 @@ alone.
 
 | # | field | render | shown when |
 |---|---|---|---|
-| 1 | `axis_name` | **segmented**, 3 choices | always |
-| 2 | `axis_start` `axis_stop` `axis_step` | **one range row** + derived point count | always |
+| 1 | `axis_name` | **segmented**, 3 choices, labelled *scan parameter* | always |
+| 2 | `axis_start` `axis_stop` `axis_step` | **one range row** labelled *scan range* + derived point count | always |
 | 3 | `centre_on_voc` | bool | `axis_name == vpre` |
 | 4 | `voc` + `led_v` | **needs row** — see below | always |
 | 5 | `measure_dc` | bool | always — it is the *other* way to get a V_oc, and belongs beside the row that says there is none |
@@ -161,7 +161,7 @@ alone.
 meaningful, and `axis_name` decides which: with the `vpre` axis the whole sweep
 is centred on V_oc and `vpre_on_voc` is *invalid* (`service-contract.md` §5
 says so); with any other axis the pinned `vpre` is an offset from the V_oc in
-scope. The card shows whichever applies and hides the other. The axis field
+scope. The card shows whichever applies and hides the other. The service reads them the same way (`core.axis.voc_flags`): the hidden one is inert whatever value it holds, so switching the scan parameter never leaves a stale flag that refuses the run. The axis field
 itself is hidden from the pinned row for the same reason — it is the axis.
 
 Folded, by group: `illumination · 4` (`led_low_v` `led_settle_s`
