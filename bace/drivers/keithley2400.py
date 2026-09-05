@@ -109,7 +109,9 @@ class Keithley2400:
         self._io.write(":TRAC:FEED:CONT NEV;")
         self._io.write(":FORM:BORD NORM;:FORM SRE;")
         self._io.write(":RES:MODE MAN;")
-        self._io.write(f":SYST:RSEN {'ON' if self.config.four_wire else 'OFF'};")
+        # `:SYST:RSEN` is deliberately not here: `_prepare` opens every
+        # measurement with `*RST`, which puts the sense back to two-wire, so
+        # a four-wire setting only counts if it is sent after that reset.
 
     # -- output -----------------------------------------------------------
     def enable_output(self, on: bool = True) -> None:
@@ -144,6 +146,9 @@ class Keithley2400:
         self._io.write("*RST")
         self._output = False
         self._io.write(f":ROUT:TERM {self.config.terminals};")
+        # After the reset, or it is the reset's two-wire that measures: until
+        # 2026-09-05 this was sent once in `default_setup` and undone here.
+        self._io.write(f":SYST:RSEN {'ON' if self.config.four_wire else 'OFF'};")
         if self.config.averaging > 1:
             self._io.write(f":AVER ON;:AVER:COUN {int(self.config.averaging)};"
                            ":AVER:TCON REP;")
@@ -228,6 +233,22 @@ class Keithley2400:
         point against 0.8 s of measuring, and buys the stream, the partial
         file, and an abort that lands between two points.
 
+        Two things the instrument's sweep did that the first point-by-point
+        version lost, both back since 2026-09-05 (curves came out rougher):
+
+        * **One source range for the whole curve.** The 2400's sweep ranges
+          `BEST` -- the lowest range that holds every point. A fixed source
+          after `*RST` auto-ranges instead, so a curve through +-0.2 V
+          changed range mid-sweep, output on, with the glitch and the change
+          of source character that brings. `:SOUR:VOLT:RANG` is set from
+          the two ends before the output comes on.
+        * **The settle is the instrument's.** `:SOUR:DEL` inside the trigger
+          model, as the sweep had it, not a `time.sleep` on the host: every
+          point gets exactly `settle_s` between the step and the first
+          aperture, whatever the GPIB turn-around, the stream and the
+          recorder's rewrite add between two points. It also switches the
+          2400's auto delay off, which the reset had left on top.
+
         Used by the J-V experiment, not by the transient one, so it is not
         part of the `SourceMeter` protocol -- the transient layer must not
         be able to start a sweep by accident.
@@ -236,9 +257,15 @@ class Keithley2400:
             raise ValueError("a sweep needs at least two points")
         self._prepare()
         self._io.write(":SOUR:FUNC:MODE VOLT;")
+        # One range for the whole curve, chosen from its ends (what the
+        # 2400's own sweep calls BEST), so no range change lands mid-sweep.
+        self._io.write(f":SOUR:VOLT:RANG {max(abs(float(start_v)), abs(float(stop_v))):g};")
         # The first point's level before the output comes on, so the device
         # sees `start_v` and never a *RST 0 V on the way there.
         self._io.write(f":SOUR:VOLT:LEV {start_v:g};")
+        # The settle, timed by the trigger model between the step and the
+        # measurement. `:SOUR:DEL` also turns `:SOUR:DEL:AUTO` off.
+        self._io.write(f":SOUR:DEL {max(0.0, float(settle_s)):g};")
         self._io.write(":SENS:FUNC 'CURR:DC';")
         self._io.write(f":SENS:CURR:PROT:LEV {self.config.current_compliance_a:g};")
         self._io.write(f":SENS:CURR:NPLC {self.config.nplc:g};")
@@ -257,8 +284,7 @@ class Keithley2400:
         try:
             for x in np.linspace(float(start_v), float(stop_v), int(points)):
                 self._io.write(f":SOUR:VOLT:LEV {x:g};")
-                if settle_s > 0:
-                    time.sleep(settle_s)
+                # `:READ?` steps to the level, waits `:SOUR:DEL`, integrates.
                 raw = self._io.query(":READ?").strip().split(",")
                 yield float(raw[0]), float(raw[1])
         finally:
