@@ -27,7 +27,7 @@ import { fileURLToPath } from 'node:url';
 import {
   LOOPS, canSwitchForm, checkSummary, costModel, gridModel, insertAt, loopCount,
   loopSummary, loopValues,
-  moveAt, newLoop, newModule, nodeAt, remapPath, removeAt, sameTree, scheduleLeaves,
+  moveAt, newLoop, newModule, nodeAt, overrideMark, remapPath, removeAt, sameTree, scheduleLeaves,
   scheduleTree, setField, setParam, setValueForm, structureSummary, timeline,
   treeRows, valueForm,
 } from '../lib/tree.js';
@@ -476,4 +476,13 @@ test('an empty pipeline draws an absence, not a chart of nothing', () => {
   const model = scheduleModel({ blocks: [], cost: null });
   assert.ok(model.absent, 'ui-rules §9: a pipeline with zero nodes is a state to draw');
   assert.deepEqual(model.panels, []);
+});
+
+test('a tree row marks a differing node with the form’s own glyph, and a plain one with nothing', () => {
+  assert.equal(overrideMark({ overrides: [] }), null);
+  assert.equal(overrideMark(null), null);
+  const mark = overrideMark({ overrides: [['n_loops', 100], ['vcoll', -0.3]] });
+  assert.equal(mark.text, '↺');
+  assert.equal(mark.count, 2);
+  assert.equal(mark.title, 'differs from the bench: n_loops 100 · vcoll -0.3');
 });
