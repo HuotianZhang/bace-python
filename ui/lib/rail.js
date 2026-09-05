@@ -394,6 +394,11 @@ export function chainModel(state) {
     // action except `park` answers 409 while one is active. A button that
     // offered itself and then failed would be worse than one that says why.
     busy,
+    // Runs waiting for the worker. Park takes them with it (#53), so the
+    // count is part of what its confirmation has to say — and, because the
+    // model is the strip's render key, part of what redraws the label when a
+    // run is queued while Park is already armed.
+    queued: (state.queue || []).length,
     items: items.map((item) => ({
       ...item,
       // `fix` on an `ok` item is the action that *made* it ok; offering it
@@ -427,6 +432,35 @@ function fixLabel(item) {
 }
 
 // -- the DOM ----------------------------------------------------------------
+
+/**
+ * What an armed Park is about to do, in full.
+ *
+ * `park` on a busy bench is `worker.stop_runs`: it aborts the run *and
+ * cancels every queued one*. The confirmation said "abort the run and park?"
+ * — one run, singular — and named the queue only in a `title` nobody hovers
+ * before the second click (#53). An operator who reached for Park to stop one
+ * scan lost the rest of the night without being told which.
+ *
+ * The count only appears when there is one, so the ordinary case — stop this,
+ * nothing behind it — keeps the shorter sentence.
+ */
+export function parkLabel(queued = 0) {
+  return queued > 0
+    ? `abort the run, cancel ${fmt.plural(queued, 'queued run')}, and park?`
+    : 'abort the run and park?';
+}
+
+/**
+ * The same thing at length, on hover. "not after the queue" is the point of
+ * the sentence and it only has one when there is a queue to be ahead of.
+ */
+export function parkTitle(queued = 0) {
+  return queued > 0
+    ? `park aborts the run and cancels ${fmt.plural(queued, 'queued run')}`
+      + ' — the bench is safe now, not after the queue'
+    : 'park aborts the run — the bench is safe now';
+}
 
 /**
  * The rail, into a container. One cell per value, in the design's order.
@@ -524,11 +558,9 @@ export function renderChainStrip(el, state, { onFix, onPark, onDismiss, status, 
     h('span.st.quiet', { text: rigText(rig) }),
     h('button', {
       class: parkArmed ? 'btns armed' : 'btns',
-      title: model.busy
-        ? 'park aborts the run and cancels the queue — the bench is safe now, not after the queue'
-        : 'outputs off, shutter shut, router park',
+      title: model.busy ? parkTitle(model.queued) : 'outputs off, shutter shut, router park',
       onclick: () => onPark && onPark(),
-    }, parkArmed ? 'abort the run and park?' : 'Park'),
+    }, parkArmed ? parkLabel(model.queued) : 'Park'),
   ]);
 }
 

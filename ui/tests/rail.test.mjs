@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import { createStore } from '../lib/store.js';
-import { railModel, chainModel } from '../lib/rail.js';
+import { railModel, chainModel, parkLabel, parkTitle } from '../lib/rail.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = (name) => JSON.parse(readFileSync(join(here, '../fixtures', name), 'utf8'));
@@ -250,6 +250,33 @@ test('a run holds the worker, so the strip disables the fixes while one is going
   // says why.
   assert.equal(model.busy, true);
   assert.equal(chainModel(stateFrom(HELLO.data.bench)).busy, false);
+});
+
+test('an armed Park names the queue it is about to cancel', () => {
+  // `park` on a busy bench is `worker.stop_runs`: it aborts the run *and*
+  // cancels every queued one. The confirmation said "abort the run and park?"
+  // and named the queue only in a tooltip, so the operator who reached for it
+  // to stop one scan lost the rest of the night silently (#53).
+  assert.equal(parkLabel(0), 'abort the run and park?', 'nothing behind it, nothing to say');
+  assert.equal(parkLabel(), 'abort the run and park?', 'and no count is the same case');
+  assert.equal(parkLabel(1), 'abort the run, cancel 1 queued run, and park?');
+  assert.equal(parkLabel(4), 'abort the run, cancel 4 queued runs, and park?');
+  // "not after the queue" is the point of the hover, and it only has one when
+  // there is a queue to be ahead of.
+  assert.equal(parkTitle(0), 'park aborts the run — the bench is safe now');
+  assert.equal(parkTitle(2),
+    'park aborts the run and cancels 2 queued runs — the bench is safe now, not after the queue');
+});
+
+test('the count Park names is the queue the strip already knows about', () => {
+  const store = createStore({ schedule: () => {} });
+  store.applyBench(RUNNING);
+  const model = chainModel(store.getState());
+  assert.equal(model.queued, (RUNNING.queue || []).length);
+  // The model is the strip's render key, so a run queued while Park is armed
+  // moves the label rather than leaving a stale count on screen.
+  assert.equal(chainModel(createStore({ schedule: () => {} }).getState()).queued, 0,
+    'a console with no snapshot claims no queue');
 });
 
 test('the rail follows the stream, not the snapshot, for what the stream owns', () => {
