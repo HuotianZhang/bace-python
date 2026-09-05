@@ -42,7 +42,7 @@ TIMEOUT = 20.0
 SID = "20260902_220000"
 
 FAST = {"n_averages": 8, "settle_s": 0.0, "dark_settle_s": 0.0, "record_length": 400,
-        "t0_int_s": 2.71e-7, "t0_int_reference": "record", "calibrate_trigger": False,
+        "t0_int_s": -2e-9, "calibrate_trigger": False,
         "led_settle_s": 0.0}
 """The bace overrides every run here types: the simulator's geometry (see
 `test_transient_sim.run`) and no settling."""
@@ -440,7 +440,7 @@ def test_modules_show_provenance_and_needs(service):
     assert p["n_loops"]["detail"] == "run.toml [acquisition]" and p["n_loops"]["editable"]
     assert p["led_v"]["value"] == 1.02 and p["led_v"]["detail"] == "run.toml [illumination]"
     assert p["vpre"]["source"] == "default" and p["record_length"]["group"] == "acquisition"
-    assert p["smu_nplc"]["group"] == "sourcemeter" and p["t0_int_reference"]["choices"]
+    assert p["smu_nplc"]["group"] == "sourcemeter" and p["dark_reference"]["choices"]
     temperature = next(m for m in mods if m["name"] == "temperature")
     assert temperature["status"] == "partial", "settles through the 331 or pauses"
     assert temperature["needs"] == [{"code": "temperature",

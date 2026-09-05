@@ -731,7 +731,7 @@ warns that it was ignored rather than letting it vanish from the schedule.
   `tree`, `nodes` and `verdicts`, `from: "journal"`, `data_in_memory: false`;
   404 when no journal file knows the id.
 - `GET /runs/{id}/data?node=<node_path>` → for `bace`:
-  `{"axis": {…}, "values": […], "q_mean": […], "q_std": […], "q_all": [[…]], "time_s": […], "light": [[…]], "dark": [[…]], "photo": [[…]], "last_shot": {"light": […], "dark": […], "photo": […], "cumulative_q": […], "t0_int_record_s": …}, "kept": 12, "requested": 20}`;
+  `{"axis": {…}, "values": […], "q_mean": […], "q_std": […], "q_all": [[…]], "time_s": […], "light": [[…]], "dark": [[…]], "photo": [[…]], "last_shot": {"light": […], "dark": […], "photo": […], "cumulative_q": […], "t0_int_record_s": …, "t1_int_record_s": …}, "kept": 12, "requested": 20}`;
   for `jv_*`: `{"curves": [{label, dark, led_level_v, direction, voltage, current, density, metrics}]}`
   — `voltage` in V, `current` in A as the instrument reported it, `density` in
   **mA/cm²** and `null` when `pixel_area_cm2` is 0 (there is no density without
@@ -739,8 +739,11 @@ warns that it was ignored rather than letting it vanish from the schedule.
   it is interpolated from `current`, whatever area the run was given;
   for a pipeline run without `node` → 400 listing the nodes.
   Full precision, no decimation. The `cumulative_q` array is the running
-  integral of the last photocurrent from `t0_int` (the LabVIEW "Integrated
-  PhotoCurrent" plot; computed with `numpy.cumsum(photo[i0:]) * dt`).
+  integral of the last photocurrent over that shot's own integration window
+  `(t0_int_record_s, t1_int_record_s]` (the LabVIEW "Integrated PhotoCurrent"
+  plot; computed with `numpy.cumsum(photo[inside]) * dt`). The window is
+  measured from the pulse, so it differs from shot to shot along a delay axis;
+  `StepDone` carries the same two numbers for every shot.
 - `GET /events` WebSocket. Query `since=<seq>` replays from the in-memory ring
   (last 5000 envelopes, traces of the last 200 shots — see §3) then streams live.
   First frame: `{"seq": null, "type": "Hello", "data": {"session", "seq":
@@ -978,7 +981,7 @@ fixes anything: a `fix` field names a bench action the operator may click.
 | `voc.source` | invalid | `bace.centre_on_voc` or `bace.vpre_on_voc` with no V_oc source in scope (`data.needed_by` names the flag) |
 | `voc.coupling` | invalid | V_oc source's `led_v` ≠ the bace's `led_v` (`assert_axis_centre`) |
 | `led.levels` | invalid | `LedDrive` refuses (low ≥ threshold, level < threshold, level ≤ low) |
-| `axis.geometry` | invalid | `Axis`/`ScanSpec` refuse (step, n_loops < 1) or `delay_ns + trigger_offset < 0`. `centre_on_voc` on a non-vpre axis and `vpre_on_voc` on the vpre axis are not faults: each flag is read only on its own side of `axis_name` (`core.axis.voc_flags`) |
+| `axis.geometry` | invalid | `Axis`/`ScanSpec` refuse (step, n_loops < 1) or `delay_ns < 0` (`:PULS:DEL1` is given `delay_ns` as it is). `centre_on_voc` on a non-vpre axis and `vpre_on_voc` on the vpre axis are not faults: each flag is read only on its own side of `axis_name` (`core.axis.voc_flags`) |
 | `bench.instrument` | invalid | a module step's instrument is in the read-back's `unavailable` (`Catalogue.needs` minus the V_oc and power advisories; the `power` module needs its meter). `info` before the first read-back. Without it a run on an unplugged Keithley was accepted, queued and failed at preflight |
 | `smu.ceiling` | crit | compliance above the bench ceiling (`config.check_smu_limits`) |
 | `relay.interlock` | crit | a tree with both a `jv_*` and a `bace` and no `Router`; or at Start a source reports its output live |

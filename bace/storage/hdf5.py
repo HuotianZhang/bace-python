@@ -29,6 +29,12 @@ Layout::
       std         (n_steps,)          nan-aware, sample (ddof=1)
     /traces
       time        (n_samples,)        record time, from the first sample
+      trace_t0    (n_steps,)          :WAV:XOR? -- where the record begins
+                                      relative to the trigger (negative:
+                                      the trigger is inside the record)
+      window      (n_steps, 2)        the integration window Q was taken
+                                      over, record time; pinned to the pulse
+                                      so it moves along a delay axis
       light       (n_steps, n_samples)   loop-averaged, amps
       dark        (n_steps, n_samples)
       photocurrent(n_steps, n_samples)
@@ -50,8 +56,8 @@ from typing import Any
 
 import numpy as np
 
-SCHEMA = "bace-run/2"
-"""2 adds `/config/resolved`. Readers of 1 are unaffected: nothing moved, and
+SCHEMA = "bace-run/3"
+"""3 adds `/traces/trace_t0` and `/traces/window`; 2 added `/config/resolved`. Readers of 1 are unaffected: nothing moved, and
 `read_run` returns `{}` for the group when it is absent."""
 COMPRESSION = dict(compression="gzip", compression_opts=4, shuffle=True)
 
@@ -89,6 +95,8 @@ def write_run(path: str, *, metadata: dict, rig_config: dict, run_config: dict,
               sync_light: np.ndarray | None = None,
               sync_dark: np.ndarray | None = None,
               diagnostics: dict | None = None,
+              window_s: np.ndarray | None = None,
+              trace_t0_s: np.ndarray | None = None,
               software: str = "bace") -> str:
     h5py = _require_h5py()
     q_all = np.asarray(q_all, dtype=float)
@@ -129,6 +137,17 @@ def write_run(path: str, *, metadata: dict, rig_config: dict, run_config: dict,
         d = tr.create_dataset("time", data=np.asarray(time_s, dtype=float), **COMPRESSION)
         d.attrs["unit"] = "s"
         d.attrs["origin"] = "first sample of the record, not the trigger"
+        if trace_t0_s is not None:
+            d = tr.create_dataset("trace_t0", data=np.asarray(trace_t0_s, dtype=float))
+            d.attrs["unit"] = "s"
+            d.attrs["note"] = (":WAV:XOR? per step: record time of the trigger is "
+                               "-trace_t0")
+        if window_s is not None:
+            d = tr.create_dataset("window", data=np.asarray(window_s, dtype=float))
+            d.attrs["unit"] = "s"
+            d.attrs["note"] = ("(step, [start, end]) of the charge integral in record "
+                               "time; t0_int_s + delay + trigger_offset_s - trace_t0, "
+                               "then + t_int_width_s")
         for name, arr in (("light", light), ("dark", dark),
                           ("photocurrent", photocurrent)):
             d = tr.create_dataset(name, data=np.asarray(arr, dtype=float), **COMPRESSION)

@@ -16,13 +16,17 @@ sense_resistor_ohm = 5.192      # between the device and CHAN2. Q is proportiona
 pulse_amp = 4.0                 # voltage gain of the amplifier in the bias path
                                 # only; the measured current does not pass it
 probe_attenuation = 1.0
-trigger_offset_s = 0.0          # added to delay_ns before :PULS:DEL1.
-                                # Measured 2026-09-02 against the LabVIEW
-                                # engine: same Delay(ns)=90, the dark trace's
-                                # displacement spike landed 48 ns apart, which
-                                # is exactly the 47 ns this used to add. The
-                                # original's looping path — the one a scan
-                                # takes — has no offset. See core/pulses.py.
+trigger_offset_s = 47.1e-9      # sync-to-field latency: the field reaches the
+                                # device this long AFTER trigger + :PULS:DEL1.
+                                # Measured 2026-09-03 (delay scan, 49 points
+                                # fitted, 1.5 ns residual). It positions the
+                                # integration window (t0_int_s in run.toml is
+                                # measured from the field) and is NOT added to
+                                # what the 81150A is told: :PULS:DEL1 gets
+                                # delay_ns as it is, as the LabVIEW looping
+                                # path did (measured 2026-09-02, spike 48 ns
+                                # apart when this port still added 47 ns to
+                                # the command). See core/pulses.py.
 current_sign = -1               # multiplied once, in Infiniium._fetch, beside
                                 # the division by sense_resistor_ohm. Measured
                                 # 2026-09-02 against the LabVIEW engine, same

@@ -62,9 +62,10 @@ class RunConfig:
     onto a 5 us pulse: only the leading edge is in it, which is the edge the
     measurement is about.
 
-    It also fixes `t0_int_s`: at 200 ns/div the trigger sits 200 ns into the
-    record, so the panel's record-referenced 320 ns is 120 ns after the trigger
-    -- which is what `run.toml` carries as `trigger` + 1.185e-7.
+    It also decides where the trigger sits in the record: 200 ns in at
+    200 ns/div, 500 ns in at 500 ns/div (`:TIM:POS` is four of the ten
+    divisions). The integration window is measured from the pulse, not from
+    the record, so it does not move when this does.
     """
 
     record_length: int = 5000
@@ -72,41 +73,40 @@ class RunConfig:
     — 5000 gave 4000 in the 2026-08-07 archive — so nothing here assumes it got
     what it asked for."""
 
-    t0_int_s: float = 3.18e-7
-    """Where charge integration starts, in the units `t0_int_reference` names."""
+    t0_int_s: float = 0.0
+    """Where charge integration starts, in seconds **from the field's arrival
+    at the device** -- i.e. from the applied pulse edge, `:PULS:DEL1` plus the
+    rig's sync-to-field latency (`RigConfig.trigger_offset_s`). Negative starts
+    before the step; a few nanoseconds of lead is harmless because the dark
+    trace removes the displacement spike, and it guarantees the whole
+    transient is inside the window.
 
-    t0_int_reference: str = "record"
-    """`record`, `trigger` or `pulse` — what `t0_int_s` is measured from.
+    The window is pinned to the pulse, so it travels with `:PULS:DEL1` along a
+    delay axis: the scope triggers on the 81150A's *Sync*, which is **not**
+    delayed by `:PULS:DEL1` -- only the output is -- so a window measured from
+    the trigger (or from the first sample) would stand still while the transient
+    slid through the record, and Q(delay) would be half physics and half
+    window. Measured from the pulse, every delay point gets the same slice of
+    its own transient, which is what both kinds of zero-finding need: the light
+    zero (sweep the delay, watch where Q turns) needs the integration to be
+    correct at every point, and the integration zero (where does the transient
+    start) is a question for the stored traces, `tools/reintegrate.py`, not for
+    the acquisition.
 
-    **`record`** measures from the first sample. That is what the original
-    engine did and what the 2026-08-07 regression reproduces to 1.6e-06, so it
-    stays the default and nothing about the validated path changes.
-
-    Its weakness is that the trigger's position inside the record is a function
-    of the timebase (see `timebase_ns_per_div`), so a record-time window
-    silently slides relative to the signal whenever the timebase changes —
-    318 ns of record time is 118.5 ns *after* the trigger at 200 ns/div and
-    182 ns *before* it at 500 ns/div.
-
-    **`trigger`** measures from the trigger instead, using the instrument's own
-    `:WAV:XOR?`, which every `Trace` carries as `t0`. The two agree exactly at
-    the archive's geometry — 118.5 ns after a trigger sitting 199.5 ns into the
-    record is 318.0 ns of record time, i.e. `3.18e-7` — so this is a change of
-    spelling, not of value. Prefer it for new work; `run.toml` selects it.
-
-    **`pulse`** measures from the applied pulse edge, i.e. from `:PULS:DEL1`.
-    The scope triggers on the 81150A's *Sync*, which is **not** delayed by
-    `:PULS:DEL1` — only the output is. So along a delay axis the transient
-    slides through the record while a trigger-referenced window stands still,
-    and each point gets a different slice of its own transient. Q(delay) is then
-    half physics and half window. `pulse` makes the window travel with the
-    transient, which is what a delay scan of a *measurement* wants.
-
-    (For a delay scan whose job is to *find* the zero, `trigger` with
-    `t0_int_s = 0` is the neutral choice instead: the window covers the whole
-    post-trigger record, so every point is treated identically without assuming
-    where the transient is. See `run-delay.toml`.)
+    Earlier files carried `t0_int_reference = record | trigger | pulse` and a
+    `t0_int_s` in that reference's units. The two fixed references are gone
+    (`docs/integration-window.md` records how to convert an old value); a
+    `run.toml` that still names them is refused with the conversion.
     """
+
+    t_int_width_s: float = 1.5e-6
+    """How long the integration window is, in seconds. The window is
+    `(t0_int, t0_int + t_int_width]` in the pulse's own time, so its **end**
+    travels with the delay too; integrating to the end of the record instead
+    (the original engine's habit) makes the window shorter at every later
+    delay point. 1.5 us is about six extraction time constants on the devices
+    measured so far (tau ~ 265 ns); the run warns once if the record ends
+    before the window does."""
 
     output_polarity: str = "auto"
     """What to do with the 81150A's output polarity (`:OUTP1:POL`): `auto`,
@@ -311,12 +311,11 @@ class RunConfig:
     set, so it is off by default and switched on for the real rig."""
 
     def __post_init__(self) -> None:
-        if self.t0_int_reference not in ("record", "trigger", "pulse"):
+        if not self.t_int_width_s > 0:
             raise ValueError(
-                f"t0_int_reference must be 'record', 'trigger' or 'pulse', not "
-                f"{self.t0_int_reference!r}. A run whose integration window is "
-                "measured from nothing in particular still produces numbers, so "
-                "this refuses before an instrument is touched."
+                f"t_int_width_s must be positive, not {self.t_int_width_s!r}: an "
+                "empty integration window still produces a number, so this "
+                "refuses before an instrument is touched."
             )
         if self.dark_reference not in ("translated", "same"):
             raise ValueError(
@@ -345,28 +344,27 @@ class RunConfig:
         return asdict(self)
 
 
-def resolve_t0_int(config: RunConfig, trace_t0: float,
-                   pulse_delay_s: float = 0.0) -> float:
-    """`config.t0_int_s` expressed in **record** time, which is what `charge` wants.
+def resolve_window(config: RunConfig, trace_t0: float, pulse_delay_s: float,
+                   trigger_offset_s: float = 0.0) -> tuple[float, float]:
+    """The integration window in **record** time, which is what `charge` wants.
 
-    A `Trace`'s `t0` is the instrument's `:WAV:XOR?` — the record's own origin
-    relative to the trigger — and is negative whenever the trigger sits inside
-    the record, which it always does here. So a window `x` after the trigger
-    begins at `x - t0` of record time: 118.5 ns after a trigger at t0 =
-    -199.5 ns is 318.0 ns, the archive's number.
+    `config.t0_int_s` is measured from the field's arrival at the device, which
+    is `pulse_delay_s` (`:PULS:DEL1`, from the arm) plus `trigger_offset_s`
+    (the rig's sync-to-field latency) after the trigger. A `Trace`'s `t0` is
+    the instrument's `:WAV:XOR?` -- the record's own origin relative to the
+    trigger, negative whenever the trigger sits inside the record, which it
+    always does here -- so a time `x` after the trigger is `x - t0` of record
+    time. The 2026-09-03 delay scan at 500 ns/div (`t0 = -500 ns`) with a 47 ns
+    latency and `t0_int_s = -2 ns` therefore starts its window at
+    `delay + 545 ns` of record time, and ends `t_int_width_s` later.
 
     Kept out of `core.process` deliberately: `charge()` is validated numerics
-    and integrates on `arange(n) * dt`, full stop. Where the window *starts* is
-    a question about the instrument's record, and belongs on this side of the
-    boundary.
+    and integrates on `arange(n) * dt`, full stop. Where the window *sits* is
+    a question about the instrument's record and the bench's cabling, and
+    belongs on this side of the boundary.
     """
-    if config.t0_int_reference == "record":
-        return config.t0_int_s
-    if config.t0_int_reference == "pulse":
-        # The pulse is `:PULS:DEL1` after the arm; the Sync the scope triggers
-        # on is not. So a window pinned to the pulse has to travel with it.
-        return config.t0_int_s + pulse_delay_s - trace_t0
-    return config.t0_int_s - trace_t0
+    start = config.t0_int_s + pulse_delay_s + trigger_offset_s - trace_t0
+    return start, start + config.t_int_width_s
 
 
 PROVISIONAL_TRIGGER_V = 0.5
@@ -439,9 +437,9 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
     charges = ChargeAccumulator(n_loops=plan.n_loops, n_steps=plan.n_steps)
     averaged: RunningAverage | None = None
     dt = float("nan")
-    t0_int_record: float | None = None
-    """`config.t0_int_s` in record time. Not known until the first trace reports
-    where its own record begins, so it is resolved once and reused."""
+    window_told = False
+    """The first shot reports where its window landed in record time, and the
+    first shot whose window runs past the record warns; neither repeats."""
     done = 0
     aborted = False
 
@@ -492,8 +490,7 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
         # CHAN3: 5.2 mV peak to peak, no sync, no measurement.
         first = pulse_levels(plan.setpoints[0].vpre, plan.setpoints[0].vcoll,
                              cfg.pulse_amp, plan.setpoints[0].delay_ns,
-                             config.pulse_width_ns, invert=config.invert_polarity,
-                             trigger_offset_s=cfg.trigger_offset_s)
+                             config.pulse_width_ns, invert=config.invert_polarity)
         rig.bias.set_levels(first.high_light, first.low_light,
                             delay_s=first.delay_s, width_s=first.width_s)
         rig.bias.enable_output(True)
@@ -574,8 +571,7 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
 
             levels = pulse_levels(sp.vpre, sp.vcoll, cfg.pulse_amp,
                                   sp.delay_ns, config.pulse_width_ns,
-                                  invert=config.invert_polarity,
-                                  trigger_offset_s=cfg.trigger_offset_s)
+                                  invert=config.invert_polarity)
 
             # The shot's segments, announced as each starts (`StepPhase`),
             # so a live view can tell a settle from a hung acquisition.
@@ -645,26 +641,37 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
 
             # -- process ---------------------------------------------------
             dt = light.dt
-            first = t0_int_record is None
-            # Recomputed every step: a `pulse`-referenced window travels with
-            # `:PULS:DEL1`, so it is not a constant along a delay axis.
-            t0_int_record = resolve_t0_int(config, light.t0,
-                                           pulse_delay_s=levels.delay_s)
+            first = averaged is None
+            # Recomputed every step: the window is pinned to the pulse, so it
+            # travels with `:PULS:DEL1` along a delay axis.
+            t0_rec, t1_rec = resolve_window(config, light.t0, levels.delay_s,
+                                            cfg.trigger_offset_s)
+            record_end = (light.n - 1) * dt
             if first:
-                if config.t0_int_reference in ("trigger", "pulse"):
-                    yield Notice(
-                        "info",
-                        f"integration starts {config.t0_int_s * 1e9:.1f} ns after "
-                        f"the {config.t0_int_reference}; this record puts the trigger "
-                        f"{-light.t0 * 1e9:.1f} ns in, so that is "
-                        f"{t0_int_record * 1e9:.1f} ns of record time")
-                if not (0.0 <= t0_int_record < (light.n - 1) * dt):
+                yield Notice(
+                    "info",
+                    f"integration window: {config.t0_int_s * 1e9:+.1f} ns from the "
+                    f"field's arrival ({levels.delay_s * 1e9:.1f} ns delay + "
+                    f"{cfg.trigger_offset_s * 1e9:.1f} ns latency after the trigger) "
+                    f"for {config.t_int_width_s * 1e9:.0f} ns; this record puts the "
+                    f"trigger {-light.t0 * 1e9:.1f} ns in, so that is "
+                    f"{t0_rec * 1e9:.1f} .. {t1_rec * 1e9:.1f} ns of record time")
+                if not (0.0 <= t0_rec < record_end):
                     yield Notice(
                         "warning",
                         f"the integration window starts at "
-                        f"{t0_int_record * 1e9:.1f} ns, outside the "
-                        f"{(light.n - 1) * dt * 1e9:.0f} ns record — every charge "
+                        f"{t0_rec * 1e9:.1f} ns, outside the "
+                        f"{record_end * 1e9:.0f} ns record — every charge "
                         "will be the whole trace or none of it")
+            if t1_rec > record_end and not window_told:
+                window_told = True
+                yield Notice(
+                    "warning",
+                    f"the integration window ends at {t1_rec * 1e9:.0f} ns but the "
+                    f"record ends at {record_end * 1e9:.0f} ns (delay "
+                    f"{sp.delay_ns:g} ns): the window is cut short there, and "
+                    "along a delay axis by a different amount at each point. A "
+                    "longer timebase or a shorter t_int_width_s makes it whole")
             if config.offset_correct and first:
                 flat, head, tail, peak = baseline_is_flat(light.y, dark.y)
                 if not flat:
@@ -683,7 +690,7 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                 averaged = RunningAverage(n_steps=plan.n_steps, n_samples=photo.size)
             photo_avg = averaged.update(s.step, s.loop, photo)
 
-            q = charge(photo, dt, t0_int_record)
+            q = charge(photo, dt, t0_rec, t1_rec)
             charges.add(s.loop, s.step, q)
             q_mean, q_std = charges.summary()
 
@@ -701,7 +708,8 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                            # so a driver that lacks it fails loudly here and in
                            # `test_every_real_driver_satisfies_its_protocol`.
                            clipped=bool(rig.scope.clipped),
-                           sync_light=sync_light, sync_dark=sync_dark)
+                           sync_light=sync_light, sync_dark=sync_dark,
+                           t0_int_record_s=t0_rec, t1_int_record_s=t1_rec)
 
             elapsed = time.monotonic() - t_start
             per = elapsed / done if done else 0.0

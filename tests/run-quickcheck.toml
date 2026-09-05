@@ -28,27 +28,29 @@ timebase_ns_per_div = 200.0     # ten divisions -> 2 us screen, which is what a
                                 # *and* Pulse Width (ns) 5e3 = 5E+3. They are
                                 # not equal, so the "timebase*10 = pulse width"
                                 # reading that briefly put 500 here was wrong.
-                                # 200 is also what the 2026-08 archive used, and
-                                # what makes t0_int_s below land on the panel's
-                                # own 320 ns of record time.
+                                # 200 is also what the 2026-08 archive used.
 record_length = 5000            # a request, not a promise: the instrument gives
                                 # window x sample rate. 2 us at 2 GSa/s gave
                                 # 4000; 5 us may give 10000, or the scope may
                                 # drop to 1 GSa/s and give 5000 at dt = 1 ns.
                                 # Nothing downstream assumes either.
-t0_int_reference = "trigger"    # "trigger" or "record".
-t0_int_s = 1.185e-7             # ns after the trigger, NOT into the record.
-                                # :TIM:POS is timebase*4 and is the screen
-                                # centre, so the trigger sits range/2 - TIM:POS
-                                # into the record: 200 ns at 200 ns/div, 500 ns
-                                # at 500 ns/div. A record-time window keeps its
-                                # number and changes its meaning every time the
-                                # timebase moves. Referenced to the trigger it
-                                # does not: the driver reads :WAV:XOR? and the
-                                # window follows. Same window as before at the
-                                # archive's geometry -- 118.5 after a trigger
-                                # 199.5 ns in is 318.0 ns of record time, which
-                                # is the old 3.18e-7 exactly.
+t0_int_s = -2e-9                # where the charge integral starts, measured
+                                # from the field's arrival at the device:
+                                # trigger + :PULS:DEL1 + trigger_offset_s
+                                # (rig.toml). Negative = a little before the
+                                # step, so the whole transient is inside; the
+                                # dark trace removes the displacement spike.
+                                # The window is pinned to the pulse, so along a
+                                # delay axis it travels with every point --
+                                # the scope triggers on the Sync, which
+                                # :PULS:DEL1 does not delay, so a window fixed
+                                # to the trigger or the record would slice a
+                                # different part of each point's transient.
+                                # (The 2026-09-03 scan's `pulse` + 45 ns with a
+                                # 47 ns latency folded in is this -2 ns.)
+t_int_width_s = 1.5e-6          # how long the window is. The end travels with
+                                # the pulse too; ~6 tau at tau ~ 265 ns. The
+                                # run warns once if the record ends first.
 pulse_width_ns = 5000.0
 pulse_frequency_hz = 500.0        # read off the rig 2026-08-31: both
                                 # generators were at 500 Hz, not the

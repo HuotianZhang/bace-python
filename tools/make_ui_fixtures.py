@@ -17,12 +17,12 @@ What it cannot take from the file it says so about, rather than inventing:
   the running integral and the window, and names the averaged traces as its
   source instead of repeating them;
 * **`t0_int_record_s`**, the start of the integration window in record time.
-  It needs the record's own origin (`:WAV:XOR?`), which the recorder does not
-  store. The service says it in as many words in a `Notice` — "integration
-  starts 120.5 ns after the trigger; this record puts the trigger 199.5 ns in,
-  so that is 320.0 ns of record time" — so the session's journal is read for
-  it, and the geometry of the timebase is the fallback. The fixture records
-  which of the two it used.
+  Files of schema 3 and later store it per step (`/traces/window`); this one
+  predates that and needs the record's own origin (`:WAV:XOR?`), which its
+  recorder did not store. The service said it in as many words in a `Notice`
+  — "... so that is 320.0 ns of record time" — so the session's journal is
+  read for it, and the geometry of the timebase is the fallback. The fixture
+  records which of the three it used.
 """
 from __future__ import annotations
 
@@ -38,8 +38,7 @@ ACCEPTANCE = os.path.join(REPO, "acceptance", "20260902_service-vs-labview")
 DEFAULT_H5 = os.path.join(ACCEPTANCE, "service_153722", "run20260902_153722.h5")
 DEFAULT_OUT = os.path.join(REPO, "ui", "fixtures")
 
-NOTICE = re.compile(r"integration starts ([\d.]+) ns after the trigger; this record puts the "
-                    r"trigger ([\d.]+) ns in, so that is ([\d.]+) ns of record time")
+NOTICE = re.compile(r"so that is (-?[\d.]+)(?: \.\. (-?[\d.]+))? ns of record time")
 
 SIGNIFICANT = 9
 """Digits kept per trace sample. The scope digitises to eight bits and the
@@ -73,7 +72,7 @@ def _t0_from_journals(started: str) -> tuple[float | None, str]:
         for line in open(path, encoding="utf-8"):
             match = NOTICE.search(line)
             if match:
-                return float(match.group(3)) * 1e-9, f"journal · {os.path.basename(path)}"
+                return float(match.group(1)) * 1e-9, f"journal · {os.path.basename(path)}"
     return None, ""
 
 
@@ -105,18 +104,29 @@ def main(argv: list[str] | None = None) -> int:
     q_mean = np.asarray(f["charge/mean"])
     q_std = np.asarray(f["charge/std"])
 
-    t0_record, source = _t0_from_journals(str(metadata.get("started", "")))
+    t1_record = None
+    if "traces/window" in f:
+        window = np.asarray(f["traces/window"])
+        t0_record, t1_record = float(window[-1][0]), float(window[-1][1])
+        source = "the run's own /traces/window"
+    else:
+        t0_record, source = _t0_from_journals(str(metadata.get("started", "")))
     if t0_record is None:
         # The geometry the driver sets: `:TIM:POS` is four divisions in, and
         # the record is centred on it, so the record starts half a record
         # before that. Half a sample out from the instrument's own `:WAV:XOR?`.
+        # A pre-schema-3 file's `t0_int_s` was in whatever reference it named;
+        # this one is `trigger`, so add the trigger's place in the record.
         per_div = float(run_attrs.get("timebase_ns_per_div", 200.0)) * 1e-9
         trace_t0 = per_div * 4.0 - (time.size * dt) / 2.0
         t0_record = float(run_attrs.get("t0_int_s", 0.0)) - trace_t0
         source = "timebase geometry (the record's own origin is not stored)"
 
-    after = (np.arange(photo.shape[1]) * dt) > t0_record
-    cumulative = np.cumsum(photo[-1][after]) * dt
+    t_rec = np.arange(photo.shape[1]) * dt
+    inside = t_rec > t0_record
+    if t1_record is not None:
+        inside &= t_rec <= t1_record
+    cumulative = np.cumsum(photo[-1][inside]) * dt
 
     payload = {
         "axis": {"name": str(axis_attrs.get("name")), "unit": str(axis_attrs.get("unit", "")),
@@ -135,6 +145,7 @@ def main(argv: list[str] | None = None) -> int:
             "traces": "the loop-averaged ones above — this run had store_shots off",
             "cumulative_q": _list(cumulative),
             "t0_int_record_s": _round(t0_record, 6),
+            "t1_int_record_s": None if t1_record is None else _round(t1_record, 6),
             "t0_int_record_source": source,
             # `StepDone.index` counts shots flat across every loop and step
             # ((loop-1)*n_steps + step-1), not steps: two loops of one step end

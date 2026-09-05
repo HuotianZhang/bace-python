@@ -14,7 +14,7 @@ from dataclasses import replace
 import numpy as np
 
 from bace.core.axis import bace_legacy_three_point
-from bace.core.pulses import pulse_levels, TRIGGER_OFFSET_S
+from bace.core.pulses import pulse_levels
 from bace.core.process import (photocurrent, charge, RunningAverage,
                                ChargeAccumulator, to_current)
 from bace.core.simulate import synthetic_traces
@@ -41,7 +41,7 @@ def main() -> None:
     plan = spec.plan(VOC)
     print(f"prebias grid      {np.round(plan.values, 6)}  V")
     print(f"loops x steps     {plan.n_loops} x {plan.n_steps} = {plan.n_shots} acquisitions")
-    print(f"trigger offset    {TRIGGER_OFFSET_S * 1e9:g} ns\n")
+    print("delay             :PULS:DEL1 is given delay_ns as it is\n")
 
     print("81150A levels per prebias point (volts at the generator output)")
     print(f"  {'Vpre':>9} {'hi_light':>9} {'lo_light':>9} {'hi_dark':>9} {'lo_dark':>9} {'delay/ns':>9}")

@@ -15,7 +15,7 @@ from bace.core.axis import Axis, ScanSpec, bace_at_voc, bace_sweep, field_depend
 from bace.drivers.simulated import make_bench
 from bace.experiment import events as E
 from bace.experiment.rig import Rig, RigConfig
-from bace.experiment.transient import RunConfig, resolve_t0_int, run_transient_scan
+from bace.experiment.transient import RunConfig, resolve_window, run_transient_scan
 
 NO_SLEEP = lambda s: None
 
@@ -29,15 +29,10 @@ def build(seed: int = 1, drive: float = 1.020):
 
 
 def run(rig, spec, cfg=None, **kw):
-    # `t0_int_s` is pinned here rather than taken from the dataclass default.
-    # The default (3.18e-7) is the archive's number, and the archive is real
-    # hardware: the field arrives ~38 ns after `:PULS:DEL1` elapses, through the
-    # generator and the cable. The simulator models no such latency -- its field
-    # arrives the instant the delay expires -- so the same window would start
-    # 38 ns late and clip the front off the transient. Until 2026-09-02 that was
-    # hidden, because `trigger_offset_s = 47e-9` pushed the simulated pulse late
-    # by almost exactly the missing latency. Measuring the offset to be zero
-    # took the compensation away and exposed it.
+    # `t0_int_s` is measured from the field's arrival at the device, so the
+    # window starts 2 ns before the simulated step whatever the delay and the
+    # timebase. The simulated bench has no sync-to-field latency unless the
+    # `RigConfig` says so (`field_latency_s`), and `RigConfig()` says 0.
     #
     # `invert_polarity=True` with the generator at NORM is the pair the rig
     # validated (`run.toml`): through the inverting amplifier the device then
@@ -45,7 +40,7 @@ def run(rig, spec, cfg=None, **kw):
     # amplifier and that rest level, so the recipe with neither flag prebiases
     # the simulated device at `-v_coll` -- exactly as the rig does.
     cfg = cfg or RunConfig(n_averages=200, settle_s=0.0, dark_settle_s=0.0,
-                           t0_int_s=2.71e-7, invert_polarity=True)
+                           t0_int_s=-2e-9, invert_polarity=True)
     return list(run_transient_scan(rig, spec, cfg, sleep=NO_SLEEP, **kw))
 
 
@@ -114,7 +109,7 @@ def test_a_lit_shot_recovers_the_photocharge_under_the_validated_recipe(led_v):
     sim, rig = build(drive=led_v)
     spec = ScanSpec(axis=Axis("vpre", 1.0, 1.0), vcoll=-2.0, n_loops=2)
     f = finished(run(rig, spec, cfg=RunConfig(n_averages=200, settle_s=0.0,
-                                                dark_settle_s=0.0, t0_int_s=2.71e-7,
+                                                dark_settle_s=0.0, t0_int_s=-2e-9,
                                                 invert_polarity=True,
                                                 output_polarity="NORM")))
     expected = sim.bench.device.photocharge(1.0, led_v)
@@ -283,52 +278,89 @@ def test_a_range_that_is_too_small_reports_clipping():
     assert sim.scope.clipped is True
 
 
-# -- where the integration window starts ---------------------------------
-def test_the_two_t0_int_references_name_the_same_window_at_the_archive_geometry():
-    """318 ns of record time and 118.5 ns after the trigger are one window at
-    200 ns/div, where `:WAV:XOR?` reads -199.5 ns. That identity is what makes
-    `t0_int_reference` a change of spelling rather than of value, and it is the
-    reason the 2026-08-07 regression is untouched by the option existing."""
-    rec = RunConfig(t0_int_s=3.18e-7, t0_int_reference="record")
-    trg = RunConfig(t0_int_s=1.185e-7, t0_int_reference="trigger")
-    assert resolve_t0_int(rec, -1.995e-7) == pytest.approx(3.18e-7)
-    assert resolve_t0_int(trg, -1.995e-7) == pytest.approx(3.18e-7)
+# -- where the integration window sits -----------------------------------
+def test_the_window_is_measured_from_the_field_and_lands_in_record_time():
+    """`t0_int_s` is from the field's arrival: `:PULS:DEL1` plus the rig's
+    sync-to-field latency after the trigger. At 200 ns/div `:WAV:XOR?` reads
+    -199.5 ns, so with a 90 ns delay, a 47 ns latency and a -2 ns lead the
+    window starts at 334.5 ns of record time and ends `t_int_width_s` later."""
+    cfg = RunConfig(t0_int_s=-2e-9, t_int_width_s=1.0e-6)
+    t0, t1 = resolve_window(cfg, -1.995e-7, 90e-9, 47e-9)
+    assert t0 == pytest.approx(3.345e-7)
+    assert t1 == pytest.approx(3.345e-7 + 1.0e-6)
 
 
-def test_a_record_time_window_ignores_the_timebase_and_a_trigger_one_follows_it():
-    """Why the option exists. `:TIM:POS` is `timebase * 4` ns and is the screen
-    centre, so the trigger sits `range/2 - TIM:POS` into the record: 200 ns at
-    200 ns/div, 500 ns at 500 ns/div. Held in record time the window keeps its
-    number and changes its meaning — at 500 ns/div, 318 ns lands 182 ns *before*
-    the trigger. Held against the trigger it does the opposite, which is what a
-    measurement wants."""
-    rec = RunConfig(t0_int_s=3.18e-7, t0_int_reference="record")
-    trg = RunConfig(t0_int_s=1.185e-7, t0_int_reference="trigger")
+def test_the_window_follows_the_timebase_and_the_delay():
+    """`:TIM:POS` is `timebase * 4` ns and is the screen centre, so the trigger
+    sits `range/2 - TIM:POS` into the record: 200 ns at 200 ns/div, 500 ns at
+    500 ns/div. And the scope triggers on the 81150A *Sync*, which `:PULS:DEL1`
+    does not delay -- only the output. So the transient moves through the
+    record with both, and the window has to move with it, start and end alike;
+    otherwise Q(delay) is half physics and half window."""
+    cfg = RunConfig(t0_int_s=0.0, t_int_width_s=1.0e-6)
+    at_200 = resolve_window(cfg, -2.0e-7, 90e-9)
+    at_500 = resolve_window(cfg, -5.0e-7, 90e-9)
+    assert at_500[0] - at_200[0] == pytest.approx(3.0e-7)
 
-    assert resolve_t0_int(rec, -2.0e-7) == resolve_t0_int(rec, -5.0e-7)
-    assert resolve_t0_int(trg, -5.0e-7) == pytest.approx(6.185e-7)
-    assert resolve_t0_int(trg, -5.0e-7) > resolve_t0_int(trg, -2.0e-7)
+    near = resolve_window(cfg, -2.0e-7, 7e-9)
+    far = resolve_window(cfg, -2.0e-7, 2.47e-7)
+    assert far[0] - near[0] == pytest.approx(2.4e-7), "the start moves with the pulse"
+    assert far[1] - near[1] == pytest.approx(2.4e-7), "and so does the end"
+    assert far[1] - far[0] == pytest.approx(1.0e-6), "so the window keeps its length"
 
 
-def test_an_unknown_t0_int_reference_is_refused_before_an_instrument_is_touched():
-    with pytest.raises(ValueError, match="'record', 'trigger' or 'pulse'"):
-        RunConfig(t0_int_reference="start")
+def test_an_empty_window_is_refused_before_an_instrument_is_touched():
+    with pytest.raises(ValueError, match="t_int_width_s must be positive"):
+        RunConfig(t_int_width_s=0.0)
     with pytest.raises(ValueError, match="'auto', 'NORM', 'INV' or 'leave'"):
         RunConfig(output_polarity="maybe")
 
 
-def test_a_trigger_referenced_run_says_where_the_window_landed():
-    """The conversion depends on the instrument's own report of its record, so
-    it is not knowable from the config alone. A run that uses it says the number
-    out loud rather than leaving it to be recomputed from a docstring."""
+def test_a_run_says_where_the_window_landed_and_records_it_per_step():
+    """The conversion depends on the instrument's own report of its record and
+    on the step's delay, so it is not knowable from the config alone. A run
+    says the number out loud once, and every `StepDone` carries its own."""
     sim, rig = build()
     cfg = RunConfig(n_averages=64, settle_s=0.0, dark_settle_s=0.0,
-                    timebase_ns_per_div=200.0,
-                    t0_int_s=1.185e-7, t0_int_reference="trigger")
+                    timebase_ns_per_div=200.0, t0_int_s=-2e-9)
     evs = run(rig, bace_at_voc(1), cfg=cfg, voc=0.906)
     notes = [e.text for e in evs if isinstance(e, E.Notice)]
-    assert any("of record time" in t for t in notes), notes
     assert sum("of record time" in t for t in notes) == 1, "said once, not per shot"
+    steps = [e for e in evs if isinstance(e, E.StepDone)]
+    # trigger 200 ns in, delay 90 ns, no latency on this rig, 2 ns lead
+    assert steps[0].t0_int_record_s == pytest.approx(2.88e-7)
+    assert steps[0].t1_int_record_s == pytest.approx(2.88e-7 + cfg.t_int_width_s)
+
+
+def test_a_window_the_record_cuts_short_is_said_once():
+    """Along a delay axis the window runs off the end of the record at some
+    point before it does at the others; the run warns at the first such shot,
+    naming the delay, and does not repeat itself."""
+    sim, rig = build()
+    cfg = RunConfig(n_averages=64, settle_s=0.0, dark_settle_s=0.0,
+                    timebase_ns_per_div=200.0, t0_int_s=-2e-9, t_int_width_s=1.9e-6)
+    from bace.core.axis import tdcf_delay
+    evs = run(rig, tdcf_delay(0, 400, 200, vpre=0.906, n_loops=2), cfg=cfg)
+    cut = [e.text for e in evs if isinstance(e, E.Notice) and "cut short" in e.text]
+    assert len(cut) == 1, cut
+    assert "delay 0 ns" in cut[0]
+
+
+def test_the_simulated_bench_puts_its_field_where_the_rig_says():
+    """`trigger_offset_s` is the sync-to-field latency, and the simulated bench
+    honours it, so a window measured from the field lands on the simulated
+    transient as it does on the real one -- Q does not depend on the number."""
+    from bace.service.rigs import Bench
+    qs = []
+    for latency in (0.0, 47e-9):
+        b = Bench.build_simulated(RigConfig(trigger_offset_s=latency), fast=True)
+        b.sim.led.set_pulse(1.02, 0.4)
+        cfg = RunConfig(n_averages=200, settle_s=0.0, dark_settle_s=0.0,
+                        t0_int_s=-2e-9, invert_polarity=True)
+        evs = list(run_transient_scan(b.rig, bace_at_voc(1), cfg, sleep=NO_SLEEP, voc=0.906))
+        assert b.sim.bench.field_latency_s == latency
+        qs.append(finished(evs).q_mean[0])
+    assert qs[0] == pytest.approx(qs[1], rel=0.02)
 
 
 # -- clipping actually travels -------------------------------------------
@@ -360,23 +392,7 @@ def test_step_done_reports_clipping_from_the_digitizer():
     assert steps and all(s.clipped for s in steps)
 
 
-# -- a window that travels with the pulse, and a polarity nobody guesses --
-def test_a_pulse_referenced_window_travels_with_the_delay():
-    """The scope triggers on the 81150A *Sync*, which `:PULS:DEL1` does not
-    delay — only the output. So along a delay axis the transient slides through
-    the record while a trigger-referenced window stands still, and every point
-    gets a different slice of its own transient. Q(delay) would then be half
-    physics and half window."""
-    trg = RunConfig(t0_int_s=1.185e-7, t0_int_reference="trigger")
-    pul = RunConfig(t0_int_s=1.185e-7, t0_int_reference="pulse")
-
-    near = resolve_t0_int(pul, -2.0e-7, pulse_delay_s=7e-9)
-    far = resolve_t0_int(pul, -2.0e-7, pulse_delay_s=2.47e-7)
-    assert far - near == pytest.approx(2.4e-7), "it has to move with the pulse"
-    assert resolve_t0_int(trg, -2.0e-7, pulse_delay_s=7e-9) == \
-        resolve_t0_int(trg, -2.0e-7, pulse_delay_s=2.47e-7), "and this must not"
-
-
+# -- a polarity nobody guesses --------------------------------------------
 def test_leave_means_the_run_does_not_write_the_output_polarity():
     """Which level the device rests at between pulses depends on how the sample
     is wired, and that is not always known. A wrong guess puts the extraction on
@@ -550,8 +566,7 @@ def test_the_dark_trace_can_be_shutter_only():
     C(V) is flat."""
     from bace.core.pulses import pulse_levels
 
-    lv = pulse_levels(1.01354, -1.0, 4.0, 90.0, 5000.0, invert=True,
-                      trigger_offset_s=0.0)
+    lv = pulse_levels(1.01354, -1.0, 4.0, 90.0, 5000.0, invert=True)
     # the two conventions, at the device
     assert (lv.high_light * 4, lv.low_light * 4) == pytest.approx((1.0, -1.01354))
     assert (lv.high_dark * 4, lv.low_dark * 4) == pytest.approx((2.01354, 0.0))

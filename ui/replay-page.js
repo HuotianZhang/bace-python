@@ -197,7 +197,7 @@ function renderCharts() {
       h('h3', 'the transient'),
       source
         ? chart(transientModel(source, values ? {
-          t0_int_s: values.t0_int_s, t0_int_reference: values.t0_int_reference,
+          t0_int_s: values.t0_int_s, t_int_width_s: values.t_int_width_s,
           pulse_delay_s: pulseDelayS(shot, values, rig),
           offset_corrected: values.offset_correct, dark_reference: values.dark_reference,
         } : {}))

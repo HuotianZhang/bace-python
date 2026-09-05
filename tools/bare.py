@@ -203,7 +203,7 @@ def main(argv=None) -> int:
         plan = []
         for v in vpres:
             lv = pulse_levels(v, a.vcoll, cfg.pulse_amp, 0.0, 0.0,
-                              invert=a.invert, trigger_offset_s=0.0)
+                              invert=a.invert)
             light = (lv.high_light, lv.low_light)
             dark = light if a.dark == "same" else (lv.high_dark, lv.low_dark)
             plan.append((v, light, dark))

@@ -31,8 +31,8 @@
 
 [axis]
 name = "delay_ns"
-start = -40.0
-stop = 400.0                    # :PULS:DEL1 = 7 … 447 ns
+start = 0.0                     # delay_ns 就是 :PULS:DEL1，不再加任何命令偏移
+stop = 440.0                    # （之前 -40…400 加 47 ns 偏移 = 7…447 ns，这里等价）
 step = 20.0                     # 23 点。tau ≈ 265 ns，这个跨度足够看到衰减
 centre_on_voc = false
 
@@ -47,17 +47,17 @@ n_averages = 40
 timebase_ns_per_div = 500.0
 record_length = 5000
 
-# --- 积分窗口跟着脉冲走 -------------------------------------------------------
+# --- 积分窗口跟着脉冲走（现在是唯一的方式）-------------------------------------
 # 实测（49 点拟合，残差 1.5 ns）：器件上的场 = 触发 + :PULS:DEL1 + 47.1 ns。
-# trace.t0 = :WAV:XOR? = −500 ns（触发落在记录的 500 ns 处），所以
+# 这 47.1 ns 现在放在 rig.toml 的 trigger_offset_s 里，t0_int_s 直接相对于场到达：
 #
-#   pulse 参考的窗口起点 = t0_int_s + (delay_ns + 47 ns) − t0
-#                        = t0_int_s + delay_ns + 547 ns   （记录时间）
+#   窗口起点（记录时间）= t0_int_s + delay_ns + trigger_offset_s − t0
+#                      = t0_int_s + delay_ns + 547.1 ns   （t0 = −500 ns）
+#   窗口终点            = 起点 + t_int_width_s
 #
-# 取 t0_int_s = 45 ns，窗口就从台阶前约 2 ns 开始，每个 delay 点待遇一致。
-# 前两轮用 trigger + 0 是因为那时还在**找**瞬态在哪；现在知道了，就该用 pulse。
-t0_int_reference = "pulse"
-t0_int_s = 4.5e-8
+# t0_int_s = −2 ns：窗口从台阶前 2 ns 开始，每个 delay 点待遇一致，起点终点都跟着走。
+t0_int_s = -2e-9
+t_int_width_s = 1.5e-6          # 5 µs 记录里最远的点窗口到 ~2.5 µs，装得下
 
 # 这一轮尾巴确实是基线（末 1 µs ≈ 0.04 mA），所以基线校正在做它该做的事。
 # run_transient_scan 会用 baseline_is_flat() 自检，尾巴不平会直接告警。

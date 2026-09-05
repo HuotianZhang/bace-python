@@ -16,12 +16,12 @@ not obvious and are reproduced deliberately:
     duly reported `:WAV:XOR? = -1.995e-7`. So **the trigger sits ~200 ns into
     the record**, not at its start.
 
-    That is what makes the integration window make sense. `t0_int = 318 ns` is
-    in record time, so it is 118 ns after the trigger, while the field arrives
-    `delay + 47 ns` = 135 ns after it, i.e. 334 ns into the record. The
-    integral therefore starts just before the transient does -- which is what
-    it should do, and could not be checked until the scope said where its
-    record begins.
+    That is what makes the integration window make sense. The window is
+    measured from the field's arrival -- `delay + trigger_offset_s` after the
+    trigger, 137 ns at delay 90 with the 47 ns latency, i.e. 337 ns into this
+    record -- and `resolve_window` needs `:WAV:XOR?` to say so. The archive's
+    record-time 318 ns was 16 ns before that, which is what a window should be
+    and could not be checked until the scope said where its record begins.
 
     **And `:ACQ:POIN` is a request, not a promise.** The scope reported
     `:ACQ:POIN? = 5000` while `:WAV:POIN?` returned **4000**, with

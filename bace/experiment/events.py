@@ -129,6 +129,12 @@ class StepDone(Event):
     clipped: bool = False
     sync_light: Trace | None = None
     sync_dark: Trace | None = None
+    t0_int_record_s: float | None = None
+    t1_int_record_s: float | None = None
+    """The integration window `q` was taken over, in record time (from the
+    first sample). Pinned to the pulse, so it differs from shot to shot along
+    a delay axis; stored with the run so the file can say what its own charge
+    integrated."""
     """The trigger channel's trace out of the same record as `light` and
     `dark`, in volts (2026-09-05). What the edge the scope fired on looked
     like: smeared, the jitter is between the sync and the scope's trigger;

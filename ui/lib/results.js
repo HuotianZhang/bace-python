@@ -232,7 +232,7 @@ function baceResult(entry, found, bench) {
     shotBlock(shot, found, config),
     chart(transientModel(shot, {
       t0_int_s: values.t0_int_s,
-      t0_int_reference: values.t0_int_reference,
+      t_int_width_s: values.t_int_width_s,
       pulse_delay_s: pulseDelayS(shot, values, rig),
       offset_corrected: values.offset_correct,
       dark_reference: values.dark_reference,
@@ -309,15 +309,16 @@ export function shotBlock(shot, found, config) {
 }
 
 /**
- * `:PULS:DEL1` for **this shot**, which is what a `pulse`-referenced window
- * travels with.
+ * When the field reaches the device on **this shot**, after the trigger: its
+ * `:PULS:DEL1` plus the rig's sync-to-field latency. The integration window
+ * is measured from there (`experiment/transient.py` `resolve_window`).
  *
- * The service recomputes `resolve_t0_int` every step from `levels.delay_s`,
- * and along a delay axis — `recipes/run-bace.toml` sweeps exactly that — the
+ * The service resolves the window every step from the shot's own delay, and
+ * along a delay axis — `recipes/run-bace.toml` sweeps exactly that — the
  * form's `delay_ns` is only the value of one point. Taken from the form, the
  * shaded window and the running integral stood still while the real one moved
- * with every point. And `trigger_offset_s` belongs to it: `pulse_levels` adds
- * it before the generator sees the number.
+ * with every point. `trigger_offset_s` is the latency after `:PULS:DEL1`; the
+ * generator is never told it.
  */
 export function pulseDelayS(shot, values, rig) {
   const setpoint = (shot && shot.setpoint) || {};

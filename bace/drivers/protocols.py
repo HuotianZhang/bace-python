@@ -38,11 +38,11 @@ class Trace:
     convention the file already records.
 
     `t0` is the record's own time origin as the instrument reports it
-    (`:WAV:XOR?`). The processing chain does not use it: it integrates on
-    `arange(n)*dt`, matching the original engine, so `t0_int` is measured from
-    the *start of the record*, not from the trigger. Keep `t0` anyway — it is
-    the only record of where the trigger sat, and any future re-referencing
-    needs it.
+    (`:WAV:XOR?`), negative when the trigger is inside the record. `charge()`
+    integrates on `arange(n)*dt`, record time, matching the original engine;
+    `experiment.transient.resolve_window` uses `t0` to put a window measured
+    from the pulse into that time, and the recorder stores it per step so an
+    offline reader can do the same.
     """
 
     y: np.ndarray

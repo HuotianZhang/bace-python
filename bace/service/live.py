@@ -243,8 +243,7 @@ class LiveState:
         try:
             return pulse_levels(setpoint.vpre, setpoint.vcoll, self.rig_config.pulse_amp,
                                 setpoint.delay_ns, cfg.pulse_width_ns,
-                                invert=cfg.invert_polarity,
-                                trigger_offset_s=self.rig_config.trigger_offset_s)
+                                invert=cfg.invert_polarity)
         except (ValueError, TypeError, AttributeError):
             return None
 

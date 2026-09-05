@@ -764,8 +764,7 @@ def stage_configure(report: Report, rm, rig_config, run_config, *,
             vpre, vcoll, delay_ns = pinned
             lv = pulse_levels(vpre, vcoll, rig_config.pulse_amp, delay_ns,
                               run_config.pulse_width_ns,
-                              invert=run_config.invert_polarity,
-                              trigger_offset_s=rig_config.trigger_offset_s)
+                              invert=run_config.invert_polarity)
             c.data["pinned (vpre / vcoll / delay_ns at the device)"] = (
                 f"{vpre:g} V / {vcoll:g} V / {delay_ns:g} ns"
                 + (", invert_polarity" if run_config.invert_polarity else ""))
@@ -960,15 +959,20 @@ def stage_acquire(report: Report, rm, rig_config, run_config, averages: int) -> 
             if trace.t0 < 0:
                 # The trigger is ~200 ns into the record, so this is the
                 # number that decides whether the integral starts before the
-                # transient does. `t0_int_s` is in whatever `t0_int_reference`
-                # names; resolve it to record time first, as `charge` does --
-                # read as record time, a trigger-referenced 120.5 ns reported
-                # as -79 ns on the lab PC (2026-09-04).
-                from bace.experiment.transient import resolve_t0_int
-                t0_rec = resolve_t0_int(run_config, trace.t0)
-                c.data["t0_int in record time (ns)"] = round(t0_rec * 1e9, 1)
+                # transient does. `t0_int_s` is measured from the field's
+                # arrival; resolve it to record time first, as `charge` does.
+                # This stage drives no generator, so the window is shown at
+                # `:PULS:DEL1 = 0`; a scan adds its delay to both numbers.
+                from bace.experiment.transient import resolve_window
+                t0_rec, t1_rec = resolve_window(run_config, trace.t0, 0.0,
+                                                rig_config.trigger_offset_s)
+                c.data["integration window in record time at delay 0 (ns)"] = (
+                    f"{t0_rec * 1e9:.1f} .. {t1_rec * 1e9:.1f}")
                 after_trigger = (t0_rec + trace.t0) * 1e9
                 c.data["t0_int, relative to the trigger (ns)"] = round(after_trigger, 1)
+                if t1_rec > (trace.n - 1) * trace.dt:
+                    c.warn(f"the integration window ends at {t1_rec * 1e9:.0f} ns, "
+                           f"past the {(trace.n - 1) * trace.dt * 1e9:.0f} ns record")
             expected_dt = (run_config.timebase_ns_per_div / 1e8) / max(trace.n, 1)
             c.data["dt expected (ns)"] = round(expected_dt * 1e9, 4)
             if abs(trace.dt - expected_dt) > expected_dt * 0.05:
@@ -1759,11 +1763,14 @@ def stage_measure(report: Report, rm, rig_config, run_config, *, averages: int,
         c.data["peak sample index"] = int(np.argmax(np.abs(photo)))
         c.data["peak time in record (ns)"] = round(
             float(np.argmax(np.abs(photo))) * fin.dt * 1e9, 2)
-        c.data["t0_int (ns)"] = round(cfg.t0_int_s * 1e9, 2)
-        c.data["t0_int reference"] = cfg.t0_int_reference
-        from bace.experiment.transient import resolve_t0_int
-        t0_rec = resolve_t0_int(cfg, steps[0].light.t0)
-        c.data["t0_int in record time (ns)"] = round(t0_rec * 1e9, 2)
+        c.data["t0_int from the field (ns)"] = round(cfg.t0_int_s * 1e9, 2)
+        c.data["t_int_width (ns)"] = round(cfg.t_int_width_s * 1e9, 2)
+        c.data["trigger_offset_s, sync to field (ns)"] = round(
+            rig.config.trigger_offset_s * 1e9, 2)
+        t0_rec = steps[0].t0_int_record_s
+        t1_rec = steps[0].t1_int_record_s
+        c.data["integration window in record time (ns)"] = (
+            f"{t0_rec * 1e9:.2f} .. {t1_rec * 1e9:.2f}")
         c.data["record t0 :WAV:XOR? (ns)"] = round(steps[0].light.t0 * 1e9, 2)
 
         # -- was the window big enough to hold the trace? --------------------
@@ -1799,9 +1806,9 @@ def stage_measure(report: Report, rm, rig_config, run_config, *, averages: int,
             c.warn("the photocurrent peak is within three standard deviations of "
                    "the tail noise — is the light reaching the sample, and is "
                    "the trigger arriving?")
-        # Against the *resolved* window, not `cfg.t0_int_s` — that number is in
-        # whatever units `t0_int_reference` names, and comparing a record-time
-        # peak against a trigger-referenced setting compares two different clocks.
+        # Against the *resolved* window, not `cfg.t0_int_s` — that number is
+        # measured from the field, and comparing a record-time peak against it
+        # compares two different clocks.
         if int(np.argmax(np.abs(photo))) * fin.dt < t0_rec:
             c.warn("the peak falls before t0_int, so part of the transient is "
                    "outside the integration window")
