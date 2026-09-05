@@ -67,7 +67,7 @@ test('a position is the bench action for it, with the light module’s levels', 
   assert.deepEqual(sh, { open: 'shutter-open', shut: 'shutter-shut' });
   const rl = Object.fromEntries(rowOf(m, 'relay').positions.map((p) => [p.id, p.action]));
   assert.deepEqual(rl, { amplifier: 'relay-to-amplifier', sourcemeter: 'relay-to-sourcemeter' });
-  assert.equal(m.park.action, 'park');
+  assert.equal(m.park, undefined, 'the panel does not offer park; the pinned strip does');
 });
 
 test('the levels beside the switch say which the lit position sends', () => {

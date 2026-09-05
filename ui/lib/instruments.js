@@ -34,7 +34,7 @@ export const LED_LEVELS = ['led_v', 'led_low_v', 'pulse_frequency_hz', 'duty_per
 const SENDS = { dc: ['led_v'], pulse: LED_LEVELS, off: [] };
 
 /**
- * `{rows, park}` from the `/bench` snapshot and the `light` module's entry.
+ * `{rows}` from the `/bench` snapshot and the `light` module's entry.
  *
  * Each row is `{key, label, inferred, positions: [{id, label, on, action,
  * args}], levels?: [{spec, used}]}`. `on` is the read-back: exactly one
@@ -91,31 +91,25 @@ export function panelModel(bench, light) {
       ],
     },
   ];
-  return { rows, park: { action: 'park', args: {} } };
+  return { rows };
 }
 
 /**
- * The panel. `ctx` is `{busy, act(action, args), edit(module, params),
- * park(), parkArmed}`; `park` is the strip's own, so the arm-then-confirm it
- * does while a run holds the worker is one implementation — and `parkArmed`
- * is that same flag, so the button that was clicked is the button that asks
- * (#42). Without it the first click on a busy bench changed nothing here and
- * put the question at the foot of the page, where nobody was looking.
+ * The panel. `ctx` is `{busy, act(action, args), edit(module, params)}`.
+ *
+ * **Park is not here.** It was, in this header, and it was the same command
+ * as the strip's: one action that aborts the run and cancels the queue, with
+ * two ways in. The copy that went is the one that could be missed — `ui-rules`
+ * §1: the shell pins the strip to the foot of the window, and this panel sits
+ * at the top of a view that scrolls under it, so on a bench with six cards the
+ * panel's Park is off screen exactly when a run is going and the strip's never
+ * is. A second way to abort a run and drop a queue is not reach; it is a
+ * second place to hit it by accident.
  */
 export function renderInstruments(model, ctx) {
   const busy = Boolean(ctx.busy);
-  const armed = Boolean(ctx.parkArmed);
   return h('div.inst',
-    h('div.zh',
-      h('span.zt', 'Instruments'),
-      h('span', { style: { flex: '1' } }),
-      h('button', {
-        class: armed ? 'btnd armed' : 'btnd',
-        title: busy
-          ? 'park aborts the run and cancels the queue — the bench is safe now, not after the queue'
-          : 'outputs off, shutter shut, relay parked',
-        onclick: () => ctx.park(),
-      }, armed ? 'abort the run and park?' : 'Park')),
+    h('div.zh', h('span.zt', 'Instruments')),
     model.rows.map((row) => h('div.irow', { class: row.inferred ? 'inferred' : '' },
       h('span.n', { text: row.label }),
       h('span.sw', { role: 'group', 'aria-label': row.label, title: row.inferred ? 'inferred from the running step, not read back' : '' },
@@ -124,7 +118,7 @@ export function renderInstruments(model, ctx) {
           class: p.on ? 'on' : '',
           'aria-pressed': p.on ? 'true' : 'false',
           disabled: busy || null,
-          title: busy ? 'a run holds the bench; only Park is allowed until it ends' : `${row.label} → ${p.label}`,
+          title: busy ? 'a run holds the bench; only Park is allowed until it ends — Park is on the strip below' : `${row.label} → ${p.label}`,
           onclick: () => { if (!p.on) ctx.act(p.action, p.args); },
         }, p.label))),
       row.levels ? levels(row, ctx) : h('span'))));

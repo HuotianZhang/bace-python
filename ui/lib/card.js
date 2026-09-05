@@ -68,7 +68,7 @@ function header(model, ctx, busy, blocked) {
     const danger = action.action === 'led-off';
     buttons.push(h('button' + (danger ? '.btnd' : '.btns'), {
       disabled: busy || null,
-      title: busy ? 'a run holds the bench; only Park is allowed until it ends'
+      title: busy ? 'a run holds the bench; only Park is allowed until it ends — Park is on the strip below'
         : `${action.label} — acts on the bench now`,
       onclick: () => ctx.act(model, action),
     }, action.label));

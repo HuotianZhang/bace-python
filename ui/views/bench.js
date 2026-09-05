@@ -22,7 +22,7 @@ export default {
   route: 'bench',
   title: 'bench',
 
-  mount(container, { store, api, notify, park, parkArmed = () => false, query = {} }) {
+  mount(container, { store, api, notify, query = {} }) {
     // The Instruments panel first — the switches — then the module cards.
     // Two zones, because they are two different things: a switch acts on the
     // bench the moment it is clicked, a card's Run posts a job the worker
@@ -344,19 +344,14 @@ export default {
       [cardModel(entry, { bench: c.bench }), c.busy, c.checksFor(entry.name), [...open].sort(), docKeys]);
 
     /** The panel, keyed on what it draws: the snapshot's three instruments,
-     *  the light levels, whether the worker is held, and whether Park is
-     *  armed — the last is the shell's flag, not the store's, and the panel
-     *  draws it because the click that arms it is the panel's own (#42). */
+     *  the light levels and whether the worker is held. */
     function renderPanel(state, c) {
       const light = state.modules.byName.light || null;
       const model = panelModel(state.bench, light);
-      const armed = Boolean(parkArmed());
-      keyed(panel, JSON.stringify([model, c.busy, armed]), () => renderInstruments(model, {
+      keyed(panel, JSON.stringify([model, c.busy]), () => renderInstruments(model, {
         busy: c.busy,
         act: (action, args) => c.actInstrument(action, args),
         edit: (name, params) => c.edit(name, params),
-        park,
-        parkArmed: armed,
       }));
     }
 
@@ -472,8 +467,6 @@ export default {
 
     const off = store.subscribe(render);
     render();
-    // `redraw` is the shell's way in for what the store does not hold: Park's
-    // armed flag lives in `app.js` and is drawn by the panel here.
-    return { dispose() { off(); charts.dispose(); }, focus, redraw: render };
+    return { dispose() { off(); charts.dispose(); }, focus };
   },
 };

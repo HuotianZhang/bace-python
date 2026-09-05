@@ -83,13 +83,10 @@ function show() {
   if (mounted && mounted.dispose) mounted.dispose();
   viewEl.scrollTop = 0;
   mountedRoute = name;
-  // `park` is the strip's, and `parkArmed` reads the *same* armed flag: the
-  // bench tab's Instruments panel offers the same button, so it must arm and
-  // confirm where it is clicked rather than send the operator to the strip to
-  // find out what their click did (#42).
-  mounted = BY_ROUTE[name].mount(viewEl, {
-    store, api, stream, fmt, notify, park, parkArmed: () => parkArmed, query,
-  });
+  // Park is the strip's alone: the strip is pinned to the foot of the window
+  // and the strip is where it arms, so no view is handed it and none offers a
+  // second one.
+  mounted = BY_ROUTE[name].mount(viewEl, { store, api, stream, fmt, notify, query });
   renderTabs();
 }
 
@@ -248,23 +245,15 @@ function dismiss() {
 /**
  * An armed Park disarms itself: it is a confirmation, not a mode.
  *
- * The flag is not in the store — it is the shell's, and it is drawn in two
- * places: the strip, and the Instruments panel's copy of the same button. The
- * panel is a view, and a view redraws on a store notify, which this is not; so
- * arming pokes it directly. A view that does not offer Park has no `redraw`
- * and there is nothing to poke.
+ * The flag is the shell's and it is drawn in one place, the strip — which is
+ * why arming only has to redraw that. It was two, and the second was a copy
+ * of the button in a panel that scrolls away.
  */
 function armPark(on) {
   parkArmed = on;
   clearTimeout(parkArmedTimer);
-  parkArmedTimer = on ? setTimeout(() => { parkArmed = false; drawPark(); }, 6000) : null;
-  drawPark();
-}
-
-/** Both places the armed flag is drawn. */
-function drawPark() {
+  parkArmedTimer = on ? setTimeout(() => { parkArmed = false; drawStrip(store.getState()); }, 6000) : null;
   drawStrip(store.getState());
-  if (mounted && mounted.redraw) mounted.redraw();
 }
 
 async function fix(name, item) {
