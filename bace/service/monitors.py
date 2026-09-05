@@ -56,6 +56,15 @@ from .rigs import power_reading, read_temperature_console
 MAX_INTERVAL_S = 3600.0
 MIN_INTERVAL_S = 0.01
 
+TEMPERATURE_MONITOR_S = 5.0
+"""What the temperature monitor runs at when nobody says otherwise, and the
+interval `Session.start` starts it at -- the console's own slow-poll interval
+and the same number as the settle's poll clock
+(`temperature.TEMPERATURE_POLL_S`), so the card moves at one rate whether a
+run is settling or the bench is idle. It is deliberately not the power
+monitor's 1 s: a cryostat does not change in a second, and this monitor
+competes for the bus."""
+
 
 class Monitor:
     """Read something every `interval_s` on a thread of its own and hand

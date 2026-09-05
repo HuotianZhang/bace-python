@@ -1003,10 +1003,17 @@ def test_unknown_things_are_404s(service):
     assert next(c for c in r.json()["checks"] if c["code"] == "tree.shape")["level"] == "invalid"
     r = client.post("/runs", json={"module": "note", "params": {"text": "x"}, "extra": 1})
     assert r.status_code == 422 and r.json()["param"] == "extra"
-    r = client.post("/runs", json={"module": "bace", "params": {**FAST, "smu_current_compliance_a": 0.1,
-                                                                "voc": 0.9}})
+    # The ceiling is read where the SourceMeter is sourced. A bace run touches
+    # the Keithley only under `measure_dc`, so that is where a compliance over
+    # the bench ceiling is refused (2026-09-05); without it the number is not
+    # read and the card marks the fold "not read".
+    over = {**FAST, "smu_current_compliance_a": 0.1, "voc": 0.9}
+    r = client.post("/runs", json={"module": "bace", "params": {**over, "measure_dc": True}})
     assert r.status_code == 422 and "smu.ceiling" in r.json()["error"]
-    assert client.get("/runs").json() == []
+    assert client.get("/runs").json() == [], "nothing refused above created a run"
+    r = client.post("/runs", json={"module": "bace", "params": over})
+    assert r.status_code == 202, "not read, not refused: no measure_dc, no SourceMeter"
+    client.post(f"/runs/{r.json()['run_id']}/stop", json={"mode": "abort"})
 
 
 # -- the power monitor ---------------------------------------------------------------------------
@@ -1192,6 +1199,18 @@ def test_the_cli_builds_a_sim_session_without_pyvisa_and_refuses_fast_on_the_rig
     assert main(["--sim", "--run", str(tmp_path / "nope.toml")]) == 2
     assert parse_args(["--sim"]).power_monitor is None
     assert parse_args(["--sim", "--power-monitor", "0.5"]).power_monitor == 0.5
+    # The temperature monitor is the other way round: on unless refused, so
+    # the flag that has to exist is the one that turns it off.
+    assert parse_args(["--sim"]).temperature_monitor == 5.0
+    assert parse_args(["--sim"]).no_temperature_monitor is False
+    assert parse_args(["--sim", "--no-temperature-monitor"]).no_temperature_monitor is True
+    assert parse_args(["--sim", "--temperature-monitor", "30"]).temperature_monitor == 30.0
+    assert main(["--sim", "--temperature-monitor", "0"]) == 2, "the interval is in seconds"
+    assert cli.build_session(parse_args(
+        ["--sim", "--out", str(tmp_path / "runs")])).temperature_monitor_s == 5.0
+    assert cli.build_session(parse_args(
+        ["--sim", "--no-temperature-monitor", "--temperature-monitor", "30",
+         "--out", str(tmp_path / "runs")])).temperature_monitor_s is None
     a = parse_args(["--sim", "--fast", "--out", str(tmp_path / "runs"), "--seed", "3"])
     assert (a.sim, a.fast, a.port, a.host, a.seed) == (True, True, 8900, "127.0.0.1", 3)
 

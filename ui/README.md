@@ -23,7 +23,7 @@ repo root for the offline bench at `/ui/replay.html`, which needs
 | `lib/stream.js` | the WebSocket, and the whole reconnect discipline — no view knows about any of it |
 | `lib/store.js` | the fold: the `/bench` snapshot and the `/events` frames become the state every view subscribes to |
 | `lib/format.js` | the number rules of `docs/ui-rules.md` §2, including the two zeros that are absences |
-| `lib/rail.js` | the pinned rail and the chain strip: `railModel(state)` is a pure function of the store, the DOM is beside it |
+| `lib/rail.js` | the pinned rail and the chain strip: `railModel(state)` is a pure function of the store, the DOM is beside it. `temperatureNow(state)` lays the newest `TemperatureRead` over the read-back's block, so the T cell follows the monitor the service runs from boot rather than the last `/bench`; the sub-line carries the monitor's cadence, and a monitor that has not read for three of its intervals reads `stale` and loses its band verdict — `in band` is a claim about now |
 | `lib/fields.js` | which fields sit above the fold on each card and in what order, as data, plus `cardModel` — the pure function one `GET /modules` entry becomes a card's rows through |
 | `lib/card.js` | the generated card and the one field component every parameter goes through: provenance rendered, `doc` under the field and `doc_full` on hover |
 | `lib/instruments.js` | the bench tab's Instruments panel: shutter, LED and relay as switches whose lit position is the read-back, the LED's levels beside it; `panelModel` is pure and tested |

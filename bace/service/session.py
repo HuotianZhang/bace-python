@@ -90,7 +90,8 @@ from .journal import (Journal, add_curve, axis_result, count_shot, finished_resu
                       loop_result, node_record)
 from .live import LiveState
 from .modules import Catalogue, RunContext, VocSource, coerce_sample, jsonable
-from .monitors import MAX_INTERVAL_S, MIN_INTERVAL_S, PowerMonitor, TemperatureMonitor
+from .monitors import (MAX_INTERVAL_S, MIN_INTERVAL_S, TEMPERATURE_MONITOR_S,
+                       PowerMonitor, TemperatureMonitor)
 from .pipeline import VOC_PARAM, Module, Schedule, Step, Validation
 from .rigs import ACTIONS, Bench, BenchActionRefused, Unavailable, action_before
 from .wire import STEPDONE_ARRAYS, ephemeral_frame, is_ephemeral, make_envelope, payloads
@@ -464,7 +465,8 @@ class Session:
                  sample: Mapping[str, Any] | None = None,
                  rig_path: str | None = None, run_path: str | None = None,
                  session_id: str | None = None, seed: int = 0,
-                 power_monitor_s: float | None = None):
+                 power_monitor_s: float | None = None,
+                 temperature_monitor_s: float | None = TEMPERATURE_MONITOR_S):
         if mode not in ("sim", "rig"):
             raise ValueError(f"mode must be 'sim' or 'rig', not {mode!r}")
         self.rig_config = rig_config
@@ -473,6 +475,34 @@ class Session:
         (`--power-monitor`), so the meter is watched from the moment the
         service is up and not from the moment somebody opens a console. None
         leaves it to `POST /monitors/power`."""
+        self.temperature_monitor_s = (None if temperature_monitor_s is None
+                                      else float(temperature_monitor_s))
+        """The interval the temperature monitor is started at in `start()`,
+        and the one observer on this bench that runs without being asked
+        for. A cryostat drifts whether or not a run is going and whether or
+        not a console is open, so the 331 is read from the moment the
+        service is up: the card's number is then a reading of a known age
+        rather than the read-back of whenever somebody last pressed
+        something, and a `TemperatureRead` is in the journal for the hours
+        between runs. None is `--no-temperature-monitor`: nothing is
+        started and `POST /monitors/temperature` is the only way in, as it
+        was before.
+
+        The power meter is the other way round (`power_monitor_s` defaults
+        to None, `--power-monitor` turns it on): its console holds the
+        wish, and a meter under a dark box logs nothing anybody wants. What
+        makes the difference safe is the bus rule, not the instrument --
+        see `start_temperature_monitor`: on GPIB this monitor reads only
+        while holding the worker's lock and skips the tick otherwise, so
+        "always on" never means "beside an acquisition".
+
+        What it costs, said plainly: one frame every `interval_s` in the
+        journal and in the ring -- at 5 s, some 17 000 lines and a few
+        megabytes for a day the bench spent idle, and the ring's 5000
+        envelopes are then about seven hours of that idleness rather than
+        the last several runs. Both are the price of being able to say what
+        the cryostat did overnight; `--no-temperature-monitor` is the way
+        out for a bench where that is not worth it."""
         self.run_toml: dict = dict(run_toml or {})
         self.out = str(out)
         self.mode = mode
@@ -566,6 +596,18 @@ class Session:
                 self.start_power_monitor(self.power_monitor_s)
             except (ValueError, Conflict) as exc:
                 self._error(f"--power-monitor: {exc}")
+        if self.temperature_monitor_s is not None and not self.temperature_monitor_running:
+            try:
+                self.start_temperature_monitor(self.temperature_monitor_s)
+            except (ValueError, Conflict) as exc:
+                # A bench with no 331 is the ordinary case here rather than
+                # start-up trouble: this monitor is the default and not
+                # something a flag asked for, and the read-back's
+                # `unavailable["temperature"]` already says on the card why
+                # there is no reading. So it is logged and *not* counted
+                # among the session's errors -- otherwise every bench
+                # without a cryostat would come up reporting one.
+                log.info("the temperature monitor was not started: %s", exc)
         return self
 
     def attach_loop(self, loop: asyncio.AbstractEventLoop | None = None) -> None:
@@ -1793,12 +1835,17 @@ class Session:
         m = self._temperature_monitor
         return m is not None and m.running
 
-    def start_temperature_monitor(self, interval_s: float = 5.0) -> dict:
+    def start_temperature_monitor(self, interval_s: float = TEMPERATURE_MONITOR_S) -> dict:
         """`POST /monitors/temperature`: the 331 read every `interval_s`
         beside whatever the worker is doing -- through the attached driver's
         lock when this process owns the GPIB session, over HTTP when a
         console does. One at most (409); `ValueError` when no 331 is on the
-        bench at all or the interval is out of range."""
+        bench at all or the interval is out of range.
+
+        `start()` has already called this on a bench that has a 331
+        (`temperature_monitor_s`), so the route is what changes the interval
+        -- `DELETE` then `POST` -- or starts the monitor again after a
+        console stopped it, rather than what first turns it on."""
         interval_s = float(interval_s)
         if not MIN_INTERVAL_S <= interval_s <= MAX_INTERVAL_S:
             raise ValueError(f"interval_s must be between {MIN_INTERVAL_S:g} and "
