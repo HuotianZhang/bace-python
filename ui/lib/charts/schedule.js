@@ -50,6 +50,11 @@ export const UNKNOWN_PX = 6;
  * and a bar drawn to a total from the previous tree would be the one thing on
  * this screen that silently described something else.
  */
+// **Not one of `frame.ASPECT`'s three shapes, on purpose.** Those size a plot
+// from its width; this is a *band* whose height is set by what surrounds it —
+// the temperature labels above and the clock axis below — and whose blocks are
+// the accent colour, which `ui-rules` §3 will not have filling a card. So the
+// height stays fixed and only the length follows the container.
 export function scheduleModel({ blocks, cost, width = 900, height = 118, now = null } = {}) {
   const list = blocks || [];
   const spans = list.map((block) => ({

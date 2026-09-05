@@ -32,6 +32,48 @@ export function paint(colour) {
 export const FONT_N = "var(--font-num)";
 export const FONT_S = "var(--font-body)";
 
+/** The plot's surround, in the model's own units. One default, in one place. */
+export const MARGIN = { left: 56, right: 16, top: 16, bottom: 26, gap: 22 };
+
+/**
+ * The three shapes a panel comes in here, as **plot width ÷ plot height**.
+ *
+ * Before this there was no such rule and every chart picked its own numbers:
+ * measured per panel the console ran from 2.1:1 (the J–V) to 12.3:1 (the power
+ * monitor), a sixfold spread with nothing to appeal to. The design pack's own
+ * drawings sit in a band — `docs/design/bace-charts-r3.js` draws its four
+ * panels at 5.2, 5.7, 6.6 and 6.8 : 1 — and `trace` is that band's middle.
+ *
+ * Three, not one, because the spread was not all error. A quantity against
+ * *time* wants length: a 4000-sample transient in a square is a smudge. A
+ * quantity against another *quantity* — a J–V's power quadrant, Q against the
+ * swept axis — is read for its shape, and stretching it lies about the slope.
+ * A `strip` is a length of time seen whole, where only the ends and the
+ * excursions matter.
+ *
+ * The ratio names the panel of **weight 1**; the others follow their weight,
+ * which stays a deliberate choice — a running-integral panel is half the
+ * height of the traces it belongs to, on purpose.
+ */
+export const ASPECT = {
+  trace: 6,     // a quantity against time — the transient's panels
+  curve: 2.6,   // a quantity against another quantity — J–V, Q(axis), the grid
+  strip: 11,    // a length of time seen whole — the power monitor, the schedule
+};
+
+/**
+ * The height that gives `panels` their aspect at this width. A chart derives
+ * its `height` from this instead of carrying a hand-picked one, so widening a
+ * chart makes it *longer* rather than squarer, and the ratio it was drawn to
+ * survives every container it is put in.
+ */
+export function heightFor(width, panels, { margin = {}, aspect = ASPECT.trace } = {}) {
+  const m = { ...MARGIN, ...margin };
+  const total = panels.reduce((sum, p) => sum + (p.weight || 1), 0);
+  const plot = Math.max(1, width - m.left - m.right);
+  return Math.round((plot / aspect) * total + m.top + m.bottom + m.gap * (panels.length - 1));
+}
+
 /**
  * Stacked panel rectangles over one x axis.
  *
@@ -41,7 +83,7 @@ export const FONT_S = "var(--font-body)";
  * is the whole reason they are stacked rather than side by side.
  */
 export function layout({ width, height, panels, margin = {} }) {
-  const m = { left: 56, right: 16, top: 16, bottom: 26, gap: 22, ...margin };
+  const m = { ...MARGIN, ...margin };
   const total = panels.reduce((sum, p) => sum + (p.weight || 1), 0);
   const free = height - m.top - m.bottom - m.gap * (panels.length - 1);
   const w = width - m.left - m.right;
@@ -66,7 +108,65 @@ export function layout({ width, height, panels, margin = {} }) {
  * when the pointer enters.
  */
 export function chart(model) {
-  const figure = h('figure.chart', { dataset: { chart: model.key || '' } });
+  if (typeof model !== 'function') {
+    const figure = h('figure.chart', { dataset: { chart: model.key || '' } });
+    return drawInto(figure, model);
+  }
+  return responsive(model);
+}
+
+/**
+ * Rounding applied to a measured container before it is handed to a model, so
+ * a drag across the window is a handful of rebuilds and not one per pixel.
+ * Four units is under half a stroke: nothing on screen moves by it.
+ */
+const WIDTH_STEP = 4;
+
+/** Below this the axis labels collide whatever the aspect; do not go smaller. */
+const MIN_WIDTH = 240;
+
+/**
+ * A chart that is a function of the width it is given, rather than of a number
+ * picked in its own file.
+ *
+ * `svg.root()` sets a `viewBox` and `width: 100%`, so the container does not
+ * lay a chart out — it **zooms** it, type and all. With each chart carrying a
+ * hand-picked viewBox width and each container a different real one, the same
+ * `9.5px` axis label was landing anywhere from 8.6 px (the rig tab) to 12.9 px
+ * (the power monitor): a 1.5× spread invisible in code, where every file says
+ * the same number. Measuring the container and building the model at that
+ * width pins the scale at 1, so 9.5 px is 9.5 px on every tab.
+ *
+ * The observer fires once with the first real width, before paint. Until then
+ * the figure stays empty rather than being drawn at a guessed width and
+ * redrawn a frame later.
+ */
+function responsive(make) {
+  const figure = h('figure.chart');
+  let drawn = null;
+  const draw = (raw) => {
+    const width = Math.max(MIN_WIDTH, Math.round(raw / WIDTH_STEP) * WIDTH_STEP);
+    if (width === drawn) return;
+    drawn = width;
+    const model = make(width);
+    figure.dataset.chart = model.key || '';
+    drawInto(figure, model);
+  };
+  if (typeof ResizeObserver === 'function') {
+    // The figure's width comes from its container and the SVG inside is
+    // `width: 100%`, so painting can never change what is being observed —
+    // there is no feedback loop to guard against.
+    new ResizeObserver((entries) => {
+      const w = entries[entries.length - 1].contentRect.width;
+      if (w > 0) draw(w);
+    }).observe(figure);
+  } else {
+    draw(MIN_WIDTH);
+  }
+  return figure;
+}
+
+function drawInto(figure, model) {
   if (model.absent) {
     fill(figure, absent(model.absent));
     return figure;
@@ -163,6 +263,48 @@ function legendGlyph(e) {
         'stroke-dasharray': e.dash || null,
       });
   }
+}
+
+/** The step between header lines, at the 9 px they are set in. */
+export const HEAD_LINE = 11;
+
+/**
+ * How many header lines a label of this length needs at this plot width, so a
+ * model can reserve the room before anything is drawn. Same arithmetic as
+ * `wrapLabel`, which is the only reason it is worth sharing.
+ */
+export function headLines(label, width, note = false) {
+  return (label ? wrapLabel(label, width).length : 0) + (note ? 1 : 0);
+}
+
+/**
+ * A panel label broken at its own separators so it fits the plot.
+ *
+ * SVG text does not wrap, and these labels are built by joining clauses with
+ * ` · ` — `photocurrent = light − dark · I / mA · averaged over the loops so
+ * far · dark translated to zero`. So the separator is the break, and a label
+ * splits only where it already reads as a break. Two lines at most: a third
+ * would be a paragraph, and a panel that needs a paragraph needs a note.
+ *
+ * The width is estimated, not measured — 4.8 units a character at 9 px, a
+ * little generous for this face. A model cannot measure text, and being a few
+ * characters pessimistic costs a wrap nobody notices; being optimistic costs
+ * the overflow this exists to stop.
+ */
+export function wrapLabel(label, width, per = 4.8) {
+  const fits = (t) => t.length * per <= width;
+  if (fits(label)) return [label];
+  const parts = String(label).split('  ·  ');
+  if (parts.length < 2) return [label];
+  let head = parts[0];
+  let i = 1;
+  for (; i < parts.length; i += 1) {
+    const next = `${head}  ·  ${parts[i]}`;
+    if (!fits(next)) break;
+    head = next;
+  }
+  const tail = parts.slice(i).join('  ·  ');
+  return tail ? [head, tail] : [head];
 }
 
 /** Clip-path ids have to be unique in a document, and a card holds several charts. */
@@ -280,12 +422,25 @@ function renderPanel(panel, model) {
       text: mark.text,
     }));
   }
-  if (panel.label) {
-    kids.push(s('text', { x: rect.x, y: rect.y - 5,
-      style: { font: `600 9px ${FONT_S}`, fill: paint('ink') }, text: panel.label }));
-  }
+  // The header, from the bottom up: the note last, the label's lines above it.
+  //
+  // Both used to sit on one line, the label from the left and the note from the
+  // right, which held only while labels were short and panels wide. Once the
+  // labels took on what they define — `dark translated to zero`, `offset
+  // corrected` — and the plot narrowed to make room for the shot's numbers, the
+  // two ran into each other, and a left-anchored label long enough simply left
+  // the chart: `svg.root()` sets `overflow: visible`, so it carried on across
+  // whatever the card had put beside it.
+  const lines = [];
+  if (panel.label) lines.push(...wrapLabel(panel.label, rect.w));
+  const noteAt = rect.y - 5;
+  const labelTop = noteAt - (panel.note ? HEAD_LINE : 0) - (lines.length - 1) * HEAD_LINE;
+  lines.forEach((line, i) => {
+    kids.push(s('text', { x: rect.x, y: labelTop + i * HEAD_LINE,
+      style: { font: `600 9px ${FONT_S}`, fill: paint('ink') }, text: line }));
+  });
   if (panel.note) {
-    kids.push(s('text', { x: rect.x + rect.w, y: rect.y - 5, 'text-anchor': 'end',
+    kids.push(s('text', { x: rect.x, y: noteAt,
       style: { font: `400 9px ${FONT_S}`, fill: paint(panel.noteColour || 'grey') }, text: panel.note }));
   }
   // One dot per series at the crosshair, hidden until the pointer is over the
