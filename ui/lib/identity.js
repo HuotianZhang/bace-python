@@ -17,12 +17,17 @@
 //     in as a slug. So the panel draws the stem the next run will be filed
 //     under — `s4_PTQ10IT4F_pxa_…` — and the operator is typing a filename,
 //     which is what they are actually doing.
-//   * **Warn where the archive has already been bitten.** `naming-plan.md`
-//     §"Fields collide" carries both: `sample = "a_b"` forges a field
-//     boundary, and `sample = "s4 pixel a"` puts a space in a directory name
-//     — the 2026-09-01 bug `slug()` was written to stop and which this path
-//     still does not stop. The console is the new front door for it, so it
-//     says so at the field, before the run.
+//   * **Show the reduction, because the name is not always the value.** All
+//     three are slugged into the folder name since 2026-09-05
+//     (`naming-plan.md` §2, brought forward because this panel made the
+//     defect typeable rather than only editable), and kept verbatim in the
+//     record. So a field can be right and still be filed as something else —
+//     `PTQ10:IT-4F` as `PTQ10IT-4F`, `px a` as `px-a`, and, where the limit
+//     bites, `PTQ10IT4F-batch-2026-08-A` and `…-B` as one string. That last
+//     is the one no character rule explains and the one a lab most needs to
+//     learn at the keyboard rather than from the archive, so every reduced
+//     field says what it will be filed as, with the reason and a way to
+//     adopt it.
 //   * **`temperature_k` is not offered.** It is a legal `[sample]` key and the
 //     route takes it, and `run.toml` says in a comment dated 2026-09-04 why
 //     nobody should type it: every recipe said 290, and a run at 220 K was
