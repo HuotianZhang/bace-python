@@ -125,8 +125,17 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
   border-left: 0; background: none;
   font-size: 10px; color: var(--grey); line-height: 1.35;
 }
+/* Two levels, because they are not the same thing: `warn` is a folder name
+   nobody wants to read, `bad` is one the service will refuse (`ui-rules` §3 —
+   alert is for the thing that stops you). */
+.ident .id-row.warn input.v { border-color: var(--warn); }
 .ident .id-row.bad input.v { border-color: var(--alert); }
-.ident .id-warn { display: block; color: var(--alert); }
+.ident .id-warn { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; color: var(--warn); }
+.ident .id-warn.refused { color: var(--alert); }
+.ident .id-warn button.link {
+  border: 0; background: none; padding: 0; font: inherit; color: inherit;
+  text-decoration: underline; cursor: pointer;
+}
 .ident .id-foot { display: flex; align-items: baseline; gap: 8px; padding-top: 8px; }
 .ident .id-foot .l { font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase; color: var(--grey); }
 .ident .id-foot .cs { font-size: 10px; color: var(--grey); }

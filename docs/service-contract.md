@@ -426,6 +426,25 @@ under which name. Nothing moved means no event and no line: a no-op that
 writes to the journal is noise in the one file an operator reads to
 reconstruct a day.
 
+**A name that is not a folder name is refused** (422). `sample`, `material`
+and `pixel` reach `RunMetadata.folder_name()` **unreduced** — only the comment
+is slugged — and the result goes straight to `os.path.join`
+(`storage/recorder.py`), so `sample = "a/b"` is two directories and
+`sample = "../../etc"` is a folder above `<out>`. Editing `run.toml` could
+always do that; it is the operator's own file on their own machine. A text
+field in the console is a different reachability, so this route refuses what
+`slug()` would *delete* — the Windows-reserved characters `<>:"/|?*`, the
+backslash, a control character, or a `..` — and names the value it would
+take instead (`slug()`'s own answer). It does **not** refuse what `slug()`
+would merely turn into a dash: a space or an underscore makes an ugly folder
+name, `run.toml` may hold either, and the console warns at the field rather
+than the route refusing something somebody may have a reason for.
+
+This closes `docs/naming-plan.md` §2's live defect at *this* door only. That
+file's own remedy — reducing all three fields with `slug()` inside
+`folder_name()`, which would settle it for `run.toml` too and is what "always
+nine parts" needs — is still open, and needs a length limit chosen.
+
 The console does not offer `temperature_k`, though the route accepts it:
 `run.toml`'s own comment (2026-09-04) says why — every recipe said 290 and a
 run at 220 K was filed as "290 K, typed", so a bench with a 331 reads the

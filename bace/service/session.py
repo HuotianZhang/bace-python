@@ -83,6 +83,7 @@ from ..experiment.rig import RigConfig
 from ..experiment.transient import RunConfig
 from ..experiment.wire import to_wire
 from ..params import Source
+from ..storage.naming import slug, traverses, unsafe_in_name
 from . import pipeline
 from .executor import run_pipeline
 from .journal import (Journal, add_curve, axis_result, count_shot, finished_result, jv_result,
@@ -452,6 +453,52 @@ def backlog_of(sink: Any) -> int:
     return sink.qsize() if numbered is None else numbered
 
 
+NAME_FIELDS = ("sample", "material", "pixel")
+"""The `[sample]` keys `RunMetadata.folder_name` puts into the path **raw** --
+only the comment is slugged on the way in."""
+
+
+def _check_name_fields(patch: Mapping[str, Any]) -> None:
+    """Refuse an identity that would not be a folder name, or `ValueError`.
+
+    `folder_name()` joins `sample`, `material` and `pixel` unreduced and the
+    result goes straight to `os.path.join` (`storage/recorder.py`), so
+    `sample = "a/b"` is two directories and `sample = "../../etc"` is a folder
+    two levels above `runs/`. That was reachable before this route only by
+    editing `run.toml`, which is the operator's own file on their own machine;
+    `PUT /session/sample` makes it a text field, so the route closes what it
+    opens rather than waiting for `naming-plan.md`'s `slug()` question to be
+    settled for every source at once.
+
+    **Only what is impossible, never what is ugly.** A space or an underscore
+    makes a bad folder name -- `naming-plan.md` §"Fields collide" -- and the
+    console warns about both at the field; refusing them here would be
+    stricter than `run.toml` is and would block a value somebody has a reason
+    for. What is refused is what `slug` would *delete*: a path separator, the
+    Windows-reserved characters, a control character, or a `..`.
+    """
+    for key in NAME_FIELDS:
+        value = patch.get(key)
+        if value is None:
+            continue
+        text = str(value)
+        bad = unsafe_in_name(text)
+        if bad:
+            # The remedy, not only the complaint: `slug` is what the comment
+            # already goes through, and for a value whose only problem is
+            # these characters it is exactly "drop them". The archive spells
+            # the contract's own `PTQ10:IT-4F` as `PTQ10IT4F` because
+            # somebody did this by hand while typing.
+            raise ValueError(
+                f"[sample] {key}: {text!r} cannot be a folder name -- "
+                f"{' '.join(repr(c) for c in bad)} is not allowed in a path segment, and this "
+                f"goes into every folder name this session writes, unreduced. Try {slug(text)!r}.")
+        if traverses(text):
+            raise ValueError(
+                f"[sample] {key}: {text!r} would put the run's folder outside {'{out}'} -- "
+                "the name is one path segment, not a path.")
+
+
 # -- the session --------------------------------------------------------------
 class Session:
     """One service process lifetime. See the module docstring."""
@@ -660,6 +707,7 @@ class Session:
         # must not leave the block half applied. Its return is discarded --
         # `None` means "back to the file" here and `coerce_sample` drops it.
         coerce_sample(patch)
+        _check_name_fields(patch)
         with self._lock:
             before = dict(self.catalogue.sample)
             merged = dict(before)

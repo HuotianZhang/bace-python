@@ -203,15 +203,27 @@ Five decisions, and the input box is none of them:
   the next run will be filed under — `s4_PTQ10IT4F_pxa_…`, or, with nothing
   named, `290K_… — no device in the name`. The operator is typing a filename;
   the panel says so.
-- **It warns where the archive has already been bitten.** `naming-plan.md`
-  §"Fields collide" carries both hazards — `sample = "a_b"` forges a field
-  boundary, `sample = "s4 pixel a"` puts a space in a directory name, the
-  2026-09-01 bug `slug()` was written to stop and which this path still does
-  not stop. Nothing below the console refuses either, so the warning at the
-  field is the whole of the protection. **Whether the service should reduce
-  these with `slug()` on the way in is still open** — `naming-plan.md` says the
-  change breaks no existing test, and it is a data-format decision rather than
-  a UX one, so it is not taken here.
+- **It separates the ugly from the impossible**, because `naming-plan.md`
+  §"Fields collide" lists both and they are not the same thing. *Ugly*:
+  `sample = "a_b"` forges a field boundary, `sample = "s4 pixel a"` puts a
+  space in a directory name — the 2026-09-01 bug. Nothing refuses either,
+  `run.toml` may hold them, so the warning at the field is the whole of the
+  protection. *Impossible*: `sample = "a/b"` is two directories,
+  `"../../etc"` is a folder above `<out>`, and `material = "PTQ10:IT-4F"` —
+  **the contract's own example** — is a colon in a Windows path segment, which
+  fails on the lab PC and passes here. Those the route refuses, with the value
+  it would take instead (`slug()`'s own answer, offered in the panel as a
+  click: *"⚠ ":" cannot be in a folder name · use PTQ10IT-4F"*).
+
+  That last part was not optional. `naming-plan.md` §2 has carried this defect
+  since 2026-09-04 and it was reachable only by editing `run.toml` — the
+  operator's own file, on their own machine. Adding a text field to the
+  console is a different reachability, and a route that opens one without
+  closing it is a regression, so the refusal is part of the feature rather
+  than a follow-up. **What is still open is that file's own remedy**: reducing
+  all three fields with `slug()` inside `folder_name()`, which would settle it
+  for `run.toml` too and is what its "always nine parts" needs. It changes
+  names on disk and wants a length limit chosen, so it is not taken here.
 - **`temperature_k` is not offered**, though the route accepts it. `run.toml`'s
   own comment (2026-09-04) says why: every recipe said 290, and a run at 220 K
   was filed as "290 K, typed". A field here would rebuild that defect with a

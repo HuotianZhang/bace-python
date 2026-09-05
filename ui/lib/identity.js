@@ -56,19 +56,52 @@ export const IDENTITY_FIELDS = [
 ];
 
 /**
- * The characters that break a folder name.
+ * What a path segment may not hold — `storage.naming._PATH_UNSAFE`, and the
+ * control characters. Kept in step with that constant by hand; the service
+ * refuses the same set, so a drift here costs a refusal the operator did not
+ * see coming, never a bad folder.
+ */
+const UNSAFE = /[<>:"/|?*\\\x00-\x1f]/g;
+
+/**
+ * What is wrong with a value that goes into the folder name, at two levels.
  *
- * An underscore is the field separator — `sample = "a_b"` makes seven parts
- * where a reader counting fields wants six — and whitespace puts a space in a
- * directory name, which `runs/` already carries one example of from
- * 2026-09-01. Both are `naming-plan.md`'s, and neither is refused anywhere
- * below this line, so the warning is the whole of the protection.
+ * `naming-plan.md` §"Fields collide" lists three, and they are not the same
+ * kind of thing — which is the whole point of separating them here:
+ *
+ *   * **refused** — `a/b` is two directories, `../..` climbs out of `runs/`,
+ *     and `PTQ10:IT-4F` (the contract's own example) is a colon in a Windows
+ *     path segment, which fails on the lab PC and passes here. The service
+ *     refuses these, so the panel says so before the `PUT` and offers the
+ *     value it *would* take — the console's standing rule that a refusal
+ *     naming a remedy gets a button for it.
+ *   * **warn** — a space makes a directory with a space in it (the
+ *     2026-09-01 bug), an underscore forges a field boundary in a name whose
+ *     fields are separated by `_`. Ugly, not impossible, and nothing refuses
+ *     them: `run.toml` may hold either and the operator may have a reason,
+ *     so this is a warning and the whole of the protection.
+ *
+ * `suggest` is the unsafe characters dropped, which is what `slug()` does to
+ * a value whose only problem is those characters — so it is the same string
+ * the service's own refusal names.
  */
 export function nameHazard(value) {
   const text = String(value == null ? '' : value);
   if (!text) return null;
-  if (/\s/.test(text)) return 'a space becomes a space in a directory name';
-  if (text.includes('_')) return 'an underscore forges a field boundary in the name';
+  if (text.trim() === '.' || text.trim() === '..' || text.startsWith('../')) {
+    return { level: 'refused', text: 'a name is one path segment, not a path out of the run folder' };
+  }
+  const bad = [...new Set(text.match(UNSAFE) || [])];
+  if (bad.length) {
+    return {
+      level: 'refused',
+      text: `${bad.map((c) => (c.charCodeAt(0) < 0x20 ? 'a control character' : `"${c}"`)).join(' ')} `
+        + 'cannot be in a folder name',
+      suggest: text.replace(UNSAFE, ''),
+    };
+  }
+  if (/\s/.test(text)) return { level: 'warn', text: 'a space becomes a space in a directory name' };
+  if (text.includes('_')) return { level: 'warn', text: 'an underscore forges a field boundary in the name' };
   return null;
 }
 
@@ -88,17 +121,25 @@ export function identityOf(sample) {
  * is the temperature, the LED level, the V_oc and the stamp, none of which is
  * this panel's.
  */
-export function identityModel(state) {
+export function identityModel(state, { rejected = null } = {}) {
   const session = (state && state.session) || {};
   const sample = session.sample || {};
   const file = session.sample_file || {};
   const rows = IDENTITY_FIELDS.map((spec) => {
-    const value = sample[spec.name] == null ? '' : String(sample[spec.name]);
+    const refused = rejected && rejected.name === spec.name ? rejected : null;
+    // What the service refused is not in the block — it never got there — so
+    // a panel drawn from the block alone would throw the operator's typing
+    // away and, worse, never draw the hazard or the remedy for the one case
+    // they exist for. The refused value stands in its own field until it is
+    // replaced by one the service takes.
+    const value = refused ? String(refused.value)
+      : sample[spec.name] == null ? '' : String(sample[spec.name]);
     const was = file[spec.name] == null ? '' : String(file[spec.name]);
     return {
       ...spec,
       value,
       file: was,
+      refused: Boolean(refused),
       // Typed here rather than opened with. The way back is a `null`, which
       // the service resolves to the file's value — so the reset is offered on
       // exactly the rows where it would change something.
@@ -106,6 +147,8 @@ export function identityModel(state) {
       hazard: spec.in_name === true ? nameHazard(value) : null,
     };
   });
+  // The chip and the stem are what the *service* holds: a refused value names
+  // nothing and no run will ever be filed under it.
   const named = identityOf(sample);
   const stem = [sample.sample, sample.material, sample.pixel].filter(Boolean).join('_');
   return {
@@ -120,6 +163,8 @@ export function identityModel(state) {
     preview: stem ? `${stem}_…` : '290K_… — no device in the name',
     /** Anything worth a colour on the chip: nothing named, or a name that breaks a path. */
     hazards: rows.filter((r) => r.hazard),
+    /** The ones the service will refuse, which is what blocks the chip red. */
+    refused: rows.filter((r) => r.hazard && r.hazard.level === 'refused'),
   };
 }
 
@@ -136,14 +181,14 @@ export function identityModel(state) {
  * in a millisecond on localhost — the measured case `views/bench.js` guards
  * against is a scan's worth of frames, and nothing here moves with a run.
  */
-export function renderIdentity(el, state, { open, onSet, onClose, status = null } = {}) {
-  const model = identityModel(state);
+export function renderIdentity(el, state, { open, onSet, onClose, status = null, rejected = null } = {}) {
+  const model = identityModel(state, { rejected });
   el.hidden = !open;
   if (!open) {
     if (el.__key !== undefined) { el.__key = undefined; el.textContent = ''; }
     return model;
   }
-  keyed(el, JSON.stringify([model, status]), () => [
+  keyed(el, JSON.stringify([model, status, rejected]), () => [
     h('div.id-head',
       h('span.cn', 'what is mounted'),
       h('span.cs', 'the session’s [sample] block — PUT /session/sample. '
@@ -177,7 +222,8 @@ function identityRow(row, onSet) {
     onchange: (e) => onSet && onSet(row.name, e.target.value),
   });
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); });
-  return h('div.id-row' + (row.hazard ? '.bad' : ''),
+  const hazard = row.hazard;
+  return h('div.id-row' + (hazard ? (hazard.level === 'refused' ? '.bad' : '.warn') : ''),
     h('span.l', { text: row.name },
       row.in_name === true ? h('i', 'in the name') : row.in_name === 'slug' ? h('i', 'slugged into the name') : null),
     input,
@@ -192,5 +238,17 @@ function identityRow(row, onSet) {
         }, '↺')
         : null),
     h('div.doc', h('span', { text: row.doc }),
-      row.hazard ? h('span.id-warn', { text: `⚠ ${row.hazard}` }) : null));
+      hazard
+        ? h('span', { class: 'id-warn ' + hazard.level },
+          h('span', { text: `⚠ ${hazard.text}` }),
+          // A refusal that names a remedy gets a button for it, or the
+          // operator is told what to do and given no way to do it — the same
+          // rule the chain strip's `status.offer` follows.
+          hazard.suggest
+            ? h('button.link', {
+              title: `use ${hazard.suggest}`,
+              onclick: () => onSet && onSet(row.name, hazard.suggest),
+            }, `use ${hazard.suggest}`)
+            : null)
+        : null));
 }

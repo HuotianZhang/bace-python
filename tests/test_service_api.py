@@ -323,14 +323,14 @@ def test_the_sample_block_is_merged_and_a_null_puts_a_key_back_to_the_file(servi
 def test_naming_the_sample_is_an_event_and_a_journal_line(service):
     client, session = service
     before = session.last_seq
-    client.put("/session/sample", json={"material": "PTQ10:IT-4F"})
+    client.put("/session/sample", json={"material": "PTQ10IT4F"})
     named = [f for f in frames(client, since=before) if f["type"] == "SampleNamed"]
     assert len(named) == 1, "one event, on the one path every frame takes"
     ev = named[0]
     assert ev["run_id"] is None and ev["node_path"] == "", "a session-level event"
     assert ev["data"]["changed"] == ["material"]
     assert ev["data"]["before"]["material"] == "SIM"
-    assert ev["data"]["after"]["material"] == "PTQ10:IT-4F"
+    assert ev["data"]["after"]["material"] == "PTQ10IT4F"
     # In the file too: a journal read years later has to be able to say which
     # runs in it were measured under which name.
     assert any(line.get("type") == "SampleNamed" for line in journal_lines(session))
@@ -338,7 +338,7 @@ def test_naming_the_sample_is_an_event_and_a_journal_line(service):
     # Nothing moved, nothing said. A no-op that writes a line is noise in the
     # one file an operator reads to reconstruct a day.
     at = session.last_seq
-    r = client.put("/session/sample", json={"material": "PTQ10:IT-4F"})
+    r = client.put("/session/sample", json={"material": "PTQ10IT4F"})
     assert r.status_code == 200 and r.json()["changed"] == []
     assert session.last_seq == at
 
@@ -352,6 +352,37 @@ def test_an_unnamed_key_is_refused_with_what_is_accepted(service):
     assert "material" in body["accepted"]
     r = client.put("/session/sample", json={"temperature_k": "warm"})
     assert r.status_code == 422 and "not a number" in r.json()["error"]
+
+
+def test_a_name_that_is_not_a_folder_name_is_refused_with_the_one_that_is(service):
+    """`docs/naming-plan.md` §2's live defect, at the door this route opened.
+
+    `sample`, `material` and `pixel` reach `folder_name()` unreduced and it
+    goes straight to `os.path.join`, so `a/b` is two directories and
+    `../../etc` is a folder above `runs/`. Editing `run.toml` could always do
+    that -- it is the operator's own file on their own machine -- but a text
+    field in the console is a different reachability, so the route closes what
+    it opens. Only what is *impossible*: a space and an underscore make a bad
+    folder name and are the console's to warn about, not this route's to
+    refuse.
+    """
+    client, _ = service
+    for value in ("a/b", "../../etc", ".."):
+        r = client.put("/session/sample", json={"sample": value})
+        assert r.status_code == 422, f"{value!r} was accepted"
+    # The contract's own example, which fails on the lab PC and passes here.
+    r = client.put("/session/sample", json={"material": "PTQ10:IT-4F"})
+    assert r.status_code == 422
+    # The remedy, not only the complaint -- and `slug`'s own answer, which is
+    # what the console offers as a click.
+    assert "PTQ10IT-4F" in r.json()["error"]
+
+    # Ugly is allowed, and nothing was left half applied by the refusals.
+    assert client.put("/session/sample", json={"sample": "s4 pixel a"}).status_code == 200
+    assert client.get("/session").json()["sample"] == {
+        "sample": "s4 pixel a", "material": "SIM", "pixel": "a", "temperature_k": 290.0}
+    # The comment is slugged on the way into the name, so it takes anything.
+    assert client.put("/session/sample", json={"comment": "a/b: 4 K, shutter only"}).status_code == 200
 
 
 def test_a_run_keeps_the_identity_it_was_queued_under(service):

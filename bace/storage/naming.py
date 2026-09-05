@@ -57,6 +57,36 @@ under a `runs/` directory a few levels deep approaches Windows' 260-character
 path limit."""
 
 
+def unsafe_in_name(text: str) -> str:
+    """The characters in `text` that a path segment cannot hold, as a string.
+
+    The ones `slug` *deletes* -- `<>:"/|?*`, the backslash, and the control
+    characters -- as against the ones it turns into a dash (whitespace and
+    `_`), which make an ugly folder name and not an impossible one. The
+    difference matters because only one of them is worth refusing: `sample =
+    "s4 pixel a"` is a directory with spaces in it, and `sample = "a/b"` is
+    two directories.
+
+    `sample`, `material` and `pixel` reach `folder_name` **raw** -- only the
+    comment is slugged -- so nothing below this turns one of these into a
+    single segment. `docs/naming-plan.md` proposes reducing all three with
+    `slug()` on the way in, which would settle it for every source at once;
+    until that is decided, this is what lets a caller refuse the values that
+    are not merely ugly.
+    """
+    return "".join(sorted({c for c in text if c in _PATH_UNSAFE or ord(c) < 0x20}))
+
+
+def traverses(text: str) -> bool:
+    """Whether `text` is a path segment that walks up out of its folder.
+
+    `..` is not an unsafe *character* and every check built out of a character
+    class misses it -- `sample = "../../etc"` passes `unsafe_in_name` and
+    `folder_name` hands `os.path.join` a path two levels above `runs/`.
+    """
+    return text.strip() in {".", ".."} or text.startswith(("../", "..\\"))
+
+
 def slug(text: str, limit: int = COMMENT_MAX) -> str:
     """A comment reduced to one path segment.
 

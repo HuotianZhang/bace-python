@@ -148,6 +148,16 @@ function renderChips(state) {
 let identOpen = false;
 let identStatus = null;
 let identOffered = false;
+/**
+ * The one value the service refused, and which field it was for.
+ *
+ * A refused value never reaches the block, so a panel drawn from the block
+ * alone would clear the operator's typing on the re-render the refusal itself
+ * causes — and would never draw the hazard or the `use …` beside the row,
+ * which are there for exactly this. It is held here, replaced by the next
+ * answer for that field, and dropped when the panel shuts.
+ */
+let identRejected = null;
 
 function drawIdent(state) {
   if (!identOffered && identityModel(state).unnamed && state.session) {
@@ -155,15 +165,21 @@ function drawIdent(state) {
     identOpen = true;
   }
   renderIdentity(identEl, state, {
-    open: identOpen, status: identStatus, onSet: setSample,
-    onClose: () => { identOpen = false; identStatus = null; drawIdent(store.getState()); renderChips(store.getState()); },
+    open: identOpen, status: identStatus, rejected: identRejected, onSet: setSample,
+    onClose: () => {
+      identOpen = false;
+      identStatus = null;
+      identRejected = null;
+      drawIdent(store.getState());
+      renderChips(store.getState());
+    },
   });
 }
 
 function toggleIdent() {
   identOpen = !identOpen;
   identOffered = true;
-  if (!identOpen) identStatus = null;
+  if (!identOpen) { identStatus = null; identRejected = null; }
   drawIdent(store.getState());
   renderChips(store.getState());
 }
@@ -180,6 +196,7 @@ async function setSample(name, value) {
   drawIdent(store.getState());
   try {
     const out = await api.setSample({ [name]: value });
+    identRejected = identRejected && identRejected.name === name ? null : identRejected;
     store.applySession(out.session);
     identStatus = out.changed && out.changed.length
       ? { level: 'ok',
@@ -188,6 +205,9 @@ async function setSample(name, value) {
             : `${out.changed.join(', ')} · every run queued from now carries it` }
       : { level: '', text: 'unchanged' };
   } catch (error) {
+    // 422: the value is not a folder name. Kept, so the field still holds what
+    // they typed and the row can offer the one the service would take.
+    identRejected = error.status === 422 && value !== null ? { name, value } : identRejected;
     identStatus = { level: 'bad', text: error.text || error.message };
   }
   drawIdent(store.getState());
