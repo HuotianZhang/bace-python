@@ -27,6 +27,7 @@ repo root for the offline bench at `/ui/replay.html`, which needs
 | `lib/fields.js` | which fields sit above the fold on each card and in what order, as data, plus `cardModel` — the pure function one `GET /modules` entry becomes a card's rows through |
 | `lib/card.js` | the generated card and the one field component every parameter goes through: provenance rendered, `doc` under the field and `doc_full` on hover |
 | `lib/instruments.js` | the bench tab's Instruments panel: shutter, LED and relay as switches whose lit position is the read-back, the LED's levels beside it; `panelModel` is pure and tested |
+| `lib/route.js` | the hash both ways: `#/bench?module=bace` parses to a route and a query, and `benchHash` writes the link a node form points at its bench card with |
 | `lib/recipe.js` | a saved recipe against the bench it is reopened on: `drift` lists where the bench moved since the save (skipping what every node overrides or a loop binds), `restore` is the `PUT` that puts it back; pure and tested |
 | `lib/watch.js` | when to ask `GET /bench` again — which frames move the bench, and the throttle that collapses a scan's worth of them into one request per 700 ms |
 | `lib/dom.js` | `h()`, and `keyed()`: rebuild an element only when its model differs from the one already on screen |

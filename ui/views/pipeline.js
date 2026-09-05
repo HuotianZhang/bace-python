@@ -43,6 +43,7 @@ import { chart } from '../lib/charts/frame.js';
 import { scheduleModel } from '../lib/charts/schedule.js';
 import * as tree from '../lib/tree.js';
 import { drift, recorded, restore } from '../lib/recipe.js';
+import { benchHash } from '../lib/route.js';
 
 /**
  * How long a burst of edits is collapsed into one validate.
@@ -431,6 +432,14 @@ export default {
           h('div.nfh',
             h('span.cn', { text: node.kind === 'loop' ? `${node.loop} loop` : node.module }),
             h('span.cs', { text: node.kind === 'loop' ? 'the values it runs, and how it settles' : 'as on the bench' }),
+            // The way to the main component: this module's card on the bench,
+            // where every value the node does not override is set.
+            node.kind === 'module'
+              ? h('a.btng.goto', {
+                href: benchHash(node.module),
+                title: `${node.module} on the bench — what every node of it starts from`,
+              }, '→ bench')
+              : null,
             h('span', { style: { flex: '1' } }),
             // The way back for the whole node, offered only while there is
             // something to take back: every override dropped, the node is the

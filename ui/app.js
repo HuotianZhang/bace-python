@@ -10,6 +10,7 @@ import { createStore, currentRun } from './lib/store.js';
 import { createStream } from './lib/stream.js';
 import { h, fill, keyed } from './lib/dom.js';
 import * as fmt from './lib/format.js';
+import { parseHash } from './lib/route.js';
 import { renderRail, renderChainStrip, PREREQUISITE } from './lib/rail.js';
 import { renderMonitor } from './lib/monitor.js';
 import { renderPowerPanel, svgFileOf, DEFAULT_UI as POWER_DEFAULTS } from './lib/power.js';
@@ -63,19 +64,25 @@ let mounted = null;
 let mountedRoute = null;
 
 function route() {
-  const hash = (location.hash || '').replace(/^#\/?/, '').split('?')[0];
+  const { route: hash } = parseHash(location.hash);
   return BY_ROUTE[hash] ? hash : 'bench';
 }
 
 function show() {
   const name = route();
-  if (name === mountedRoute) return;
+  const { query } = parseHash(location.hash);
+  if (name === mountedRoute) {
+    // Same tab, new query — `#/bench?module=bace` from a node form while
+    // the bench is already up. The view answers it without remounting.
+    if (mounted && mounted.focus) mounted.focus(query);
+    return;
+  }
   if (mounted && mounted.dispose) mounted.dispose();
   viewEl.scrollTop = 0;
   mountedRoute = name;
   // `park` is the strip's: the bench tab's Instruments panel offers the same
   // button, and a busy bench arms it there exactly as it does on the strip.
-  mounted = BY_ROUTE[name].mount(viewEl, { store, api, stream, fmt, notify, park });
+  mounted = BY_ROUTE[name].mount(viewEl, { store, api, stream, fmt, notify, park, query });
   renderTabs();
 }
 
