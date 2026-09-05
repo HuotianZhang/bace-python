@@ -384,7 +384,9 @@ export default {
       return fill(el,
         h('span.nk' + (row.kind === 'module' ? '.mod' : ''), { text: row.kind === 'loop' ? '⟳' : '▪' }),
         h('span.n', { text: row.kind === 'loop' ? row.loop : row.module }),
-        h('span.d', { text: row.kind === 'loop' ? row.summary : nodeSummary(row) }),
+        // A module row says nothing about the bench: it *is* the bench's
+        // module, and only a node that differs carries the mark.
+        row.kind === 'loop' ? h('span.d', { text: row.summary }) : overrideTag(row),
         h('span', { style: { flex: '1' } }),
         tags,
         h('span.rowact',
@@ -409,10 +411,11 @@ export default {
       change(next, { select: tree.remapPath(selected, path, delta) });
     }
 
-    /** `as on the bench · n_loops 100` — the contract's own sentence for a node. */
-    function nodeSummary(row) {
-      if (!row.overrides.length) return 'as on the bench';
-      return 'as on the bench, except ' + row.overrides.map(([k, val]) => `${k} ${val}`).join(' · ');
+    /** The `↺` a differing node carries in the tree, with the list on hover. */
+    function overrideTag(row) {
+      const mark = tree.overrideMark(row);
+      if (!mark) return null;
+      return h('span.ovr', { title: mark.title, 'aria-label': mark.title, text: mark.text });
     }
 
     function label(node) {

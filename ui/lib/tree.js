@@ -105,6 +105,24 @@ export function newModule(name) {
   return { kind: 'module', module: name, params: {} };
 }
 
+/**
+ * The mark a tree row carries for a node that differs from the bench: the
+ * same `↺` the node form puts beside each override, with the list in the
+ * title. `null` for a node with nothing typed on it — the absence of the
+ * mark is the statement, as a Figma instance with no overrides carries
+ * nothing. (The row used to say "as on the bench, except n_loops 100", a
+ * sentence in the one place that has no room to grow.)
+ */
+export function overrideMark(row) {
+  const overrides = (row && row.overrides) || [];
+  if (!overrides.length) return null;
+  return {
+    text: '↺',
+    title: 'differs from the bench: ' + overrides.map(([k, v]) => `${k} ${v}`).join(' · '),
+    count: overrides.length,
+  };
+}
+
 // -- walking and editing ----------------------------------------------------
 //
 // A path is a list of child indices from the root: `[]` is the root itself,

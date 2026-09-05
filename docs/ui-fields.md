@@ -120,6 +120,12 @@ override dropped, the node is the bench's module again. This is the rule a
 Figma instance follows — show the overrides, the rest is the main component —
 and it needs no word explaining it.
 
+In the tree itself, a node that differs from the bench carries the same
+`↺` after its name, with the list of overrides on hover; a node with
+nothing typed on it carries nothing. The row used to spell it out as "as
+on the bench, except n_loops 100", a sentence in the one place that has no
+room to grow, and the same fact in two conventions.
+
 The other Figma gesture, *go to main component*, is the `→ bench` link in
 the node form's header: `#/bench?module=bace` opens the bench tab, scrolls
 that module's card into view and pings it once (an accent outline, gone in

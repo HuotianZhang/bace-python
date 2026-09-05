@@ -744,6 +744,8 @@ button.link:hover { color: var(--accent-dark); }
 .tr .nk.mod { border-color: var(--ink); color: var(--ink); }
 .tr .n { font-family: var(--font-num); font-size: 12px; font-weight: 500; }
 .tr .d { color: var(--grey); font-family: var(--font-num); font-size: 11px; }
+/* A node that differs from the bench: the node form's own glyph, the list on hover. */
+.tr .ovr { color: var(--ink); font-family: var(--font-num); font-size: 12px; cursor: help; }
 .tr .rowact { display: inline-flex; gap: 2px; opacity: .25; }
 .tr:hover .rowact, .tr.on .rowact { opacity: 1; }
 .tr .rowact button.btng { padding: 0 5px; line-height: 16px; }
