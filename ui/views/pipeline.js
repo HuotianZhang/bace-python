@@ -95,9 +95,6 @@ export default {
     const body = h('div.pipe');
     fill(container,
       h('h1', 'pipeline'),
-      h('p.lede', 'Compose the run from the same modules the bench tab fires one at a time. '
-        + 'Every count, cost and check below the tree is POST /pipelines/validate’s answer — '
-        + 'it touches nothing, and it is asked again on every edit.'),
       body);
 
     const structureEl = h('div.card.pipe-col');
@@ -364,7 +361,7 @@ export default {
         if (row.measure_s) tags.push(h('span.cs', { text: fmt.duration(row.measure_s) }));
       } else {
         const entry = v.catalogue[row.module];
-        if (!entry) tags.push(h('span.tag.bad', { title: 'GET /modules does not list it', text: 'unknown module' }));
+        if (!entry) tags.push(h('span.tag.bad', { title: 'this service has no module by that name', text: 'unknown module' }));
         else if (entry.status !== 'built') tags.push(h('span.tag.nb', { text: entry.status }));
         if (row.centre_on_voc) {
           tags.push(h('span.inh', {
@@ -609,7 +606,7 @@ export default {
     function moduleForm(node, row, v, open) {
       const catalogue = v.catalogue[node.module];
       if (!catalogue) {
-        return h('p.absent', { text: `${node.module} is not in GET /modules — this tree cannot run here` });
+        return h('p.absent', { text: `this service has no module named ${node.module} — this tree cannot run here` });
       }
       const overrides = node.params || {};
       /**
@@ -873,13 +870,13 @@ export default {
                 : v.stale || inflight ? 'the tree has changed — checking it again'
                   : !typed ? 'nothing to run'
                     : 'the checks refuse this tree; the list above says why')
-              : 'POST /pipelines — validates again with a fresh chain read-back, then queues',
+              : 'checks the tree once more against the bench as it is now, then queues the run',
             onclick: start,
           }, c ? `Start · ${c.prefix ? c.prefix + ' ' : ''}${fmt.duration(c.total_s)}` : 'Start'),
           h('button.btns', { disabled: !typed || null, onclick: save }, 'Save recipe'),
           h('button.btns', {
             disabled: !typed || null,
-            title: 'POST /pipelines/validate — touches nothing',
+            title: 'checks the tree without touching the bench',
             onclick: () => { showAllChecks = true; showFlat = false; revalidate({ now: true }); },
           }, 'Dry run')),
       ]);
@@ -934,7 +931,7 @@ export default {
           h('span', { text: `the bench has moved since ${loaded.name} was saved — its nodes will run with the bench, not the file:` }),
           h('span', { style: { flex: '1' } }),
           h('button.btns', {
-            title: 'PUT the recipe’s values back onto the bench, one module at a time',
+            title: 'put the recipe’s values back onto the bench, one module at a time',
             onclick: () => restoreBench(moved),
           }, '↺ bench to recipe'),
           h('button.btng', { title: 'keep the bench as it is', onclick: () => { loaded = null; render(); } }, 'keep bench')),
@@ -995,7 +992,7 @@ export default {
           text: v.cost
             ? `shot time from the ${v.cost.t_shot_source === 'journal' ? 'journal' : 'default'} · `
               + 'settle from what this bench has measured'
-            : 'from POST /pipelines/validate',
+            : 'from the last check of the tree',
         }),
         v.stale ? h('span.tag.nb', { text: 'stale' }) : null,
       ]);
@@ -1046,9 +1043,13 @@ export default {
       });
 
       const folder = v.shown && v.shown.folder_pattern;
+      // The operator sees the folder's name under the out directory; the full
+      // path is one hover away (#38).
       keyed(folderEl, JSON.stringify([folder, v.counters.modules]), () => (folder
-        ? `writes ${v.counters.modules || 0} folders under ${folder}/ — the stamp is taken at Start, `
-          + 'so a Dry run cannot name it. A run that stops early says kept of requested.'
+        ? [`writes ${v.counters.modules || 0} folders under `,
+          h('span.path', { title: folder, text: folder.replace(/\/+$/, '').split('/').pop() + '/' }),
+          ' — the stamp is taken at Start, so a Dry run cannot name it. '
+          + 'A run that stops early says kept of requested.']
         : ''));
     }
 

@@ -374,7 +374,7 @@ export default {
         // (the service restarting under us) would leave the cards it just
         // dropped frozen on the screen, saying nothing about it. It is one
         // cheap element with nothing focusable in it; there is nothing to save.
-        fill(body, h('div.card', h('p.absent', 'GET /modules has not answered')));
+        fill(body, h('div.card', h('p.absent', 'the module catalogue has not arrived yet')));
         return;
       }
       const c = ctx();

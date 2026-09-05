@@ -43,7 +43,7 @@ export default {
 
   mount(container, { store, api, notify }) {
     let rows = [];
-    let rowsStatus = 'asking GET /runs?session=all …';
+    let rowsStatus = 'loading the runs …';
     let record = null;
     let recordStatus = '';
     let rerunState = null;
@@ -54,10 +54,6 @@ export default {
     const body = h('div.results');
     fill(container,
       h('h1', 'results'),
-      h('p.lede', 'Every run the journal knows, newest first, and the one that is open: its grid of Q at '
-        + 'V_pre = V_oc with the V_oc beneath each cell, the partial cell outlined and never averaged in, '
-        + 'every flag with its reason, and where the files are. Read from GET /runs and GET /runs/{id}; '
-        + 'no folder name is parsed and no HDF5 is opened.'),
       body);
     const listEl = h('div.card.hist');
     const openEl = h('div.card.open');
@@ -83,7 +79,7 @@ export default {
         rows = await api.runs('all');
         rowsStatus = '';
       } catch (error) {
-        rowsStatus = `GET /runs failed · ${error.text || error.message}`;
+        rowsStatus = `could not load the runs · ${error.text || error.message}`;
       }
       if (disposed) return;
       if (!selectedRun && rows.length) selectedRun = rows[0].run_id;
@@ -93,14 +89,14 @@ export default {
 
     async function loadRecord(runId) {
       const mine = (recordRequest += 1);
-      recordStatus = `asking GET /runs/${runId} …`;
+      recordStatus = `loading ${runId} …`;
       render(store.getState());
       let got = null;
       try {
         got = await api.run(runId);
         recordStatus = '';
       } catch (error) {
-        recordStatus = `GET /runs/${runId} failed · ${error.text || error.message}`;
+        recordStatus = `could not load ${runId} · ${error.text || error.message}`;
       }
       if (disposed || mine !== recordRequest) return;
       if (got) {
@@ -145,7 +141,7 @@ export default {
       if (submitting) return;
       submitting = true;
       const overrides = rerunParams(params);
-      rerunState = { text: `POST /runs ${node.module} …` };
+      rerunState = { text: `starting ${node.module} …` };
       render(store.getState());
       try {
         const out = await api.startRun(node.module, overrides, `again: ${node.node_path || node.module}`);
