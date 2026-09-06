@@ -1,0 +1,614 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>J–V 正扫 / 回扫的名字 — 四种改法</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="fonts/fonts.css">
+<!--
+  又一个比较用的架子，不是交付物 —— 和 `rail-density.html`、`bench-head.html`
+  同一个模子：在决定之前有个东西可以看，而且是量过的。
+
+  起因是 issue #66。`both_directions` 打开时，一个光强出两条曲线；指标表两行
+  首列都是 `1.020 V`，十字光标也输出两次 `1.020 V`。13 % 的迟滞就摆在那两行
+  之间，读不出哪行是正扫。
+
+  #66 说了三处，实际上是四处 —— 曲线在屏幕上被叫出名字的地方一共有四个，
+  只有图例一个是对的：
+
+    图例      `${label} · reverse`                     ✓ 唯一带方向的
+    指标表    `metricsOf()` → `curveLabel(curve)`      ✗ 两行同名
+    光标读数  `series.label = label`                   ✗ 两次同名
+    曲线直标  `marks.push({ text: label })`            ✗ 两个同名，且跑出画框
+
+  第四处是量的时候才看见的：直标锚在 `curve.voltage[0]`、`anchor: 'start'`。
+  回扫的第一点是 `stop_v`，也就是画框的右边缘 —— 现状下那个标签已经压出
+  绘图区 64.1 px、压出 svg 自己的框 48.1 px，落在卡片的空白里。它不是「读不出
+  是哪条」，它是根本不在图上。
+
+  `series.key` 早就带方向了（十字光标两个点曾经共用一个 `data-series`，
+  `find` 只更新第一个，回扫的值挂在正扫的颜色下面）。也就是说**身份认了方向，
+  名字没认** —— #66 是那次修补留下的另一半。
+
+  下面四个样例用的是 `lib/charts/jv.js` 真正吐出来的字符串和 `ui/style.css`
+  里逐条抄来的样式。每个数字都是在真机流程上量的：`--sim --fast` 起服务，
+  `jv` 跑一次 `both_directions`，四个候选各自是对 `jv.js` 的一次真实改动，
+  改完重开 console，从渲染出来的 DOM 上读 —— 不是估的。
+
+  **C 是选中的那个。**它是唯一一个四处全修、两条臂都标、而且把图例改窄的。
+  这一页留着，是为了记住 A 的后缀贵在哪、B 少修了三处。
+-->
+<style>html, body { margin: 0; } img { max-width: 100%; } [hidden] { display: none !important; }</style>
+</head>
+<body>
+
+<style>
+/* ==========================================================================
+   页面外壳的取色。console 自己的调色板写死在 .frame 里 —— 它是 light-only
+   的仪器（ui-rules §1），在深色页面上也必须照原样显示。
+   ========================================================================== */
+:root {
+  --pg-bg: #f7f5f4;
+  --pg-panel: #ffffff;
+  --pg-ink: #1c1a19;
+  --pg-dim: #726d6a;
+  --pg-faint: #9c9694;
+  --pg-rule: #ded9d7;
+  --pg-hair: #ebe6e4;
+  --pg-accent: #ec3013;
+  --pg-ok: #3f7d53;
+  --pg-warn: #b06a00;
+  --pg-chip: #efeceb;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --pg-bg: #161514;
+    --pg-panel: #1e1c1b;
+    --pg-ink: #f0ecea;
+    --pg-dim: #a49d9a;
+    --pg-faint: #7d7674;
+    --pg-rule: #3a3634;
+    --pg-hair: #2a2726;
+    --pg-accent: #ff6448;
+    --pg-ok: #6fae84;
+    --pg-warn: #d79a3f;
+    --pg-chip: #2a2726;
+  }
+}
+:root[data-theme="dark"] {
+  --pg-bg: #161514;
+  --pg-panel: #1e1c1b;
+  --pg-ink: #f0ecea;
+  --pg-dim: #a49d9a;
+  --pg-faint: #7d7674;
+  --pg-rule: #3a3634;
+  --pg-hair: #2a2726;
+  --pg-accent: #ff6448;
+  --pg-ok: #6fae84;
+  --pg-warn: #d79a3f;
+  --pg-chip: #2a2726;
+}
+
+body {
+  background: var(--pg-bg); color: var(--pg-ink);
+  font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  font-size: 15px; line-height: 1.6;
+}
+.wrap { max-width: 1180px; margin: 0 auto; padding: 44px 28px 90px; }
+.eyebrow {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--pg-faint); margin: 0 0 10px;
+}
+h1 { font-family: 'Archivo', 'IBM Plex Sans', sans-serif; font-size: 30px; line-height: 1.2; margin: 0 0 16px; font-weight: 700; }
+h2.sec {
+  font-family: 'Archivo', 'IBM Plex Sans', sans-serif; font-size: 19px; margin: 52px 0 14px;
+  padding-top: 20px; border-top: 1px solid var(--pg-rule); font-weight: 700;
+}
+.lede { color: var(--pg-dim); max-width: 76ch; margin: 0 0 14px; }
+.lede b { color: var(--pg-ink); font-weight: 600; }
+code, .num { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: .92em; }
+code { background: var(--pg-chip); padding: 1px 5px; border-radius: 3px; }
+.bad { color: var(--pg-accent); font-weight: 600; }
+.good { color: var(--pg-ok); font-weight: 600; }
+
+/* -- 四处读法的清单 ------------------------------------------------------- */
+.paths { border-collapse: collapse; margin: 6px 0 8px; font-size: 14px; width: 100%; max-width: 900px; }
+.paths th, .paths td { padding: 6px 16px 6px 0; text-align: left; border-bottom: 1px solid var(--pg-hair); vertical-align: top; }
+.paths th { font-weight: 600; font-size: 12px; color: var(--pg-faint); text-transform: uppercase; letter-spacing: .06em; }
+.paths td.src { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12.5px; color: var(--pg-dim); }
+.paths td.ok { color: var(--pg-ok); font-weight: 600; white-space: nowrap; }
+.paths td.no { color: var(--pg-accent); font-weight: 600; white-space: nowrap; }
+
+/* -- 汇总条 --------------------------------------------------------------- */
+.summary { display: flex; gap: 10px; flex-wrap: wrap; margin: 16px 0 30px; }
+.scard {
+  flex: 1 1 200px; border: 1px solid var(--pg-rule); border-radius: 6px;
+  background: var(--pg-panel); padding: 12px 14px 13px;
+}
+.scard.base { background: var(--pg-bg); }
+.scard.win { border-color: var(--pg-ok); }
+.scard .k { font-size: 12px; color: var(--pg-faint); text-transform: uppercase; letter-spacing: .07em; }
+.scard .v { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 22px; line-height: 1.15; margin-top: 3px; }
+.scard .d { font-size: 12.5px; color: var(--pg-dim); margin-top: 4px; }
+.scard .d.save { color: var(--pg-ok); }
+
+/* -- 一个样例 ------------------------------------------------------------- */
+.spec { margin: 0 0 34px; }
+.spec-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 3px; }
+.spec-head h3 { font-family: 'Archivo', 'IBM Plex Sans', sans-serif; font-size: 17px; margin: 0; font-weight: 700; }
+.spec-head .px {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 13px;
+  background: var(--pg-chip); padding: 2px 9px; border-radius: 3px;
+}
+.spec-head .px.win { background: transparent; color: var(--pg-ok); font-weight: 600; }
+.spec-head .px.no { background: transparent; color: var(--pg-accent); font-weight: 600; }
+.spec-note { color: var(--pg-dim); font-size: 13.5px; margin: 0 0 10px; max-width: 84ch; }
+.spec-note b { color: var(--pg-ink); font-weight: 600; }
+.holder { border: 1px solid var(--pg-rule); border-radius: 5px; background: #fff; overflow: hidden; }
+.diff {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; line-height: 1.5;
+  background: var(--pg-chip); border-radius: 4px; padding: 9px 12px; margin: 10px 0 0;
+  white-space: pre; overflow-x: auto; color: var(--pg-dim);
+}
+.diff .add { color: var(--pg-ok); }
+.diff .del { color: var(--pg-accent); }
+
+/* -- 对照表 --------------------------------------------------------------- */
+.matrix-wrap { overflow-x: auto; }
+.matrix { border-collapse: collapse; font-size: 13.5px; min-width: 820px; }
+.matrix th, .matrix td { border: 1px solid var(--pg-rule); padding: 8px 11px; text-align: left; vertical-align: top; }
+.matrix thead th { background: var(--pg-chip); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--pg-dim); }
+.matrix tbody th { background: var(--pg-panel); white-space: nowrap; font-weight: 600; }
+.matrix td.n { font-family: 'IBM Plex Mono', ui-monospace, monospace; text-align: right; white-space: nowrap; }
+.matrix td.n.up { color: var(--pg-warn); }
+.matrix td.n.down { color: var(--pg-ok); }
+.matrix td.n.bad { color: var(--pg-accent); }
+.matrix td.n i { font-style: normal; font-size: 11.5px; opacity: .75; margin-left: 5px; }
+.mcap { font-size: 12.5px; color: var(--pg-faint); margin: 9px 0 0; }
+.mcap .up { color: var(--pg-warn); } .mcap .down { color: var(--pg-ok); } .mcap .bad { color: var(--pg-accent); }
+.foot { color: var(--pg-dim); font-size: 13.5px; max-width: 84ch; margin-top: 22px; }
+.foot b { color: var(--pg-ink); font-weight: 600; }
+
+/* ==========================================================================
+   console 本体。以下取自 ui/style.css，逐条照抄。取色写死，不跟随页面主题：
+   四个样例之间的差别只在字符串，不在样式。
+   ========================================================================== */
+.frame {
+  --ink: #201e1d;
+  --grey: #7d7979;
+  --rule: #d7d3d3;
+  --paper: #ffffff;
+  --accent: #ec3013;
+  --font-num: 'IBM Plex Mono', ui-monospace, monospace;
+  background: var(--paper); color: var(--ink);
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  font-size: 13px; line-height: 1.45;
+  padding: 12px 14px 14px;
+}
+.frame * { box-sizing: border-box; }
+
+/* style.css:355 */
+.frame table.rows { border-collapse: collapse; width: 100%; }
+.frame table.rows th, .frame table.rows td { text-align: left; padding: 2px 10px 2px 0; vertical-align: top; }
+.frame table.rows th { color: var(--grey); font-weight: 400; white-space: nowrap; }
+/* style.css:927 */
+.frame .metrics table.rows { width: auto; }
+.frame .metrics table.rows th { text-align: right; font-weight: 600; font-size: 11px; padding: 2px 0 3px 14px; white-space: nowrap; border-bottom: 1px solid var(--rule); }
+.frame .metrics table.rows th.l { text-align: left; padding-left: 0; }
+.frame .metrics td.l { color: var(--grey); font-size: 11px; white-space: nowrap; padding-right: 0; }
+.frame .metrics td.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 11px; text-align: right; padding: 2px 0 2px 14px; white-space: nowrap; }
+/* style.css:880 */
+.frame .chart-legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--grey); }
+.frame .legend-item { display: inline-flex; align-items: center; gap: 4px; }
+/* style.css:886 */
+.frame .chart-readout {
+  min-height: 15px;
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 11px; color: var(--ink);
+}
+.frame .chart-note { font-size: 11px; color: var(--grey); }
+
+/* 这一页自己的脚手架：把每个面每次量的宽度标出来，并把 jv 卡片在 1440 下
+   真正给图表的 380 px 画成一条硬边界 —— 读数换行与否，全看这条线。 */
+.surface { border-top: 1px dashed #d7d3d3; padding-top: 9px; margin-top: 11px; }
+.surface:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+.slab {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10px;
+  letter-spacing: .06em; text-transform: uppercase; color: #9c9694; margin-bottom: 5px;
+}
+.slab .w { color: #7d7979; text-transform: none; letter-spacing: 0; }
+.box380 { width: 380px; max-width: 100%; border-right: 1px solid var(--accent); padding-right: 0; }
+.box380 .chart-readout { overflow-wrap: anywhere; }
+.dupe { outline: 1px solid rgba(236, 48, 19, .5); outline-offset: 1px; }
+.markrow { position: relative; height: 30px; }
+.markline { position: absolute; left: 0; top: 0; bottom: 0; width: 250px; border-right: 1px solid var(--rule); }
+.markline::after {
+  content: 'plot 右边缘'; position: absolute; right: 3px; bottom: -2px;
+  font-size: 9px; color: #9c9694; font-family: 'IBM Plex Mono', monospace;
+}
+.mark {
+  position: absolute; left: 253px; top: 4px; white-space: nowrap;
+  font: 600 9px 'IBM Plex Sans', system-ui, sans-serif; color: var(--accent);
+}
+.markover { position: absolute; left: 250px; top: 2px; height: 14px; background: rgba(236, 48, 19, .10); }
+</style>
+
+<div class="wrap">
+
+<p class="eyebrow">bace console · issue #66 · 2026-09-06</p>
+<h1>J–V 正扫和回扫的名字</h1>
+
+<p class="lede">
+  <code>both_directions</code> 打开时，一个光强出两条曲线。<b>只有图例带方向。</b>
+  指标表两行首列同名、十字光标输出两次同一个名字、曲线直标画两个同样的字 ——
+  <b>13 % 的迟滞摆在那两行之间，读不出哪行是正扫。</b>
+  下面是四种改法，每一个都是对 <code>lib/charts/jv.js</code> 的一次真实改动，
+  在 <code>--sim --fast</code> 的真机流程上跑同一次 <code>jv</code> 运行，
+  从渲染出来的 DOM 上量的。
+</p>
+
+<h2 class="sec">曲线在屏幕上被叫出名字的四个地方</h2>
+
+<p class="lede">
+  #66 点了三处。量的时候发现是四处 —— 而且第四处比「同名」更糟。
+</p>
+
+<table class="paths">
+  <thead><tr><th>读法</th><th>出处</th><th>现在写什么</th><th></th></tr></thead>
+  <tbody>
+    <tr>
+      <td>图例</td>
+      <td class="src">jv.js · <code>legend.push</code></td>
+      <td class="src">`${label} · reverse`</td>
+      <td class="ok">✓ 唯一对的</td>
+    </tr>
+    <tr>
+      <td>指标表首列</td>
+      <td class="src">jv.js · <code>metricsOf()</code> → <code>curveLabel()</code></td>
+      <td class="src">`as found 1.02 V` × 2</td>
+      <td class="no">✗ 两行同名</td>
+    </tr>
+    <tr>
+      <td>十字光标读数</td>
+      <td class="src">jv.js · <code>series.label</code></td>
+      <td class="src">`as found 1.02 V` × 2</td>
+      <td class="no">✗ 两次同名</td>
+    </tr>
+    <tr>
+      <td>曲线直标（≤4 条时）</td>
+      <td class="src">jv.js · <code>marks.push</code></td>
+      <td class="src">`as found 1.02 V` × 2</td>
+      <td class="no">✗ 同名，且出框 64 px</td>
+    </tr>
+  </tbody>
+</table>
+
+<p class="lede">
+  第四处不只是读不出。直标锚在 <code>curve.voltage[0]</code>，用 <code>anchor: 'start'</code> ——
+  正扫的第一点是 <code>start_v</code>（画框左边），回扫的第一点是 <code>stop_v</code>（<b>画框右边</b>）。
+  量下来现状那个标签已经压出绘图区 <span class="num">64.1 px</span>、压出 svg 自己的框
+  <span class="num">48.1 px</span>，浮在卡片的空白里：
+</p>
+
+<div class="holder" style="padding: 14px">
+  <div class="markrow">
+    <div class="markline"></div>
+    <div class="markover" style="width: 64px"></div>
+    <div class="mark">as found 1.02 V</div>
+  </div>
+</div>
+
+<p class="lede" style="margin-top:12px">
+  值得记一笔的是 <code>series.key</code> <b>早就带方向了</b>：
+  <code>`${label}·${curve.direction || 'forward'}`</code>。
+  十字光标的两个点曾经共用一个 <code>data-series</code>，<code>attachCursor</code> 的
+  <code>find</code> 只更新第一个，回扫的值挂在正扫的颜色下面 —— 那次修的是<b>身份</b>。
+  #66 是那次修补留下的另一半：<b>身份认了方向，名字没认。</b>
+</p>
+
+<h2 class="sec">四种改法</h2>
+
+<div class="summary" id="summary"></div>
+
+<div id="specs"></div>
+
+<h2 class="sec">量到的</h2>
+
+<p class="lede">
+  同一次运行（<code>jv</code>，<code>both_directions</code>，1.02 V 一个光强，131 点 ×2 条），
+  console 在 <span class="num">1440</span> 下开着，四个候选各自改一次 <code>jv.js</code>、重开页面、
+  从 DOM 上读。「读数要多宽」是把 <code>.chart-readout</code> 临时置
+  <code>white-space: nowrap</code> 量的 <code>scrollWidth</code>。
+</p>
+
+<div class="matrix-wrap">
+  <table class="matrix" id="matrix"></table>
+</div>
+<p class="mcap">
+  颜色是<b>相对现状</b>读的：<span class="down">绿 = 比现状好</span> ·
+  <span class="up">橙 = 比现状贵</span> · <span class="bad">红 = 本来就坏，不是这次改出来的</span>。
+</p>
+
+<p class="foot">
+  <b>三件事值得单独看。</b>
+  一，<b>读数早就不够宽了</b> —— 1440 下 jv 卡片只给图表
+  <span class="num">380 px</span>，两条曲线的读数就要 <span class="num">455 px</span>，
+  已经折成两行；<code>.chart-readout</code> 的注释写着「空着也占住高度，
+  所以指针进入绘图区时卡片上没有东西会动」，实测<b>卡片跳 16.9 px</b>。
+  这条在四个候选上完全一样，不是 #66 造成的，但它决定了后缀的每一个字符都要还账。
+  二，<b>1440 比 1280 窄</b>：<code>.cards</code> 在 1440 下排三列、宽卡占两列
+  （<span class="num">566 px</span>），1280 下排两列、宽卡占满（<span class="num">878 px</span>）。
+  三，那 <span class="num">566 px</span> 里图表只拿到 <span class="num">380</span> ——
+  <code>.card.mod.wide .cb.split > .res</code> 是
+  <code>minmax(0,1fr) 172px</code>，第二条轨是留给 <code>bace</code> 卡的
+  <code>.shot</code> 块的，<b>jv 卡没有 .shot，那 172 + 14 px 就空着</b>。
+  这三件都不在 #66 里，都该另开。
+</p>
+
+<h2 class="sec">结论</h2>
+
+<p class="foot">
+  <b>C 是选中的那个。</b>四处全修，两条臂都标，指标表只多
+  <span class="num">11.9 px</span>（A 的四分之一），读数只多
+  <span class="num">27 px</span>（A 的五分之二），而且是四个里<b>唯一把图例改窄的</b> ——
+  三个光强下图例从 <span class="num">68 px</span> 降到
+  <span class="num">42 px</span>，因为今天的图例本来就在写 <code>· reverse</code>，
+  <code>←</code> 比它短。箭头也不是随手挑的代号：x 轴的标题本来就写着
+  <code>V / V →</code>，<code>→</code> 就是笔在这张图上走的方向，
+  <code>←</code> 是回来的那趟；回扫那个直标落在画框右边缘、箭头指着左边，
+  这件事自己就说明白了。
+</p>
+<p class="foot">
+  <b>B（#66 的第二个改法）只修四处里的一处。</b>指标表对了，
+  读数和两个直标照旧同名 —— 而它在表上比 C 还贵
+  <span class="num">33.9 px</span> vs <span class="num">11.9 px</span>，还多一列。
+  <b>A（#66 的第一个改法）四处全修</b>，但它是不对称的：正扫那行不带标记，
+  读者分不清「一对里的正扫」和「只有这一条」；而且它把已经出框 64 px 的直标
+  推到 <span class="num">102 px</span>。
+</p>
+<p class="foot">
+  <b>顺手量出来的、同一个根子的另一个毛病：</b>图注写着
+  <code>sequential 1.020 V → 1.020 V at the LED</code>。
+  <code>notes()</code> 里是 <code>levels.length > 1</code> —— 数的是<b>曲线</b>，
+  说的是<b>光强</b>。<code>both_directions</code> 下一个光强出两条，就报了一段
+  从 1.020 V 到 1.020 V 的「渐变」。<code>ui/README.md</code> 记着色阶
+  （<code>ramp</code>）已经因为同一个原因改成按光强排而不是按曲线排，
+  <code>notes()</code> 是漏下的那处：<code>new Set(levels).size > 1</code>。
+</p>
+
+</div>
+
+<script>
+/* ---------------------------------------------------------------------------
+   量出来的数，来自 2026-09-06 的那次运行：`python -m bace.service --sim --fast`，
+   `POST /runs {"module":"jv","params":{"both_directions":true,…}}`，
+   viewport 1440×1400，每个候选改一次 jv.js、重开 console、从 DOM 上读。
+   --------------------------------------------------------------------------- */
+const RUN = {
+  voc: ['0.9049 V', '0.9047 V'],
+  jsc: ['-201 µA', '-200 µA'],
+  ff:  ['81.3 %', '81.5 %'],
+  pmpp: ['148 µW', '148 µW'],
+  vmpp: ['0.7900 V', '0.7800 V'],
+};
+const KEYS = ['V_oc', 'J_sc · in amps', 'FF', 'P_mpp', 'V_mpp'];
+const VALS = [RUN.voc, RUN.jsc, RUN.ff, RUN.pmpp, RUN.vmpp];
+
+const CANDIDATES = [
+  {
+    id: 'base', title: '现状', tag: '四处里三处同名', tagCls: 'no',
+    note: '图例是对的，别的三处都不是。指标表两行首列都是 <b>as found 1.02 V</b>，'
+        + '两行之间是 FF 81.3 → 81.5 %（真机上 #66 那台是 61.0 → 69.0 %，13 % 的迟滞），'
+        + '而<b>哪行是正扫，屏幕上没有任何东西说</b>。',
+    label: (dir) => 'as found 1.02 V',
+    legend: (dir) => dir === 'rev' ? 'as found 1.02 V · reverse' : 'as found 1.02 V',
+    dirCol: null,
+    readout1: '0.559 V  ·  as found 1.02 V -4.93 mA/cm²  ·  as found 1.02 V -4.94 mA/cm²',
+    readout3: '0.559 V  ·  as found 0.90 V -4.93 mA/cm²  ·  as found 0.90 V -4.94 mA/cm²  ·  as found 0.96 V -9.37 mA/cm²  ·  as found 0.96 V -9.39 mA/cm²  ·  as found 1.02 V -13.8 mA/cm²  ·  as found 1.02 V -13.8 mA/cm²',
+    markOver: 64, dupe: true, diff: null,
+  },
+  {
+    id: 'A', title: 'A · 后缀 <code>· reverse</code>', tag: '四处全修 · 表 +45.5 px', tagCls: '',
+    note: '#66 的第一个改法：把方向搬进 <code>curveLabel()</code>，'
+        + '指标表、读数、直标三处一起继承，图例那句自己的 <code>· reverse</code> 特判就可以删掉。'
+        + '代价是<b>不对称</b> —— 正扫那行什么都不带，读者分不清「一对里的正扫」和「只有这一条」；'
+        + '而且它把已经出框的直标又推远 38 px。',
+    label: (dir) => dir === 'rev' ? 'as found 1.02 V · reverse' : 'as found 1.02 V',
+    legend: (dir) => dir === 'rev' ? 'as found 1.02 V · reverse' : 'as found 1.02 V',
+    dirCol: null,
+    readout1: '0.559 V  ·  as found 1.02 V -4.93 mA/cm²  ·  as found 1.02 V · reverse -4.94 mA/cm²',
+    readout3: '0.559 V  ·  as found 0.90 V -4.93 mA/cm²  ·  as found 0.90 V · reverse -4.94 mA/cm²  ·  as found 0.96 V -9.37 mA/cm²  ·  as found 0.96 V · reverse -9.39 mA/cm²  ·  as found 1.02 V -13.8 mA/cm²  ·  as found 1.02 V · reverse -13.8 mA/cm²',
+    markOver: 102, dupe: false,
+    diff: [['', 'export function curveLabel(curve) {'],
+           ['add', "  const dir = curve.direction === 'reverse' ? ' · reverse' : '';"],
+           ['del', '  if (curve.label) return curve.label;'],
+           ['add', '  if (curve.label) return curve.label + dir;'],
+           ['', '  …'],
+           ['', '}'],
+           ['', ''],
+           ['del', "  legend.push({ label: … : curve.direction === 'reverse' ? `${label} · reverse` : label, …"],
+           ['add', '  legend.push({ label: … : label, …          // 方向已经在 label 里了']],
+  },
+  {
+    id: 'B', title: 'B · 指标表加一列 <code>direction</code>', tag: '四处里只修一处', tagCls: 'no',
+    note: '#66 的第二个改法：首列还是光强（表头 <code>LED</code> 就是这么写的，不撒谎），'
+        + '方向单独一列。<b>但它只到指标表为止</b> —— 十字光标和两个直标照旧输出同名，'
+        + '而它在表上比 C 还贵，还多一列。',
+    label: (dir) => 'as found 1.02 V',
+    legend: (dir) => dir === 'rev' ? 'as found 1.02 V · reverse' : 'as found 1.02 V',
+    dirCol: ['fwd', 'rev'],
+    readout1: '0.559 V  ·  as found 1.02 V -4.93 mA/cm²  ·  as found 1.02 V -4.94 mA/cm²',
+    readout3: '0.559 V  ·  as found 0.90 V -4.93 mA/cm²  ·  as found 0.90 V -4.94 mA/cm²  ·  as found 0.96 V -9.37 mA/cm²  ·  as found 0.96 V -9.39 mA/cm²  ·  as found 1.02 V -13.8 mA/cm²  ·  as found 1.02 V -13.8 mA/cm²',
+    markOver: 64, dupeReadout: true,
+    diff: [['', 'export function metricsOf(list, quantity) {'],
+           ['', '  …  rows: ['],
+           ['add', "        { key: 'dir', value: curve.direction === 'reverse' ? 'rev' : 'fwd' },"],
+           ['', "        { key: 'V_oc', … },"],
+           ['', '  …']],
+  },
+  {
+    id: 'C', title: 'C · 箭头 <code>→</code> / <code>←</code>', tag: '四处全修 · 表 +11.9 px · 图例 −26 px', tagCls: 'win',
+    note: '两条臂都标，<b>只在两条臂都在图上时才标</b>（<code>bothArms(list)</code>）—— '
+        + '单向扫描的名字一个字都不变，而 <code>both_directions</code> 默认是关的。'
+        + '箭头不是随手挑的代号：x 轴标题本来就写着 <code>V / V →</code>，'
+        + '<code>→</code> 就是笔在这张图上走的方向。回扫那个直标落在画框右边缘、箭头指着左边，'
+        + '这件事自己就说明白了。',
+    label: (dir) => dir === 'rev' ? 'as found 1.02 V ←' : 'as found 1.02 V →',
+    legend: (dir) => dir === 'rev' ? 'as found 1.02 V ←' : 'as found 1.02 V →',
+    dirCol: null,
+    readout1: '0.559 V  ·  as found 1.02 V → -4.93 mA/cm²  ·  as found 1.02 V ← -4.94 mA/cm²',
+    readout3: '0.559 V  ·  as found 0.90 V → -4.93 mA/cm²  ·  as found 0.90 V ← -4.94 mA/cm²  ·  as found 0.96 V → -9.37 mA/cm²  ·  as found 0.96 V ← -9.39 mA/cm²  ·  as found 1.02 V → -13.8 mA/cm²  ·  as found 1.02 V ← -13.8 mA/cm²',
+    markOver: 74, dupe: false,
+    diff: [['add', 'export function curveLabel(curve, both = false) {'],
+           ['add', "  const dir = !both ? '' : curve.direction === 'reverse' ? ' ←' : ' →';"],
+           ['add', '  if (curve.label) return curve.label + dir;  …'],
+           ['', ''],
+           ['add', '/** 一个光强在图上出现两次、方向不同时为 true。 */'],
+           ['add', 'export function bothArms(list) { … }'],
+           ['', ''],
+           ['del', '  const label = curveLabel(curve);'],
+           ['add', '  const label = curveLabel(curve, arms);   // arms = bothArms(list)']],
+  },
+];
+
+/* 汇总条上的一句话，和量到的数。 */
+const HEAD = {
+  base: { v: '3 / 4', d: '四处里三处读不出方向', cls: 'base' },
+  A:    { v: '+45.5 px', d: '四处全修 · 表最宽 · 不对称', cls: '' },
+  B:    { v: '1 / 4', d: '只修指标表 · 表 +33.9 px', cls: '' },
+  C:    { v: '+11.9 px', d: '四处全修 · 表最省 · 图例 −26 px', cls: 'win' },
+};
+
+const el = (tag, cls, ...kids) => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  for (const k of kids.flat()) {
+    if (k === null || k === undefined || k === false) continue;
+    n.append(k instanceof Node ? k : document.createTextNode(String(k)));
+  }
+  return n;
+};
+
+/** 指标表，markup 逐字取自 `lib/results.js` 的 `metricsTable()`。 */
+function metricsTable(c) {
+  const keys = c.dirCol ? ['dir', ...KEYS] : KEYS;
+  const head = el('tr', null, el('th', 'l', 'LED'), keys.map((k) => el('th', null, k)));
+  const body = [0, 1].map((i) => {
+    const dir = i === 0 ? 'fwd' : 'rev';
+    const cells = c.dirCol ? [c.dirCol[i], ...VALS.map((v) => v[i])] : VALS.map((v) => v[i]);
+    const first = el('td', 'l' + (c.dupe ? ' dupe' : ''), c.label(dir));
+    return el('tr', null, first, cells.map((v) => el('td', 'num', v)));
+  });
+  return el('div', 'metrics',
+    el('table', 'rows', el('thead', null, head), el('tbody', null, body)),
+    el('p', 'chart-note', 'derived · interpolated from the curve, not measured points'));
+}
+
+/** 图例，markup 取自 `lib/charts/frame.js` 的 `legend()`。 */
+function legend(c) {
+  const item = (dir, dash) => {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', 18); svg.setAttribute('height', 10);
+    svg.style.cssText = 'display:inline-block;vertical-align:middle';
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', 1); line.setAttribute('y1', 5);
+    line.setAttribute('x2', 17); line.setAttribute('y2', 5);
+    line.setAttribute('stroke', '#ec3013'); line.setAttribute('stroke-width', 1.6);
+    if (dash) line.setAttribute('stroke-dasharray', '4 2');
+    svg.append(line);
+    return el('span', 'legend-item', svg, el('span', null, c.legend(dir)));
+  };
+  return el('div', 'chart-legend', item('fwd', false), item('rev', true));
+}
+
+/** 一个面，带它自己那行小标题；宽度是量出来的，写在标题右边。 */
+function surface(name, meta, node) {
+  return el('div', 'surface',
+    el('div', 'slab', name, meta ? el('span', 'w', ' — ' + meta) : null), node);
+}
+
+function specOf(c) {
+  const head = el('div', 'spec-head',
+    Object.assign(el('h3'), { innerHTML: c.title }),
+    el('span', 'px ' + (c.tagCls || ''), c.tag));
+  const note = el('p', 'spec-note');
+  note.innerHTML = c.note;
+
+  const readout = (text, klass) => {
+    const box = el('div', 'box380' + (klass ? ' ' + klass : ''));
+    box.append(el('div', 'chart-readout', text));
+    return box;
+  };
+
+  const mark = el('div', 'markrow',
+    el('div', 'markline'),
+    Object.assign(el('div', 'markover'), { style: `width:${c.markOver}px` }),
+    el('div', 'mark', c.label('rev')));
+
+  const body = el('div', 'frame',
+    surface('指标表', null, metricsTable(c)),
+    surface('图例', null, legend(c)),
+    surface('十字光标读数 · 一个光强 ×2', '红线 = jv 卡片在 1440 下真正给图表的 380 px',
+      readout(c.readout1, c.dupeReadout || c.dupe ? 'dupe' : '')),
+    surface('十字光标读数 · 三个光强 ×2', null, readout(c.readout3, '')),
+    surface('曲线直标 · 回扫那条', `出绘图区 ${c.markOver} px`, mark));
+
+  const spec = el('div', 'spec', head, note, el('div', 'holder', body));
+  if (c.diff) {
+    const pre = el('pre', 'diff');
+    for (const [kind, line] of c.diff) pre.append(el('span', kind, line + '\n'));
+    spec.append(pre);
+  }
+  return spec;
+}
+
+document.getElementById('specs').replaceChildren(...CANDIDATES.map(specOf));
+document.getElementById('summary').replaceChildren(...CANDIDATES.map((c) => {
+  const h = HEAD[c.id];
+  return el('div', 'scard ' + h.cls,
+    el('div', 'k', c.id === 'base' ? '现状' : c.id),
+    el('div', 'v', h.v),
+    el('div', 'd' + (h.cls === 'win' ? ' save' : ''), h.d));
+}));
+
+/* ---------------------------------------------------------------------------
+   对照表。全部实测，1440 / 1400 viewport，`--sim --fast` 的 console。
+   --------------------------------------------------------------------------- */
+const ROWS = [
+  ['修好的读法（共 4 处）', ['1 / 4', '4 / 4', '2 / 4', '4 / 4'], ['bad', 'down', 'up', 'down'],
+   '图例 · 指标表 · 读数 · 直标'],
+  ['指标表宽度', ['403 px', '448.5 px <i>+45.5</i>', '436.9 px <i>+33.9</i>', '414.9 px <i>+11.9</i>'],
+   ['', 'up', 'up', 'up'], '1440 下结果栏有 566 px，四个都放得下'],
+  ['├ 首列宽度', ['77.1 px', '122.6 px <i>+45.5</i>', '77.1 px', '88.9 px <i>+11.8</i>'], ['', 'up', '', 'up'], ''],
+  ['└ 列数', ['6', '6', '7', '6'], ['', '', 'up', ''], 'B 多一列 <code>dir</code>'],
+  ['读数要多宽 · 1 光强 ×2', ['455 px', '521 px <i>+66</i>', '455 px', '482 px <i>+27</i>'],
+   ['bad', 'up', 'bad', 'up'], '只有 380 px：<b>现状就已经折两行</b>'],
+  ['读数要多宽 · 3 光强 ×2', ['1274 px', '1472 px <i>+198</i>', '1274 px', '1353 px <i>+79</i>'],
+   ['bad', 'up', 'bad', 'up'], 'C 的代价是 A 的五分之二'],
+  ['读数要多宽 · 5 光强 ×2', ['2092 px', '2422 px <i>+330</i>', '2092 px', '2224 px <i>+132</i>'],
+   ['bad', 'up', 'bad', 'up'], ''],
+  ['读数折成几行 · 1/2/3/5 光强', ['2/3/4/6', '2/3/4/7', '2/3/4/6', '2/3/4/7'], ['bad', 'up', 'bad', 'up'],
+   'A 和 C 在 5 光强上各多一行'],
+  ['图例高度 · 3 光强 ×2', ['68 px', '68 px', '68 px', '42 px <i>−26</i>'], ['', '', '', 'down'],
+   'C 是唯一改窄的：<code>←</code> 比今天的 <code>· reverse</code> 短'],
+  ['图例高度 · 5 光强 ×2', ['120 px', '120 px', '120 px', '94 px <i>−26</i>'], ['', '', '', 'down'], ''],
+  ['回扫直标出绘图区', ['64.1 px', '102.3 px <i>+38</i>', '64.1 px', '73.9 px <i>+10</i>'],
+   ['bad', 'bad', 'bad', 'bad'], '四个都出框 —— 锚点本身是错的，另开一条'],
+  ['指针进入绘图区时卡片跳', ['16.9 px', '16.9 px', '16.9 px', '16.9 px'], ['bad', 'bad', 'bad', 'bad'],
+   '<code>.chart-readout</code> 说好了不跳；1440 下就跳。与 #66 无关'],
+];
+
+const m = document.getElementById('matrix');
+m.append(el('thead', null, el('tr', null,
+  el('th', null, ''), el('th', null, '现状'), el('th', null, 'A · 后缀'),
+  el('th', null, 'B · 加一列'), el('th', null, 'C · 箭头'), el('th', null, '说明'))));
+m.append(el('tbody', null, ROWS.map(([name, vals, cls, note]) => el('tr', null,
+  el('th', null, name),
+  vals.map((v, i) => Object.assign(el('td', 'n ' + (cls[i] || '')), { innerHTML: v })),
+  Object.assign(el('td'), { innerHTML: note })))));
+</script>
+
+</body>
+</html>
