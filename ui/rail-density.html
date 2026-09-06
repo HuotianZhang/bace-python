@@ -10,19 +10,22 @@
   A comparison harness, not a deliverable — the same shape as `preview.html`,
   and with the same job: something to look at before anything is decided.
 
-  The rail is `ui-rules` §1's densest surface and its tallest: eight live values
-  in three stacked lines each, folded to two rows of four below 1560, which is
-  where a lab PC beside a LabVIEW window actually sits. That is 156 px of a
-  1080-line screen spent before the first measured number appears.
+  The rail was `ui-rules` §1's densest surface and its tallest: eight live
+  values in three stacked lines each, folded to two rows of four below 1560,
+  which is where a lab PC beside a LabVIEW window actually sits. That was
+  156 px of a 1080-line screen spent before the first measured number appears.
 
   Every rail on this page is built from the same eight cells and the same DOM
   `lib/rail.js` emits, so the only thing that differs between the four is CSS.
-  `railModel` is untouched and `tests/rail.test.mjs` cannot tell the options
-  apart — which is the point: the choice here costs nothing but a stylesheet.
-
   The heights are measured in the browser after the fonts land, never written
   down by hand: a density argument settled with a number somebody typed is not
-  settled. Open it beside `preview.html` and pick one.
+  settled.
+
+  **C shipped** (2026-09-06) — one row at every width, 27 px in the real
+  console. The page stays because the decision is not the whole of the record:
+  it is also what A and B each saved, and what C gave up to save more than
+  either. Open it beside `preview.html` when the next person asks why the
+  LED's low level is behind a hover.
 -->
 <style>html, body { margin: 0; } img { max-width: 100%; } [hidden] { display: none !important; }</style>
 </head>
@@ -170,6 +173,15 @@ h1 {
   font-weight: 800; letter-spacing: -.01em; font-size: 19px; margin: 0;
 }
 .sp-head .en { font-size: 12.5px; color: var(--pg-faint); }
+.sp-chosen {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 10px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase;
+  padding: 2px 7px; background: var(--pg-ok); color: #fff;
+}
+.specimen.is-chosen { border-color: var(--pg-ok); border-width: 2px; }
+.specimen.is-chosen .sp-tag { border-color: var(--pg-ok); color: var(--pg-ok); }
+.sm.chosen .h { color: var(--pg-ok); }
+.sm.chosen .k::after { content: ' · 选定'; color: var(--pg-ok); }
 .sp-h {
   margin-left: auto;
   font-family: 'IBM Plex Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums;
@@ -420,6 +432,14 @@ table.matrix td.n { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-
     同一份 DOM，<b>差别全部在 CSS 里</b>：<code class="num">rail.js</code> 一行不动，
     <code class="num">ui/tests/rail.test.mjs</code> 不受影响。高度是页面加载后实测的，不是估的。
   </p>
+  <p class="lede">
+    <b>结果：C 已经合入 <code class="num">ui/style.css</code>。</b>
+    真机上量到 <b class="num">27 px</b>（这页的样例是 29 px，差在页面外壳的字体回退），
+    1280 / 1440 / 1920 三个宽度都是同一行，标签和数值都不截断。
+    继电器一格 248 px，示意图 96 px；副行改成悬停 / <code class="num">Tab</code> 聚焦时落下的面板，
+    <code class="num">lib/rail.js</code> 给带副行的格子加了 <code class="num">tabindex</code> 和 <code class="num">title</code>。
+    这一页留着，是为了记住 A 和 B 各自能省多少、C 又拿什么换的。
+  </p>
 
   <div class="controls">
     <span class="lab">Console 宽度</span>
@@ -628,7 +648,7 @@ const VARIANTS = [
 .tag-inferred { align-self: center; font-size: 7.5px; padding: 0 3px; }`,
   },
   {
-    id: 'c', tag: 'C', name: '一行八格', en: 'one strip, eight cells',
+    id: 'c', tag: 'C', name: '一行八格', en: 'one strip, eight cells', chosen: true,
     idea: '在 B 的基础上取消折行：八格永远一排，第一格给继电器留 268 px，其余七格平分。副行不再占高度 —— 右下角一个小角标说明这格还有话，鼠标悬停或键盘聚焦时落下来。为了塞进一行，inferred 徽章和继电器格的文字值都让给了图形。',
     keeps: ['台架栏基本从版面上消失了', '任何宽度都是一排，1280 的窗口也不会突然变高', '八个数值仍然一眼扫完'],
     costs: ['副行默认不在屏幕上，包括 ui-rules §10 点名要看见的 LED 低电平',
@@ -671,10 +691,11 @@ const summaryEl = document.getElementById('summary');
 const frames = {};
 
 for (const v of VARIANTS) {
-  const sp = el('article', 'specimen' + (v.id === 'base' ? ' is-base' : ''));
+  const sp = el('article', 'specimen' + (v.id === 'base' ? ' is-base' : '') + (v.chosen ? ' is-chosen' : ''));
 
   const head = el('div', 'sp-head');
   head.append(el('span', 'sp-tag', v.tag), el('h2', null, v.name), el('span', 'en', v.en));
+  if (v.chosen) head.append(el('span', 'sp-chosen', '选定'));
   const h = el('span', 'sp-h');
   h.id = 'h-' + v.id;
   head.append(h);
@@ -728,7 +749,7 @@ for (const v of VARIANTS) {
 }
 
 for (const v of VARIANTS) {
-  const sm = el('div', 'sm' + (v.id === 'base' ? ' base' : ' win'));
+  const sm = el('div', 'sm' + (v.id === 'base' ? ' base' : ' win') + (v.chosen ? ' chosen' : ''));
   sm.append(el('span', 'k', v.id === 'base' ? '现状' : '方案 ' + v.tag));
   const hv = el('div', 'h');
   hv.id = 'sum-h-' + v.id;
