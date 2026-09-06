@@ -10,7 +10,7 @@ import { createStore, currentRun } from './lib/store.js';
 import { createStream } from './lib/stream.js';
 import { h, fill, keyed } from './lib/dom.js';
 import * as fmt from './lib/format.js';
-import { parseHash } from './lib/route.js';
+import { parseHash, swapView } from './lib/route.js';
 import { renderRail, renderChainStrip, PREREQUISITE } from './lib/rail.js';
 import { renderMonitor } from './lib/monitor.js';
 import { renderPowerPanel, svgFileOf, DEFAULT_UI as POWER_DEFAULTS } from './lib/power.js';
@@ -80,14 +80,19 @@ function show() {
     if (mounted && mounted.focus) mounted.focus(query);
     return;
   }
-  if (mounted && mounted.dispose) mounted.dispose();
-  viewEl.scrollTop = 0;
+  // The bookkeeping first, and the tabs with it: the hash has already moved,
+  // so whatever a view does on the way down or up, the shell has to agree
+  // with the address bar afterwards. `swapView` is why (`lib/route.js`).
+  const previous = mounted;
+  mounted = null;
   mountedRoute = name;
+  viewEl.scrollTop = 0;
+  renderTabs();
   // Park is the strip's alone: the strip is pinned to the foot of the window
   // and the strip is where it arms, so no view is handed it and none offers a
   // second one.
-  mounted = BY_ROUTE[name].mount(viewEl, { store, api, stream, fmt, notify, query });
-  renderTabs();
+  mounted = swapView(previous,
+    () => BY_ROUTE[name].mount(viewEl, { store, api, stream, fmt, notify, query }));
 }
 
 function renderTabs() {
