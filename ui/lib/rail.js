@@ -501,14 +501,33 @@ function cellEl(cell) {
   const classes = ['brc'];
   if (cell.level) classes.push('lv-' + cell.level);
   if (cell.inferred) classes.push('inferred');
-  return h('div', { class: classes.join(' ') },
+  // What the diagram already says, the words need not repeat. A closed
+  // circuit is in the drawing; `neutral` and an absent read-back are not —
+  // an unlit diagram is both of them at once — so only a lit one is `drawn`.
+  if (cell.key === 'relay' && cell.links && (cell.links[0] || cell.links[1])) classes.push('drawn');
+  // The rail is one line (`style.css`), so the sub-line is a panel the cell
+  // opens rather than a third row. It opens on hover **and on focus**, which
+  // is what the `tabindex` is for: a reading reachable only by a pointer is a
+  // reading half the operators cannot get to. `title` says the same thing
+  // where a screen reader will find it, and where the panel runs off-screen.
+  return h('div', {
+    class: classes.join(' '),
+    tabindex: cell.sub ? '0' : null,
+    title: cell.sub || null,
+  },
     h('span.brl',
       icon(CELL_ICON[cell.key] || 'blank'),
       h('span', { text: cell.label }),
       // The inferred mark rides on the label, so the value keeps the register
       // of a number: this cell is what the run implies, not what was read.
+      // On one line there is no room for the badge and the dashed rule under
+      // the value carries it instead, so this is the mark's title, not the
+      // mark — `style.css` hides the element and keeps what it says.
       cell.inferred ? h('span.tag-inferred', { title: 'implied by the running step, not read back', text: 'inferred' }) : null),
-    h('span.brv', { text: cell.value }),
+    h('span.brv', {
+      text: cell.value,
+      title: cell.inferred ? 'implied by the running step, not read back' : null,
+    }),
     cell.key === 'relay' ? relayEl(cell) : null,
     cell.sub ? h('span.brs', { text: cell.sub }) : null);
 }
