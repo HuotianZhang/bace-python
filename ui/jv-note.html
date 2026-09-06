@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>J–V 脚注 — 四种写法</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="fonts/fonts.css">
+<link rel="stylesheet" href="style.css">
+<!--
+  第三个比较用的架子，和 `rail-density.html`、`bench-head.html` 同一个模子：
+  在决定之前有个东西可以看，决定之后留着当记录。
+
+  起因是 #65。`pixel_area_cm2 = 0` 的时候，`currentOf()` 按 `ui-rules §6`
+  把整张图切到安培 —— 这一步是对的，也是有测试的。但同一张卡上的三句话
+  没有一起切：
+
+      面板标签   |I| / A  ·  V / V →
+      脚注一     no pixel area on this run, so the axis is amps …
+      脚注二     |J| on a log axis: a dark sweep is read over decades
+
+  第二条脚注里的 `|J|` 是 `notes()` 里写死的字面量，`quantity` 传进去了却
+  只被读了 `.key`。于是一张暗扫描的卡上，轴说安培，脚注说电流密度，中间
+  还夹着一句「这次没有像素面积」—— 三句话两个量纲，操作员没有任何依据
+  判断哪一句是真的。
+
+  这一页要回答的不是「改不改」（那是一行），而是「改成什么」，以及
+  「下一次怎么不再犯」。四种写法用的是真的 `lib/charts/jv.js`：模型整个
+  由 `jvModel()` 造出来，只有那一句被替换掉，别的字、别的几何、别的颜色
+  都是卡上原样。样例宽度取的是控制台里 J–V 卡真正拿到的宽 —— 在
+  `preview.html` 上量的，1280 单栏 692 px，1440 / 1920 双栏 380 / 384 px ——
+  不是随手写的 530。
+
+  脚注块的高度是页面加载后实测的，一致性审计是当场跑的。用一个人手打的
+  数字结束一场措辞争论，等于没结束。
+
+  **C 合入了**（2026-09-06）—— 见页脚。
+-->
+<style>
+/* ==========================================================================
+   页面外壳。console 自己的调色板由 style.css 带进来，样例里一律照原样显示：
+   它是 light-only 的仪器（ui-rules §1），外壳换成深色也不跟着换。
+   ========================================================================== */
+:root {
+  --pg-bg: #f7f5f4; --pg-panel: #ffffff; --pg-ink: #1c1a19; --pg-dim: #726d6a;
+  --pg-faint: #9c9694; --pg-rule: #ded9d7; --pg-hair: #ebe6e4;
+  --pg-accent: #ec3013; --pg-ok: #3f7d53; --pg-warn: #b06a00; --pg-chip: #efeceb;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --pg-bg: #161514; --pg-panel: #1e1c1b; --pg-ink: #f0ecea; --pg-dim: #a49d9a;
+    --pg-faint: #7d7674; --pg-rule: #3a3634; --pg-hair: #2a2726;
+    --pg-accent: #ff6448; --pg-ok: #6fae84; --pg-warn: #d79a3f; --pg-chip: #2a2726;
+  }
+}
+:root[data-theme="dark"] {
+  --pg-bg: #161514; --pg-panel: #1e1c1b; --pg-ink: #f0ecea; --pg-dim: #a49d9a;
+  --pg-faint: #7d7674; --pg-rule: #3a3634; --pg-hair: #2a2726;
+  --pg-accent: #ff6448; --pg-ok: #6fae84; --pg-warn: #d79a3f; --pg-chip: #2a2726;
+}
+
+html, body { height: auto; background: var(--pg-bg); color: var(--pg-ink); }
+body { font-family: var(--font-body); font-size: 14px; line-height: 1.55; }
+.page { max-width: 1180px; margin: 0 auto; padding: 40px 24px 80px; }
+
+.eyebrow { font-family: var(--font-num); font-size: 11px; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--pg-faint); margin: 0 0 6px; }
+h1 { font-family: var(--font-head); font-size: 27px; line-height: 1.2; margin: 0 0 14px;
+  font-weight: 600; letter-spacing: -.01em; }
+h2.sec { font-family: var(--font-head); font-size: 17px; margin: 44px 0 10px; font-weight: 600;
+  padding-top: 14px; border-top: 1px solid var(--pg-rule); }
+.lede { color: var(--pg-dim); max-width: 76ch; margin: 0 0 14px; }
+.lede b, .lede strong { color: var(--pg-ink); font-weight: 600; }
+code, .num { font-family: var(--font-num); font-size: .92em; }
+.page code { background: var(--pg-chip); padding: 1px 4px; border-radius: 2px; }
+
+/* 出问题的那三句话，原样摆出来 */
+.clash { background: var(--pg-panel); border: 1px solid var(--pg-rule); border-left: 3px solid var(--pg-accent);
+  padding: 12px 14px; margin: 0 0 16px; display: grid; grid-template-columns: max-content 1fr;
+  gap: 4px 18px; align-items: baseline; }
+.clash dt { font-size: 11px; color: var(--pg-faint); font-family: var(--font-num); }
+.clash dd { margin: 0; font-family: var(--font-num); font-size: 12px; color: var(--pg-ink); }
+.clash .bad { color: var(--pg-accent); font-weight: 600; }
+
+/* 样例：一格一种写法，里面是真的卡 */
+.specimens { display: flex; flex-wrap: wrap; gap: 18px; margin: 4px 0 0; align-items: flex-start; }
+.spec { border: 1px solid var(--pg-rule); background: var(--pg-panel); }
+.spec > header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  padding: 7px 10px; border-bottom: 1px solid var(--pg-hair); }
+.spec .who { font-family: var(--font-num); font-size: 11px; font-weight: 600; letter-spacing: .04em; }
+.spec .verdict { font-family: var(--font-num); font-size: 10px; color: var(--pg-faint); }
+.spec .verdict.bad { color: var(--pg-accent); font-weight: 600; }
+.spec .verdict.ok { color: var(--pg-ok); }
+.spec .gloss { padding: 6px 10px 9px; font-size: 11px; color: var(--pg-dim); border-top: 1px solid var(--pg-hair); }
+/* 控制台本体：白纸、console 的字与色，外壳是深是浅都一样 */
+.frame { background: var(--paper); color: var(--ink); padding: 10px; }
+.frame .chart-note.subject { color: var(--ink); font-weight: 600; }
+
+table.grid { border-collapse: collapse; font-size: 12px; margin: 6px 0 0; }
+table.grid th, table.grid td { border: 1px solid var(--pg-rule); padding: 4px 9px; text-align: left; }
+table.grid th { background: var(--pg-chip); font-weight: 600; font-size: 11px; color: var(--pg-dim);
+  font-family: var(--font-num); letter-spacing: .03em; }
+table.grid td.n { font-family: var(--font-num); text-align: right; }
+table.grid td.bad { color: var(--pg-accent); font-weight: 600; }
+table.grid td.ok { color: var(--pg-ok); }
+table.grid tr.win td { background: color-mix(in srgb, var(--pg-ok) 9%, transparent); }
+
+.foot { margin-top: 46px; padding-top: 14px; border-top: 1px solid var(--pg-rule);
+  color: var(--pg-faint); font-size: 12px; max-width: 76ch; }
+.foot b { color: var(--pg-dim); }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <p class="eyebrow">BACE console · ui/lib/charts/jv.js · notes()</p>
+  <h1>J–V 的脚注，四种写法</h1>
+
+  <p class="lede">
+    <a href="https://github.com/HuotianZhang/bace-python/issues/65">#65</a>：
+    <code>pixel_area_cm2 = 0</code> 的一次暗扫描，轴按 <code>ui-rules §6</code>
+    切成了安培，脚注没跟着切。三句话摆在一张卡上，两个量纲：
+  </p>
+
+  <dl class="clash">
+    <dt>面板标签</dt><dd id="clash-label"></dd>
+    <dt>脚注一</dt><dd id="clash-n1"></dd>
+    <dt>脚注二</dt><dd id="clash-n2" class="bad"></dd>
+  </dl>
+
+  <p class="lede">
+    病根在 <code>notes()</code>：<code>quantity</code> 整个传了进去，函数却只读
+    <code>.key</code> 决定要不要说「这次没有像素面积」，那句 <code>|J|</code>
+    是写死的字面量。所以真正要定的不是「改不改」（那是一行），而是
+    <b>改成什么</b>，以及 <b>下一次怎么不再犯</b>。
+  </p>
+
+  <h2 class="sec">四种写法</h2>
+  <p class="lede">
+    每一格都是真的 <code>jvModel()</code> 造出来的模型，交给真的
+    <code>chart()</code> 画，样式来自真的 <code>ui/style.css</code>；
+    四者之间<b>只有那一句不同</b>。加粗的是被换掉的那句。
+    宽度取控制台里 J–V 卡真正拿到的 <span class="num" id="w-note">…</span>。
+  </p>
+
+  <h3 class="lede" style="margin:18px 0 6px;color:var(--pg-ink);font-weight:600;">
+    现场一 · <code>pixel_area_cm2 = 0</code>，全暗 —— #65 说的那张卡</h3>
+  <div class="specimens" id="spec-noarea"></div>
+
+  <h3 class="lede" style="margin:26px 0 6px;color:var(--pg-ink);font-weight:600;">
+    现场二 · <code>pixel_area_cm2 &gt; 0</code>，全暗 —— 同一段话在有面积时的样子</h3>
+  <div class="specimens" id="spec-area"></div>
+
+  <h2 class="sec">一致性审计：18 个状态，逐个扫</h2>
+  <p class="lede">
+    状态空间是三维的 —— 有没有面积（2）× 明暗读回来的是什么（3）×
+    <code>log</code> 自动 / 强制开 / 强制关（3）。每个状态把
+    <b>面板标签和全部脚注</b>拿出来，扫里面的量纲记号（<code>|J|</code>、
+    <code>mA cm⁻²</code>、<code>|I|</code>、<code>amps</code>），
+    只要出现了这张图<b>没有在画</b>的那个量，就记一次自相矛盾。
+    数字是这一页当场跑出来的。
+  </p>
+  <div id="audit"></div>
+
+  <h2 class="sec">脚注块占多少 px</h2>
+  <p class="lede">
+    量之前的想法是：D 最短，应该能省下几行。<b>量完是空的</b> ——
+    四种写法在两个宽度上高度一模一样，因为那一句在 380 px 里
+    四种都还没到换行。所以 B / C / D 之间<b>不是一场密度之争</b>，
+    这一点和 <code>rail-density.html</code> 不同，得说清楚。
+    有差别的是<b>离换行还剩多少</b>：那一句真正占的宽，和卡给它的宽之间
+    还剩几个像素 —— 剩得越少，下一次改字、换字体、或者卡再窄一点，
+    就越容易多出一行。两张表都是加载后在浏览器里量的。
+  </p>
+  <div id="heights"></div>
+
+  <h2 class="sec">下一次怎么不再犯</h2>
+  <p class="lede">
+    上面四种写法里，B / C / D 都能把 #65 关掉 —— 但关掉的只是这一句。
+    <code>notes()</code> 还是一个可以自由造句的函数，下个月再加一条脚注，
+    照样可以写死一个量纲，而现有的 336 个测试一个都不会红。
+    所以真正的修法是<b>两半</b>：换掉这一句，再加一条把上面那张审计表
+    钉进测试的不变量 —— 面板标签和脚注里，不许出现这张图没在画的量。
+    下面是拿变异体验的：往 <code>notes()</code> 里塞回一个写死的量纲，
+    看测试抓不抓得住。
+  </p>
+  <div id="mutants"></div>
+
+  <p class="foot" id="foot"></p>
+</div>
+
+<script type="module">
+import { jvModel, currentOf } from './lib/charts/jv.js';
+import { chart } from './lib/charts/frame.js';
+import { h, fill } from './lib/dom.js';
+
+const CURVES = await (await fetch('./fixtures/jv_sim.json')).json().then((d) => d.curves);
+
+// 控制台里 J–V 卡真正拿到的宽，在 preview.html 上量的：1280 单栏 692,
+// 1440 / 1920 双栏 380 / 384。窄的那个是常态，所以样例用它。
+const W_NARROW = 380;
+const W_WIDE = 692;
+document.getElementById('w-note').textContent = `${W_NARROW} px（1440 / 1920 双栏；1280 单栏是 ${W_WIDE}）`;
+
+// ---------------------------------------------------------------------------
+// 四种写法。除了这一句，四者共用同一个 `jvModel()` 的输出。
+// ---------------------------------------------------------------------------
+const WORDINGS = [
+  { key: 'A', who: 'A · 现状',
+    gloss: '写死 |J|。有面积时对，没面积时和它上面一行、和轴标同时打架。',
+    line: () => '|J| on a log axis: a dark sweep is read over decades' },
+  { key: 'B', who: 'B · 跟 magnitude',
+    gloss: 'issue 里提的改法。对，但 |I| / A 和轴标一字不差地重了一遍。',
+    line: (q) => `${q.magnitude} on a log axis: a dark sweep is read over decades` },
+  { key: 'C', who: 'C · 只跟符号',
+    gloss: '量归脚注，单位归轴。没面积时卡上说三次电流，但只有一次带单位。',
+    line: (q) => `${q.symbol} on a log axis: a dark sweep is read over decades` },
+  { key: 'D', who: 'D · 脚注不提量',
+    gloss: '只留理由。句里没有量纲记号，也就没有可以和轴标对不上的东西。',
+    line: () => 'a dark sweep is read over decades, so the axis is logarithmic' },
+];
+
+const isLogNote = (n) => /over decades/.test(n);
+
+/** 同一个模型，换掉那一句 —— 别的一个字都不动。 */
+function reword(model, quantity, wording) {
+  return { ...model, notes: model.notes.map((n) => (isLogNote(n) ? wording.line(quantity) : n)) };
+}
+
+// ---------------------------------------------------------------------------
+// 状态空间
+// ---------------------------------------------------------------------------
+const AREA = [
+  { key: 'area', name: 'area > 0', map: (cs) => cs },
+  { key: 'noarea', name: 'area = 0', map: (cs) => cs.map((c) => ({ ...c, density: null })) },
+];
+const LIGHT = [
+  { key: 'dark', name: '全暗', pick: (cs) => cs.filter((c) => c.dark === true) },
+  { key: 'mixed', name: '明+暗', pick: (cs) => cs },
+  { key: 'unknown', name: 'dark=null', pick: (cs) => cs.map((c) => ({ ...c, dark: null })) },
+];
+const LOGOPT = [
+  { key: 'auto', name: 'log 自动', opt: {} },
+  { key: 'on', name: 'log 强制开', opt: { log: true } },
+  { key: 'off', name: 'log 强制关', opt: { log: false } },
+];
+
+function states() {
+  const out = [];
+  for (const a of AREA) for (const l of LIGHT) for (const g of LOGOPT) {
+    const curves = a.map(l.pick(CURVES));
+    if (!curves.length) continue;
+    out.push({ id: `${a.key}/${l.key}/${g.key}`, name: `${a.name} · ${l.name} · ${g.name}`,
+      curves, opt: g.opt, quantity: currentOf(curves) });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// 审计：屏幕上说出口的量纲，和这张图实际在画的量，对不上就记一次
+// ---------------------------------------------------------------------------
+// 只认记号和单位，不认「density」这个词 —— 「a density would be inventing one」
+// 讲的正是没有密度这件事，把它当成一句密度声明，审计就抓错人了。
+const TOKENS = [
+  [/\|J\|/, 'density'],
+  [/mA\s?cm⁻²|mA\/cm²/, 'density'],
+  [/\|I\|/, 'current'],
+  [/\bamps?\b/, 'current'],
+];
+
+function saidQuantities(text) {
+  const said = new Set();
+  for (const [re, q] of TOKENS) if (re.test(text)) said.add(q);
+  return said;
+}
+
+/** 一个模型上，所有和轴有关的可见字。J_sc 那一行不在内 —— 见页脚。 */
+function axisStrings(model) {
+  return [model.panels[0].label, ...model.notes];
+}
+
+function contradictions(model, quantity) {
+  const out = [];
+  for (const text of axisStrings(model)) {
+    for (const said of saidQuantities(text)) {
+      if (said !== quantity.key) out.push({ text, said, plotted: quantity.key });
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// 样例
+// ---------------------------------------------------------------------------
+function specimen(state, wording, width) {
+  const base = jvModel(state.curves, { width, ...state.opt });
+  const model = reword(base, state.quantity, wording);
+  const bad = contradictions(model, state.quantity);
+
+  const box = h('div.spec');
+  const head = h('header',
+    h('span.who', { text: wording.who }),
+    h('span.verdict' + (bad.length ? '.bad' : '.ok'),
+      { text: bad.length ? `${bad.length} 处对不上` : '一致' }));
+  const frame = h('div.frame', { style: `width:${width + 20}px` });
+  frame.append(chart(model));
+  box.append(head, frame, h('p.gloss', { text: wording.gloss }));
+  // 被换掉的那句加粗，别的脚注保持原来的灰
+  for (const el of frame.querySelectorAll('.chart-note')) {
+    if (isLogNote(el.textContent) || /logarithmic/.test(el.textContent)) el.classList.add('subject');
+  }
+  return box;
+}
+
+const NOAREA = { curves: AREA[1].map(LIGHT[0].pick(CURVES)), opt: {} };
+NOAREA.quantity = currentOf(NOAREA.curves);
+const AREADARK = { curves: LIGHT[0].pick(CURVES), opt: {} };
+AREADARK.quantity = currentOf(AREADARK.curves);
+
+// 开头那三句话，从真模型里取，不是抄的 —— 套上写法 A，也就是 #65 当时的样子。
+// 修好之后 `jvModel()` 自己已经不这么说了，但这一段要给的是现场。
+{
+  const m = reword(jvModel(NOAREA.curves), NOAREA.quantity, WORDINGS[0]);
+  document.getElementById('clash-label').textContent = m.panels[0].label;
+  document.getElementById('clash-n1').textContent = m.notes.find((n) => /pixel area/.test(n)) || '—';
+  document.getElementById('clash-n2').textContent = m.notes.find(isLogNote) || '—';
+}
+
+for (const w of WORDINGS) {
+  document.getElementById('spec-noarea').append(specimen(NOAREA, w, W_NARROW));
+  document.getElementById('spec-area').append(specimen(AREADARK, w, W_NARROW));
+}
+
+// ---------------------------------------------------------------------------
+// 审计表
+// ---------------------------------------------------------------------------
+{
+  const all = states();
+  const rows = [];
+  const result = {};
+  for (const w of WORDINGS) {
+    let states_bad = 0; let hits = 0; const worst = [];
+    for (const s of all) {
+      const model = reword(jvModel(s.curves, { width: W_NARROW, ...s.opt }), s.quantity, w);
+      const bad = contradictions(model, s.quantity);
+      if (bad.length) { states_bad += 1; hits += bad.length; if (worst.length < 2) worst.push(`${s.id} → “${bad[0].text}”`); }
+    }
+    result[w.key] = { states_bad, hits, worst };
+    rows.push(h('tr' + (states_bad ? '' : '.win'),
+      h('td', { text: w.who }),
+      h('td.n' + (states_bad ? '.bad' : '.ok'), { text: `${states_bad} / ${all.length}` }),
+      h('td.n' + (hits ? '.bad' : '.ok'), { text: String(hits) }),
+      h('td', { text: worst.join(' · ') || '—' })));
+  }
+  const table = h('table.grid',
+    h('thead', h('tr', h('th', { text: '写法' }), h('th', { text: '自相矛盾的状态' }),
+      h('th', { text: '句数' }), h('th', { text: '例（前两条）' }))),
+    h('tbody', ...rows));
+  fill(document.getElementById('audit'), table);
+  window.__audit = result;
+  window.__nstates = all.length;
+}
+
+// ---------------------------------------------------------------------------
+// 脚注块的高度，量出来的
+// ---------------------------------------------------------------------------
+{
+  const stage = h('div', { style: 'position:absolute;left:-99999px;top:0;' });
+  document.body.append(stage);
+  const measure = (state, wording, width) => {
+    const model = reword(jvModel(state.curves, { width, ...state.opt }), state.quantity, wording);
+    const frame = h('div.frame', { style: `width:${width}px` });
+    frame.append(chart(model));
+    stage.append(frame);
+    const notes = frame.querySelector('.chart-notes');
+    const r = notes ? Math.round(notes.getBoundingClientRect().height) : 0;
+    const lines = frame.querySelectorAll('.chart-note').length;
+    frame.remove();
+    return { px: r, lines };
+  };
+  const cases = [
+    ['area = 0 · 全暗', NOAREA],
+    ['area > 0 · 全暗', AREADARK],
+  ];
+  const heights = {};
+  const rows = [];
+  for (const w of WORDINGS) {
+    const cells = [];
+    heights[w.key] = {};
+    for (const [name, st] of cases) {
+      for (const width of [W_NARROW, W_WIDE]) {
+        const m = measure(st, w, width);
+        heights[w.key][`${name}@${width}`] = m;
+        cells.push(h('td.n', { text: `${m.px} px · ${m.lines} 条` }));
+      }
+    }
+    rows.push(h('tr', h('td', { text: w.who }), ...cells));
+  }
+  const head = [];
+  for (const [name] of cases) for (const width of [W_NARROW, W_WIDE]) head.push(h('th', { text: `${name} @ ${width}` }));
+
+  // 那一句自己有多宽 —— 不让它换行，量出来，再看卡给的 380 px 还剩多少。
+  const ruler = h('div.frame', { style: 'position:absolute;left:-99999px;top:0;width:2000px;' });
+  document.body.append(ruler);
+  const intrinsic = (text) => {
+    const span = h('span.chart-note', { text, style: 'white-space:nowrap;display:inline-block;' });
+    ruler.append(span);
+    const w = Math.round(span.getBoundingClientRect().width);
+    span.remove();
+    return w;
+  };
+  const room = [];
+  const headroom = {};
+  for (const w of WORDINGS) {
+    const cells = [];
+    headroom[w.key] = {};
+    for (const [name, st] of cases) {
+      const px = intrinsic(w.line(st.quantity));
+      const left = W_NARROW - px;
+      headroom[w.key][name] = { px, left };
+      cells.push(h('td.n' + (left < 60 ? '.bad' : ''), { text: `${px} px · 还剩 ${left}` }));
+    }
+    room.push(h('tr', h('td', { text: w.who }), ...cells));
+  }
+  ruler.remove();
+
+  fill(document.getElementById('heights'),
+    h('p', { class: 'lede', style: 'margin:14px 0 4px;font-size:12px;',
+      text: '脚注块实测高度 —— 四种写法一样高，这一栏是个空结果：' }),
+    h('table.grid', h('thead', h('tr', h('th', { text: '写法' }), ...head)), h('tbody', ...rows)),
+    h('p', { class: 'lede', style: 'margin:20px 0 4px;font-size:12px;',
+      text: `那一句自己的宽，和 ${W_NARROW} px 的卡之间还剩多少（不换行时实测）：` }),
+    h('table.grid',
+      h('thead', h('tr', h('th', { text: '写法' }), ...cases.map(([n]) => h('th', { text: n })))),
+      h('tbody', ...room)));
+  window.__heights = heights;
+  window.__headroom = headroom;
+  stage.remove();
+}
+
+// ---------------------------------------------------------------------------
+// 变异体：把写死的量纲塞回去，看不变量抓不抓得住
+// ---------------------------------------------------------------------------
+{
+  // 每个变异体是一条「新加的脚注」，都是很像会被写出来的句子。
+  const MUTANTS = [
+    ['把 #65 原样塞回来', () => '|J| on a log axis: a dark sweep is read over decades'],
+    ['新脚注里带单位', () => 'the floor is one decade below the smallest |J| / mA cm⁻² measured'],
+    ['顺手写了 amps', () => 'the crossing is read in amps off the same axis'],
+    ['写对的一条（不该被抓）', (q) => `${q.symbol} is plotted as a magnitude — the sign is on the linear axis`],
+  ];
+  // 基底是修好之后的 `jvModel()`，所以抓到的都是变异体带进来的，
+  // 不是 #65 自己的残留。
+  const rows = [];
+  for (const [name, make] of MUTANTS) {
+    let caught = 0; let total = 0;
+    for (const s of states()) {
+      const base = jvModel(s.curves, { width: W_NARROW, ...s.opt });
+      const model = { ...base, notes: [...base.notes, make(s.quantity)] };
+      total += 1;
+      if (contradictions(model, s.quantity).length) caught += 1;
+    }
+    rows.push(h('tr', h('td', { text: name }),
+      h('td.n' + (caught ? '.bad' : '.ok'), { text: `${caught} / ${total}` }),
+      h('td', { text: caught ? '不变量红了' : '不变量放行' })));
+  }
+  fill(document.getElementById('mutants'),
+    h('table.grid', h('thead', h('tr', h('th', { text: '变异体' }), h('th', { text: '被抓住的状态' }),
+      h('th', { text: '结果' }))), h('tbody', ...rows)));
+}
+
+document.getElementById('foot').innerHTML =
+  '<b>C 合入了</b>（2026-09-06），连同 <code>ui/tests/charts.test.mjs</code> 里那条不变量。'
+  + '三项量下来，C 是唯一一个在每一项上都<b>不比出问题的现状差</b>的改法：'
+  + '一致性 0 / 18（A 是 4 / 18）；脚注块高度四种一样，是个空结果；'
+  + '离换行的余量 130 px，和现状的 128 px 持平 —— B 在有面积时只剩 72，'
+  + 'D 只剩 81，两个都比它们要替换掉的那句更长。'
+  + '<br><br>B 是 issue 里提的改法，正确，代价是把轴标一字不差地重念一遍，'
+  + '并且在有面积时把余量吃掉 56 px。D 读起来最干净，也最不容易再犯 ——'
+  + '句子里没有量纲记号，就没有可以和轴标对不上的东西 —— 但那份免疫力'
+  + '不变量已经给了全部四种，而 D 用「so the axis is logarithmic」换掉了'
+  + '「|I| on a log axis」，字更多，还把「这一句在讲哪条轴」这个锚点丢了。'
+  + '<br><br><b>真正拦住下一次的是不变量，不是措辞。</b>'
+  + '拿同样三个变异体去打 HEAD 上那 57 个测试：一个都没红。'
+  + '加上不变量之后：三个全红，而第四个「写对的一条」放行 —— 它抓的是'
+  + '前后不一致，不是「别提量纲」。'
+  + '<br><br>有一处这一页故意没管：metrics 里的 <code>J_sc</code> 在没有像素面积时'
+  + '也叫 J_sc，虽然后面跟着 <code>in amps</code>。那是一个数不是一条轴，'
+  + '且 <code>jsc</code> 按设计永远是安培（<code>ui-rules §6</code>），'
+  + '所以不变量没有把 metrics 扫进去；换不换符号是另一个决定，留给这块的主人。'
+  + '<br><br>还有一处是潜伏的，不是这次的 bug：'
+  + '「a dark sweep is read over decades」把「全暗」当成既成事实，而 '
+  + '<code>useLog</code> 在 <code>log</code> 被强制打开时和 <code>allDark</code> 无关。'
+  + '生产里没有人传 <code>log</code>（<code>results.js</code> 只传 <code>planned</code>），'
+  + '所以现在还碰不到 —— 四种写法都有这个毛病，它不是这一页要选的东西。';
+</script>
+</body>
+</html>

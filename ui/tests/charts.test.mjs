@@ -278,6 +278,104 @@ test('a sweep that is dark all through is read over decades', () => {
   assert.equal(unknown.panels[0].y.scale.kind, 'linear');
 });
 
+// The axis and the words about it, over every state the card has (#65)
+// ------------------------------------------------------------------------
+//
+// `currentOf` switches the whole chart to amps when a run has no pixel area
+// (`ui-rules` §6), and the panel label follows it. The notes did not: one of
+// them said `|J|` as a literal, so a dark sweep with `pixel_area_cm2 = 0` drew
+// a card whose axis said `|I| / A`, whose first note said the axis was amps,
+// and whose second said `|J|`. Three lines, two quantities, and nothing on the
+// card to say which was true.
+//
+// The one-line fix is not the guard. `notes()` is a function that writes
+// prose, so the next note added to it can hard-code a unit exactly as this one
+// did and the suite will stay green. What holds it down is the invariant
+// below, over the whole state space rather than the one case in the issue:
+// **nothing the card says about its axis may name a quantity the axis is not
+// plotting.** `ui/jv-note.html` is the same sweep with the wordings side by
+// side, and the reason `|I|` shipped rather than `|I| / A`.
+
+/**
+ * The quantities a string claims — by symbol and unit only.
+ *
+ * Deliberately not the word "density": the amps note is
+ * *"a density would be inventing one"*, which is a sentence about there being
+ * no density, and an audit that reads it as a density claim accuses the one
+ * note that gets this right.
+ */
+function saidQuantities(text) {
+  const said = new Set();
+  if (/\|J\|/.test(text)) said.add('density');
+  if (/mA\s?cm⁻²|mA\/cm²/.test(text)) said.add('density');
+  if (/\|I\|/.test(text)) said.add('current');
+  if (/\bamps?\b/.test(text)) said.add('current');
+  return said;
+}
+
+/** Every state the J–V card has: area × what the bench read back × the log switch. */
+function jvStates(curves) {
+  const area = [
+    ['area > 0', (cs) => cs],
+    ['area = 0', (cs) => cs.map((c) => ({ ...c, density: null }))],
+  ];
+  const light = [
+    ['all dark', (cs) => cs.filter((c) => c.dark === true)],
+    ['light + dark', (cs) => cs],
+    ['dark unknown', (cs) => cs.map((c) => ({ ...c, dark: null }))],
+  ];
+  const log = [['log auto', {}], ['log forced on', { log: true }], ['log forced off', { log: false }]];
+  const out = [];
+  for (const [an, amap] of area) {
+    for (const [ln, lpick] of light) {
+      for (const [gn, opt] of log) {
+        const list = amap(lpick(curves));
+        if (list.length) out.push({ id: `${an} · ${ln} · ${gn}`, curves: list, opt });
+      }
+    }
+  }
+  return out;
+}
+
+test('nothing the card says about its axis names a quantity it is not plotting (#65)', () => {
+  const states = jvStates(JV.curves);
+  assert.equal(states.length, 18, 'the state space is the one jv-note.html audits');
+  const wrong = [];
+  for (const state of states) {
+    const plotted = currentOf(state.curves).key;
+    const model = jvModel(state.curves, state.opt);
+    // The panel label and the notes: what the card says the axis *is*. The
+    // metrics table is not in here on purpose — `J_sc` is in amps whatever the
+    // axis, and says so, because it is interpolated from `current` and not a
+    // point on the axis at all.
+    for (const text of [model.panels[0].label, ...model.notes]) {
+      for (const said of saidQuantities(text)) {
+        if (said !== plotted) wrong.push(`${state.id}: plots ${plotted}, says ${said} — “${text}”`);
+      }
+    }
+  }
+  assert.deepEqual(wrong, [], wrong.join('\n'));
+});
+
+test('a dark sweep with no pixel area says |I| on every line of the card (#65)', () => {
+  const dark = JV.curves.filter((c) => c.dark === true).map((c) => ({ ...c, density: null }));
+  const model = jvModel(dark);
+  assert.equal(model.panels[0].y.scale.kind, 'log10', 'still the leakage axis');
+  assert.equal(model.panels[0].label, '|I| / A  ·  V / V →');
+  assert.ok(model.notes.some((n) => n === '|I| on a log axis: a dark sweep is read over decades'),
+    model.notes.join(' | '));
+  assert.ok(!model.notes.some((n) => /\|J\|/.test(n)), model.notes.join(' | '));
+});
+
+test('the fix changes nothing on a run that has a pixel area', () => {
+  // The density branch is byte-identical to what shipped before #65: the bug
+  // was only ever visible where the axis had already switched.
+  const dark = JV.curves.filter((c) => c.dark === true);
+  const model = jvModel(dark);
+  assert.ok(model.notes.includes('|J| on a log axis: a dark sweep is read over decades'),
+    model.notes.join(' | '));
+});
+
 test('the light axis is the power quadrant, and says how much it cropped', () => {
   const model = jvModel(JV.curves);
   assert.ok(model.panels[0].y.scale.domain[1] < 50, 'forward injection is off the top');

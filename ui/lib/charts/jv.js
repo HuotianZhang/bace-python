@@ -67,9 +67,12 @@ export function currentOf(curves) {
   // which is what a run with no pixel area sends — every curve is drawn in
   // amps and the axis says so.
   const all = curves.length > 0 && curves.every((c) => Array.isArray(c.density) && c.density.length);
+  // `symbol` is the quantity **without** its unit, for prose: the axis label
+  // already carries `/ A` or `/ mA cm⁻²`, and a note that repeats it states
+  // the unit twice within a centimetre of itself.
   return all
-    ? { key: 'density', label: 'J / mA cm⁻²', magnitude: '|J| / mA cm⁻²', format: (v) => fmt.density(v), unit: 'mA/cm²' }
-    : { key: 'current', label: 'I / A', magnitude: '|I| / A', format: (v) => fmt.amps(v), unit: 'A' };
+    ? { key: 'density', symbol: '|J|', label: 'J / mA cm⁻²', magnitude: '|J| / mA cm⁻²', format: (v) => fmt.density(v), unit: 'mA/cm²' }
+    : { key: 'current', symbol: '|I|', label: 'I / A', magnitude: '|I| / A', format: (v) => fmt.amps(v), unit: 'A' };
 }
 
 export function jvModel(curves, options = {}) {
@@ -371,7 +374,14 @@ function notes(list, quantity, { useLog, clamped, allDark, cropped = 0 }) {
       + 'of forward injection above it, clipped rather than compressed away');
   }
   if (useLog) {
-    out.push('|J| on a log axis: a dark sweep is read over decades');
+    // **The symbol follows the axis.** With `pixel_area_cm2 = 0` the axis is
+    // already in amps two lines above — `currentOf` saw no density and said so
+    // — and this sentence went on saying `|J|` because it was a literal
+    // (#65). One card, two quantities, and nothing on it to say which was
+    // true. It is the symbol and not `quantity.magnitude` because the panel
+    // label carries the unit a centimetre away; repeating `/ A` here states it
+    // three times on one card and tells the reader nothing the third time.
+    out.push(`${quantity.symbol} on a log axis: a dark sweep is read over decades`);
     if (clamped) out.push(`${clamped} sample${clamped === 1 ? '' : 's'} at or below the floor, clamped to it`);
   }
   if (!allDark && list.some((c) => c.dark === null || c.dark === undefined)) {
