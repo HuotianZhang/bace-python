@@ -205,7 +205,7 @@ class Infiniium:
                 "would be folded into it"
             )
 
-    def _digitize(self, source: str, timeout_s: float) -> None:
+    def _digitize(self, timeout_s: float) -> None:
         """`:DIGitize` and block on `*OPC?` until the record is complete.
 
         With averaging on, that is the whole count: the probe measured 32
@@ -217,7 +217,12 @@ class Infiniium:
         previous = self._io.timeout
         self._io.timeout = max(1000, int(timeout_s * 1000))
         try:
-            self._io.write(f":DIG {source};")
+            # Bare :DIG, not `:DIG {source}`: with a channel list the scope
+            # digitizes only those channels, and the first verification run
+            # (2026-09-06, 031419-001) then had no CHAN3 record for the sync
+            # trace that `_sync_trace` reads beside the current. Bare, it
+            # acquires every displayed channel -- what `:RUN` did.
+            self._io.write(":DIG;")
             self._io.query("*OPC?")
         except Exception as exc:                            # noqa: BLE001
             self._io.write(":STOP;")
@@ -229,7 +234,7 @@ class Infiniium:
         finally:
             self._io.timeout = previous
 
-    def _single_shot(self, source: str, timeout_s: float) -> None:
+    def _single_shot(self, timeout_s: float) -> None:
         """One un-averaged record, from an emptied display.
 
         For the auto-range passes: they only need the extremes of the signal in
@@ -238,7 +243,7 @@ class Infiniium:
         trace (2026-09-06).
         """
         self._io.write(":STOP;:ACQ:AVER OFF;:CDIS;")
-        self._digitize(source, timeout_s)
+        self._digitize(timeout_s)
 
     def _query_count(self) -> int | None:
         """`:WAV:COUN?` as an integer, or None when the firmware does not
@@ -342,7 +347,7 @@ class Infiniium:
             # The window in force for the acquisition about to be taken.
             top, bottom = voffset + vrange / 2.0, voffset - vrange / 2.0
 
-            self._single_shot(source, 10.0)
+            self._single_shot(10.0)
             tr = self._fetch_volts(source)      # volts, not amps -- see _fetch_volts
             hi, lo = float(tr.y.max()), float(tr.y.min())
 
@@ -649,7 +654,7 @@ class Infiniium:
                 "channel explicitly"
             )
         self._reset_averager(n_averages)
-        self._digitize(source, timeout_s)   # stopped when it returns
+        self._digitize(timeout_s)           # stopped when it returns
         trace = self._fetch(source)
         count = self._averages_folded()
         if count is not None and count < n_averages:

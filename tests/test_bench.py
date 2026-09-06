@@ -537,7 +537,7 @@ class _MeasuredScope:
                 self.averaging = True
             elif p.startswith(":ACQ:AVER:COUN "):
                 self.configured = int(p.split()[-1])
-            elif p.startswith(":DIG "):
+            elif p == ":DIG" or p.startswith(":DIG "):
                 self.running = False
                 if not self.averaging:
                     self.count = 1
@@ -623,7 +623,7 @@ def test_the_acquisition_is_digitized_to_the_whole_count_not_polled():
     trace = scope.acquire(200, autorange_first=False)
     assert trace.count == 200 and io.fetched_counts == [200]
     up = [c.strip().upper() for c in io.log]
-    assert any(c.startswith(":DIG CHAN2") for c in up)
+    assert ":DIG;" in up, "a bare :DIG, so every displayed channel is in the record"
     assert "*OPC?" in up
     assert not any("ADER" in c for c in up)
     # the count is never read while running
