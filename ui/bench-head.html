@@ -1,0 +1,782 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bench 页头 — 四种排法</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="fonts/fonts.css">
+<!--
+  又一个比较用的架子，不是交付物 —— 和 `rail-density.html` 同一个模子，同一个
+  用途：在决定之前有个东西可以看。
+
+  起因是两件事撞在一起。`rail-density.html` 刚把台架栏从 156 px 压到 27 px；
+  同一周 bench 页上多了一条 65 px 的「Bench settings」。量下来（1440 宽、身份栏
+  收起）：外壳 90 px，Instruments 面板 172 px，Bench settings 65 px，MODULES
+  标签 26 px —— 第一个参数出现在 397 px 处，身份栏展开时是 540 px，正好半屏。
+
+  两个毛病，性质不一样：
+
+    1. 相邻两块的密度差了六倍。台架栏一行 27 px 装八个读数；紧挨着的
+       Instruments 面板三行 172 px 装三个开关。`ui-rules §1` 说密度是要求。
+
+    2. Save 按钮的作用域没有任何东西说明。屏幕上从上到下叠了三种保存语义 ——
+       开关是「点了立刻作用于台架」，卡片字段是「改了就 PUT」，Bench settings
+       是「显式 Save」—— 而 Save 那一条夹在开关和卡片中间，两边都不属于。
+       Primer 的说法是 one save button per form，且 explicit 与 automatic 不
+       能混在同一个 form 里；这里是三种混在一起且没有边界。
+
+  下面四个样例用的是 `lib/instruments.js` 真正吐出来的 DOM 和 `ui/style.css`
+  里逐条抄来的样式。高度是页面加载后实测的，不是估的 —— 用一个人手打的数字
+  结束一场密度争论，等于没结束。
+
+  还没有任何一个合入。这一页是给人点评用的。
+-->
+<style>html, body { margin: 0; } img { max-width: 100%; } [hidden] { display: none !important; }</style>
+</head>
+<body>
+
+<style>
+/* ==========================================================================
+   页面外壳的取色。console 自己的调色板写死在 .frame 里 —— 它是 light-only
+   的仪器（ui-rules §1），在深色页面上也必须照原样显示。
+   ========================================================================== */
+:root {
+  --pg-bg: #f7f5f4;
+  --pg-panel: #ffffff;
+  --pg-ink: #1c1a19;
+  --pg-dim: #726d6a;
+  --pg-faint: #9c9694;
+  --pg-rule: #ded9d7;
+  --pg-hair: #ebe6e4;
+  --pg-accent: #ec3013;
+  --pg-ok: #3f7d53;
+  --pg-warn: #b06a00;
+  --pg-chip: #efeceb;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --pg-bg: #161514;
+    --pg-panel: #1e1c1b;
+    --pg-ink: #f0ecea;
+    --pg-dim: #a49d9a;
+    --pg-faint: #7d7674;
+    --pg-rule: #3a3634;
+    --pg-hair: #2a2726;
+    --pg-accent: #ff6448;
+    --pg-ok: #6fae84;
+    --pg-warn: #d79a3f;
+    --pg-chip: #2a2726;
+  }
+}
+:root[data-theme="dark"] {
+  --pg-bg: #161514;
+  --pg-panel: #1e1c1b;
+  --pg-ink: #f0ecea;
+  --pg-dim: #a49d9a;
+  --pg-faint: #7d7674;
+  --pg-rule: #3a3634;
+  --pg-hair: #2a2726;
+  --pg-accent: #ff6448;
+  --pg-ok: #6fae84;
+  --pg-warn: #d79a3f;
+  --pg-chip: #2a2726;
+}
+
+body {
+  background: var(--pg-bg); color: var(--pg-ink);
+  font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  font-size: 15px; line-height: 1.6;
+}
+.wrap { max-width: 1180px; margin: 0 auto; padding: 44px 28px 90px; }
+.eyebrow {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--pg-faint); margin: 0 0 10px;
+}
+h1 { font-family: 'Archivo', 'IBM Plex Sans', sans-serif; font-size: 30px; line-height: 1.2; margin: 0 0 16px; font-weight: 700; }
+h2.sec {
+  font-family: 'Archivo', 'IBM Plex Sans', sans-serif; font-size: 19px; margin: 52px 0 14px;
+  padding-top: 20px; border-top: 1px solid var(--pg-rule); font-weight: 700;
+}
+.lede { color: var(--pg-dim); max-width: 76ch; margin: 0 0 14px; }
+.lede b { color: var(--pg-ink); font-weight: 600; }
+code, .num { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: .92em; }
+code { background: var(--pg-chip); padding: 1px 5px; border-radius: 3px; }
+
+/* -- 现状的账单表 --------------------------------------------------------- */
+.budget { border-collapse: collapse; margin: 6px 0 8px; font-size: 14px; }
+.budget th, .budget td { padding: 5px 16px 5px 0; text-align: left; border-bottom: 1px solid var(--pg-hair); }
+.budget th { font-weight: 600; font-size: 12px; color: var(--pg-faint); text-transform: uppercase; letter-spacing: .06em; }
+.budget td.n { font-family: 'IBM Plex Mono', ui-monospace, monospace; text-align: right; }
+.budget tr.tot td, .budget tr.tot th { border-bottom: 0; border-top: 2px solid var(--pg-rule); font-weight: 600; padding-top: 7px; }
+.budget td.who { color: var(--pg-dim); }
+
+/* -- 宽度开关 ------------------------------------------------------------- */
+.controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 26px 0 6px; }
+.controls .lab { font-size: 12px; color: var(--pg-faint); text-transform: uppercase; letter-spacing: .08em; }
+.wbtns { display: inline-flex; border: 1px solid var(--pg-rule); border-radius: 4px; overflow: hidden; }
+.wbtn {
+  font: inherit; font-size: 13px; font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  padding: 5px 13px; border: 0; border-left: 1px solid var(--pg-rule);
+  background: var(--pg-panel); color: var(--pg-dim); cursor: pointer;
+}
+.wbtn:first-child { border-left: 0; }
+.wbtn[aria-pressed="true"] { background: var(--pg-ink); color: var(--pg-bg); }
+.wnote { font-size: 13px; color: var(--pg-faint); }
+
+/* -- 汇总条 --------------------------------------------------------------- */
+.summary { display: flex; gap: 10px; flex-wrap: wrap; margin: 16px 0 30px; }
+.scard {
+  flex: 1 1 210px; border: 1px solid var(--pg-rule); border-radius: 6px;
+  background: var(--pg-panel); padding: 12px 14px 13px;
+}
+.scard .k { font-size: 12px; color: var(--pg-faint); text-transform: uppercase; letter-spacing: .07em; }
+.scard .v { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 25px; line-height: 1.15; margin-top: 3px; }
+.scard .d { font-size: 12.5px; color: var(--pg-dim); margin-top: 3px; }
+.scard .d.save { color: var(--pg-ok); }
+.scard.base { background: var(--pg-bg); }
+
+/* -- 一个样例 ------------------------------------------------------------- */
+.spec { margin: 0 0 40px; }
+.spec-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 3px; }
+.spec-head h3 { font-family: 'Archivo', 'IBM Plex Sans', sans-serif; font-size: 17px; margin: 0; font-weight: 700; }
+.spec-head .px {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 14px;
+  background: var(--pg-chip); padding: 2px 9px; border-radius: 3px;
+}
+.spec-head .px.win { background: transparent; color: var(--pg-ok); font-weight: 600; }
+.spec-note { color: var(--pg-dim); font-size: 13.5px; margin: 0 0 10px; max-width: 82ch; }
+.spec-note b { color: var(--pg-ink); font-weight: 600; }
+.holder { overflow: hidden; border: 1px solid var(--pg-rule); border-radius: 5px; background: #fff; }
+.frame-scale { transform-origin: top left; }
+
+/* -- 对照表 --------------------------------------------------------------- */
+.matrix-wrap { overflow-x: auto; }
+.matrix { border-collapse: collapse; font-size: 13.5px; min-width: 780px; }
+.matrix th, .matrix td { border: 1px solid var(--pg-rule); padding: 8px 11px; text-align: left; vertical-align: top; }
+.matrix thead th { background: var(--pg-chip); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--pg-dim); }
+.matrix tbody th { background: var(--pg-panel); white-space: nowrap; font-weight: 600; }
+.matrix td.n { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+.foot { color: var(--pg-dim); font-size: 13.5px; max-width: 82ch; margin-top: 22px; }
+
+/* ==========================================================================
+   console 本体。以下取自 ui/style.css，逐条照抄。取色写死，不跟随页面主题。
+   差别全部在 .v-a / .v-b / .v-c 三段覆盖里。
+   ========================================================================== */
+.frame {
+  --ink: #201e1d;
+  --grey: #7d7979;
+  --rule: #d7d3d3;
+  --fill: #eae7e7;
+  --paper: #ffffff;
+  --accent: #ec3013;
+  --alert: #ec3013;
+  --warn: #b06a00;
+  --ok: #3f7d53;
+  --font-num: 'IBM Plex Mono', ui-monospace, monospace;
+  --font-head: 'Archivo', 'IBM Plex Sans', system-ui, sans-serif;
+  background: #f6f4f4;
+  color: var(--ink);
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* 台架栏 —— 合入后的一行版，放在这里只作为密度的标尺 */
+.frame .rail {
+  display: grid; grid-template-columns: 236px repeat(7, minmax(0, 1fr));
+  border-bottom: 2px solid var(--rule); background: var(--paper);
+  font-variant-numeric: tabular-nums;
+}
+.frame .brc {
+  display: flex; align-items: baseline; gap: 7px; min-width: 0;
+  padding: 5px 13px 6px; border-left: 1px solid var(--rule);
+}
+.frame .brc:first-child { border-left: 0; }
+.frame .brl {
+  font-size: 8px; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--grey); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.frame .brv { font-family: var(--font-num); font-size: 13px; white-space: nowrap; margin-left: auto; }
+.frame .lv-ok .brv { color: var(--ok); }
+.frame .lv-warn .brv { color: var(--warn); }
+
+/* 视图 */
+.frame .view { padding: 12px 14px 0; }
+
+/* Instruments 面板 —— ui/style.css .inst / .irow / .sw / .vals */
+.frame .inst {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 12px 10px; margin: 0 0 12px;
+  background: var(--paper); border: 1px solid var(--rule);
+}
+.frame .zh { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.frame .zt {
+  font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase;
+  color: var(--grey);
+}
+.frame .irow {
+  display: grid; grid-template-columns: 9em auto 1fr; align-items: center; gap: 14px;
+  padding: 5px 4px; border-bottom: 1px solid var(--fill);
+}
+.frame .irow:last-child { border-bottom: 0; }
+.frame .irow .n {
+  font-family: var(--font-head); font-weight: 800; font-size: 11px;
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.frame .sw { display: inline-flex; border: 1px solid var(--ink); }
+.frame .sw .p {
+  padding: 6px 16px; font-size: 13px; color: var(--grey); cursor: pointer;
+  font-family: var(--font-num); font-weight: 400; line-height: 1.4;
+  border: 0; border-right: 1px solid var(--rule); background: var(--paper);
+  box-shadow: inset 0 -3px 0 transparent;
+}
+.frame .sw .p:last-child { border-right: 0; }
+.frame .sw .p.on {
+  background: var(--fill); color: var(--ink); font-weight: 600;
+  box-shadow: inset 0 -3px 0 var(--accent);
+}
+.frame .vals { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
+.frame .vals label { display: inline-flex; align-items: baseline; gap: 4px; }
+.frame .vals input.v {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 12px;
+  border: 1px solid transparent; border-bottom-color: var(--rule);
+  background: transparent; color: inherit; padding: 1px 3px; width: 5.5em; text-align: right;
+}
+.frame .vals i { font-style: normal; color: var(--grey); font-size: 11px; }
+.frame .vals label.dim input.v { color: var(--grey); border-bottom-color: var(--fill); }
+.frame .vals label.dim i { color: var(--rule); }
+
+/* Bench settings —— 现状那一条 */
+.frame .bset .zn { font-size: 11px; color: var(--grey); }
+.frame .namerow { display: flex; align-items: center; gap: 10px; }
+.frame .namerow .l { color: var(--grey); font-size: 12px; }
+.frame .namerow input.v, .frame .namerow select.v {
+  border: 1px solid var(--rule); background: var(--paper); padding: 3px 6px;
+  font-family: var(--font-num); font-size: 12px;
+}
+.frame .namerow input.v { flex: 1 1 auto; min-width: 0; max-width: 20em; }
+.frame .btns {
+  font: inherit; font-size: 12px; font-weight: 600; padding: 5px 11px; cursor: pointer;
+  border: 1px solid var(--ink); background: var(--paper); color: var(--ink);
+  font-family: var(--font-head); letter-spacing: .01em;
+}
+.frame .btng {
+  font: inherit; font-size: 12px; padding: 4px 9px; cursor: pointer;
+  border: 1px solid var(--rule); background: var(--paper); color: var(--grey);
+  font-family: var(--font-num);
+}
+
+/* MODULES 那一行 —— 现状是 .cards::before 的一个纯 CSS 伪元素 */
+.frame .cards-label {
+  display: block; font-size: 9px; font-weight: 600; letter-spacing: .11em;
+  text-transform: uppercase; color: var(--grey); margin-bottom: 6px;
+}
+/* A/B/C 里它变成一条真的行，带上台架的身份和一个 ⋯ */
+.frame .modbar {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 6px; min-height: 20px;
+}
+.frame .modbar .zt { flex: 0 0 auto; }
+.frame .modbar .who {
+  font-family: var(--font-num); font-size: 12px; color: var(--ink);
+}
+.frame .modbar .who .dot { color: var(--warn); font-weight: 700; }
+.frame .modbar .drift { font-size: 11.5px; color: var(--warn); }
+.frame .modbar .match { font-size: 11.5px; color: var(--ok); }
+.frame .modbar .none { font-size: 11.5px; color: var(--grey); }
+.frame .modbar .sp { flex: 1 1 auto; }
+.frame .dots {
+  font: inherit; font-size: 13px; line-height: 1; padding: 2px 7px 4px; cursor: pointer;
+  border: 1px solid transparent; background: transparent; color: var(--grey);
+}
+.frame .dots:hover { border-color: var(--rule); color: var(--ink); }
+
+/* ⋯ 展开后的抽屉 */
+.frame .drawer {
+  border: 1px solid var(--rule); background: var(--paper);
+  padding: 8px 12px 10px; margin: 0 0 8px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.frame .filelist { display: grid; grid-template-columns: max-content max-content 1fr; gap: 2px 14px; align-items: baseline; }
+.frame .filelist .fn { font-family: var(--font-num); font-size: 12px; }
+.frame .filelist .ft { font-family: var(--font-num); font-size: 11px; color: var(--grey); }
+.frame .filelist .fa { font-size: 11.5px; color: var(--grey); }
+.frame .recipe-note {
+  display: flex; flex-direction: column; gap: 4px;
+  border-left: 2px solid var(--warn); background: #fff8ef; padding: 5px 8px; font-size: 12px;
+}
+.frame .rn-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.frame .rn-list { display: grid; grid-template-columns: max-content max-content max-content auto; gap: 1px 14px; }
+.frame .rn-row { display: contents; }
+.frame .rn-row .l { color: var(--grey); font-family: var(--font-num); font-size: 11px; }
+.frame .rn-row .v { font-family: var(--font-num); font-size: 11px; color: var(--grey); }
+.frame .rn-row .v.now { color: var(--ink); font-weight: 500; }
+.frame .rn-row i { font-style: normal; color: var(--grey); font-size: 11px; }
+
+/* 卡片 —— 只画到能看出第一个参数落在哪儿为止 */
+.frame .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(430px, 1fr)); gap: 12px; align-items: start; }
+.frame .card {
+  border: 1px solid var(--rule); background: var(--paper);
+  display: flex; flex-direction: column;
+}
+.frame .ch {
+  display: flex; align-items: center; gap: 9px; background: var(--fill);
+  padding: 7px 12px; border-bottom: 1px solid var(--rule);
+}
+.frame .ch .cn { font-family: var(--font-head); font-weight: 700; font-size: 14px; }
+.frame .ch .cs { font-size: 11.5px; color: var(--grey); }
+.frame .ch .sp { flex: 1 1 auto; }
+.frame .btnp {
+  font: inherit; font-size: 12px; font-weight: 600; padding: 4px 13px;
+  border: 1px solid var(--accent); background: var(--accent); color: #fff;
+  font-family: var(--font-head); cursor: pointer;
+}
+.frame .cb { padding: 9px 12px 12px; }
+.frame .pf { display: grid; grid-template-columns: 9em 1fr; gap: 9px; align-items: baseline; padding: 3px 0; }
+.frame .pf .pl { color: var(--grey); font-size: 12.5px; }
+.frame .pf .pv { font-family: var(--font-num); font-size: 13px; border-bottom: 1px solid var(--rule); padding-bottom: 1px; }
+
+/* -- 测量用的红线 --------------------------------------------------------- */
+.frame .mark { position: relative; }
+.frame .mark::after {
+  content: ''; position: absolute; left: 0; right: 0; top: 0;
+  border-top: 1px dashed var(--accent); opacity: .5;
+}
+
+/* ==========================================================================
+   B —— Instruments 收成一行
+   ========================================================================== */
+.v-b .inst { padding: 6px 12px 7px; margin-bottom: 8px; }
+.v-b .inst .zh { display: none; }
+.v-b .irow-wrap { display: flex; align-items: center; gap: 22px; flex-wrap: nowrap; }
+.v-b .irow {
+  display: flex; align-items: center; gap: 9px; grid-template-columns: none;
+  padding: 0; border-bottom: 0; min-width: 0;
+}
+.v-b .irow .n { font-size: 9px; letter-spacing: .09em; color: var(--grey); font-weight: 700; }
+.v-b .sw .p { padding: 4px 11px; font-size: 12px; }
+.v-b .vals { gap: 9px; flex-wrap: nowrap; }
+.v-b .vals input.v { width: 4.2em; font-size: 11.5px; }
+.v-b .vals i { font-size: 10px; }
+
+/* ==========================================================================
+   C —— 开关和台架身份并成一条，和台架栏同一个音区
+   ========================================================================== */
+.v-c .inst {
+  /* 基础规则是 flex-direction: column —— 这里必须显式扳回 row，
+     否则整条就是三行叠着，一个像素也没省下来。 */
+  display: flex; flex-direction: row; align-items: center; gap: 20px; flex-wrap: nowrap;
+  padding: 4px 12px 5px; margin: 0 0 8px; border: 1px solid var(--rule);
+}
+.v-c .inst .zh { display: none; }
+.v-c .irow-wrap { display: flex; align-items: center; gap: 20px; }
+.v-c .irow { display: flex; align-items: center; gap: 7px; grid-template-columns: none; padding: 0; border-bottom: 0; }
+.v-c .irow .n { font-size: 8px; letter-spacing: .09em; color: var(--grey); font-weight: 700; }
+.v-c .sw { border-width: 1px; }
+.v-c .sw .p { padding: 2px 9px; font-size: 12px; box-shadow: none; }
+.v-c .sw .p.on { box-shadow: inset 0 -2px 0 var(--accent); }
+.v-c .vals { display: none; }              /* LED 的四个电平退到悬停里 */
+.v-c .inst .sp { flex: 1 1 auto; }
+.v-c .inst .who { font-family: var(--font-num); font-size: 12px; }
+.v-c .inst .who .dot { color: var(--warn); font-weight: 700; }
+.v-c .inst .drift { font-size: 11px; color: var(--warn); }
+.v-c .modbar { display: none; }
+.v-c .cards-label { display: block; }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<div class="wrap">
+
+  <p class="eyebrow">BACE console · ui/views/bench.js · bench 页头</p>
+  <h1>Bench 页头，四种排法</h1>
+
+  <p class="lede">
+    在 <span class="num" id="base-w">1440</span> 的窗口上、身份栏收起的情况下，第一个参数出现在
+    <b class="num" id="base-px">—</b> 处（真机上是 <b class="num">397 px</b>，差在这页外壳的字体回退）；
+    身份栏展开是 <b class="num">540 px</b>，正好半屏。
+    上周刚有一个 PR 把台架栏从 156 px 压到 27 px，这周 bench 页上多了一条 65 px 的
+    Bench settings —— 省下来的地方又还回去了一部分。
+  </p>
+
+  <table class="budget">
+    <thead><tr><th>现状（1440，身份栏收起）</th><th style="text-align:right">高度</th><th>是什么</th></tr></thead>
+    <tbody>
+      <tr><td>标签栏</td><td class="n">38 px</td><td class="who">外壳</td></tr>
+      <tr><td>台架栏 rail</td><td class="n">27 px</td><td class="who">外壳 · 八个实时读数</td></tr>
+      <tr><td>功率监视器</td><td class="n">25 px</td><td class="who">外壳 · 折起时一行</td></tr>
+      <tr><td>Instruments 面板</td><td class="n">172 px</td><td class="who">视图 · 三个开关</td></tr>
+      <tr><td>Bench settings</td><td class="n">65 px</td><td class="who">视图 · 一个每天用一次的按钮</td></tr>
+      <tr><td>MODULES 标签</td><td class="n">26 px</td><td class="who">视图 · 一个 CSS 伪元素，没有控件</td></tr>
+      <tr class="tot"><th>第一张卡片之前</th><td class="n">397 px</td><td class="who">1080 屏的 37%</td></tr>
+    </tbody>
+  </table>
+
+  <p class="lede">
+    两个毛病，性质不一样。<b>一、密度差了六倍</b>：台架栏一行 27 px 装八个读数，
+    紧挨着的 Instruments 三行 172 px 装三个开关 —— 每行 57 px，是整个 console 上最松的一块。
+    <b>二、Save 的作用域没有任何东西说明</b>：屏幕上从上到下叠了三种保存语义 ——
+    开关点了立刻作用于台架、卡片字段改了就 <code>PUT</code>、Bench settings 是显式 Save ——
+    而 Save 那一条夹在开关和卡片中间，两边都不属于。
+  </p>
+  <p class="lede">
+    第二条是根子。修法不是把它压矮，是<b>把它放回它所保存的东西的边界里</b>：它存的是下面那些卡片，
+    所以它属于 <code>MODULES</code> 那一行 —— 那一行本来就在（26 px），现在还是个空的
+    <code>::before</code> 伪元素。而 <code>ui-rules §14</code> 的第四问「多久碰一次」
+    决定了剩下的：一天用不到一次的东西不该常驻屏幕，它在一个 <code>⋯</code> 后面。
+    常驻的只留一样 —— <b>这台架是哪个存档、跟存档比动没动过</b>。
+  </p>
+
+  <div class="controls">
+    <span class="lab">Console 宽度</span>
+    <div class="wbtns" role="group" aria-label="模拟的 console 窗口宽度">
+      <button class="wbtn" data-w="1920" aria-pressed="false">1920</button>
+      <button class="wbtn" data-w="1600" aria-pressed="false">1600</button>
+      <button class="wbtn" data-w="1440" aria-pressed="true">1440</button>
+      <button class="wbtn" data-w="1280" aria-pressed="false">1280</button>
+    </div>
+    <span class="wnote" id="wnote"></span>
+  </div>
+
+  <div class="summary" id="summary"></div>
+
+  <div id="specimens"></div>
+
+  <h2 class="sec">三个方案摆在一起</h2>
+  <div class="matrix-wrap">
+    <table class="matrix">
+      <thead>
+        <tr><th></th><th>Instruments</th><th>存档的身份</th><th>存 / 取在哪</th><th>代价</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th>A 归位</th>
+          <td>不动，172 px</td>
+          <td><code>MODULES</code> 行上一个名字 + 动没动过</td>
+          <td>行尾 <code>⋯</code>，展开是名字框 + Save + 存档表</td>
+          <td>省得最少；面板仍是屏幕上最松的一块，两块的密度还是对不上</td>
+        </tr>
+        <tr>
+          <th>B A + 仪器一行</th>
+          <td>一行，三组开关横排</td>
+          <td>同 A</td>
+          <td>同 A</td>
+          <td>开关点击区 6px → 4px 内边距；<code>INSTRUMENTS</code> 这个区标题没了，
+              开关靠自己的标签说明自己。<b>1280 下量到需要 1226 px、有 1250 px，
+              放得下，没有截断</b> —— 只剩 24 px 余量，再加一个开关就要重排</td>
+        </tr>
+        <tr>
+          <th>C 并成一条</th>
+          <td>和身份并成一条，台架栏的音区</td>
+          <td>并在同一条上</td>
+          <td>同一条的行尾 <code>⋯</code></td>
+          <td>LED 的四个电平退到悬停；开关点击区最小 —— <code>§14</code> 明说开关要大靶子</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2 class="sec">A 展开 <code>⋯</code> 之后</h2>
+  <p class="lede">
+    存 / 取本身没有变 —— 名字框、Save、存档表，选中一个画出差异表，下面的按钮才真的动台架。
+    变的只是它<b>不常驻</b>了，而且它现在长在 <code>MODULES</code> 这一行下面，
+    作用域是自明的：它保存的就是它下面那些卡片。
+  </p>
+  <div id="drawer-demo"></div>
+
+  <p class="foot">
+    三个方案我都没有合入。<code>ui-rules §14</code> 第四问「一天碰不到一次的控件不该在屏幕上」
+    三个都满足了；<code>§1</code>「密度是要求」只有 B 和 C 认真回答；
+    而 <code>§14</code> 又说开关「点一下就throw 继电器，要更大的靶子」—— C 把靶子做得最小，
+    还把 LED 的低电平藏进了悬停，那正是 <code>rail-density.html</code> 里 C 被挑出来的同一笔账
+    （低电平要压在开启电压以下，暗的半周才真的是暗的）。
+    我倾向 <b>B</b>：省 <b class="num">209 px</b>，一个读数都没藏，1280 下也放得下。
+    C 在 B 的基础上只多省 <b class="num">16 px</b>，却要拿 LED 的四个电平和开关的靶子去换 ——
+    这笔交易我认为不划算。但这是你说了算，我只把账摆出来。
+  </p>
+
+</div>
+
+<script>
+/* ---------------------------------------------------------------------------
+   八个台架栏格子，取自截图里那次读数 —— 这里只作为密度的标尺。
+   --------------------------------------------------------------------------- */
+const CELLS = [
+  { label: 'relay · interlock', value: 'amplifier' },
+  { label: 'bias 81150A', value: 'off' },
+  { label: 'SMU 2400', value: 'off' },
+  { label: 'shutter', value: 'shut' },
+  { label: 'LED 33220A', value: 'off' },
+  { label: 'V_oc', value: '—' },
+  { label: 'optical power', value: '0 W', lv: 'ok' },
+  { label: 'T', value: '—' },
+];
+
+/** 三行开关，和 lib/instruments.js 的 panelModel 一一对应。 */
+const SWITCHES = [
+  { key: 'shutter', label: 'Shutter', positions: [['open', false], ['shut', true]] },
+  { key: 'led', label: 'LED · 33220A',
+    positions: [['off', true], ['DC', false], ['pulse', false]],
+    levels: [['1.000', 'V', false], ['0.400', 'V low', true], ['500', 'Hz', true], ['50', '%', true]] },
+  { key: 'relay', label: 'Relay', positions: [['amplifier', true], ['sourcemeter', false]] },
+];
+
+/** 存档和台架的差异，取自真机上那次实测。 */
+const DRIFT = [
+  ['jv.step_v', '0.020', '0.050', 'V'],
+  ['bace.vcoll', '-1.000', '-0.750', 'V'],
+  ['bace.n_loops', '100', '7', ''],
+];
+
+const el = (tag, cls, ...kids) => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  for (const k of kids.flat()) {
+    if (k === null || k === undefined || k === false) continue;
+    n.append(k instanceof Node ? k : document.createTextNode(String(k)));
+  }
+  return n;
+};
+
+function rail() {
+  const r = el('div', 'rail');
+  for (const c of CELLS) {
+    r.append(el('div', 'brc' + (c.lv ? ' lv-' + c.lv : ''),
+      el('span', 'brl', c.label), el('span', 'brv', c.value)));
+  }
+  return r;
+}
+
+/** 一行开关。`inline` 时标签和开关同行（B、C 用）。 */
+function switchRow(s, { levels = true } = {}) {
+  const sw = el('span', 'sw');
+  for (const [name, on] of s.positions) {
+    const b = el('button', 'p' + (on ? ' on' : ''), name);
+    b.type = 'button';
+    sw.append(b);
+  }
+  const vals = s.levels && levels
+    ? el('span', 'vals', s.levels.map(([v, unit, dim]) => {
+      const inp = document.createElement('input');
+      inp.className = 'v'; inp.type = 'text'; inp.value = v; inp.readOnly = true;
+      return el('label', dim ? 'dim' : '', inp, el('i', '', unit));
+    }))
+    : el('span', '');
+  return el('div', 'irow', el('span', 'n', s.label), sw, vals);
+}
+
+function instruments({ inline = false, levels = true, tail = null } = {}) {
+  const rows = SWITCHES.map((s) => switchRow(s, { levels }));
+  const body = inline ? [el('div', 'irow-wrap', rows)] : rows;
+  return el('div', 'inst',
+    el('div', 'zh', el('span', 'zt', 'Instruments')),
+    body,
+    tail);
+}
+
+/** 现状那一条 Bench settings。 */
+function bsetRow() {
+  const name = document.createElement('input');
+  name.className = 'v'; name.type = 'text'; name.value = 'monday_morning'; name.readOnly = true;
+  const sel = document.createElement('select');
+  sel.className = 'v';
+  sel.append(new Option('monday_morning'), new Option('evening'));
+  const save = el('button', 'btns', 'Save settings');
+  save.type = 'button';
+  return el('div', 'inst bset',
+    el('div', 'zh', el('span', 'zt', 'Bench settings'), el('span', 'zn', '2 files saved')),
+    el('div', 'namerow', el('span', 'l', 'name'), name, sel, save));
+}
+
+/** A / B 的 MODULES 行：标签 + 存档身份 + ⋯ */
+function modBar() {
+  const dots = el('button', 'dots', '⋯');
+  dots.type = 'button';
+  dots.title = '存档：命名保存、打开、和台架比对';
+  return el('div', 'modbar',
+    el('span', 'zt', 'Modules'),
+    el('span', 'who', 'monday_morning', el('span', 'dot', ' •')),
+    el('span', 'drift', '3 个值和存档不同'),
+    el('span', 'sp'),
+    dots);
+}
+
+/** C 把身份并进开关那一条的尾巴。 */
+function cTail() {
+  const dots = el('button', 'dots', '⋯');
+  dots.type = 'button';
+  return [el('span', 'sp'),
+    el('span', 'who', 'monday_morning', el('span', 'dot', ' •')),
+    el('span', 'drift', '3 个值不同'),
+    dots];
+}
+
+function card() {
+  return el('div', 'cards',
+    el('div', 'card mark',
+      el('div', 'ch', el('span', 'cn', 'jv'), el('span', 'cs', '1 curves × 71 pts ≈ 7.1 s'),
+        el('span', 'sp'), el('button', 'btnp', 'Run')),
+      el('div', 'cb',
+        el('div', 'pf', el('span', 'pl', 'sweep'), el('span', 'pv', '−0.200 → 1.200')),
+        el('div', 'pf', el('span', 'pl', 'settle_s'), el('span', 'pv', '0.05')),
+        el('div', 'pf', el('span', 'pl', 'pixel_area_cm2'), el('span', 'pv', '0')))),
+    el('div', 'card',
+      el('div', 'ch', el('span', 'cn', 'bace'), el('span', 'cs', 'one shot ≈ 0.8 s · 20 loops'),
+        el('span', 'sp'), el('button', 'btnp', 'Scan')),
+      el('div', 'cb',
+        el('div', 'pf', el('span', 'pl', 'scan parameter'), el('span', 'pv', 'vpre')),
+        el('div', 'pf', el('span', 'pl', 'vcoll'), el('span', 'pv', '−1.000')),
+        el('div', 'pf', el('span', 'pl', 'n_loops'), el('span', 'pv', '20')))));
+}
+
+/* ---------------------------------------------------------------------------
+   四个样例。`build` 只造视图里的东西 —— 外壳（标签栏、台架栏、功率行）四个都
+   一样，画出来只是为了让人看到页头在整块屏幕里的比重。
+   --------------------------------------------------------------------------- */
+const VARIANTS = [
+  {
+    id: 'base', cls: '', name: '现状（本分支）',
+    note: '三块平级的区：Instruments、Bench settings、MODULES 标签。' +
+      'Save 夹在开关和卡片中间，没有任何东西说明它存的是哪一边。',
+    view: () => [instruments(), bsetRow(), el('span', 'cards-label', 'Modules'), card()],
+  },
+  {
+    id: 'a', cls: 'v-a', name: 'A · 归位',
+    note: 'Bench settings 这一块整个不见了 —— 它的身份挪到 MODULES 那一行上，' +
+      '机器（名字框、Save、存档表）退到行尾的 ⋯ 后面。Instruments 一个像素没动。',
+    view: () => [instruments(), modBar(), card()],
+  },
+  {
+    id: 'b', cls: 'v-b', name: 'B · A + 仪器一行',
+    note: '在 A 的基础上，把台架栏刚刚受过的那套办法用在 Instruments 上：' +
+      '三组开关横排一行，标签缩成台架栏那种小号大写。LED 的四个电平仍在屏幕上。',
+    view: () => [instruments({ inline: true }), modBar(), card()],
+  },
+  {
+    id: 'c', cls: 'v-c', name: 'C · 并成一条',
+    note: '开关和存档身份并成一条，和台架栏同一个音区。LED 的四个电平退到悬停里 —— ' +
+      '这正是 rail-density 里 C 被挑出来的那笔账。',
+    view: () => [instruments({ inline: true, levels: false, tail: cTail() }),
+      el('span', 'cards-label', 'Modules'), card()],
+  },
+];
+
+let width = 1440;
+const specimens = document.getElementById('specimens');
+const summary = document.getElementById('summary');
+
+function build() {
+  specimens.textContent = '';
+  const frames = [];
+  for (const v of VARIANTS) {
+    const frame = el('div', 'frame ' + v.cls);
+    frame.style.width = width + 'px';
+    frame.append(rail(), el('div', 'view', v.view()));
+
+    const scale = el('div', 'frame-scale', frame);
+    const holder = el('div', 'holder', scale);
+
+    const head = el('div', 'spec-head',
+      el('h3', '', v.name),
+      el('span', 'px', '—'));
+    const spec = el('div', 'spec', head, el('p', 'spec-note', v.note), holder);
+    specimens.append(spec);
+    frames.push({ v, frame, scale, holder, head });
+  }
+  requestAnimationFrame(() => measure(frames));
+}
+
+function measure(frames) {
+  const wrapW = specimens.clientWidth;
+  const k = Math.min(1, wrapW / width);
+  const results = [];
+  for (const f of frames) {
+    f.scale.style.transform = `scale(${k})`;
+    const view = f.frame.querySelector('.view');
+    const mark = f.frame.querySelector('.mark');
+    // 视图顶端到第一张卡片顶端 —— 这一段就是页头
+    const px = Math.round(mark.getBoundingClientRect().top - view.getBoundingClientRect().top) / k;
+    // 外壳（标签栏 38 + 台架栏 + 功率行 25）加上视图自己的内边距
+    const shell = 38 + Math.round(f.frame.querySelector('.rail').getBoundingClientRect().height / k) + 25;
+    const pad = 12;
+    results.push({ ...f, head_px: Math.round(px + pad), total: Math.round(px + pad + shell) });
+    f.holder.style.height = Math.ceil(f.frame.getBoundingClientRect().height) + 'px';
+  }
+  const base = results[0];
+  document.getElementById('base-px').textContent = base.total + ' px';
+  document.getElementById('base-w').textContent = width;
+
+  summary.textContent = '';
+  for (const r of results) {
+    const delta = r.total - base.total;
+    r.head.querySelector('.px').textContent = r.total + ' px';
+    if (r !== base && delta < 0) r.head.querySelector('.px').classList.add('win');
+    summary.append(el('div', 'scard' + (r === base ? ' base' : ''),
+      el('div', 'k', r.v.name),
+      el('div', 'v', r.total + ' px'),
+      el('div', 'd' + (delta < 0 ? ' save' : ''),
+        r === base ? '第一个参数之前' : (delta < 0 ? `省 ${-delta} px` : `多 ${delta} px`))));
+  }
+  document.getElementById('wnote').textContent =
+    `样例按 ${(100 * k).toFixed(0)}% 缩放显示；高度是缩放前的实测值。`;
+}
+
+/* -- A 的 ⋯ 展开 ---------------------------------------------------------- */
+function drawerDemo() {
+  const holder = document.getElementById('drawer-demo');
+  const frame = el('div', 'frame v-a');
+  frame.style.width = '1440px';
+
+  const name = document.createElement('input');
+  name.className = 'v'; name.type = 'text'; name.value = 'monday_morning'; name.readOnly = true;
+  const save = el('button', 'btns', 'Save settings');
+  save.type = 'button';
+
+  const files = el('div', 'filelist',
+    ['monday_morning', '今天 13:56', '打开 · 覆盖 · 删除',
+      'evening', '昨天 21:04', '打开 · 覆盖 · 删除'].map((t, i) =>
+      el('span', ['fn', 'ft', 'fa'][i % 3], t)));
+
+  const note = el('div', 'recipe-note',
+    el('div', 'rn-head',
+      el('span', '', '3 个值和 monday_morning 不同：'),
+      el('span', 'sp'),
+      el('button', 'btns', '↺ bench to monday_morning'),
+      el('button', 'btng', 'keep bench')),
+    el('div', 'rn-list', DRIFT.map(([k, saved, now, unit]) =>
+      el('div', 'rn-row',
+        el('span', 'l', k),
+        el('span', 'v', 'saved ' + saved),
+        el('span', 'v now', 'bench ' + now),
+        el('i', '', unit)))));
+
+  const drawer = el('div', 'drawer',
+    el('div', 'namerow', el('span', 'l', 'name'), name, save),
+    files, note);
+
+  frame.append(el('div', 'view', instruments(), modBar(), drawer, card()));
+  const scale = el('div', 'frame-scale', frame);
+  const box = el('div', 'holder', scale);
+  holder.append(box);
+  requestAnimationFrame(() => {
+    const k = Math.min(1, holder.clientWidth / 1440);
+    scale.style.transform = `scale(${k})`;
+    box.style.height = Math.ceil(frame.getBoundingClientRect().height * k) + 'px';
+  });
+}
+
+for (const b of document.querySelectorAll('.wbtn')) {
+  b.addEventListener('click', () => {
+    width = Number(b.dataset.w);
+    for (const o of document.querySelectorAll('.wbtn')) o.setAttribute('aria-pressed', String(o === b));
+    build();
+  });
+}
+
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { build(); drawerDemo(); });
+else window.addEventListener('load', () => { build(); drawerDemo(); });
+</script>
+
+</body>
+</html>
