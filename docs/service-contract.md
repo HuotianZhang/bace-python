@@ -284,11 +284,12 @@ between the sync and the scope's trigger. `averages_*` are `:WAV:COUN?` after
 each acquisition — the Acquisition Done flag both this service and the
 LabVIEW original waited on is set per acquisition, not per completed
 average — and the engine yields a warning `Notice` when a trace folded fewer
-than `n_averages`. Since 2026-09-06 the driver waits on that count itself and
-empties the averager before every acquisition (it was never emptied before,
-so `averages_dark` read `averages_light + ~27` and the dark trace was half
-light — `HANDOFF.md` trap 5); a short count now means only that the firmware
-did not answer `:WAV:COUN?` and the wait fell back to the flag. The recorder stores the same numbers per (loop, step) in
+than `n_averages`. Since 2026-09-06 the driver empties the averager before
+every acquisition (it was never emptied before, so `averages_dark` read
+`averages_light + ~27` and the dark trace was half light — `HANDOFF.md`
+trap 5), acquires with `:DIG` + `*OPC?`, which runs to the whole count, and
+refuses a short count as `ScopeError`; `null` now means only that the
+firmware did not answer `:WAV:COUN?` with a number. The recorder stores the same numbers per (loop, step) in
 the HDF5 `diagnostics` group and the sync traces under `traces/sync_light`
 and `traces/sync_dark`. The `ok` line now reads
 "autorange pass 1 · no shared extreme · 1 rail sample · spikes 0.01 ns apart · edge 6.5 ns · 200 avg · sync edge 2.1 ns".

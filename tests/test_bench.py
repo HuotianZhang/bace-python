@@ -46,7 +46,8 @@ class FakeInstrument:
         self.points_returned = points_returned
         self.reject = reject
         self.errors: list[str] = []
-        self.coun_polls = 0
+        self.avg_count = 0
+        self.avg_on = True
         if fail_open:
             raise OSError("simulated open failure")
 
@@ -57,8 +58,20 @@ class FakeInstrument:
             part = part.strip()
             if not part:
                 continue
-            if part.upper() == ":RUN":
-                self.coun_polls = 0             # a fresh acquisition: count from nothing
+            up = part.upper()
+            # the averager as measured 2026-09-06: :CDIS and averaging off/on
+            # empty it, :DIG runs to the configured count (or one record with
+            # averaging off) -- see tools/probe_averager.py
+            if up == ":CDIS":
+                self.avg_count = 0
+            elif up == ":ACQ:AVER OFF":
+                self.avg_on = False
+            elif up == ":ACQ:AVER ON":
+                if not self.avg_on:
+                    self.avg_count = 0
+                self.avg_on = True
+            elif up.startswith(":DIG"):
+                self.avg_count = int(self.state.get(":ACQ:AVER:COUN", "1")) if self.avg_on else 1
             if any(r in part for r in self.reject):
                 self.errors.append(f'-113,"Undefined header; {part}"')
                 continue
@@ -83,12 +96,10 @@ class FakeInstrument:
             return str(self.sample_rate)
         if up == ":ADER?":
             return "1"
+        if up == "*OPC?":
+            return "1"
         if up == ":WAV:COUN?":
-            # Nothing folded at the first look after :RUN, the full count after
-            # -- an averager that empties and then completes, as the fixed
-            # driver requires (2026-09-06).
-            self.coun_polls += 1
-            return "0" if self.coun_polls == 1 else self.state.get(":ACQ:AVER:COUN", "1")
+            return str(self.avg_count)
         key = up.rstrip("?")
         if key in self.state:
             return self.state[key]
@@ -471,31 +482,37 @@ def test_the_acquisition_latch_is_cleared_before_running():
             return np.arange(4000, dtype=np.int16)
 
     io = IO()
-    Infiniium(io).autorange("CHAN2")
+    Infiniium(io).single_acquisition()
     kinds = [c for _, c in io.log]
     first_ader = next(i for i, c in enumerate(kinds) if "ADER" in c)
     first_run = next(i for i, c in enumerate(kinds) if c.startswith(":RUN"))
     assert first_ader < first_run, "the latch must be cleared before :RUN"
 
 
-# -- the averager that never empties ---------------------------------------
-class _AccumulatingScope:
-    """The DSO9054H's averager as measured on 2026-09-06.
+# -- the averager, as the probe measured it ----------------------------------
+class _MeasuredScope:
+    """The DSO9054H's averager as `tools/probe_averager.py` measured it on
+    2026-09-06 (`runs/probe_averager_20260906_030246.txt`).
 
-    `:WAV:COUN?` climbs while the scope runs and is emptied only by `:CDIS`
-    (or a channel range write, as on the rig). `:STOP`/`:RUN` and rewriting
-    `:ACQ:AVER:COUN` -- the LabVIEW double configure -- leave it alone, which
-    is how every dark trace came to be half light. `per_poll` is how many
-    acquisitions arrive between two count queries; with averaging off a record
-    is one acquisition.
+    `:STOP`/`:RUN`, rewriting the count and rewriting the same range all
+    *continue* the average; `:CDIS`, averaging off-then-on, and a changed
+    range empty it; `:DIGitize` with averaging on runs to the whole count and
+    `*OPC?` answers only then; `:WAV:COUN?` read while running answers the
+    configured count, stopped the real one. `empties=False` is the scope the
+    check is for -- nothing resets it; `dig_waits=False` a firmware whose
+    :DIG stops after `partial` acquisitions.
     """
 
     timeout = 0
 
-    def __init__(self, per_poll: int = 50, empties: bool = True, count: int = 0):
-        self.count, self.per_poll, self.empties = count, per_poll, empties
-        self.running = False
+    def __init__(self, *, empties: bool = True, dig_waits: bool = True,
+                 partial: int = 5, count: int = 0, per_run: int = 60):
+        self.count, self.per_run = count, per_run
+        self.empties, self.dig_waits, self.partial = empties, dig_waits, partial
+        self.configured = 200
         self.averaging = True
+        self.running = False
+        self.range = 0.15
         self.log: list[str] = []
         self.fetched_counts: list[int] = []
 
@@ -506,27 +523,44 @@ class _AccumulatingScope:
             if p == ":RUN":
                 self.running = True
             elif p == ":STOP":
+                if self.running and self.averaging:
+                    self.count = min(self.configured, self.count + self.per_run)
                 self.running = False
-            elif p == ":CDIS" and self.empties:
-                self.count = 0
+            elif p == ":CDIS":
+                if self.empties:
+                    self.count = 0
             elif p == ":ACQ:AVER OFF":
                 self.averaging = False
             elif p == ":ACQ:AVER ON":
+                if not self.averaging and self.empties:
+                    self.count = 0
                 self.averaging = True
-            elif p.startswith(":CHAN") and "RANG " in p and self.empties:
-                self.count = 0
+            elif p.startswith(":ACQ:AVER:COUN "):
+                self.configured = int(p.split()[-1])
+            elif p == ":DIG" or p.startswith(":DIG "):
+                self.running = False
+                if not self.averaging:
+                    self.count = 1
+                elif self.dig_waits:
+                    self.count = self.configured
+                else:
+                    self.count = min(self.configured, self.count + self.partial)
+            elif "RANG " in p and ":CHAN" in p:
+                new = float(p.split()[-1])
+                if new != self.range and self.empties:
+                    self.count = 0
+                self.range = new
 
     def query(self, command):
         self.log.append(command)
+        if "*OPC?" in command:
+            return "1"
         if "ADER" in command:
             return "+1"
         if "WAV:COUN" in command:
-            n = self.count
-            if self.running:
-                self.count = self.count + self.per_poll if self.averaging else 1
-            return str(n)
+            return str(self.configured if self.running else self.count)
         if "RANG?" in command:
-            return "0.15"
+            return str(self.range)
         if "OFFS?" in command:
             return "0"
         return "4000;-1.995E-7;5.0E-10;0;1.0E-5;0"
@@ -543,24 +577,22 @@ def test_each_averaged_acquisition_starts_from_an_empty_averager():
     must now be complete averages of their own records, and nothing else."""
     from bace.drivers.infiniium import Infiniium
 
-    io = _AccumulatingScope()
+    io = _MeasuredScope()
     scope = Infiniium(io)
-    scope.poll_s = 0.0
     light = scope.acquire(200, autorange_first=True)
     dark = scope.acquire(200, autorange_first=False)
 
-    assert light.count is not None and 200 <= light.count < 400
-    assert dark.count is not None and 200 <= dark.count < 400, \
-        "the dark average must not continue the light one"
+    assert light.count == 200 and dark.count == 200
+    assert scope.last_count_after_reset == 0
     # every record fetched -- the auto-range pass, the light, the dark -- came
-    # from a :RUN that an emptied averager preceded, since the previous fetch
+    # from a :DIG that an emptied averager preceded, since the previous fetch
     up = [c.upper() for c in io.log]
     fetches = [i for i, c in enumerate(up) if c.startswith(":WAV:POIN?")]
     assert len(fetches) == 3
     previous = -1
     for f in fetches:
-        run = max(i for i in range(previous + 1, f) if up[i].startswith(":RUN"))
-        assert any(":CDIS" in up[i] for i in range(previous + 1, run)), \
+        dig = max(i for i in range(previous + 1, f) if up[i].startswith(":DIG"))
+        assert any(":CDIS" in up[i] for i in range(previous + 1, dig)), \
             f"the record fetched at {f} was not preceded by an emptied averager"
         previous = f
 
@@ -571,70 +603,109 @@ def test_the_autorange_passes_are_not_averaged():
     previous step's dark -- and range on that."""
     from bace.drivers.infiniium import Infiniium
 
-    io = _AccumulatingScope()
+    io = _MeasuredScope()
     Infiniium(io).autorange("CHAN2")
-    first_run = next(i for i, c in enumerate(io.log) if c.strip().upper().startswith(":RUN"))
-    before = " ".join(io.log[:first_run]).upper()
+    first_dig = next(i for i, c in enumerate(io.log) if c.strip().upper().startswith(":DIG"))
+    before = " ".join(io.log[:first_dig]).upper()
     assert ":ACQ:AVER OFF" in before and ":CDIS" in before
+    assert io.fetched_counts == [1]
 
 
-def test_the_fetch_waits_for_the_whole_count_not_the_first_acquisition():
-    """`:ADER?` answers +1 after one acquisition; the fetch must not happen
-    until `:WAV:COUN?` reaches the count asked for."""
+def test_the_acquisition_is_digitized_to_the_whole_count_not_polled():
+    """`:ADER?` answers +1 after one acquisition and `:WAV:COUN?` answers the
+    configured count while running (the two ways the first fixes went wrong);
+    the record is taken with :DIG and *OPC?, and the count read back stopped."""
     from bace.drivers.infiniium import Infiniium
 
-    io = _AccumulatingScope(per_poll=25)
+    io = _MeasuredScope()
     scope = Infiniium(io)
-    scope.poll_s = 0.0
     scope._ranged = True
     trace = scope.acquire(200, autorange_first=False)
-    assert io.fetched_counts[-1] >= 200
-    assert trace.count is not None and trace.count >= 200
+    assert trace.count == 200 and io.fetched_counts == [200]
+    up = [c.strip().upper() for c in io.log]
+    assert ":DIG;" in up, "a bare :DIG, so every displayed channel is in the record"
+    assert "*OPC?" in up
+    assert not any("ADER" in c for c in up)
+    # the count is never read while running
+    running = False
+    for c in up:
+        for part in c.split(";"):
+            part = part.strip()
+            if part == ":RUN":
+                running = True
+            elif part == ":STOP" or part.startswith(":DIG"):
+                running = False
+            elif part == ":WAV:COUN?":
+                assert not running, "the count was read while running"
+
+
+def test_the_trigger_source_is_kept_displayed_so_a_bare_dig_records_it():
+    """`:DIG CHAN2` switched CHAN3's display off and a bare `:DIG` then never
+    acquired the sync (rig, 2026-09-06, runs 031419-001 and 032124-001).
+    Configuring the trigger turns its channel's display on, so the sync
+    trace `_sync_trace` reads out of the same record is there."""
+    from bace.drivers.infiniium import Infiniium
+
+    io = _MeasuredScope()
+    Infiniium(io).configure_edge_trigger("CHAN3", positive=True, sweep="AUTO")
+    up = [c.strip().upper() for c in io.log]
+    assert ":CHAN3:DISP ON;" in up
+    assert up.index(":CHAN3:DISP ON;") < up.index(":TRIG:EDGE:SOUR CHAN3;")
 
 
 def test_an_averager_that_will_not_empty_is_refused_not_fetched():
-    """A complete count before the first acquisition means the buffer still
-    holds the previous trace. Fetching it would return the last acquisition
-    again, as the rig did for a week without saying so."""
+    """A count still standing after :CDIS and averaging off/on means the
+    buffer still holds the previous trace. Fetching would fold this
+    acquisition into it, as the rig did for a week without saying so."""
     from bace.drivers.infiniium import Infiniium, ScopeError
 
-    io = _AccumulatingScope(empties=False, count=200)
+    io = _MeasuredScope(empties=False, count=200)
     scope = Infiniium(io)
     scope._ranged = True
-    with pytest.raises(ScopeError, match="did not restart"):
+    with pytest.raises(ScopeError, match="did not empty"):
         scope.acquire(200, autorange_first=False)
     assert not io.fetched_counts, "nothing must be fetched from a stale buffer"
 
 
-def test_a_stalled_average_times_out_saying_how_far_it_got():
+def test_a_digitize_that_stops_short_of_the_count_is_refused():
     from bace.drivers.infiniium import Infiniium, ScopeError
 
-    io = _AccumulatingScope(per_poll=0)
+    io = _MeasuredScope(dig_waits=False, partial=5)
     scope = Infiniium(io)
-    scope.poll_s = 0.0
     scope._ranged = True
-    with pytest.raises(ScopeError, match=r"folded 0 of 200"):
-        scope.acquire(200, autorange_first=False, timeout_s=0.05)
+    with pytest.raises(ScopeError, match=r"5 of 200"):
+        scope.acquire(200, autorange_first=False)
 
 
-def test_a_firmware_without_a_count_falls_back_to_the_acquisition_flag():
-    """`:WAV:COUN?` answered with something that is not a number: wait on
-    `:ADER?` as before and report no count, so the engine can warn."""
+def test_a_digitize_that_never_completes_times_out_with_a_message():
+    from bace.drivers.infiniium import Infiniium, ScopeError
+
+    class Silent(_MeasuredScope):
+        def query(self, command):
+            if "*OPC?" in command:
+                raise TimeoutError("VI_ERROR_TMO")
+            return super().query(command)
+
+    io = Silent()
+    scope = Infiniium(io)
+    scope._ranged = True
+    with pytest.raises(ScopeError, match="did not complete within 2 s"):
+        scope.acquire(200, autorange_first=False, timeout_s=2.0)
+    assert io.timeout == 20000, "the session timeout is put back after the wait"
+
+
+def test_a_firmware_without_a_count_still_acquires_and_reports_none():
+    """`:WAV:COUN?` answered with something that is not a number: the
+    :DIG/*OPC? sequence still runs, no count is claimed, and the engine's
+    warning is what says so."""
     from bace.drivers.infiniium import Infiniium
 
-    class NoCount(_KnownVolts):
-        def __init__(self): self.log = []
-        def write(self, c): self.log.append(c)
-        def query(self, c):
-            self.log.append(c)
-            return super().query(c)
-
-    io = NoCount()
-    scope = Infiniium(io)
+    scope = Infiniium(_KnownVolts())
     scope._ranged = True
     trace = scope.acquire(200, autorange_first=False)
     assert trace.count is None
-    assert any("ADER" in c for c in io.log)
+    assert scope.last_count_after_reset is None
+
 
 
 # -- the iterative autorange ----------------------------------------------
