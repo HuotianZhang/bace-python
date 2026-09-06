@@ -596,6 +596,41 @@ def test_the_dark_trace_can_be_shutter_only():
             assert len(set(seen)) == 1
 
 
+def test_the_light_trace_can_be_taken_with_the_shutter_shut():
+    """`light_shutter = "shut"`: the control that measures the dark term of
+    the charge at V_pre. The shutter must be shut for *both* traces, the
+    levels still the light pair then the dark pair, and the simulator -- which
+    only photogenerates with the shutter open -- must return a charge of
+    nothing but noise beside the open-shutter run."""
+    opened: dict[str, list[bool]] = {}
+    charges = {}
+    for mode in ("open", "shut"):
+        sim, rig = build(seed=3)             # a lit bench: the LED pulsing
+        states: list[bool] = []
+        real_acquire = rig.scope.acquire
+        def watch(*a, **kw):
+            states.append(bool(sim.shutter.is_open))
+            return real_acquire(*a, **kw)
+        rig.scope.acquire = watch            # type: ignore[method-assign]
+        cfg = RunConfig(n_averages=8, settle_s=0.0, dark_settle_s=0.0,
+                        t0_int_s=-2e-9, invert_polarity=True, light_shutter=mode)
+        events = list(run(rig, bace_at_voc(3), cfg, voc=0.906))
+        opened[mode] = states
+        charges[mode] = [e.q for e in events if isinstance(e, E.StepDone)]
+        assert any(isinstance(e, E.InstrumentState) and e.values.get("light_shutter") == mode
+                   for e in events), "the choice is reported with the run"
+    # open: the light acquisition sees the shutter open, the dark one shut
+    assert opened["open"][-2:] == [True, False]
+    # shut: neither acquisition of the pair sees it open
+    assert opened["shut"][-2:] == [False, False]
+    assert abs(charges["shut"][0]) < 0.05 * abs(charges["open"][0]),         f"shut {charges['shut'][0]:.3e} vs open {charges['open'][0]:.3e}"
+
+
+def test_a_misspelt_light_shutter_is_refused():
+    with pytest.raises(ValueError, match="light_shutter must be"):
+        RunConfig(light_shutter="closed")
+
+
 def test_a_misspelt_dark_reference_is_refused():
     with pytest.raises(ValueError, match="dark_reference must be"):
         RunConfig(dark_reference="shutter-only")

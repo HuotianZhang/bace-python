@@ -240,6 +240,24 @@ class RunConfig:
     the reconstruction says translated. `"same"` is here to be run against it.
     """
 
+    light_shutter: str = "open"
+    """Where the shutter sits for the *light* trace: `"open"` | `"shut"`.
+
+    `"open"` is the measurement: light on the sample, the transient at V_pre
+    is photogenerated charge plus whatever the device holds in the dark.
+    `"shut"` takes the "light" trace with the shutter shut as well, so the
+    pair differs in nothing but the bias levels and `Q` is the dark term
+    alone -- injected or doping charge at V_pre, and the capacitive mismatch
+    between the light and the translated dark swing. The 2026-09-06 sweep
+    (220 -> 295 K, `docs/analysis/2026-09-06/`) found Q at room temperature
+    nearly independent of intensity while doubling with temperature; this is
+    the control that says how much of it never came from the light.
+
+    Everything else is unchanged: V_pre still comes from a V_oc measured
+    under light (the DC measurement opens the shutter itself), the LED still
+    pulses, the intensity is still read -- and reads the shutter's leak.
+    """
+
     shutter_settle_s: float = 0.0
     """How long the run waits after the shutter has finished moving, before
     the scope acquires. **Applied to both traces.**
@@ -322,6 +340,10 @@ class RunConfig:
                 f"dark_reference must be 'translated' or 'same', not "
                 f"{self.dark_reference!r}. It decides what the dark trace is a "
                 "reference *for*, and a typo would silently pick the default."
+            )
+        if self.light_shutter not in ("open", "shut"):
+            raise ValueError(
+                f"light_shutter must be 'open' or 'shut', not {self.light_shutter!r}"
             )
         if self.output_polarity.lower() not in ("auto", "norm", "inv", "leave"):
             raise ValueError(
@@ -471,6 +493,7 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
             "bias_arm_source": arm.get("arm_source", "?"),
             "bias_arm_slope": arm.get("arm_slope", "?"),
             "dark_reference": config.dark_reference,
+            "light_shutter": config.light_shutter,
         })
         yield Notice(
             "info",
@@ -591,7 +614,10 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
             yield phase("levels")
             rig.bias.set_levels(levels.high_light, levels.low_light,
                                 delay_s=levels.delay_s, width_s=levels.width_s)
-            rig.shutter.unblock()
+            if config.light_shutter == "shut":
+                rig.shutter.shut()          # the dark-only control, see RunConfig
+            else:
+                rig.shutter.unblock()
             yield phase("light settle")
             sleep(config.settle_s + config.shutter_settle_s)
 

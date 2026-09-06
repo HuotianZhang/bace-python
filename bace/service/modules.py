@@ -336,6 +336,7 @@ class RunContext:
 # -- the specs --------------------------------------------------------------
 RUN_CHOICES: dict[str, tuple[str, ...]] = {
     "dark_reference": ("translated", "same"),
+    "light_shutter": ("open", "shut"),
     "output_polarity": ("auto", "NORM", "INV", "leave"),
     "trigger_sweep": ("AUTO", "TRIG"),
 }
@@ -351,7 +352,8 @@ RUN_UNITS: dict[str, str] = {
 
 RUN_GROUPS: dict[str, str] = {
     **{f: "acquisition" for f in ("n_averages", "timebase_ns_per_div", "record_length",
-                                  "read_intensity", "acquisition_timeout_s")},
+                                  "read_intensity", "acquisition_timeout_s",
+                                  "light_shutter")},
     **{f: "processing" for f in ("t0_int_s", "t_int_width_s", "offset_correct",
                                  "invert_polarity", "dark_reference")},
     **{f: "timing" for f in ("settle_s", "dark_settle_s", "shutter_settle_s",
