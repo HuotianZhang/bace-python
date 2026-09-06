@@ -46,6 +46,7 @@ class FakeInstrument:
         self.points_returned = points_returned
         self.reject = reject
         self.errors: list[str] = []
+        self.coun_polls = 0
         if fail_open:
             raise OSError("simulated open failure")
 
@@ -56,6 +57,8 @@ class FakeInstrument:
             part = part.strip()
             if not part:
                 continue
+            if part.upper() == ":RUN":
+                self.coun_polls = 0             # a fresh acquisition: count from nothing
             if any(r in part for r in self.reject):
                 self.errors.append(f'-113,"Undefined header; {part}"')
                 continue
@@ -80,6 +83,12 @@ class FakeInstrument:
             return str(self.sample_rate)
         if up == ":ADER?":
             return "1"
+        if up == ":WAV:COUN?":
+            # Nothing folded at the first look after :RUN, the full count after
+            # -- an averager that empties and then completes, as the fixed
+            # driver requires (2026-09-06).
+            self.coun_polls += 1
+            return "0" if self.coun_polls == 1 else self.state.get(":ACQ:AVER:COUN", "1")
         key = up.rstrip("?")
         if key in self.state:
             return self.state[key]
@@ -467,6 +476,165 @@ def test_the_acquisition_latch_is_cleared_before_running():
     first_ader = next(i for i, c in enumerate(kinds) if "ADER" in c)
     first_run = next(i for i, c in enumerate(kinds) if c.startswith(":RUN"))
     assert first_ader < first_run, "the latch must be cleared before :RUN"
+
+
+# -- the averager that never empties ---------------------------------------
+class _AccumulatingScope:
+    """The DSO9054H's averager as measured on 2026-09-06.
+
+    `:WAV:COUN?` climbs while the scope runs and is emptied only by `:CDIS`
+    (or a channel range write, as on the rig). `:STOP`/`:RUN` and rewriting
+    `:ACQ:AVER:COUN` -- the LabVIEW double configure -- leave it alone, which
+    is how every dark trace came to be half light. `per_poll` is how many
+    acquisitions arrive between two count queries; with averaging off a record
+    is one acquisition.
+    """
+
+    timeout = 0
+
+    def __init__(self, per_poll: int = 50, empties: bool = True, count: int = 0):
+        self.count, self.per_poll, self.empties = count, per_poll, empties
+        self.running = False
+        self.averaging = True
+        self.log: list[str] = []
+        self.fetched_counts: list[int] = []
+
+    def write(self, command):
+        self.log.append(command)
+        for part in command.split(";"):
+            p = part.strip().upper()
+            if p == ":RUN":
+                self.running = True
+            elif p == ":STOP":
+                self.running = False
+            elif p == ":CDIS" and self.empties:
+                self.count = 0
+            elif p == ":ACQ:AVER OFF":
+                self.averaging = False
+            elif p == ":ACQ:AVER ON":
+                self.averaging = True
+            elif p.startswith(":CHAN") and "RANG " in p and self.empties:
+                self.count = 0
+
+    def query(self, command):
+        self.log.append(command)
+        if "ADER" in command:
+            return "+1"
+        if "WAV:COUN" in command:
+            n = self.count
+            if self.running:
+                self.count = self.count + self.per_poll if self.averaging else 1
+            return str(n)
+        if "RANG?" in command:
+            return "0.15"
+        if "OFFS?" in command:
+            return "0"
+        return "4000;-1.995E-7;5.0E-10;0;1.0E-5;0"
+
+    def query_binary_values(self, command, **kw):
+        self.fetched_counts.append(self.count)
+        return np.full(4000, 100, dtype=np.int16)
+
+
+def test_each_averaged_acquisition_starts_from_an_empty_averager():
+    """Light then dark, as a step takes them. On the rig the dark count was
+    the light count plus ~27 -- the dark trace was the light buffer with a few
+    dark records folded on top, and Q came out at half its value. Both traces
+    must now be complete averages of their own records, and nothing else."""
+    from bace.drivers.infiniium import Infiniium
+
+    io = _AccumulatingScope()
+    scope = Infiniium(io)
+    scope.poll_s = 0.0
+    light = scope.acquire(200, autorange_first=True)
+    dark = scope.acquire(200, autorange_first=False)
+
+    assert light.count is not None and 200 <= light.count < 400
+    assert dark.count is not None and 200 <= dark.count < 400, \
+        "the dark average must not continue the light one"
+    # every record fetched -- the auto-range pass, the light, the dark -- came
+    # from a :RUN that an emptied averager preceded, since the previous fetch
+    up = [c.upper() for c in io.log]
+    fetches = [i for i, c in enumerate(up) if c.startswith(":WAV:POIN?")]
+    assert len(fetches) == 3
+    previous = -1
+    for f in fetches:
+        run = max(i for i in range(previous + 1, f) if up[i].startswith(":RUN"))
+        assert any(":CDIS" in up[i] for i in range(previous + 1, run)), \
+            f"the record fetched at {f} was not preceded by an emptied averager"
+        previous = f
+
+
+def test_the_autorange_passes_are_not_averaged():
+    """A pass only wants the extremes of the signal in the window now in
+    force; averaged, it would report the buffer from before -- on the rig the
+    previous step's dark -- and range on that."""
+    from bace.drivers.infiniium import Infiniium
+
+    io = _AccumulatingScope()
+    Infiniium(io).autorange("CHAN2")
+    first_run = next(i for i, c in enumerate(io.log) if c.strip().upper().startswith(":RUN"))
+    before = " ".join(io.log[:first_run]).upper()
+    assert ":ACQ:AVER OFF" in before and ":CDIS" in before
+
+
+def test_the_fetch_waits_for_the_whole_count_not_the_first_acquisition():
+    """`:ADER?` answers +1 after one acquisition; the fetch must not happen
+    until `:WAV:COUN?` reaches the count asked for."""
+    from bace.drivers.infiniium import Infiniium
+
+    io = _AccumulatingScope(per_poll=25)
+    scope = Infiniium(io)
+    scope.poll_s = 0.0
+    scope._ranged = True
+    trace = scope.acquire(200, autorange_first=False)
+    assert io.fetched_counts[-1] >= 200
+    assert trace.count is not None and trace.count >= 200
+
+
+def test_an_averager_that_will_not_empty_is_refused_not_fetched():
+    """A complete count before the first acquisition means the buffer still
+    holds the previous trace. Fetching it would return the last acquisition
+    again, as the rig did for a week without saying so."""
+    from bace.drivers.infiniium import Infiniium, ScopeError
+
+    io = _AccumulatingScope(empties=False, count=200)
+    scope = Infiniium(io)
+    scope._ranged = True
+    with pytest.raises(ScopeError, match="did not restart"):
+        scope.acquire(200, autorange_first=False)
+    assert not io.fetched_counts, "nothing must be fetched from a stale buffer"
+
+
+def test_a_stalled_average_times_out_saying_how_far_it_got():
+    from bace.drivers.infiniium import Infiniium, ScopeError
+
+    io = _AccumulatingScope(per_poll=0)
+    scope = Infiniium(io)
+    scope.poll_s = 0.0
+    scope._ranged = True
+    with pytest.raises(ScopeError, match=r"folded 0 of 200"):
+        scope.acquire(200, autorange_first=False, timeout_s=0.05)
+
+
+def test_a_firmware_without_a_count_falls_back_to_the_acquisition_flag():
+    """`:WAV:COUN?` answered with something that is not a number: wait on
+    `:ADER?` as before and report no count, so the engine can warn."""
+    from bace.drivers.infiniium import Infiniium
+
+    class NoCount(_KnownVolts):
+        def __init__(self): self.log = []
+        def write(self, c): self.log.append(c)
+        def query(self, c):
+            self.log.append(c)
+            return super().query(c)
+
+    io = NoCount()
+    scope = Infiniium(io)
+    scope._ranged = True
+    trace = scope.acquire(200, autorange_first=False)
+    assert trace.count is None
+    assert any("ADER" in c for c in io.log)
 
 
 # -- the iterative autorange ----------------------------------------------

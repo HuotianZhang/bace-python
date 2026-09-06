@@ -29,9 +29,27 @@ not obvious and are reproduced deliberately:
     sample rate: 2 us at 2 GSa/s is 4000 points. That is where the archive's
     4000 comes from.
 
-2.  **The averager is restarted by a double configure.** Averaging is set once
-    with a count of 64, then again with the real count. Setting the count alone
-    does not reliably restart accumulation on these scopes.
+2.  **The averager is restarted by a double configure** -- averaging set once
+    with a count of 64, then again with the real count -- is what the LabVIEW
+    driver does, and **on the DSO9054H it does nothing.** Measured 2026-09-06
+    (`runs/260826-6_*`, the `averages_*` diagnostics): `:WAV:COUN?` climbed
+    across the double configure, across `:STOP`/`:RUN`, and from the light
+    acquisition straight into the dark one -- every dark count was the light
+    count plus ~27 -- and fell back to zero only when the auto-range wrote a
+    new channel range. So each dark trace was half light, and a step whose
+    range sat inside the deadband inherited the *previous step's dark* into its
+    light trace: `Q ~ 25 / count`, a third of the value on the third point of
+    every scan, and half of it everywhere else. The original was waiting the
+    same way, so its charges carry the same dilution.
+
+    This driver therefore empties the averager explicitly before every
+    averaged acquisition (`:CDIS`, with averaging toggled off and on around it
+    -- both are documented averager resets, and either alone was not measured
+    on its own), takes the auto-range passes un-averaged so they cannot
+    inherit anything either, and **waits on `:WAV:COUN?` reaching the count**,
+    not on `:ADER?`, which is set per acquisition rather than per completed
+    average. A count that is already complete before the first acquisition is
+    refused as a stuck averager rather than fetched.
 
 3.  **Range once, on the light trace; never between light and dark.** The
     light acquisition auto-ranges (`scale to maximum`) and the dark one does
@@ -153,11 +171,87 @@ class Infiniium:
                        f":ACQ:AVER:COUN {int(count):d};"
                        ":ACQ:INT OFF;")
 
-    def _restart_averager(self, count: int) -> None:
-        """The double-configure the LabVIEW driver relies on."""
-        self._configure_acquisition(averaging=True, count=64)
-        self._io.write(":RUN;")
+    #: seconds between `:WAV:COUN?` polls while an average accumulates
+    poll_s = 0.1
+
+    def _reset_averager(self, count: int) -> None:
+        """Empty the averager and arm it for `count` acquisitions.
+
+        Not the LabVIEW double configure -- see the module docstring, point 2:
+        that left the buffer, and the count, exactly where they were. The scope
+        is stopped first because `:CDIS` on a stopped scope erases the record
+        outright, whereas on a running one it only promises the next
+        acquisition will replace it.
+        """
+        self._io.write(":STOP;")
+        self._configure_acquisition(averaging=False, count=count)
+        self._io.write(":CDIS;")
         self._configure_acquisition(averaging=True, count=count)
+
+    def _single_shot(self, timeout_s: float) -> None:
+        """One un-averaged record, from an emptied display.
+
+        For the auto-range passes: they only need the extremes of the signal in
+        the window now in force, and an averaged record here would be whatever
+        the buffer held from before -- on the rig, the previous step's dark
+        trace (2026-09-06).
+        """
+        self._io.write(":STOP;:ACQ:AVER OFF;:CDIS;")
+        self._clear_acquisition_flag()
+        self._io.write(":RUN;:WAV:FORM WORD;")
+        self._wait_for_acquisition(timeout_s)
+        self._io.write(":STOP;")            # a finished record, not a live one
+
+    def _query_count(self) -> int | None:
+        """`:WAV:COUN?` as an integer, or None when the firmware does not
+        answer it with a number. Zero is a real answer -- nothing folded yet."""
+        try:
+            return int(float(self._io.query(":WAV:COUN?").strip()))
+        except Exception:                                   # noqa: BLE001
+            return None
+
+    def _wait_for_averages(self, count: int, source: str,
+                           timeout_s: float) -> int | None:
+        """Block until the averager has folded `count` acquisitions of `source`.
+
+        Polls `:WAV:COUN?` -- the one readback that says how many records are
+        in the average; `:ADER?` is set after every single acquisition and
+        would return after the first (2026-09-05). Returns the count reached,
+        or None when the firmware does not answer `:WAV:COUN?` numerically and
+        the wait had to fall back to the per-acquisition flag.
+
+        The first answer, taken within milliseconds of `:RUN`, must be short of
+        `count`: if the averager already holds a complete average before it
+        has acquired anything, it was not emptied, and the fetch would return
+        the previous acquisition -- silently, which is how 2026-09-06 happened.
+        That is an error, not a warning. Counts under eight are exempt, because
+        eight triggers can arrive inside one round trip.
+        """
+        self._io.write(f":WAV:SOUR {source};")
+        deadline = time.monotonic() + timeout_s
+        n = self._query_count()
+        if n is None:
+            self._wait_for_acquisition(max(0.0, deadline - time.monotonic()))
+            return None
+        if count >= 8 and n >= count:
+            raise ScopeError(
+                f"the averager did not restart: :WAV:COUN? answered {n} before the "
+                f"first acquisition of a {count}-average record, so the buffer still "
+                "holds the previous acquisition. :CDIS did not empty it on this "
+                "firmware -- fetching now would return the last trace again"
+            )
+        while n < count:
+            if time.monotonic() >= deadline:
+                raise ScopeError(
+                    f"the averager folded {n} of {count} acquisitions in {timeout_s:g} s "
+                    "— check that the trigger source is actually receiving edges, or "
+                    "raise acquisition_timeout_s"
+                )
+            time.sleep(self.poll_s)
+            again = self._query_count()
+            if again is not None:
+                n = again
+        return n
 
     def _clear_acquisition_flag(self) -> None:
         """Read and discard `:ADER?` so the next read means *this* acquisition.
@@ -253,10 +347,7 @@ class Infiniium:
             # The window in force for the acquisition about to be taken.
             top, bottom = voffset + vrange / 2.0, voffset - vrange / 2.0
 
-            self._clear_acquisition_flag()
-            self._io.write(":RUN;:WAV:FORM WORD;")
-            self._wait_for_acquisition(10.0)
-            self._io.write(":STOP;")            # a finished record, not a live one
+            self._single_shot(10.0)
             tr = self._fetch_volts(source)      # volts, not amps -- see _fetch_volts
             hi, lo = float(tr.y.max()), float(tr.y.min())
 
@@ -562,13 +653,13 @@ class Infiniium:
                 "for the light trace before acquiring the dark one, or configure the "
                 "channel explicitly"
             )
-        self._restart_averager(n_averages)
-        self._clear_acquisition_flag()
+        self._reset_averager(n_averages)
+        self._clear_acquisition_flag()      # for the fallback wait only
         self._io.write(":RUN;")
-        self._wait_for_acquisition(timeout_s)
+        self._wait_for_averages(n_averages, source, timeout_s)
         # Stop first. Reading a channel while the scope is still acquiring can
-        # return a partial record or none at all, and the average is only
-        # complete once acquisition has ended anyway.
+        # return a partial record or none at all -- and stopped, the count
+        # read back below is the count of the record fetched.
         self._io.write(":STOP;")
         trace = self._fetch(source)
         count = self._averages_folded()
@@ -577,14 +668,12 @@ class Infiniium:
 
     def _averages_folded(self) -> int | None:
         """`:WAV:COUN?` for the source just fetched: how many acquisitions the
-        averager folded into the record. The Acquisition Done flag this driver
-        waits on is set per acquisition, not per completed average, so this
-        is the only readback that says whether 200 were 200 (2026-09-05)."""
-        try:
-            n = int(float(self._io.query(":WAV:COUN?").strip()))
-        except Exception:                                   # noqa: BLE001
-            return None
-        return n if n > 0 else None
+        averager folded into the record. `acquire` waits on this number, so it
+        should be `n_averages` or a little over; short means the firmware did
+        not answer the count and the wait fell back to `:ADER?`, which is set
+        per acquisition, not per completed average (2026-09-05)."""
+        n = self._query_count()
+        return n if n else None
 
     def close(self) -> None:
         try:

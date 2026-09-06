@@ -775,6 +775,7 @@ def _averages_notice(trace: Trace, asked: int, index: int, which: str):
         return None
     return Notice("warning",
                   f"shot {index}: the {which} trace averages {count} acquisitions, not "
-                  f"the {int(asked)} asked for -- the scope reported done before the "
-                  "averager had finished. Its noise is higher than the recipe's and "
-                  "its Q is a single shot's, not an average's")
+                  f"the {int(asked)} asked for -- the digitiser could not wait on its "
+                  "averager's count and fetched on the per-acquisition flag instead. "
+                  "Its noise is higher than the recipe's and its Q is a single "
+                  "shot's, not an average's")
