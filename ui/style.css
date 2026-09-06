@@ -1279,6 +1279,17 @@ table.qgrid td { padding: 0; }
 .power.off .pw-row { padding: 2px 12px; }
 .power.off .pw-value { font-size: 12px; font-weight: 400; color: var(--grey); letter-spacing: 0; }
 .power.off .pw-switch { color: var(--grey); }
+/* The fold: the trace away without the monitor off. Beside the `⋯`, in its
+   register — the switch is about the bench, this is about the screen. */
+.pw-fold {
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+  background: none; border: 1px solid transparent; padding: 2px 6px;
+  font: inherit; color: var(--grey); line-height: 1;
+}
+.pw-fold:hover { color: var(--ink); border-color: var(--rule); }
+.pw-fold:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pw-fold.open { color: var(--ink); }
+.pw-caret { font-size: 11px; width: 1em; text-align: center; line-height: 1; }
 /* The `⋯` menu: everything touched less than once a session. */
 .pw-menu { position: relative; }
 .pw-menu summary {
