@@ -204,6 +204,7 @@ code { background: var(--pg-chip); padding: 1px 5px; border-radius: 3px; }
 
 /* 视图 */
 .frame .view { padding: 12px 14px 0; }
+#states .frame .view { padding: 10px 14px 12px; }
 
 /* Instruments 面板 —— ui/style.css .inst / .irow / .sw / .vals */
 .frame .inst {
@@ -477,11 +478,27 @@ code { background: var(--pg-chip); padding: 1px 5px; border-radius: 3px; }
     </table>
   </div>
 
-  <h2 class="sec">A 展开 <code>⋯</code> 之后</h2>
+  <h2 class="sec">存 / 取到底在哪儿：<code>MODULES</code> 这一行的三个状态</h2>
   <p class="lede">
-    存 / 取本身没有变 —— 名字框、Save、存档表，选中一个画出差异表，下面的按钮才真的动台架。
-    变的只是它<b>不常驻</b>了，而且它现在长在 <code>MODULES</code> 这一行下面，
-    作用域是自明的：它保存的就是它下面那些卡片。
+    常驻屏幕的只有一行，而且它只回答一个问题：<b>这台架是哪个存档、跟存档比动没动过。</b>
+    机器（起名、Save、存档表、差异表）在行尾的 <code>⋯</code> 后面 —— 一天用不到一次的东西
+    不该占着屏幕（<code>ui-rules §14</code> 第四问）。示波器也是这么干的：Save/Recall
+    在一个前面板键加一层菜单后面，从不占用测量画面。
+  </p>
+  <div id="states"></div>
+
+  <h2 class="sec">点开 <code>⋯</code> 之后</h2>
+  <p class="lede">
+    存 / 取本身一样没少 —— 名字框、<code>Save settings</code>、存档表，选一个「打开」画出差异表，
+    差异表下面那个按钮才真的动台架。变的只有两件事：它<b>不常驻</b>了，
+    以及它现在长在 <code>MODULES</code> 这一行下面 —— 作用域是自明的，
+    它保存的就是它下面那些卡片，不含上面那排开关。
+  </p>
+  <p class="lede">
+    <b>它不是功率面板那种 <code>⋯</code>。</b>那个是 <code>&lt;details&gt;</code>，指针一离开就自己合上，
+    对「点一下就完事」的选项是对的；这里要在里面打字、要读一张差异表，
+    鼠标划出去就没了是不能用的。所以这个抽屉<b>点开就一直开着</b>，
+    直到再点一次 <code>⋯</code>、或者存完 / 取完为止。
   </p>
   <div id="drawer-demo"></div>
 
@@ -722,10 +739,39 @@ function measure(frames) {
     `样例按 ${(100 * k).toFixed(0)}% 缩放显示；高度是缩放前的实测值。`;
 }
 
+/* -- MODULES 这一行的三个状态 --------------------------------------------- */
+const STATES = [
+  { k: '从未存过', note: '灰的「未存档」把 ⋯ 指出来 —— 否则一个孤零零的 ⋯ 没人会点。',
+    build: () => [el('span', 'zt', 'Modules'), el('span', 'none', '未存档')] },
+  { k: '存过，和台架一致', note: '名字在，没有点。这是存完、或者刚取回来之后的样子。',
+    build: () => [el('span', 'zt', 'Modules'),
+      el('span', 'who', 'monday_morning'), el('span', 'match', '✓ 和存档一致')] },
+  { k: '存过，台架动了', note: '一个 warn 色的点，加上动了几个值。点 ⋯ 才看得到是哪几个。',
+    build: () => [el('span', 'zt', 'Modules'),
+      el('span', 'who', 'monday_morning', el('span', 'dot', ' •')),
+      el('span', 'drift', '3 个值和存档不同')] },
+];
+
+function statesDemo() {
+  const holder = document.getElementById('states');
+  for (const st of STATES) {
+    const dots = el('button', 'dots', '⋯');
+    dots.type = 'button';
+    const frame = el('div', 'frame v-b');
+    frame.style.width = '100%';        // 这一段只看一行，不必按 console 的宽度缩放
+    frame.append(el('div', 'view',
+      el('div', 'modbar', st.build(), el('span', 'sp'), dots)));
+    holder.append(el('div', 'spec',
+      el('div', 'spec-head', el('h3', '', st.k)),
+      el('p', 'spec-note', st.note),
+      el('div', 'holder', frame)));
+  }
+}
+
 /* -- A 的 ⋯ 展开 ---------------------------------------------------------- */
 function drawerDemo() {
   const holder = document.getElementById('drawer-demo');
-  const frame = el('div', 'frame v-a');
+  const frame = el('div', 'frame v-b');
   frame.style.width = '1440px';
 
   const name = document.createElement('input');
@@ -755,7 +801,7 @@ function drawerDemo() {
     el('div', 'namerow', el('span', 'l', 'name'), name, save),
     files, note);
 
-  frame.append(el('div', 'view', instruments(), modBar(), drawer, card()));
+  frame.append(el('div', 'view', instruments({ inline: true }), modBar(), drawer, card()));
   const scale = el('div', 'frame-scale', frame);
   const box = el('div', 'holder', scale);
   holder.append(box);
@@ -774,8 +820,8 @@ for (const b of document.querySelectorAll('.wbtn')) {
   });
 }
 
-if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { build(); drawerDemo(); });
-else window.addEventListener('load', () => { build(); drawerDemo(); });
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { build(); statesDemo(); drawerDemo(); });
+else window.addEventListener('load', () => { build(); statesDemo(); drawerDemo(); });
 </script>
 
 </body>
