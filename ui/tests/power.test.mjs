@@ -272,6 +272,7 @@ test('switched off, the panel is one line but nothing it recorded is out of reac
     'Export SVG is not: it serialises the SVG on screen, and there is none');
   assert.deepEqual([shape.menu.window, shape.menu.toggles], [false, false],
     'nor is anything else that only describes a chart that is not drawn');
+  assert.equal(shape.fold, false, 'and there is no trace to fold: the panel is the line');
 });
 
 test('running, the menu carries all of it', () => {
@@ -279,8 +280,67 @@ test('running, the menu carries all of it', () => {
   const shape = panelShape(on);
   assert.equal(shape.collapsed, false);
   assert.equal(shape.chart, true);
+  assert.equal(shape.fold, true, 'and the trace can be folded away from here');
   assert.deepEqual(shape.menu,
     { interval: true, window: true, toggles: true, exportCsv: true, exportSvg: true, clear: true });
+});
+
+// -- the fold ---------------------------------------------------------------
+//
+// The switch is about the bench and the fold is about the screen, and the
+// panel had only the first: the one way to be rid of 210 px of trace on every
+// tab was to stop the service reading the meter, which is a hole in the run's
+// power record for as long as the operator wanted the room.
+
+test('the trace folds away with the monitor still on, and nothing else moves', () => {
+  const now = T0 + 200;
+  const state = stateWith({ log: trace(100), monitors: RUNNING });
+  const open = powerPanelModel(state, { ...DEFAULT_UI, on: true }, { now });
+  const folded = powerPanelModel(state, { ...DEFAULT_UI, on: true, chart: false }, { now });
+  // The monitor is untouched: still running, still at its interval, still the
+  // newest reading, and every reading it took is still held.
+  assert.deepEqual([folded.running, folded.live, folded.wanted], [true, true, true]);
+  assert.equal(folded.interval_s, open.interval_s);
+  assert.equal(folded.count, open.count);
+  assert.deepEqual(folded.points, open.points);
+  // What moves is the chart, and only the chart.
+  assert.equal(panelShape(open).chart, true);
+  assert.equal(panelShape(folded).chart, false);
+  assert.equal(panelShape(folded).collapsed, false,
+    'the panel is not the collapsed line — the reading is still big at the top of it');
+  assert.equal(panelShape(folded).fold, true, 'and the button that folded it unfolds it again');
+});
+
+test('folding drops what describes a chart that is not drawn, and no more', () => {
+  const now = T0 + 200;
+  const folded = panelShape(powerPanelModel(stateWith({ log: trace(100), monitors: RUNNING }),
+    { ...DEFAULT_UI, on: true, chart: false }, { now }));
+  assert.deepEqual([folded.menu.window, folded.menu.toggles, folded.menu.exportSvg], [false, false, false],
+    'the window, `y from 0` and Export SVG describe a trace that is not on screen');
+  assert.deepEqual([folded.menu.interval, folded.menu.exportCsv, folded.menu.clear], [true, true, true],
+    'and folding a panel away must not fold away what it recorded');
+});
+
+test('off there is nothing to fold, whatever the fold was left at', () => {
+  const now = T0 + 200;
+  for (const chart of [true, false]) {
+    const off = panelShape(powerPanelModel(stateWith({ log: trace(100) }), { ...DEFAULT_UI, on: false, chart }, { now }));
+    assert.equal(off.fold, false, 'the collapsed line has no trace under it to fold');
+    assert.equal(off.chart, false);
+  }
+});
+
+test('the fold is rebuilt when it moves, and not by a reading', () => {
+  const now = T0 + 200;
+  const ui = { ...DEFAULT_UI, on: true };
+  const key = (log, patch = {}) => panelKeys(
+    powerPanelModel(stateWith({ log, monitors: RUNNING }), { ...ui, ...patch }, { now }), null).fold;
+  assert.notEqual(key(trace(100), { chart: false }), key(trace(100)), 'folding redraws the button');
+  assert.equal(key(trace(101)), key(trace(100)), 'a reading arriving does not');
+  // And the monitor stopping takes the button away, since there is then no
+  // trace under it: `live` is running *or* wished for, so both have to go.
+  const stopped = panelKeys(powerPanelModel(stateWith({ log: trace(100) }), { ...ui, on: false }, { now }), null).fold;
+  assert.notEqual(stopped, key(trace(100)));
 });
 
 test('the wish alone opens the panel, before the service has answered', () => {

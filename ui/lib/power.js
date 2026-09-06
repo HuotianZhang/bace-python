@@ -21,7 +21,9 @@
 //   * **the trace below it**, over a window the operator picks, with the
 //     statistics over that window, from the store's `powerLog` (every
 //     `PowerReading` frame, merged with `GET /monitors/power/history` on
-//     connect so a reload does not start the chart blank).
+//     connect so a reload does not start the chart blank) — and a fold beside
+//     the `⋯` that puts those 210 px away without stopping the monitor, since
+//     wanting the shell out of the way is not wanting the meter unread.
 //   * **export**: the whole history the service holds as a CSV
 //     (`/monitors/power/history.csv`), and the chart on screen as an SVG.
 //
@@ -133,10 +135,10 @@ export function powerPanelModel(state, ui = DEFAULT_UI, { now = Date.now() / 100
 // -- what the panel draws, and what it rebuilds it on ------------------------
 
 /**
- * What the panel draws: the collapsed line or the open one, which rows the
- * `⋯` carries, and whether the trace is on screen. Pure and exported, so the
- * three decisions are held down by `ui/tests/power.test.mjs` — the renderer
- * only obeys it.
+ * What the panel draws: the collapsed line or the open one, whether the trace
+ * is folded away, which rows the `⋯` carries, and whether the chart is on
+ * screen. Pure and exported, so the decisions are held down by
+ * `ui/tests/power.test.mjs` — the renderer only obeys it.
  *
  * The rule that shapes it: **switching the monitor off may take away the
  * always-on chart; it must not take away what the monitor recorded.** So the
@@ -144,20 +146,31 @@ export function powerPanelModel(state, ui = DEFAULT_UI, { now = Date.now() / 100
  * interval, which is not a view filter at all but a control that acts on the
  * bench the moment it lands (`app.js` stops and restarts the service's
  * polling), and the one thing worth setting *before* the switch is flipped.
- * What the collapsed panel drops is only what describes a chart that is not
- * drawn: the window, the two chart toggles, and Export SVG, which serialises
- * the SVG on screen and has none to serialise.
+ * What a panel with no chart drops is only what describes a chart that is not
+ * drawn: the window, the y-axis toggle, and Export SVG, which serialises the
+ * SVG on screen and has none to serialise.
+ *
+ * **Two things can take the chart away, and they are not the same thing.**
+ * The switch is about the bench — it starts and stops a thread in the service
+ * that reads the meter whether or not a browser is open. The fold is about
+ * this screen and nothing else: an operator watching a card wants the meter's
+ * number on the rail and the 210 px of trace out of the way, and folding it
+ * must not cost them a reading. So `fold` is drawn whenever the monitor is
+ * live, it is the operator's own `ui.chart`, and switching it does not touch
+ * the service. Off, there is no fold: the panel is already one quiet line.
  */
 export function panelShape(model) {
+  const chart = model.live && model.chart;
   return {
     collapsed: !model.live,
-    chart: model.live && model.chart,
+    fold: model.live,
+    chart,
     menu: {
       interval: true,
-      window: model.live,
-      toggles: model.live,
+      window: chart,
+      toggles: chart,
       exportCsv: true,
-      exportSvg: model.live,
+      exportSvg: chart,
       clear: true,
     },
   };
@@ -185,6 +198,9 @@ export function panelKeys(model, status) {
     switch: JSON.stringify([model.running, model.wanted, model.available]),
     reading: JSON.stringify([model.value, model.sub, model.level, model.reason, model.live]),
     status: JSON.stringify([status]),
+    // The fold carries its own state and no reading: it is a button the
+    // operator clicks, and the trace under it is redrawn five times a second.
+    fold: JSON.stringify([model.live, model.chart]),
     menu: JSON.stringify([model.live, model.interval_s, model.window.key, model.chart, model.fromZero,
       model.count > 0, model.points.length > 0]),
     chart: JSON.stringify([model.points.length ? model.points[model.points.length - 1].ts : null,
@@ -195,8 +211,8 @@ export function panelKeys(model, status) {
 // -- the DOM ----------------------------------------------------------------
 
 /**
- * Into `el`, in five keyed parts: the switch, the reading, the sentence the
- * last click came back with, the `⋯` menu and the chart.
+ * Into `el`, in six keyed parts: the switch, the reading, the sentence the
+ * last click came back with, the fold, the `⋯` menu and the chart.
  */
 export function renderPowerPanel(el, state, ui, handlers = {}) {
   const model = powerPanelModel(state, ui);
@@ -206,8 +222,8 @@ export function renderPowerPanel(el, state, ui, handlers = {}) {
     el.replaceChildren(
       h('div.pw-row',
         h('span.pw-switch-box'), h('span.pw-reading'),
-        h('span.spacer'), h('span.pw-status-box'), h('span.pw-menu-box')),
-      h('div.pw-chart'));
+        h('span.spacer'), h('span.pw-status-box'), h('span.pw-fold-box'), h('span.pw-menu-box')),
+      h('div.pw-chart#pw-chart'));
   }
   // Off: the switch, the last spot check muted, and the `⋯` — one line.
   const shape = panelShape(model);
@@ -217,6 +233,7 @@ export function renderPowerPanel(el, state, ui, handlers = {}) {
   keyed(el.querySelector('.pw-reading'), key.reading, () => readingEl(model, model.live));
   keyed(el.querySelector('.pw-status-box'), key.status, () => (status
     ? h('span', { class: 'pw-status ' + (status.level || ''), text: status.text }) : []));
+  keyed(el.querySelector('.pw-fold-box'), key.fold, () => foldButton(shape, handlers));
   keyed(el.querySelector('.pw-menu-box'), key.menu, () => menu(model, shape.menu, handlers));
   const chartEl = el.querySelector('.pw-chart');
   chartEl.hidden = !shape.chart;
@@ -253,6 +270,39 @@ function switchRow(model, { onToggle }) {
   ];
 }
 
+/**
+ * The fold — `▾ trace` / `▸ trace`, beside the `⋯` and independent of the
+ * switch.
+ *
+ * The trace is 210 px of the shell on every tab, and the shell sits above the
+ * view the operator is actually working in: a card being filled in, a tree
+ * being edited. Before this there was one way to be rid of it — switch the
+ * monitor off — and that answer is wrong twice over: it stops the service
+ * reading the meter, which is the thing the operator wanted to keep running,
+ * and it leaves the run with no power record for the minutes the panel was
+ * out of the way. So the fold is a button of its own, it is remembered like
+ * every other panel wish (`ui.chart` in `localStorage`), and it touches
+ * nothing but this screen — the monitor goes on reading, the readings go on
+ * arriving, and the number stays big at the top of the panel.
+ *
+ * It is drawn only where there is something to fold: off, the panel is
+ * already one quiet line and the chart is not on it.
+ */
+function foldButton(shape, { onChart }) {
+  if (!shape.fold) return [];
+  const open = shape.chart;
+  return h('button.pw-fold', {
+    type: 'button',
+    class: open ? 'open' : null,
+    'aria-expanded': open ? 'true' : 'false',
+    'aria-controls': 'pw-chart',
+    title: open
+      ? 'hide the trace — the monitor keeps reading and every reading is kept'
+      : 'show the trace — the readings held, over the window',
+    onclick: () => onChart && onChart(!open),
+  }, h('span.pw-caret', { text: open ? '▾' : '▸' }), h('span', { text: 'trace' }));
+}
+
 function readingEl(model, live) {
   if (!model.value) {
     return live ? [
@@ -268,14 +318,20 @@ function readingEl(model, live) {
 /**
  * Everything the operator touches less than once a session, behind one
  * `⋯`: the interval and the window (with the defaults that suit a scan),
- * the two chart toggles, and the three actions. `<details>` so it needs no
- * script to open, and closes itself when the pointer leaves it.
+ * `y from 0`, and the three actions. `<details>` so it needs no script to
+ * open, and closes itself when the pointer leaves it.
  *
- * `rows` is `panelShape(model).menu` — which of them this state carries. Off,
- * that is the interval, Export CSV and Clear: the panel is collapsed, but
- * nothing it recorded is out of reach.
+ * `rows` is `panelShape(model).menu` — which of them this state carries. With
+ * no chart on screen — the monitor off, or the trace folded away — that is the
+ * interval, Export CSV and Clear: nothing the panel recorded is out of reach.
+ *
+ * The trace itself is not in here. It was a toggle in this menu, two clicks
+ * behind a `⋯` that closes itself on `mouseleave`, which is the wrong depth
+ * for something the operator reaches for whenever the view underneath needs
+ * the room — it is the fold beside the `⋯` now, and this menu keeps only
+ * `y from 0`, which describes how the trace is drawn rather than whether.
  */
-function menu(model, rows, { onInterval, onWindow, onChart, onZero, onClear, onExportCsv, onExportSvg }) {
+function menu(model, rows, { onInterval, onWindow, onZero, onClear, onExportCsv, onExportSvg }) {
   const pick = (label, opts, current, onPick, title) => h('div.pw-opt',
     h('span.pw-optl', { text: label, title }),
     h('span.filt', { role: 'group', 'aria-label': label }, opts.map(([key, text]) => h('button.opt', {
@@ -296,7 +352,6 @@ function menu(model, rows, { onInterval, onWindow, onChart, onZero, onClear, onE
         (k) => onWindow && onWindow(k),
         'how much of the trace is drawn; the statistics under it are over the same span') : null,
       rows.toggles ? h('div.pw-opt.togs',
-        toggle('trace', model.chart, (v) => onChart && onChart(v), 'show or hide the trace'),
         toggle('y from 0', model.fromZero, (v) => onZero && onZero(v), 'pin the y axis to zero, so an LED that is off reads as off')) : null,
       h('div.pw-opt.acts',
         rows.exportCsv ? action('Export CSV', 'every reading the service holds, not only what this page saw',

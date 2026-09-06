@@ -145,14 +145,29 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
 
 /* -- the rail: fixed, everything else scrolls (§1) -------------------------
    Eight live values, from `docs/design/BenchRail.dc.html`. The relay is first
-   and widest because it is the interlock. */
+   and widest because it is the interlock.
+
+   **One row, at every width.** The rail was three stacked lines per cell,
+   folded to two rows of four below 1560 — 156 px of a 1080-line screen spent
+   before the first measured number appears, on the surface §1 calls the
+   densest thing in the console. It is one 29 px line now: the label and the
+   value side by side, and the sub-line one hover or one Tab away, drawn over
+   the view instead of above it.
+
+   That is a trade, and §1 is the reason to name it rather than enjoy the
+   number: the density exists to keep things visible, and `low 0.400 V` and
+   `stale · 5002 ticks skipped` are no longer on screen at rest. What is at
+   rest is every value, every level colour and every dashed inferred rule —
+   which is what says whether to look closer. The caret in a cell's corner
+   says there is more, and the cell is focusable, because a tooltip nobody
+   can focus is a tooltip half the operators cannot read. */
 .rail {
   display: grid;
-  /* The relay is widest because it carries the interlock diagram, the LED
-     because its line has to say polarity *and* low level without truncating —
-     "the LED low level must sit below turn-on" is one of the three things on
-     this rail that decide whether a result means anything. */
-  grid-template-columns: 236px 1.05fr 1fr 0.7fr 1.45fr 1.15fr 1fr 0.95fr;
+  /* The relay keeps a fixed column because it is the one cell whose value is
+     a *drawing*; the other seven divide what is left. Nothing wraps at any
+     width — a rail that doubles in height when the window narrows is the
+     thing this row was redrawn to end. */
+  grid-template-columns: 248px repeat(7, minmax(0, 1fr));
   align-items: stretch;
   border-bottom: 2px solid var(--rule);
   background: var(--paper);
@@ -160,48 +175,79 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
   flex: 0 0 auto;
 }
 .rail .brc {
-  display: flex; flex-direction: column; gap: 2px;
-  padding: 8px 13px 9px;
+  position: relative;
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 9px;
   border-left: 1px solid var(--rule);
   min-width: 0;
 }
 .rail .brc:first-child { border-left: 0; }
-/* Below the 1920 the design is written for, the rail wraps instead of
-   ellipsising: §1 says the LED line has to say polarity *and* low level
-   without truncating, and a lab PC parked beside a LabVIEW window is a real
-   width. Two rows of four, nothing clipped. */
-@media (max-width: 1560px) {
-  .rail { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .rail .brc:nth-child(5) { border-left: 0; }
-  .rail .brc:nth-child(n+5) { border-top: 1px solid var(--rule); }
-  .rail .brv { font-size: 16px; }
-}
+/* The label is what gives way when a cell runs out of room, never the number:
+   `optical power` reading as `optical…` beside an intact `159 nW` costs
+   nothing, and a truncated reading is a different reading (§2). */
 .rail .brl {
-  display: flex; align-items: center; gap: 5px;
-  font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase;
+  display: flex; align-items: center; gap: 4px;
+  flex: 0 1 auto; min-width: 0; overflow: hidden;
+  font-size: 8px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase;
   color: var(--grey);
-  min-width: 0;
 }
-/* The eight cell glyphs sit a shade above the 9 px label's cap height, so the
-   row reads as one line rather than as a mark and a caption. */
-.rail .brl .icon { margin-top: -1px; }
+.rail .brl > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail .brl .icon { flex: 0 0 auto; }
 .rail .lv-alert .brl .icon { color: rgba(255,255,255,.85); }
 .rail .brv {
-  font-family: var(--font-num); font-weight: 500; font-size: 17px; line-height: 1.15;
+  flex: 0 0 auto; margin-left: auto; max-width: 100%;
+  font-family: var(--font-num); font-weight: 500; font-size: 13px; line-height: 1.3;
   letter-spacing: -.01em;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* When a circuit is closed, the interlock's value *is* the diagram — the lit
+   nodes are `Keithley 2400`, and printing both is the same sentence twice on
+   a row that has room for one. `neutral` and an absent read-back are not in
+   the drawing (an unlit diagram is both), so those keep their word:
+   `lib/rail.js` marks the cell `.drawn` only when the diagram says it. */
+.rail .brc.drawn .brv { display: none; }
+/* One line has no room for eight `inferred` badges, and it does not need
+   them: the dashed rule under the value is the same statement, on the value
+   it is about. The badge stays in the DOM with its title. */
+.rail .brc .tag-inferred { display: none; }
+/* The sub-line, over the view rather than above it. `lib/rail.js` puts
+   `tabindex` on the cells that have one, which is what `:focus-within` is
+   listening for; `title` carries the same text to a screen reader. */
 .rail .brs {
-  font-family: var(--font-num); font-size: 10.5px; line-height: 1.25; color: var(--grey);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  position: absolute; top: 100%; left: -1px; z-index: 6;
+  display: none;
+  width: max-content; min-width: calc(100% + 2px); max-width: 340px;
+  padding: 4px 9px 5px;
+  font-family: var(--font-num); font-size: 10px; line-height: 1.35;
+  white-space: normal;
+  color: var(--ink); background: var(--paper);
+  border: 1px solid var(--ink);
+  box-shadow: 0 3px 0 rgba(32,30,29,.09);
+}
+.rail .brc:hover .brs, .rail .brc:focus-within .brs { display: block; }
+/* The last two open leftwards: a panel half off the screen is not a panel. */
+.rail .brc:nth-last-child(-n+2) .brs { left: auto; right: -1px; }
+.rail .brc:hover, .rail .brc:focus-within { background: var(--fill); }
+.rail .brc:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* A cell with more to say marks itself. Three pixels: it is the only thing
+   on this row that is about the interface rather than about the bench.
+   `:has()`, as `.pf:has(> .seg)` below already does — the cells that carry a
+   sub-line are the cells `lib/rail.js` gave one, and nothing else to keep in
+   step. */
+.rail .brc:has(.brs)::after {
+  content: ''; position: absolute; right: 3px; bottom: 2px;
+  border: 3px solid transparent; border-top-color: var(--rule);
 }
 
 /* The one alert on the rail: the 81150A driving the device. §3 keeps this
    intensity for a live bias, a crit and a saturation verdict, so nothing else
    in this row may compete with it. */
 .rail .lv-alert { background: var(--alert); color: #fff; }
-.rail .lv-alert .brl, .rail .lv-alert .brs { color: rgba(255,255,255,.85); }
+.rail .lv-alert .brl { color: rgba(255,255,255,.85); }
+/* The panel is on paper whatever the cell is, so it keeps the ink. */
+.rail .lv-alert:hover, .rail .lv-alert:focus-within { background: var(--alert); }
 .rail .lv-warn .brv, .rail .lv-warn .brs { color: var(--warn); }
+.rail .lv-warn:has(.brs)::after { border-top-color: var(--warn); }
 .rail .lv-crit .brv, .rail .lv-crit .brs { color: var(--alert); font-weight: 600; }
 .rail .lv-ok .brv { color: var(--ok); }
 .rail .lv-off .brv { color: var(--grey); }
@@ -212,10 +258,10 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
 
 /* Inferred, not read back. The dashed rule is the same language the artboard
    uses for an inherited parameter — a value that is true because something
-   else made it true, rather than because anyone looked. */
+   else made it true, rather than because anyone looked. On one line it is the
+   whole of the mark, so it is not decoration any more. */
 .rail .inferred .brv {
   border-bottom: 1px dashed var(--accent);
-  align-self: flex-start;
   padding-bottom: 1px;
 }
 .rail .lv-alert.inferred .brv { border-bottom-color: rgba(255,255,255,.8); }
@@ -228,10 +274,14 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
 .rail .lv-alert .tag-inferred { border-color: rgba(255,255,255,.7); background: transparent; color: #fff; }
 
 /* The interlock diagram: which circuit the device is actually in. */
-.rail .relay { display: flex; align-items: center; margin-top: 3px; }
+.rail .relay { display: flex; align-items: center; flex: 0 0 auto; width: 96px; }
+/* Drawn, the diagram is the value and takes the value's place at the right;
+   spelled out, it follows the word it belongs to. */
+.rail .brc.drawn .relay { margin-left: auto; }
 .rail .rn {
-  font-family: var(--font-num); font-weight: 500; font-size: 9px;
-  padding: 3px 5px; border: 1px solid var(--rule); color: var(--grey);
+  font-family: var(--font-num); font-weight: 500; font-size: 8px;
+  padding: 1px 4px; border: 1px solid var(--rule); color: var(--grey);
+  white-space: nowrap;
 }
 .rail .rn.on { border-color: var(--ink); background: var(--ink); color: #fff; }
 .rail .rw { flex: 1; height: 2px; background: var(--rule); }
@@ -1292,6 +1342,17 @@ table.qgrid td { padding: 0; }
 .power.off .pw-row { padding: 2px 12px; }
 .power.off .pw-value { font-size: 12px; font-weight: 400; color: var(--grey); letter-spacing: 0; }
 .power.off .pw-switch { color: var(--grey); }
+/* The fold: the trace away without the monitor off. Beside the `⋯`, in its
+   register — the switch is about the bench, this is about the screen. */
+.pw-fold {
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+  background: none; border: 1px solid transparent; padding: 2px 6px;
+  font: inherit; color: var(--grey); line-height: 1;
+}
+.pw-fold:hover { color: var(--ink); border-color: var(--rule); }
+.pw-fold:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pw-fold.open { color: var(--ink); }
+.pw-caret { font-size: 11px; width: 1em; text-align: center; line-height: 1; }
 /* The `⋯` menu: everything touched less than once a session. */
 .pw-menu { position: relative; }
 .pw-menu summary {

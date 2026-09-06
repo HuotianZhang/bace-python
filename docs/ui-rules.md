@@ -427,3 +427,21 @@ and Export SVG, which serialises the SVG on screen. The same limit applies to
 the sentence an action answers with: it belongs to the click, not to the
 state the click leaves behind, so switching a thing *off* — or failing to —
 still says so.
+
+**And the other half of it: what folds the panel must not be the switch that
+runs the instrument.** The power panel's trace is 210 px of shell above
+whichever view the operator is working in, and until 2026-09-06 the only way
+to be rid of it was to switch the monitor off — which stops a thread in the
+service reading the meter, and leaves the run with no power record for as
+long as the operator wanted the room. Two questions were answered by one
+control, and the wrong one won. So the trace has a fold of its own beside the
+`⋯` (`▾ trace` / `▸ trace`, remembered like every other panel wish): the
+switch is about the bench, the fold is about this screen, and folding takes
+away the chart and nothing else — the monitor goes on reading, the readings
+go on arriving, and the number stays big at the top of the panel. It is a
+button on the row rather than a toggle inside the `⋯`, because the fourth
+question — how often is it touched? — answers differently for it than for the
+window and the interval: this one is reached for whenever the view underneath
+needs the room. The limit above still holds under the fold, and by the same
+rule: with no chart on screen the menu drops the window, `y from 0` and
+Export SVG, and keeps the interval, Export CSV and Clear.
