@@ -251,7 +251,10 @@ export function jvModel(curves, options = {}) {
     // No metrics for the sweep in flight: a V_oc interpolated on half a
     // curve is a number nobody measured.
     metrics: metricsOf(list.filter((c) => c.partial !== true), quantity),
-    notes: notes(list, quantity, { useLog, clamped, allDark, cropped: Y.cropped || 0 }),
+    // `levels` and not `list`: the note describes the ramp, and the ramp is
+    // ranked by illumination. Given the curves it counted a level once per
+    // arm — see `notes`.
+    notes: notes(list, quantity, { useLog, clamped, allDark, cropped: Y.cropped || 0, levels }),
   };
 }
 
@@ -361,7 +364,25 @@ function watts(value) {
   return `${fmt.sig(scaled, 3)} ${prefix}W`;
 }
 
-function notes(list, quantity, { useLog, clamped, allDark, cropped = 0 }) {
+/**
+ * What the chart is doing that the chart cannot say for itself.
+ *
+ * `levels` is the ramp's own array — deduplicated, dark excluded, sorted — and
+ * not the curve list, because the last line here describes the **colour
+ * encoding** and the colours are ranked by illumination, not by curve. Taken
+ * from the raw list it counted a level once per arm: under `both_directions`
+ * a single 1.020 V sweep gave `[1.02, 1.02]`, two entries, so a range, printed
+ * `sequential 1.020 V → 1.020 V at the LED` — a ramp from one illumination to
+ * itself, under two curves that are one colour on the screen.
+ *
+ * Excluding the dark curve is the same fault one step further out, and it is
+ * not hypothetical: under `light_control="leave"` a curve read back dark keeps
+ * whatever level the generator reports, because the *shutter* is what made it
+ * dark (`experiment.jv.illumination_state`). From the raw list a shut-shutter
+ * curve at 1.060 V and a lit one at 1.020 V printed a 1.020 → 1.060 ramp whose
+ * bright end never reached the sample.
+ */
+function notes(list, quantity, { useLog, clamped, allDark, cropped = 0, levels = [] }) {
   const out = [];
   if (quantity.key === 'current') {
     out.push('no pixel area on this run, so the axis is amps — a density would be inventing one');
@@ -377,9 +398,25 @@ function notes(list, quantity, { useLog, clamped, allDark, cropped = 0 }) {
   if (!allDark && list.some((c) => c.dark === null || c.dark === undefined)) {
     out.push('a curve whose illumination the bench could not read back — labelled from the read-back, and it said nothing');
   }
-  const levels = list.map((c) => c.led_level_v).filter((v) => v !== null && v !== undefined);
-  if (levels.length > 1) {
-    out.push(`sequential ${fmt.volts(Math.min(...levels), { decimals: 3 })} → ${fmt.volts(Math.max(...levels), { decimals: 3 })} at the LED`);
+  // The ramp keeps a slot for a light curve whose level went unread — it still
+  // needs a colour — but `null` is not a voltage, and `Math.min(null, 1.02)`
+  // is **0**, so a sentence built over the array as it stands reports a
+  // 0.000 V step nobody set. Only the levels that have a number are printed;
+  // the unread slot is said, not numbered. There is at most one of them
+  // whatever the curve count, because the `Set` folds them together.
+  const known = levels.filter((v) => Number.isFinite(v));
+  const unread = levels.length > known.length;
+  const V = (v) => fmt.volts(v, { decimals: 3 });
+  // Sorted, so the ends are the ends. The **count** leads because that is the
+  // fact the reader cannot recover from the picture: with `both_directions`
+  // there are twice as many curves as there are colours.
+  if (known.length > 1) {
+    out.push(`sequential · ${known.length} illumination levels, `
+      + `${V(known[0])} → ${V(known[known.length - 1])} at the LED`
+      + (unread ? ', and one whose level went unread' : ''));
+  } else if (known.length === 1 && unread) {
+    out.push(`one illumination level, ${V(known[0])} at the LED, `
+      + 'beside a curve whose level went unread');
   }
   return out;
 }

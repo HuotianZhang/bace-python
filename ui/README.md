@@ -551,6 +551,19 @@ the instrument rather than in how they draw:
   a *key*, so the crosshair built two dots with one identity, updated the
   first for both, and drew the reverse arm's value in the forward arm's
   colour.
+* **And the footnote under it kept counting curves** (2026-09-06, #67). The
+  colours were ranked by illumination, but `notes()` was still reading the raw
+  list: `both_directions` at one level gave it `[1.02, 1.02]`, two entries so
+  a range, and the card said `sequential 1.020 V → 1.020 V at the LED` — a
+  ramp from one illumination to itself, under two curves it had just drawn in
+  a single colour. It reads the same deduplicated array the colours are ranked
+  from now, which also takes the dark curve out of the ramp: under
+  `light_control="leave"` the *shutter* makes the dark, so a curve read back
+  dark keeps whatever level the generator reports, and a shut shutter at
+  1.060 V was being printed as the bright end of a ramp that never reached
+  the sample. The line names the level count too — with `both_directions`
+  there are twice as many curves as colours, which is the arithmetic that was
+  wrong in all three places.
 
 ### What rendering it found
 

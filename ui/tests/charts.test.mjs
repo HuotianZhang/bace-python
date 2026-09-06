@@ -606,6 +606,52 @@ test('both directions of one level share its colour, and not its key', () => {
   assert.notEqual(stepped.panels[0].series[0].colour, stepped.panels[0].series[1].colour);
 });
 
+test('the ramp note counts illumination levels, not curves', () => {
+  // The colour bug's third site (#67). `notes()` ranked the raw curve list, so
+  // `both_directions` at one level gave `[1.02, 1.02]` — two entries, so a
+  // range — and the footnote read `sequential 1.020 V → 1.020 V at the LED`:
+  // a ramp from one illumination to itself, under two curves the chart itself
+  // draws in a single colour. It reads the same array the colours are ranked
+  // from now, so the sentence and the picture cannot disagree.
+  const light = JV.curves.find((c) => c.dark !== true);
+  const ramped = (curves) => jvModel(curves).notes.find((n) => /at the LED/.test(n));
+
+  assert.equal(ramped([
+    { ...light, direction: 'forward' },
+    { ...light, direction: 'reverse' },
+  ]), undefined, 'one level is not a ramp, however many arms it was swept in');
+
+  // A dark curve is not a rung of it either. Under `light_control="leave"` the
+  // *shutter* makes the dark, so a curve read back dark keeps whatever level
+  // the generator reports — and that level never reached the sample.
+  assert.equal(ramped([
+    { ...light, dark: true, led_level_v: 1.06 },
+    { ...light, dark: false, led_level_v: 1.02 },
+  ]), undefined, 'a shut shutter at 1.06 is not the bright end of a ramp');
+
+  // What the line is for still gets said, and says how many colours are on
+  // the chart — which is what six curves in three colours cannot show.
+  const three = ramped([1.0, 1.0, 1.02, 1.02, 1.06, 1.06].map((v, i) => ({
+    ...light, led_level_v: v, direction: i % 2 ? 'reverse' : 'forward',
+  })));
+  assert.match(three, /3 illumination levels/);
+  assert.match(three, /1\.000 V → 1\.060 V/);
+
+  // `null` is not a voltage: the ramp keeps a slot for a light curve whose
+  // level went unread, and `Math.min(null, 1.02)` is 0, so a sentence built
+  // over that array reports a 0 V step nobody set. It is said, not numbered.
+  const unread = ramped([
+    { ...light, led_level_v: null },
+    { ...light, led_level_v: 1.02 },
+  ]);
+  assert.ok(!/0\.000 V/.test(unread), 'an unread level is never printed as 0 V');
+  assert.match(unread, /1\.020 V/);
+  assert.match(unread, /unread/);
+
+  // One lit curve, its level unread: one colour, nothing to rank, nothing said.
+  assert.equal(ramped([{ ...light, led_level_v: null }]), undefined);
+});
+
 test('a pipeline node draws on the card of the module that ran it', () => {
   // `RunQueued.module` is null for a pipeline and the module names are the
   // nodes' `kind`. Found by the run's module, the canonical two-node tree drew
