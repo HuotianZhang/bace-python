@@ -639,6 +639,20 @@ def test_the_acquisition_is_digitized_to_the_whole_count_not_polled():
                 assert not running, "the count was read while running"
 
 
+def test_the_trigger_source_is_kept_displayed_so_a_bare_dig_records_it():
+    """`:DIG CHAN2` switched CHAN3's display off and a bare `:DIG` then never
+    acquired the sync (rig, 2026-09-06, runs 031419-001 and 032124-001).
+    Configuring the trigger turns its channel's display on, so the sync
+    trace `_sync_trace` reads out of the same record is there."""
+    from bace.drivers.infiniium import Infiniium
+
+    io = _MeasuredScope()
+    Infiniium(io).configure_edge_trigger("CHAN3", positive=True, sweep="AUTO")
+    up = [c.strip().upper() for c in io.log]
+    assert ":CHAN3:DISP ON;" in up
+    assert up.index(":CHAN3:DISP ON;") < up.index(":TRIG:EDGE:SOUR CHAN3;")
+
+
 def test_an_averager_that_will_not_empty_is_refused_not_fetched():
     """A count still standing after :CDIS and averaging off/on means the
     buffer still holds the previous trace. Fetching would fold this

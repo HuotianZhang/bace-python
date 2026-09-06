@@ -164,6 +164,12 @@ class Infiniium:
         so it is Huotian's to make, not mine.
         """
         self._io.write(":TRIG:MODE EDGE;")
+        if source.upper().startswith("CHAN"):
+            # The sync is fetched out of the same record as the current
+            # (`_sync_trace`), and :DIG acquires only displayed channels -- a
+            # `:DIG CHAN2` had switched CHAN3's display off, and the next run
+            # (2026-09-06, 032124-001) found no CHAN3 samples at all.
+            self._io.write(f":{source}:DISP ON;")
         self._io.write(f":TRIG:EDGE:SOUR {source};")
         self._io.write(f":TRIG:EDGE:SLOP {'POS' if positive else 'NEG'};")
         self._io.write(f":TRIG:SWE {sweep};")
@@ -218,10 +224,12 @@ class Infiniium:
         self._io.timeout = max(1000, int(timeout_s * 1000))
         try:
             # Bare :DIG, not `:DIG {source}`: with a channel list the scope
-            # digitizes only those channels, and the first verification run
-            # (2026-09-06, 031419-001) then had no CHAN3 record for the sync
-            # trace that `_sync_trace` reads beside the current. Bare, it
-            # acquires every displayed channel -- what `:RUN` did.
+            # digitizes only those channels *and switches the others' display
+            # off*, and the first verification run (2026-09-06, 031419-001)
+            # then had no CHAN3 record for the sync trace that `_sync_trace`
+            # reads beside the current. Bare, it acquires every displayed
+            # channel -- what `:RUN` did -- and `configure_edge_trigger`
+            # keeps the trigger source displayed.
             self._io.write(":DIG;")
             self._io.query("*OPC?")
         except Exception as exc:                            # noqa: BLE001
