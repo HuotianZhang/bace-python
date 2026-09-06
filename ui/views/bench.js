@@ -849,7 +849,7 @@ export default {
     // after every save or delete, rather than on a timer.
     loadBenches();
     return {
-      dispose() { off(); charts.dispose(); clearTimeout(saveArmedTimer); },
+      dispose() { off(); charts.dispose(); clearTimeout(armedTimer); },
       focus,
     };
   },
