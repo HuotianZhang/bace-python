@@ -300,6 +300,20 @@ Nine, and they are the reason the harness exists. Each is documented at its site
 4. **The empty fetch was not a block-header problem** (two wrong diagnoses
    first) — it was fetching while the scope was still running. `:STOP` first.
 5. **`:ADER?` is a latch cleared on read**, and answered `+1` ~1 ms after `:RUN`.
+   **And it is set per acquisition, not per completed average** -- so with
+   200 averages asked for, the fetch came after ~25. Worse (2026-09-06): **the
+   averager is never emptied** by the LabVIEW double configure, nor by
+   `:STOP`/`:RUN`, only by a channel range write. `:WAV:COUN?` ran on from the
+   light acquisition into the dark one (dark count = light count + ~27, every
+   step), so every dark trace was half light and Q was half its value; a
+   step whose auto-range sat inside the deadband inherited the *previous
+   step's dark* into its light trace and read a third. That was "the third
+   point" of every scan on 2026-09-05/06. The driver now empties the averager
+   (`:CDIS` with averaging toggled), takes the auto-range passes un-averaged,
+   waits on `:WAV:COUN?` reaching the count, and refuses a count that is
+   complete before the first acquisition. The LabVIEW original waited the
+   same way this port did, so the 2026-09-02 agreement with it does not
+   validate absolute charge; re-measure before quoting any Q from before this.
 6. **Auto-range was single-pass**, then capped at 4 — both too few. See §7.
 7. **The scope rounds `:CHAN2:RANG?` to three significant figures.** A readback
    added for accuracy was degrading it, and an equality-based ceiling test would

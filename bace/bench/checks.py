@@ -924,6 +924,8 @@ def stage_acquire(report: Report, rm, rig_config, run_config, averages: int) -> 
                        "transcript shows what it returned.")
                 c.data[":ADER? replies"] = [x.reply for x in c.exchanges
                                             if "ADER" in x.command][-5:]
+                c.data[":WAV:COUN? replies"] = [x.reply for x in c.exchanges
+                                                if "WAV:COUN" in x.command][-5:]
                 return
             c.data["autorange range/offset (V)"] = f"{vrange:g} / {voffset:g}"
             c.data["fetch route"] = s.last_fetch_method
