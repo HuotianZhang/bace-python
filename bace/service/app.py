@@ -431,7 +431,7 @@ def create_app(session: Session, *, ui_dir: str | None = None,
         The record is the recipe's `bench` block widened to the whole
         catalogue: `{module: {param: {"value", "source"}}}`, resolved, so the
         file says both what a value is and which layer it came from. There is
-        deliberately no route that loads one back. Putting a saved value onto
+        deliberately no route that *loads* one back. Putting a saved value onto
         the bench is `PUT /modules/{m}/params`, the same edit a card's field
         makes, one module at a time -- so a value the spec now refuses is
         refused with the sentence it would have got from the field, and the
@@ -450,8 +450,28 @@ def create_app(session: Session, *, ui_dir: str | None = None,
 
     @app.get("/bench/saved")
     async def saved_bench():
-        """Every saved bench under `<out>/bench`, newest first, values included."""
-        return {"presets": _saved_records(os.path.join(session.out, "bench"), ("bench",))}
+        """Every saved bench under `<out>/bench`, newest first, values included.
+
+        Keyed `benches` as `/pipelines/saved` is keyed `recipes`: each tab's
+        saved things, under the name that tab calls them."""
+        return {"benches": _saved_records(os.path.join(session.out, "bench"), ("bench",))}
+
+    @app.delete("/bench/saved/{name}")
+    async def delete_bench(name: str):
+        """Delete one saved bench. 404 when there is no such file.
+
+        A saved bench is the only thing the console can remove from disk, so
+        it is the only DELETE that reaches a file: a recipe has no delete
+        (nothing in the pipeline tab offers one), and a run's folder is the
+        record of an experiment. The console arms the second click, as it
+        does for the overwrite beside it.
+        """
+        stem = _stem(name)
+        path = os.path.join(session.out, "bench", f"{stem}.json")
+        if not stem or not os.path.isfile(path):
+            return _error(404, f"no saved bench called {stem or name!r}", name=stem)
+        os.remove(path)
+        return {"name": stem, "deleted": True}
 
     # -- /modules --------------------------------------------------------------
     @app.get("/modules")

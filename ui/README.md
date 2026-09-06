@@ -26,9 +26,9 @@ repo root for the offline bench at `/ui/replay.html`, which needs
 | `lib/rail.js` | the pinned rail and the chain strip: `railModel(state)` is a pure function of the store, the DOM is beside it. `temperatureNow(state)` lays the newest `TemperatureRead` over the read-back's block, so the T cell follows the monitor the service runs from boot rather than the last `/bench`; the sub-line carries the monitor's cadence, and a monitor that has not read for three of its intervals reads `stale` and loses its band verdict — `in band` is a claim about now. Since 2026-09-06 the rail is **one 27 px row at every width**: the label and the value on one line, the sub-line a panel the cell opens on hover and on focus, and no wrap to two rows below 1560. `cellEl` marks the cells that carry one (`tabindex`, `title`) and the interlock cell `drawn` when the diagram states the position and the word beside it would be the same sentence twice |
 | `lib/fields.js` | which fields sit above the fold on each card and in what order, as data, plus `cardModel` — the pure function one `GET /modules` entry becomes a card's rows through |
 | `lib/card.js` | the generated card and the one field component every parameter goes through: provenance rendered, `doc` under the field and `doc_full` on hover |
-| `lib/instruments.js` | the bench tab's Instruments panel: shutter, LED and relay as switches whose lit position is the read-back, the LED's levels beside it; `panelModel` is pure and tested |
+| `lib/instruments.js` | the bench tab's Instruments panel: shutter, LED and relay as switches whose lit position is the read-back, the LED's levels beside it; `panelModel` is pure and tested. **One row since 2026-09-06** — it was three stacked rows at 57 px each under a rail just cut to 27 px for eight readings; the zone heading went with the stack, since `SHUTTER`, `LED · 33220A` and `RELAY` label themselves. 42 px, and 1226 px of a 1250 px row at 1280, so nothing truncates anywhere the console runs |
 | `lib/route.js` | the hash both ways: `#/bench?module=bace` parses to a route and a query, and `benchHash` writes the link a node form points at its bench card with |
-| `lib/recipe.js` | a saved bench against the bench it is reopened on — a pipeline recipe (`POST /pipelines/save`) and the bench tab's own settings file (`POST /bench/save`) carry the same `bench` block, so one comparison reads both: `drift` lists where the bench moved since the save (for a recipe, skipping what every node overrides or a loop binds; for a bench file, which has no tree, every module in it), `restore` is the `PUT` that puts it back, and `fileStem` is `app.py: _RECIPE_STEM` in JS — without it a Save's "this will write over ⟨name⟩" arming never fired for a name with a space in it. Pure and tested |
+| `lib/recipe.js` | a saved bench against the bench it is reopened on — a pipeline recipe (`POST /pipelines/save`) and the bench tab's own settings file (`POST /bench/save`) carry the same `bench` block, so one comparison reads both: `drift` lists where the bench moved since the save (for a recipe, skipping what every node overrides or a loop binds; for a bench file, which has no tree, every module in it), `restore` is the `PUT` that puts it back, and `fileStem` is `app.py: _RECIPE_STEM` in JS — without it a Save's "this will write over ⟨name⟩" arming never fired for a name with a space in it; and `savedBenchModel` is the bench tab's `MODULES` row in one object, four states (nothing saved / files but none open / open and matching / open and drifted). Pure and tested |
 | `lib/watch.js` | when to ask `GET /bench` again — which frames move the bench, and the throttle that collapses a scan's worth of them into one request per 700 ms |
 | `lib/dom.js` | `h()`, and `keyed()`: rebuild an element only when its model differs from the one already on screen |
 | `lib/svg.js` | `h()` in the SVG namespace, because `createElement('svg')` is an `HTMLUnknownElement` — a tag with the right name and no geometry |
@@ -51,8 +51,8 @@ repo root for the offline bench at `/ui/replay.html`, which needs
 | `lib/replay.js`, `replay.html` | the offline bench: fixtures fed into the same store the socket feeds |
 | `preview.html` | the bench tab itself with no service: the real shell and `views/bench.js` over the modules and Hello fixtures with a stub API, from the Round 3 review. Its bench save is in memory — a saved bench lasts until the tab is reloaded, which is enough to work on the row that draws it. `#/rig` mounts the rig tab instead, whose drawings need no service either |
 | `rail-density.html` | the rail at four densities, side by side (2026-09-06): as shipped, and three ways of giving its 156 px back — a tighter stack, one line per cell, and a single strip of eight with the sub-lines on hover. Same eight cells and the same DOM `lib/rail.js` emits, so the four differ only in CSS and `tests/rail.test.mjs` cannot tell them apart; the heights are measured in the browser, not written down. **C is the one that shipped** — the page stays as the record of what the other two cost and what C gave up for its 27 px |
-| `bench-head.html` | bench 页头的四种排法，并排 (2026-09-06): as shipped, and three ways of spending less than 397 px before the first parameter — the bench-settings row folded into the `MODULES` header, that plus the Instruments panel on one row, and everything on one strip. Same DOM `lib/instruments.js` emits and the same rules copied out of `style.css`, heights measured in the browser rather than written down. **Nothing has shipped from it** — it is the page the decision gets made against, and it carries the two findings behind the options: the rail does eight readings in 27 px where the panel below it does three switches in 172, and a Save button that sits between two zones states the scope of neither |
-| `views/` | bench is M2's six generated cards with M3's charts in three of them, the Instruments panel above them and the Bench settings row between the two (below); pipeline is M5's editor and schedule; results is M6's grid, drawn from `GET /runs` and `GET /runs/{id}` and nothing else; rig is R3·4: the chain, one shot at three scales with the swept axis taken from the `bace` card, and the read-back under them |
+| `bench-head.html` | bench 页头的四种排法，并排 (2026-09-06): as shipped then, and three ways of spending less than 397 px before the first parameter — the bench-settings row folded into the `MODULES` header, that plus the Instruments panel on one row, and everything on one strip. Same DOM `lib/instruments.js` emits and the same rules copied out of `style.css`, heights measured in the browser rather than written down. **B is the one that shipped** — 185 px in the real console, 212 back to the view. The page stays as the record of what A left on the table and what C wanted for its extra 16 px, and of the two findings behind all three: the rail does eight readings in 27 px where the panel below it did three switches in 172, and a Save button that sits between two zones states the scope of neither |
+| `views/` | bench is M2's six generated cards with M3's charts in three of them, the one-row Instruments panel above them and the `MODULES` header between the two, which carries the saved bench and the `⋯` that saves, opens and deletes them (below); pipeline is M5's editor and schedule; results is M6's grid, drawn from `GET /runs` and `GET /runs/{id}` and nothing else; rig is R3·4: the chain, one shot at three scales with the swept axis taken from the `bace` card, and the read-back under them |
 | `fonts/` | IBM Plex Sans and Mono, Archivo — 24 woff2, 387 KB, lifted out of the Round 3 mockup by `tools/extract_ui_fonts.py`. Nothing is fetched from a network at runtime |
 | `fixtures/` | see below |
 | `tests/` | `node --test ui/tests/…` — and `tests/test_ui.py` runs them from the Python suite, skipping where there is no Node |
@@ -576,47 +576,63 @@ a card is replaced *in place* so rebuilding one does not blur a field in
 another. Idle with a monitor ticking: zero rebuilds. Through a scan: six, in
 the three cards whose read-back row actually moved.
 
-### What the Bench settings row is, and why it does not have a Load button
+### Where saved benches live, and why the load is two clicks
 
-*2026-09-06.* The values on the six cards are the catalogue's **edited** layer,
-and that layer is a session: it lives in the service process and goes with it.
-An afternoon of tuning was recoverable only by saving a pipeline recipe, which
-records the bench for the modules one tree happens to name, as a by-product of
-saving a structure the operator may not want. So the bench saves for its own
-sake — `POST /bench/save` writes every module of the catalogue to
-`<out>/bench/<name>.json`, `GET /bench/saved` lists them, and the row that
-drives the two sits between the Instruments panel and the cards: what it is
-about is everything below it, and nothing the switches above it do (a switch is
-an action on the bench, and an action is not a setting to save).
+*2026-09-06, revised the same day.* The values on the six cards are the
+catalogue's **edited** layer, and that layer is a session: it lives in the
+service process and goes with it. An afternoon of tuning was recoverable only
+by saving a pipeline recipe, which records the bench for the modules one tree
+happens to name, as a by-product of saving a structure the operator may not
+want. So the bench saves for its own sake — `POST /bench/save`,
+`GET /bench/saved`, `DELETE /bench/saved/{name}`.
 
-**There is no Load button, and no load route.** Two decisions, made for the
-same reason and worth separating:
+**It shipped twice, and the first version is the more useful half of the
+story.** It went in as a zone of its own between the Instruments panel and the
+cards: 65 px carrying a name field and a Save button, permanently, for
+something touched once a session. Two things were wrong with that, and they
+were different in kind. The rail had just been cut from 156 px to 27 for eight
+live readings, and this added 65 back next to an Instruments panel spending 172
+on three switches — `ui-rules` §1 says density is a requirement. And a Save
+sitting *between* two zones stated the scope of neither: the switches above act
+on the bench the moment they are clicked, the fields below `PUT` on change, and
+this was an explicit Save of which of them? (Primer's rule — one save button per
+form, and never explicit and automatic mixed in one form — names it exactly.)
 
-*The service does not load.* Putting a saved value back is `PUT
-/modules/{m}/params`, one module at a time — the same edit a field makes — so a
-value the spec now refuses is refused with the sentence the field would have
-given, and the modules that took theirs keep them. A load route would have had
-to invent an all-or-nothing rule for nine modules, and an all-or-nothing that
-fails leaves the operator holding the bench they were trying to replace with no
-idea which value stopped it.
+`bench-head.html` is the four layouts measured side by side. **B shipped**: the
+Instruments panel on one row, and the saved bench folded into the `MODULES`
+header — the row that labels the thing it saves. 397 px before the first
+parameter became 185.
 
-*The console says what it will do before it does it.* Picking a name from the
-list never moves anything: it draws the comparison — `bace.n_loops  saved 100 ·
-bench 20`, one line per value — and the button under the list is what sends the
-`PUT`s. Replacing the bench is not undoable and is not a read-back, so it is
-not something to find out about by clicking. That comparison is `lib/recipe.js:
-drift`, the same one the pipeline tab makes when a recipe is reopened, because
-a bench file *is* a recipe record with no tree.
+What is permanently on screen is one row answering one question: **which saved
+bench this is, and whether the bench has moved since.** `no saved bench` /
+`2 saved benches` / `monday_morning ✓ matches the bench` /
+`monday_morning • 3 values differ`. `lib/recipe.js: savedBenchModel` is those
+four states, pure. Everything else — the name field, the file list, the drift
+table — is behind the `⋯` beside it, per §14's fourth question.
 
-Two smaller things fell out of building it. The pointer guard that holds a
-render back between a card's mousedown and its mouseup — without which a text
-field's `change` fires during the blur the button press causes, the card
-redraws, and the click lands on a button that no longer exists — now covers
-this row too, whose name field has exactly that shape. And the Save arming
-(`⟨name⟩ already exists — click again`) compares the **stem** the service will
-write rather than the name as typed: `cool down` is the file `cool_down`, so
-the pipeline tab's arming had never once fired for a name with a space in it,
-which is most of them. `lib/recipe.js: fileStem` is that rule in JS, pinned to
-the service's by one table asserted on both sides.
+**The load is two clicks, and that is the design.** `open` on a file never moves
+a value: it draws the drift — `bace.vpre  saved 1.020 · bench 0.800`, one line
+each — and the button in the note's head sends the `PUT`s. Replacing the bench
+is not undoable and is not a read-back, so it is not something to find out about
+by clicking. That comparison is `lib/recipe.js: drift`, the same one the pipeline
+tab makes when a recipe is reopened, because a saved bench *is* a recipe record
+with no tree.
+
+**And there is no load route.** Putting a saved value back is
+`PUT /modules/{m}/params`, one module at a time — the same edit a field makes —
+so a value the spec now refuses is refused with the sentence the field would
+have given, and the modules that took theirs keep them. An all-or-nothing load
+that fails leaves the operator holding the bench they were trying to replace
+with no idea which value stopped it.
+
+Three smaller things came out of building it. The pointer guard that holds a
+render back between a card's mousedown and its mouseup now covers this row too,
+whose name field has exactly that shape — and the throwaway prototype
+rediscovered why, by omitting the guard and shipping a Save button that did
+nothing. The Save arming compares the **stem** the service will write rather
+than the name as typed (`cool down` is the file `cool_down`), so the pipeline
+tab's arming, which had never once fired for a name with a space in it, works
+now as well. And §14 gained a fifth question — *where does the control sit?* —
+which this round earned three times over; the paragraph there names all three.
 
 The phases, and what each one has to prove, are in `docs/ui-plan.md`.

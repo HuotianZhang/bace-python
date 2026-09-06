@@ -30,7 +30,11 @@
   里逐条抄来的样式。高度是页面加载后实测的，不是估的 —— 用一个人手打的数字
   结束一场密度争论，等于没结束。
 
-  还没有任何一个合入。这一页是给人点评用的。
+  **B 合入了**（2026-09-06）。真机上量到 185 px，比现状的 397 少 212；
+  Instruments 一行 42 px，1280 / 1440 / 1920 三个宽度都不折不截。
+  存 / 取的入口是 `MODULES` 行上紧跟身份的一个 `⋯` —— 不是最右边那个：
+  第一版就是把它推到 1440 宽的行尾，结果谁也找不到。
+  这一页留着，是为了记住 A 少省了多少、C 又拿什么换那多出来的 16 px。
 -->
 <style>html, body { margin: 0; } img { max-width: 100%; } [hidden] { display: none !important; }</style>
 </head>
@@ -423,10 +427,17 @@ code { background: var(--pg-chip); padding: 1px 5px; border-radius: 3px; }
   </p>
   <p class="lede">
     第二条是根子。修法不是把它压矮，是<b>把它放回它所保存的东西的边界里</b>：它存的是下面那些卡片，
-    所以它属于 <code>MODULES</code> 那一行 —— 那一行本来就在（26 px），现在还是个空的
+    所以它属于 <code>MODULES</code> 那一行 —— 那一行本来就在（26 px），当时还是个空的
     <code>::before</code> 伪元素。而 <code>ui-rules §14</code> 的第四问「多久碰一次」
     决定了剩下的：一天用不到一次的东西不该常驻屏幕，它在一个 <code>⋯</code> 后面。
     常驻的只留一样 —— <b>这台架是哪个存档、跟存档比动没动过</b>。
+  </p>
+  <p class="lede">
+    <b>结果：B 已经合入。</b>真机上量到 <b class="num">185 px</b>（这页的样例是 196，
+    差在页面外壳的字体回退），Instruments 一行 <b class="num">42 px</b>，
+    1280 / 1440 / 1920 都不折不截。那个 <code>⋯</code> <b>紧跟在身份后面</b>，不在行尾 ——
+    第一版把它推到 1440 宽的行尾，离它所属的 <code>MODULES</code> 标签 1300 px，
+    结果没人找得到。<code>ui-rules §14</code> 现在写下了这一条。
   </p>
 
   <div class="controls">
@@ -503,14 +514,14 @@ code { background: var(--pg-chip); padding: 1px 5px; border-radius: 3px; }
   <div id="drawer-demo"></div>
 
   <p class="foot">
-    三个方案我都没有合入。<code>ui-rules §14</code> 第四问「一天碰不到一次的控件不该在屏幕上」
+    <code>ui-rules §14</code> 第四问「一天碰不到一次的控件不该在屏幕上」
     三个都满足了；<code>§1</code>「密度是要求」只有 B 和 C 认真回答；
     而 <code>§14</code> 又说开关「点一下就throw 继电器，要更大的靶子」—— C 把靶子做得最小，
     还把 LED 的低电平藏进了悬停，那正是 <code>rail-density.html</code> 里 C 被挑出来的同一笔账
     （低电平要压在开启电压以下，暗的半周才真的是暗的）。
-    我倾向 <b>B</b>：省 <b class="num">209 px</b>，一个读数都没藏，1280 下也放得下。
+    <b>B 是选中的那个</b>：省 <b class="num">209 px</b>，一个读数都没藏，1280 下也放得下。
     C 在 B 的基础上只多省 <b class="num">16 px</b>，却要拿 LED 的四个电平和开关的靶子去换 ——
-    这笔交易我认为不划算。但这是你说了算，我只把账摆出来。
+    这笔交易不划算。这一页留着，就是为了记住这笔账。
   </p>
 
 </div>

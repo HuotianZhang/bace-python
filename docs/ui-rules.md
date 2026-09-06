@@ -445,3 +445,17 @@ window and the interval: this one is reached for whenever the view underneath
 needs the room. The limit above still holds under the fold, and by the same
 rule: with no chart on screen the menu drops the window, `y from 0` and
 Export SVG, and keeps the interval, Export CSV and Clear.
+
+**And a fifth, once the family and the depth are settled: where does it
+sit?** Beside the thing it acts on. This is not a nicety — a control far
+enough from its subject is a control nobody finds, and the console has now
+proved it three times in one afternoon (2026-09-06, the saved-bench row):
+the `⋯` pushed to the end of a 1440 px row, 1300 px from the `MODULES` label
+it belonged to; the `open` beside each saved file pushed the same way by a
+`1fr` third column; and a file list that only existed once something had
+been saved, so the way *back* from a file was invisible until you had made
+one. Each was found by an operator asking where the button was. So: pack a
+row's controls toward the thing they name and let the slack fall at the end,
+never between; and give a list that can be empty a first row, an example or
+a sentence naming what would be in it — an empty state that shows nothing
+hides the path through it.

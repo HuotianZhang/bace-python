@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { drift, recorded, restore, coveredBy, fileStem, showValue } from '../lib/recipe.js';
+import { drift, recorded, restore, coveredBy, fileStem, showValue, savedBenchModel } from '../lib/recipe.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const CATALOGUE = JSON.parse(fs.readFileSync(path.join(here, '..', 'fixtures', 'modules_sim.json'), 'utf8'));
@@ -131,4 +131,47 @@ test('a drifted value is shown the way the cards show it', () => {
   assert.equal(showValue([1, 2.5], 'V'), '1.000, 2.500');
   assert.equal(showValue(null, 'V'), '—');
   assert.equal(showValue('shut', ''), 'shut');
+});
+
+// -- the `MODULES` row (`savedBenchModel`) ----------------------------------
+//
+// The only thing about saved benches permanently on screen. Four states, and
+// the row has to say which without the operator opening anything.
+
+const file = (name, moved = {}) => ({ ...preset(moved), name, saved_at: 1 });
+
+test('nothing saved, and the row says so', () => {
+  const m = savedBenchModel([], null, byName);
+  assert.equal(m.state, 'none');
+  assert.deepEqual([m.name, m.count, m.moved], [null, 0, []]);
+});
+
+test('files exist but none is open: the count, and no name claimed', () => {
+  const m = savedBenchModel([file('a'), file('b')], null, byName);
+  assert.equal(m.state, 'idle');
+  assert.equal(m.count, 2);
+  assert.equal(m.name, null, 'no file is open, so the row names none');
+});
+
+test('one open and the bench is what it holds', () => {
+  const m = savedBenchModel([file('evening')], 'evening', byName);
+  assert.equal(m.state, 'match');
+  assert.deepEqual([m.name, m.moved], ['evening', []]);
+});
+
+test('one open and the bench has moved: every value, in catalogue order', () => {
+  const m = savedBenchModel([file('evening', { bace: { vpre: 0.8 }, jv: { step_v: 0.05 } })],
+    'evening', byName);
+  assert.equal(m.state, 'drift');
+  assert.deepEqual(m.moved.map((d) => `${d.module}.${d.name}`), ['jv.step_v', 'bace.vpre']);
+  assert.deepEqual(restore(m.moved), { jv: { step_v: 0.05 }, bace: { vpre: 0.8 } });
+});
+
+test('a name that is no longer a file, and a file that will not parse, are idle', () => {
+  assert.equal(savedBenchModel([file('a')], 'deleted_since', byName).state, 'idle',
+    'the row must not name a file the service no longer has');
+  const torn = { name: 'torn', saved_at: 1, error: 'JSONDecodeError: …' };
+  const m = savedBenchModel([torn], 'torn', byName);
+  assert.equal(m.state, 'idle', 'no bench values in it, so there is nothing to compare');
+  assert.equal(m.count, 1, 'but it is still one of the files on disk');
 });

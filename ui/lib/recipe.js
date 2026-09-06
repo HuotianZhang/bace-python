@@ -94,6 +94,41 @@ export function coveredBy(tree, rows) {
 }
 
 /**
+ * The `MODULES` row of the bench tab, as one object — `views/bench.js`.
+ *
+ * That row is the only thing about saved benches that is permanently on
+ * screen, and it answers exactly one question: **which saved bench this is,
+ * and whether the bench has moved since**. Everything else — the name field,
+ * the file list, the drift table — is behind the `⋯` beside it, because a
+ * control reached for less than once a session does not sit on the screen
+ * (`ui-rules` §14's fourth question).
+ *
+ * Four states, and the row says which:
+ *
+ *   `none`   nothing saved yet — the row says so, or the `⋯` beside it is a
+ *            glyph with nothing to explain it
+ *   `idle`   files exist, none open against the bench: the count
+ *   `match`  one open, and the bench is what it holds
+ *   `drift`  one open, and `moved` lists every value that differs
+ *
+ * Pure, so `recipe.test.mjs` holds the four down without a browser.
+ */
+export function savedBenchModel(benches, loadedName, byName) {
+  const files = benches || [];
+  const file = loadedName ? files.find((f) => f.name === loadedName) || null : null;
+  if (!file || !recorded(file)) {
+    return { state: files.length ? 'idle' : 'none', name: null, count: files.length, moved: [] };
+  }
+  const moved = drift(file, byName);
+  return {
+    state: moved.length ? 'drift' : 'match',
+    name: file.name,
+    count: files.length,
+    moved,
+  };
+}
+
+/**
  * The file stem a name is saved under: `app.py: _RECIPE_STEM`, in JS.
  *
  * Here because the console has to compare a typed name with the names the

@@ -597,11 +597,21 @@ modules to the whole bench. The name is stemmed by `_RECIPE_STEM` exactly as a
 recipe's is, and an existing file is written over without asking (the console
 arms the second click, which is where a confirmation belongs).
 
-`GET /bench/saved` → `{"presets": [{"name", "path", "saved_at", "bench"}…]}`,
-newest first. A file that will not parse is listed with an `error` and no
-values rather than dropped: the operator saved it, so a picker that silently
-omitted it would say the save never happened. `GET /pipelines/saved` answers
-the same way, from the same reader.
+`GET /bench/saved` → `{"benches": [{"name", "path", "saved_at", "bench"}…]}`,
+newest first — keyed `benches` as `/pipelines/saved` is keyed `recipes`: each
+tab's saved things, under the name that tab calls them. A file that will not
+parse is listed with an `error` and no values rather than dropped: the operator
+saved it, so a picker that silently omitted it would say the save never
+happened. `GET /pipelines/saved` answers the same way, from the same reader.
+
+`DELETE /bench/saved/{name}` → 200 `{"name": "<stem>", "deleted": true}`, or 404
+`{"error", "name"}` when there is no such file. The name is stemmed the way the
+save stems it, so the console deletes under the name it lists. This is the only
+route that unlinks anything: a recipe has no delete (nothing on the pipeline tab
+offers one) and a run's folder is the record of an experiment. The console arms
+the second click for it, as it does for the overwrite beside it — and for more
+reason, since an overwrite replaces a file with the bench in front of the
+operator and this leaves nothing.
 
 **There is deliberately no load route.** Putting a saved value back on the
 bench is `PUT /modules/{m}/params`, one module at a time — the same edit a

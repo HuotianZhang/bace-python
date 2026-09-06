@@ -69,6 +69,9 @@ export function createApi({ base = '', fetch: fetchImpl = globalThis.fetch } = {
     saveBench: (name) => call('POST', '/bench/save', { name }),
     /** Every saved bench, newest first, values included. */
     savedBench: () => call('GET', '/bench/saved'),
+    /** Delete one. The only file the console removes: a recipe has no delete
+     *  and a run's folder is the record of an experiment. */
+    deleteBench: (name) => call('DELETE', `/bench/saved/${encodeURIComponent(name)}`),
     // There is no `loadBench`. A saved value goes back onto the bench through
     // `setParams` — the same edit a card's field makes — so one the spec now
     // refuses is refused with the sentence the field would have given, and

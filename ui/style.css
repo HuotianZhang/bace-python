@@ -404,9 +404,16 @@ button:disabled { opacity: .45; cursor: not-allowed; }
    `lib/instruments.js`. Above the cards, in its own zone, because it is a
    different thing from a card: a switch acts the moment it is clicked. */
 .instruments:empty { display: none; }
+/* One row since 2026-09-06 (`bench-head.html`, option B). It was three
+   stacked rows at 57 px each — 172 px, the least dense surface in the console,
+   directly under a rail just cut to 27 px for eight readings. `nowrap` is the
+   claim: at 1280 the row needs 1226 px of 1250, so nothing truncates at any
+   width the console runs at, and a fourth instrument gets this laid out again
+   rather than wrapped into two rows nobody measured. */
 .inst {
-  display: flex; flex-direction: column; gap: 2px;
-  padding: 8px 12px 10px; margin: 0 0 12px;
+  display: flex; flex-direction: row; align-items: center; gap: 22px;
+  flex-wrap: nowrap; overflow-x: auto;
+  padding: 6px 12px 7px; margin: 0 0 8px;
   background: var(--paper); border: 1px solid var(--rule);
 }
 .zh { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
@@ -415,29 +422,74 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   color: var(--grey);
 }
 
-/* -- saved bench settings: the edited layer, made to outlive the session ---
-   `views/bench.js`. The same box as the Instruments panel, between it and the
-   cards, because that is what it is about: everything on the cards below, and
-   nothing the switches above do. The drift list it opens is the pipeline
-   tab's `.recipe-note`, unchanged — it is the same comparison. */
-.benchsave:empty { display: none; }
-.bset .zn { font-size: 11px; color: var(--grey); }
-.bset .namerow { gap: 10px; }
-/* Bounded rather than free: the row is one line, and a name field that grew
-   to the width of a 430px-column grid pushed Save off the end of it. */
-.bset .namerow input.v { max-width: 20em; }
+/* -- saved benches: the `MODULES` header, and what the `⋯` opens ------------
+   `views/bench.js`. This was a 65 px zone of its own between the switches and
+   the cards, carrying a name field and a Save button permanently for
+   something touched once a session — and a Save between two zones states the
+   scope of neither. It is the header of the zone it saves now: the row
+   carries the identity, the `⋯` carries the machinery. The drift list it
+   opens is the pipeline tab's `.recipe-note`, unchanged — same comparison. */
+.modbar { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; min-height: 22px; }
+.modbar .zt { flex: 0 0 auto; }
+.modbar .sp { flex: 1 1 auto; }
+.modbar .who { font-family: var(--font-num); font-size: 12px; color: var(--ink); }
+/* The dot is the whole of "this has moved since it was saved" — warn, because
+   it is evidence and never a block (§3). */
+.modbar .who .dot { color: var(--warn); font-weight: 700; }
+.modbar .drift { font-size: 11.5px; color: var(--warn); }
+.modbar .match { font-size: 11.5px; color: var(--ok); }
+.modbar .none { font-size: 11.5px; color: var(--grey); }
+/* Beside the identity, never at the row's end: at 1440 the end of the row is
+   1300 px from the label it belongs to, and a control that far from the thing
+   it acts on is one nobody finds. */
+.dots {
+  font-family: var(--font-num); font-size: 14px; line-height: 1;
+  padding: 2px 8px 5px; cursor: pointer;
+  border: 1px solid transparent; background: transparent; color: var(--grey);
+}
+.dots:hover { border-color: var(--rule); color: var(--ink); }
+.dots[aria-expanded="true"] { border-color: var(--rule); color: var(--ink); background: var(--paper); }
 
-.cards::before {
-  content: 'Modules'; display: block; grid-column: 1 / -1;
-  font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase;
-  color: var(--grey); margin-bottom: 6px;
+/* Not a `<details>` that shuts on `mouseleave` the way `.pw-menu` is: that
+   depth suits an option picked in one click, and this holds a field to type a
+   name into and a table to read. */
+.bdrawer {
+  display: flex; flex-direction: column; gap: 9px;
+  padding: 9px 12px 11px; margin: 0 0 10px;
+  background: var(--paper); border: 1px solid var(--rule);
 }
-.irow {
-  display: grid; grid-template-columns: 9em auto 1fr; align-items: center; gap: 14px;
-  padding: 5px 4px; border-bottom: 1px solid var(--fill);
+.bdrawer .namerow { gap: 10px; }
+.bdrawer .namerow input.v { max-width: 20em; }
+.bfiles { display: flex; flex-direction: column; gap: 1px; }
+.bcap { margin: 0 0 3px; font-size: 11.5px; color: var(--grey); }
+/* Four columns, all packed left, the last one empty to eat the slack — every
+   action within a hand's width of the name it acts on. */
+.brow {
+  display: grid; grid-template-columns: minmax(9em, max-content) max-content max-content 1fr;
+  align-items: center; gap: 14px; padding: 3px 0; border-bottom: 1px solid var(--fill);
 }
-.irow:last-child { border-bottom: 0; }
-.irow .n { font-family: var(--font-head); font-weight: 800; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.brow:last-child { border-bottom: 0; }
+.brow.on { background: #fbf8f3; }
+.brow .fn { font-family: var(--font-num); font-size: 12px; }
+.brow .fn i { font-style: normal; color: var(--grey); }
+.brow .ft { font-family: var(--font-num); font-size: 11px; color: var(--grey); }
+.brow .fa { display: flex; gap: 6px; align-items: center; }
+/* A bench is saved once and put back many times, so `open` is the bordered
+   button and `overwrite`/`delete` are quiet beside it. */
+.brow .fa .btng { font-size: 11px; }
+.recipe-note.matched { border-left-color: var(--ok); background: #f2f8f3; }
+
+/* The `Modules` label was a `::before` on the grid. It is `.modbar`'s own
+   `.zt` now, because a label that has controls beside it is an element. */
+.irow { display: flex; align-items: center; gap: 9px; min-width: 0; }
+/* The label went from a 9em column to a rail-sized eyebrow when the panel
+   became a row: `SHUTTER` names the switch beside it, and at 11px in a column
+   it was doing the job of a zone heading that no longer exists. */
+.irow .n {
+  font-family: var(--font-head); font-weight: 700; font-size: 9px;
+  text-transform: uppercase; letter-spacing: .09em; color: var(--grey);
+  white-space: nowrap;
+}
 /* -- the instrument switch -------------------------------------------------
    One of three control families (`docs/ui-rules.md` §14). A position here is
    a *bench action*: clicking it moves the shutter, drives the LED, throws
@@ -446,7 +498,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
    accent under it rather than the settings' white-on-ink. */
 .sw { display: inline-flex; border: 1px solid var(--ink); }
 .sw .p {
-  padding: 6px 16px; font-size: 13px; color: var(--grey); cursor: pointer;
+  padding: 4px 12px; font-size: 12px; color: var(--grey); cursor: pointer;
   font-family: var(--font-num); font-weight: 400; letter-spacing: 0; line-height: 1.4;
   border: 0; border-right: 1px solid var(--rule); background: var(--paper);
   box-shadow: inset 0 -3px 0 transparent;
@@ -463,16 +515,16 @@ button:disabled { opacity: .45; cursor: not-allowed; }
    goes grey — the position is a guess, not a read-back. */
 .irow.inferred .sw { border-style: dashed; }
 .irow.inferred .sw .p.on { box-shadow: inset 0 -3px 0 var(--grey); }
-.vals { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
+.vals { display: flex; gap: 9px; align-items: baseline; flex-wrap: nowrap; }
 .vals label { display: inline-flex; align-items: baseline; gap: 4px; }
 .vals input.v {
-  font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 12px;
+  font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 11.5px;
   border: 1px solid transparent; border-bottom-color: var(--rule);
-  background: transparent; color: inherit; padding: 1px 3px; width: 5.5em; text-align: right;
+  background: transparent; color: inherit; padding: 1px 3px; width: 4.2em; text-align: right;
 }
 .vals input.v:hover { border-color: var(--rule); }
 .vals input.v:focus { border-color: var(--accent); outline: none; background: var(--paper); }
-.vals i { font-style: normal; color: var(--grey); font-size: 11px; }
+.vals i { font-style: normal; color: var(--grey); font-size: 10px; }
 .vals label.dim input.v { color: var(--grey); border-bottom-color: var(--fill); }
 .vals label.dim i { color: var(--rule); }
 

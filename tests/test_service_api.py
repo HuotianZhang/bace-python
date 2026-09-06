@@ -823,7 +823,7 @@ def test_the_bench_is_saved_and_put_back_a_module_at_a_time(service):
     round trip the console makes out of the two.
     """
     client, session = service
-    assert client.get("/bench/saved").json() == {"presets": []}
+    assert client.get("/bench/saved").json() == {"benches": []}
     assert client.post("/bench/save", json={"name": "  "}).status_code == 422
     assert client.post("/bench/save", json={}).json()["param"] == "name"
 
@@ -841,7 +841,7 @@ def test_the_bench_is_saved_and_put_back_a_module_at_a_time(service):
     # The bench moves on, and the file is the only record of what it was.
     client.put("/modules/bace/params", json={"vpre": 0.4})
     assert client.get("/modules/bace").json()["params"]
-    listed = client.get("/bench/saved").json()["presets"]
+    listed = client.get("/bench/saved").json()["benches"]
     assert [p["name"] for p in listed] == ["before_the_dark_scan"]
     assert listed[0]["bench"]["bace"]["vpre"]["value"] == 1.02
     assert "tree" not in listed[0], "a bench preset is not a recipe"
@@ -855,7 +855,7 @@ def test_the_bench_is_saved_and_put_back_a_module_at_a_time(service):
     # the second click, which is where a confirmation belongs.
     assert client.post("/bench/save", json={"name": "before/the dark scan"}).json()["name"] \
         == "before_the_dark_scan"
-    assert len(client.get("/bench/saved").json()["presets"]) == 1
+    assert len(client.get("/bench/saved").json()["benches"]) == 1
     paths = {(e["method"], e["path"]) for e in client.get("/").json()["routes"]}
     assert ("POST", "/bench/save") in paths and ("GET", "/bench/saved") in paths
 
@@ -888,6 +888,37 @@ def test_a_name_becomes_the_same_file_stem_on_both_sides(service):
         assert os.path.exists(os.path.join(session.out, "bench", f"{stem}.json"))
 
 
+def test_a_saved_bench_is_deleted_by_name(service):
+    """`DELETE /bench/saved/{name}` — the only file the console removes.
+
+    A recipe has no delete (nothing on the pipeline tab offers one) and a
+    run's folder is the record of an experiment, so this is the one route
+    that unlinks. The name is stemmed the same way the save stems it, so the
+    console can delete a file under the name it lists.
+    """
+    client, session = service
+    client.post("/bench/save", json={"name": "monday morning"})
+    client.post("/bench/save", json={"name": "evening"})
+    assert {b["name"] for b in client.get("/bench/saved").json()["benches"]} \
+        == {"monday_morning", "evening"}
+
+    r = client.delete("/bench/saved/monday_morning")
+    assert r.status_code == 200 and r.json() == {"name": "monday_morning", "deleted": True}
+    assert not os.path.exists(os.path.join(session.out, "bench", "monday_morning.json"))
+    assert [b["name"] for b in client.get("/bench/saved").json()["benches"]] == ["evening"]
+
+    # Gone is gone, and a name that was never there is the same 404.
+    for name in ("monday_morning", "never_saved"):
+        r = client.delete(f"/bench/saved/{name}")
+        assert r.status_code == 404 and r.json()["name"] == name
+    # The stem, so a name as typed reaches the file it named.
+    assert client.delete("/bench/saved/evening.json").status_code == 404, "the stem, not the filename"
+    assert client.delete("/bench/saved/evening").status_code == 200
+    assert client.get("/bench/saved").json() == {"benches": []}
+    paths = {(e["method"], e["path"]) for e in client.get("/").json()["routes"]}
+    assert ("DELETE", "/bench/saved/{name}") in paths
+
+
 def test_a_saved_file_that_will_not_parse_is_listed_with_its_reason(service):
     """Both save folders, one rule (`app._saved_records`).
 
@@ -903,7 +934,7 @@ def test_a_saved_file_that_will_not_parse_is_listed_with_its_reason(service):
             fh.write("{oh dear")
         with open(os.path.join(session.out, folder, "list.json"), "w", encoding="utf-8") as fh:
             fh.write("[1, 2]")
-    for url, key in (("/bench/saved", "presets"), ("/pipelines/saved", "recipes")):
+    for url, key in (("/bench/saved", "benches"), ("/pipelines/saved", "recipes")):
         rows = {r["name"]: r for r in client.get(url).json()[key]}
         assert set(rows) == {"good", "torn", "list"}
         assert "error" in rows["torn"] and "JSONDecodeError" in rows["torn"]["error"]
