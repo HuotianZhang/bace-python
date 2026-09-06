@@ -580,6 +580,49 @@ Actions:
 
 Unknown action → 404. The service never performs any of these on its own.
 
+### Saving the bench
+
+The values a bench card holds are the catalogue's **edited** layer, and that
+layer is a session: it lives in the process and goes with it. An afternoon of
+tuning six cards was recoverable only from a pipeline recipe, which records the
+bench for the modules one tree happens to name, as a by-product of saving a
+structure.
+
+`POST /bench/save` body `{"name": "…"}` → 200 `{"name": "<stem>", "path":
+"<out>/bench/<stem>.json"}`, 422 `{"error", "param": "name"}` when the name
+stems to nothing. The record is `{"name", "saved_at", "bench"}`, where `bench`
+is `{module: {param: {"value", "source"}}}` for **every module in the
+catalogue**, resolved — the recipe's `bench` block widened from one tree's
+modules to the whole bench. The name is stemmed by `_RECIPE_STEM` exactly as a
+recipe's is, and an existing file is written over without asking (the console
+arms the second click, which is where a confirmation belongs).
+
+`GET /bench/saved` → `{"benches": [{"name", "path", "saved_at", "bench"}…]}`,
+newest first — keyed `benches` as `/pipelines/saved` is keyed `recipes`: each
+tab's saved things, under the name that tab calls them. A file that will not
+parse is listed with an `error` and no values rather than dropped: the operator
+saved it, so a picker that silently omitted it would say the save never
+happened. `GET /pipelines/saved` answers the same way, from the same reader.
+
+`DELETE /bench/saved/{name}` → 200 `{"name": "<stem>", "deleted": true}`, or 404
+`{"error", "name"}` when there is no such file. The name is stemmed the way the
+save stems it, so the console deletes under the name it lists. This is the only
+route that unlinks anything: a recipe has no delete (nothing on the pipeline tab
+offers one) and a run's folder is the record of an experiment. The console arms
+the second click for it, as it does for the overwrite beside it — and for more
+reason, since an overwrite replaces a file with the bench in front of the
+operator and this leaves nothing.
+
+**There is deliberately no load route.** Putting a saved value back on the
+bench is `PUT /modules/{m}/params`, one module at a time — the same edit a
+card's field makes — so a value the spec now refuses is refused with the
+sentence the field would have given and the modules that took theirs keep it.
+A load route would have had to invent an all-or-nothing rule for the whole
+catalogue at once, and one that fails leaves the operator with the bench they
+were trying to replace and no idea which value stopped it. The console's bench tab
+compares a picked file with `GET /modules`, lists every value that would move,
+and sends those `PUT`s when the button under the list is clicked.
+
 ---
 
 ## 5. `/modules` — the catalogue with provenance
@@ -1024,7 +1067,7 @@ Never invent a settle time: `null` renders as "—" (the design's table shows
 
 - `POST /pipelines/validate` body `{"tree": …}` → 200 `{"valid": bool, "checks": [Verdict…], "schedule": [Step…], "counters": {…}, "cost": {…}, "node_paths": […], "folder": "<out>/<stem>", "folder_pattern": "<out>/<stem>_YYYYMMDD_HHMMSS"}`. This is the **Dry run** button: touches nothing. `folder` is the stem; the run's folder is `folder_pattern` with the stamp `submit` takes, which the Dry run cannot know — "writes 90 folders under `20260901_Txill_YYYYMMDD_HHMMSS/`".
 - `POST /pipelines` body `{"tree": …, "name": "…"}` → validates (including a fresh chain read-back job when idle), 422 with the checks when `invalid`/`crit`, else 202 `{"run_id", "state", "checks", "cost", "folder"}` (the stamped folder).
-- `GET /pipelines/last` → the last validated tree in this session (so the UI can reopen it). Saving recipes to disk is `POST /pipelines/save {"tree", "name"}` → `<out>/recipes/<name>.json`; `GET /pipelines/saved` lists them. Small, optional.
+- `GET /pipelines/last` → the last validated tree in this session (so the UI can reopen it). Saving recipes to disk is `POST /pipelines/save {"tree", "name"}` → `<out>/recipes/<name>.json`; `GET /pipelines/saved` lists them. Small, optional. The bench's own save (section 4) writes the same `bench` block to `<out>/bench/` for the whole catalogue, and both listings come from one reader — a file that will not parse is a row with an `error`, not a row that vanished.
   **The file is complete.** A tree carries only what its nodes override; everything else a node runs with is the module's bench value at *start* time, so a file holding the tree alone would run differently after a bench edit with no diff in it. The record is `{"name", "saved_at", "tree", "bench"}`, where `bench` is `{module: {param: {"value", "source"}}}` for every module the tree names, as the bench had them at save time (a tree that does not parse records `{}`). The UI compares `bench` with `GET /modules` when a recipe is reopened, lists every parameter the bench has moved on that some node of that module still takes from the bench (not one every node overrides or a loop binds), and offers to `PUT` the recipe's values back. Start is unchanged: it runs with the bench as it is — the note is what makes that visible.
 
 ### Executor (`executor.run_pipeline`)

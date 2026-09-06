@@ -52,7 +52,7 @@ import { renderRow, field, fold } from '../lib/card.js';
 import { chart } from '../lib/charts/frame.js';
 import { scheduleModel } from '../lib/charts/schedule.js';
 import * as tree from '../lib/tree.js';
-import { drift, recorded, restore } from '../lib/recipe.js';
+import { drift, recorded, restore, showValue, fileStem } from '../lib/recipe.js';
 import { createHistory } from '../lib/undo.js';
 import { benchHash } from '../lib/route.js';
 
@@ -945,7 +945,10 @@ export default {
       const c = v.cost;
       const blocked = !v.answer || !v.answer.valid || v.busy || v.stale || inflight || !typed;
       const moved = loaded ? drift(loaded, store.getState().modules.byName, { tree: typed, rows: v.rows }) : [];
-      const stem = name || (typed && typed.name) || '';
+      // The stem the service will write, not the name as typed: `cool down`
+      // is the file `cool_down`, and comparing the raw name meant the "this
+      // will write over it" arming never fired for a name with a space in it.
+      const stem = fileStem(name || (typed && typed.name) || '');
       const overwrites = recipes.some((r) => r.name === stem);
       const armed = Boolean(stem) && saveArmed === stem;
       const key = JSON.stringify([Boolean(typed), v.answer && v.answer.valid, v.busy, v.stale, inflight, c && c.total_s, name, recipes.map((r) => r.name), loaded && loaded.name, moved, history.depth, history.canRedo, history.undoLabel, history.redoLabel, saveArmed, overwrites]);
@@ -1077,15 +1080,9 @@ export default {
           h('button.btng', { title: 'keep the bench as it is', onclick: () => { loaded = null; render(); } }, 'keep bench')),
         h('div.rn-list', moved.map((it) => h('div.rn-row',
           h('span.l', { text: `${it.module}.${it.name}` }),
-          h('span.v', { text: `saved ${show(it.saved, it.unit)}` }),
-          h('span.v.now', { text: `bench ${show(it.now, it.unit)}` }),
+          h('span.v', { text: `saved ${showValue(it.saved, it.unit)}` }),
+          h('span.v.now', { text: `bench ${showValue(it.now, it.unit)}` }),
           h('i', { text: it.unit })))));
-    }
-
-    function show(v, unit) {
-      if (typeof v === 'number') return unit === 'V' ? v.toFixed(3) : Number.isInteger(v) ? String(v) : v.toFixed(3);
-      if (Array.isArray(v)) return v.map((x) => show(x, unit)).join(', ');
-      return v === null || v === undefined ? '—' : String(v);
     }
 
     async function restoreBench(moved) {
@@ -1112,14 +1109,14 @@ export default {
      * overwrite that one with no confirmation at all. The rule
      * `monitor.scopedTo` applies to an armed Abort, for the same reason.
      */
-    function armSave(stem) {
-      saveArmed = stem;
+    function armSave(name) {
+      saveArmed = name;
       clearTimeout(saveArmedTimer);
-      saveArmedTimer = stem ? setTimeout(() => { saveArmed = null; render(); }, 6000) : null;
+      saveArmedTimer = name ? setTimeout(() => { saveArmed = null; render(); }, 6000) : null;
     }
 
     async function save() {
-      const stem = name || (typed && typed.name) || '';
+      const stem = fileStem(name || (typed && typed.name) || '');
       if (!stem) {
         notify('a saved recipe needs a name — type one in the name field first.', 'warn');
         return;

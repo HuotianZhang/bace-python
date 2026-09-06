@@ -105,11 +105,26 @@ export function panelModel(bench, light) {
  * panel's Park is off screen exactly when a run is going and the strip's never
  * is. A second way to abort a run and drop a queue is not reach; it is a
  * second place to hit it by accident.
+ *
+ * **One row, since 2026-09-06** (`bench-head.html`, option B). It was three
+ * stacked rows of 57 px each — 172 px, the least dense surface in the
+ * console, immediately under a rail that had just been cut to 27 px for eight
+ * live readings. The switches sit side by side now, and the `Instruments`
+ * heading goes with the stack: `SHUTTER`, `LED · 33220A` and `RELAY` label
+ * themselves, and a zone heading over three labelled things says nothing the
+ * three do not.
+ *
+ * Measured at 1226 px of a 1250 px row at 1280, so nothing truncates at any
+ * width the console runs at — but that is 24 px of slack, and a fourth
+ * instrument needs this laid out again rather than squeezed into it.
+ *
+ * What did **not** change is the hit target's shape: a position here is a
+ * bench action (`ui-rules` §14), so it keeps its ink border and its fill.
+ * 4 px of padding rather than 6 is the whole of what the row cost.
  */
 export function renderInstruments(model, ctx) {
   const busy = Boolean(ctx.busy);
   return h('div.inst',
-    h('div.zh', h('span.zt', 'Instruments')),
     model.rows.map((row) => h('div.irow', { class: row.inferred ? 'inferred' : '' },
       h('span.n', { text: row.label }),
       h('span.sw', { role: 'group', 'aria-label': row.label, title: row.inferred ? 'inferred from the running step, not read back' : '' },

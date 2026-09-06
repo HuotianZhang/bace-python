@@ -5,6 +5,16 @@
 // here is the six generated module cards, and M4's live monitor will go inside
 // the running one.
 //
+// The one thing here that is neither a card nor a switch is the `MODULES`
+// header: the values the cards make live in the catalogue's edited layer,
+// which is a session, so an afternoon of tuning six of them went when the
+// service did. `POST /bench/save` writes the whole bench to a file,
+// `GET /bench/saved` lists them, `DELETE /bench/saved/{name}` removes one;
+// putting one back is the ordinary `PUT` a field makes, one module at a time,
+// so a value the spec now refuses is refused with the sentence the field
+// would have given and the rest of the file still lands. The row carries the
+// identity, the `⋯` beside it carries the rest.
+//
 // This file owns almost nothing. `fields.js` decides which rows a card has,
 // `card.js` draws them, and the service owns every value and its provenance.
 // What is left is the loop: an edit `PUT`s and re-renders from the entry that
@@ -13,7 +23,9 @@
 // value is a second opinion about a number the service is the authority on.
 
 import { h, fill, keyed } from './../lib/dom.js';
+import * as fmt from './../lib/format.js';
 import { moduleCard } from './../lib/card.js';
+import { drift, recorded, restore, savedBenchModel, showValue, fileStem } from './../lib/recipe.js';
 import { BENCH_CARDS, cardModel, cardRuns } from './../lib/fields.js';
 import { panelModel, renderInstruments } from './../lib/instruments.js';
 import { RESULT_CARDS, createChartThrottle, resultKeys, resultPanel, runFor } from './../lib/results.js';
@@ -29,8 +41,13 @@ export default {
     // runs, and the values on a card are also where every pipeline node of
     // that module starts. The shape says which is which; nothing is labelled.
     const panel = h('div.instruments');
+    // The `MODULES` header: the zone label the cards used to get from a CSS
+    // `::before`, now a row that also carries which saved bench this is and
+    // the `⋯` that saves and opens them. It labels the thing it acts on,
+    // which is the whole reason it is here rather than in a zone of its own.
+    const savedEl = h('div.saved');
     const body = h('div.cards');
-    fill(container, panel, body);
+    fill(container, panel, savedEl, body);
 
     /**
      * A card asked for by name — `#/bench?module=bace`, the pipeline tab's
@@ -87,25 +104,30 @@ export default {
      */
     let pressing = false;
     let missed = false;
-    body.addEventListener('pointerdown', (e) => {
-      if (e.target.closest('button')) pressing = true;
-    });
-    // `click` fires after `pointerup`, so release on the later of the two —
-    // and on `pointercancel`, or a drag off the button would freeze the card.
-    for (const kind of ['click', 'pointercancel']) {
-      body.addEventListener(kind, () => {
-        pressing = false;
-        if (missed) { missed = false; render(); }
-      }, true);
+    // Both zones this view redraws that have a text field beside a button:
+    // the cards, and the saved-bench drawer, whose name field commits on the
+    // same blur its own Save button causes.
+    for (const zone of [savedEl, body]) {
+      zone.addEventListener('pointerdown', (e) => {
+        if (e.target.closest('button')) pressing = true;
+      });
+      // `click` fires after `pointerup`, so release on the later of the two —
+      // and on `pointercancel`, or a drag off the button would freeze the card.
+      for (const kind of ['click', 'pointercancel']) {
+        zone.addEventListener(kind, () => {
+          pressing = false;
+          if (missed) { missed = false; render(); }
+        }, true);
+      }
+      zone.addEventListener('pointerup', () => {
+        // Nothing landed on a button: no `click` is coming, so release here.
+        setTimeout(() => {
+          if (!pressing) return;
+          pressing = false;
+          if (missed) { missed = false; render(); }
+        }, 0);
+      });
     }
-    body.addEventListener('pointerup', () => {
-      // Nothing landed on a button: no `click` is coming, so release here.
-      setTimeout(() => {
-        if (!pressing) return;
-        pressing = false;
-        if (missed) { missed = false; render(); }
-      }, 0);
-    });
 
     const opened = (name) => {
       if (!open.has(name)) open.set(name, new Set());
@@ -212,6 +234,359 @@ export default {
       // neither of them is `detail`.
       notify(err.text || String(err), err.level || 'warn', err.checks || null);
     };
+
+    // -- saved benches -----------------------------------------------------
+    //
+    // The cards' values are the catalogue's *edited* layer, and that layer is
+    // a session: it lives in the process and goes with it. Until now the only
+    // way to keep an afternoon of tuning was to save a pipeline recipe, which
+    // records the bench for the modules one tree happens to name, as a
+    // by-product of saving a structure the operator may not want.
+    //
+    // So: `POST /bench/save` writes the whole catalogue's values to
+    // `<out>/bench/<name>.json`, `GET /bench/saved` lists them,
+    // `DELETE /bench/saved/{name}` removes one, and there is **no load
+    // route**. Putting a saved bench back is `PUT /modules/{m}/params`, one
+    // module at a time — the same edit a field makes — so a value the spec now
+    // refuses is refused with the sentence the field would have given, and the
+    // modules that took theirs keep them. An all-or-nothing load that fails
+    // leaves the operator holding the bench they were trying to replace with
+    // no idea which value stopped it.
+    //
+    // **Where it lives** (`bench-head.html`, option B, 2026-09-06). This was a
+    // zone of its own between the switches and the cards: 65 px carrying a
+    // name field and a Save button, permanently, for something touched once a
+    // session. Worse, a Save sitting between two zones stated the scope of
+    // neither — the switches above act on the bench the moment they are
+    // clicked, the fields below `PUT` on change, and this one was an explicit
+    // Save of *which* of them? So it moved into the `MODULES` header, which is
+    // the row that labels the thing it saves. The row carries the identity and
+    // nothing else — which saved bench, and whether the bench has moved — and
+    // the machinery is behind the `⋯` beside it (`ui-rules` §14's fourth
+    // question). `lib/recipe.js: savedBenchModel` is that row, pure.
+    //
+    // **And the load says what it will do first.** Opening a file never moves
+    // a value: it draws the drift — `bace.vpre  saved 1.020 · bench 0.800`,
+    // one line each — and the button under the list is what sends the `PUT`s.
+    // Replacing the bench is not undoable and is not a read-back, so it is not
+    // something to find out about by clicking. That comparison is
+    // `lib/recipe.js: drift`, the same one the pipeline tab makes when a
+    // recipe is reopened, because a saved bench *is* a recipe record with no
+    // tree.
+
+    /** `GET /bench/saved`, newest first. Re-read after every save and delete. */
+    let benches = [];
+    /** What the next Save will be called, and what opening a file fills in. */
+    let benchName = '';
+    /** The file being compared with the bench, by name, until it is applied or
+     *  dismissed. Opening one never applies it: opening shows the list. */
+    let loaded = null;
+    /** Whether the `⋯` drawer is open. Not a `<details>` that shuts on
+     *  `mouseleave` the way `lib/power.js`'s menu is: that depth suits an
+     *  option picked in one click, and this holds a field to type a name into
+     *  and a table to read. It stays open until it is closed, or until a save
+     *  or a delete finishes. */
+    let drawerOpen = false;
+
+    /**
+     * An arm-then-confirm in flight, as `{kind, name}` — the six seconds Park
+     * uses, and the pipeline tab's Save.
+     *
+     * `views/pipeline.js` arms one thing and so keeps a bare stem; this row
+     * arms two — an overwrite and a delete — so the kind rides with the name.
+     * Both halves matter for the same reason that comment gives: a name that
+     * changed between the two clicks would otherwise carry the arming to a
+     * different file, and a kind that changed would delete what the operator
+     * meant to overwrite.
+     */
+    let armed = null;
+    let armedTimer = null;
+    const isArmed = (kind, name) => Boolean(armed && armed.kind === kind && armed.name === name);
+
+    function arm(kind, name) {
+      armed = kind ? { kind, name } : null;
+      clearTimeout(armedTimer);
+      armedTimer = kind ? setTimeout(() => { armed = null; render(); }, 6000) : null;
+    }
+
+    async function loadBenches() {
+      let answer;
+      try {
+        answer = (await api.savedBench()).benches || [];
+      } catch (err) {
+        // A list that will not answer is not an empty list. Emptying it would
+        // draw "none saved" over a folder full of files and invite a Save
+        // under a name that then writes over one with no arming, so the list
+        // stays as it was and the strip says the refresh did not land.
+        notify(`the saved benches could not be listed · ${err.text || String(err)}`, 'warn');
+        render();
+        return;
+      }
+      benches = answer;
+      if (loaded && !benches.some((b) => b.name === loaded)) loaded = null;
+      render();
+    }
+
+    /** Open one against the bench: the comparison, never an apply. */
+    function openBench(name) {
+      const found = benches.find((b) => b.name === name) || null;
+      arm(null);
+      if (!found) { loaded = null; return render(); }
+      benchName = found.name;
+      if (found.error) {
+        notify(`${found.name} will not open · ${found.error}`, 'warn');
+        loaded = null;
+      } else if (!recorded(found)) {
+        notify(`${found.name} holds no bench values — there is nothing to put back.`, 'warn');
+        loaded = null;
+      } else {
+        loaded = found.name;
+        // No note is drawn for a file that matches, so this is the whole
+        // answer to the click; without it, opening one does nothing visible.
+        if (!drift(found, store.getState().modules.byName).length) {
+          notify(`the bench already matches ${found.name}.`, 'ok');
+        }
+      }
+      render();
+    }
+
+    /** A save on the wire, so a double-click writes one file and not two. */
+    let saving = false;
+
+    async function save() {
+      if (saving) return;                    // the second click of a double-click
+      const name = fileStem(benchName);
+      if (!name) {
+        notify('a saved bench needs a name — type one in the field first.', 'warn');
+        return render();
+      }
+      // A name that is already a file: say what it will replace and take a
+      // second click for it. `benches` is the service's list, re-read after
+      // every save, so this is what is on disk rather than a guess.
+      if (!isArmed('overwrite', name) && benches.some((b) => b.name === name)) {
+        const was = benches.find((b) => b.name === name);
+        arm('overwrite', name);
+        notify(`${name} already exists${was && was.saved_at ? ` — saved ${fmt.clock(was.saved_at)}` : ''}. `
+          + 'Click again to write over it, or type another name.', 'warn');
+        // `notify` draws the strip and nothing else; the button has to say
+        // what the second click will do, or the arming is invisible where the
+        // finger already is.
+        return render();
+      }
+      arm(null);
+      saving = true;
+      try {
+        const out = await api.saveBench(name);
+        notify(`saved ${out.name} → ${out.path}`, 'ok');
+        // The name as the service wrote it, so the next Save over the same
+        // file arms rather than replacing it silently.
+        benchName = out.name;
+        await loadBenches();
+        // Saved from this bench, so the file and the bench agree; the note has
+        // nothing to say until the bench moves under it.
+        loaded = benches.some((b) => b.name === out.name) ? out.name : null;
+        drawerOpen = false;
+      } catch (err) { fail(err); } finally { saving = false; }
+      render();
+    }
+
+    /**
+     * Delete one, on the second click.
+     *
+     * Armed like the overwrite beside it, and for more reason: an overwrite
+     * replaces a file with the bench in front of the operator, and this leaves
+     * nothing. It is the only thing the console removes from disk.
+     */
+    async function removeBench(name) {
+      if (!isArmed('delete', name)) {
+        arm('delete', name);
+        notify(`${name} will be deleted — the file is not recoverable. Click again to confirm.`, 'warn');
+        return render();
+      }
+      arm(null);
+      try {
+        await api.deleteBench(name);
+        notify(`deleted ${name}`, 'ok');
+        if (loaded === name) loaded = null;
+        await loadBenches();
+      } catch (err) { fail(err); }
+      render();
+    }
+
+    /**
+     * Put the listed values back, one module at a time.
+     *
+     * Inside the `edits` chain, exactly as a field's edit is, and for the same
+     * reason: a Run or a DC clicked while six `PUT`s are on the wire must not
+     * go with the bench half-replaced. A module the service refuses leaves
+     * `refused` set, which is what stops that Run — and the ones that landed
+     * stay landed, because the note redraws from the bench and says what is
+     * still unlike the file.
+     *
+     * The same shape `views/pipeline.js: restoreBench` has, because it is the
+     * same act: the drift note's button, sending one `PUT` per module.
+     */
+    function restoreBench(moved) {
+      const bodies = restore(moved);
+      const names = Object.keys(bodies);
+      const label = loaded || 'the saved bench';
+      edits = edits.then(async () => {
+        const bad = [];
+        for (const [module, params] of Object.entries(bodies)) {
+          try {
+            // The response *is* the module as the bench now has it, which is
+            // what every card and every node form draws from.
+            store.applyModule(await api.setParams(module, params));
+          } catch (err) { bad.push(module); fail(err); }
+        }
+        await revalidate(names);
+        refused = bad.length > 0;
+        notify(bad.length
+          ? `${label}: ${fmt.plural(bad.length, 'module')} of ${names.length} refused — the rest is on the bench`
+          : `bench set to ${label} · ${fmt.plural(moved.length, 'value')}`,
+        bad.length ? 'warn' : 'ok');
+        render();
+      });
+      return edits;
+    }
+
+    function renderSaved(state) {
+      const m = savedBenchModel(benches, loaded, state.modules.byName);
+      keyed(savedEl, JSON.stringify([m, benchName, drawerOpen, armed,
+        benches.map((b) => [b.name, b.saved_at, Boolean(b.error)])]),
+      () => [savedBar(m), drawerOpen ? savedDrawer(m) : null]);
+    }
+
+    /**
+     * The `MODULES` header: the zone label, the identity, and the `⋯`.
+     *
+     * The `⋯` follows the identity rather than sitting at the end of the row.
+     * At 1440 the end of the row is 1300 px from the label it belongs to, and
+     * a control that far from the thing it acts on is one nobody finds — which
+     * is exactly what happened the first time this was built.
+     */
+    function savedBar(m) {
+      const said = {
+        none: () => [h('span.none', 'no saved bench')],
+        idle: () => [h('span.none', { text: `${fmt.plural(m.count, 'saved bench', 'saved benches')}` })],
+        match: () => [h('span.who', { text: m.name }), h('span.match', '✓ matches the bench')],
+        drift: () => [h('span.who', m.name, h('span.dot', ' •')),
+          h('span.drift', { text: `${fmt.plural(m.moved.length, 'value')} differ${m.moved.length === 1 ? 's' : ''}` })],
+      }[m.state]();
+      return h('div.modbar',
+        h('span.zt', 'Modules'),
+        said,
+        h('button.dots', {
+          type: 'button',
+          'aria-expanded': drawerOpen ? 'true' : 'false',
+          'aria-label': 'saved benches — save this one, open one, compare it with the bench',
+          title: 'saved benches — save this one, open one, compare it with the bench',
+          onclick: () => { drawerOpen = !drawerOpen; arm(null); render(); },
+        }, '⋯'),
+        h('span.sp'));
+    }
+
+    /** Save above, open below — the two halves, each saying which it is. */
+    function savedDrawer(m) {
+      const stem = fileStem(benchName);
+      const overwrites = Boolean(stem) && benches.some((b) => b.name === stem);
+      const armedSave = isArmed('overwrite', stem);
+      return h('div.bdrawer',
+        h('div.namerow',
+          h('span.l', 'save as'),
+          h('input.v', {
+            type: 'text', value: benchName,
+            // Short enough for the 20em field: a placeholder cut off mid-word
+            // is a label that has to be guessed at.
+            placeholder: 'the bench as it is now',
+            'aria-label': 'the name to save the bench under',
+            title: 'the file: <out>/bench/<name>.json',
+            onchange: (e) => { benchName = e.target.value; render(); },
+          }),
+          h('button', {
+            class: armedSave ? 'btns armed' : 'btns',
+            title: overwrites
+              ? `${stem} already exists — saving writes over it`
+              : 'writes every module’s values to a file, so they outlive this session',
+            onclick: save,
+          }, armedSave ? `overwrite ${stem}?` : 'Save bench')),
+        h('div.bfiles',
+          // Not `.zt`: that is the zone-label face — 9px and uppercased — and
+          // a whole sentence set in it is shouting. This is a caption.
+          h('p.bcap', { text: benches.length
+            ? 'open compares a file with the bench; nothing moves until the button under the list'
+            : 'nothing saved yet — name the bench above and Save it' }),
+          benches.map((b) => benchRow(b))),
+        driftNote(m));
+    }
+
+    /** One file: what it is called, when it was written, and what can be done
+     *  to it — all within a hand's width of the name, never at the row's end. */
+    function benchRow(b) {
+      const armedDelete = isArmed('delete', b.name);
+      return h('div.brow', { class: b.name === loaded ? 'on' : '' },
+        // `· comparing`, not `· open`: `open` is the button two columns along,
+        // and the same word for the state and the act reads as one thing.
+        h('span.fn', b.name, b.name === loaded ? h('i', ' · comparing') : null),
+        h('span.ft', { text: b.error ? 'will not parse' : fmt.clock(b.saved_at) }),
+        h('span.fa',
+          // `open` is the path walked most — a bench is saved once and put
+          // back many times — so it is the bordered button and the other two
+          // are quiet beside it.
+          h('button.btns', {
+            title: 'compare this file with the bench; nothing moves until the button under the list',
+            disabled: b.error ? true : null,
+            onclick: () => openBench(b.name),
+          }, 'open'),
+          h('button.btng', {
+            title: `write the bench as it is now over ${b.name}`,
+            onclick: () => { benchName = b.name; save(); },
+          }, 'overwrite'),
+          h('button', {
+            class: armedDelete ? 'btnd armed' : 'btnd',
+            title: armedDelete ? 'click again and the file is gone' : `delete ${b.name}`,
+            onclick: () => removeBench(b.name),
+          }, armedDelete ? `delete ${b.name}?` : 'delete')));
+    }
+
+    /**
+     * What opening a file would change, before it changes it.
+     *
+     * The same shape the pipeline tab's drift note has, and the same
+     * comparison behind it — with one difference that matters: there, the note
+     * is a reading about a run that will happen anyway, and here it *is* the
+     * load. Nothing on the bench moves until the button in its head is
+     * clicked, because replacing the bench is not undoable and the operator
+     * should not have to click to find out what a file holds.
+     */
+    function driftNote(m) {
+      if (m.state === 'match') {
+        return h('div.recipe-note.matched',
+          h('div.rn-head',
+            h('span', { text: `the bench matches ${m.name} — nothing to put back.` }),
+            h('span', { style: { flex: '1' } }),
+            h('button.btng', { title: 'stop comparing', onclick: () => { loaded = null; render(); } }, 'close')));
+      }
+      if (m.state !== 'drift') return null;
+      return h('div.recipe-note',
+        h('div.rn-head',
+          h('span', { text: `${fmt.plural(m.moved.length, 'value')} on the bench `
+            + `${m.moved.length === 1 ? 'differs' : 'differ'} from ${m.name}:` }),
+          h('span', { style: { flex: '1' } }),
+          h('button.btns', {
+            title: 'puts these values onto the bench, one module at a time',
+            onclick: () => restoreBench(m.moved),
+          }, `↺ bench to ${m.name}`),
+          h('button.btng', {
+            title: 'keep the bench as it is',
+            onclick: () => { loaded = null; render(); },
+          }, 'keep bench')),
+        h('div.rn-list', m.moved.map((it) => h('div.rn-row',
+          h('span.l', { text: `${it.module}.${it.name}` }),
+          h('span.v', { text: `saved ${showValue(it.saved, it.unit)}` }),
+          h('span.v.now', { text: `bench ${showValue(it.now, it.unit)}` }),
+          h('i', { text: it.unit })))));
+    }
 
     const ctx = () => {
       const state = store.getState();
@@ -361,6 +736,9 @@ export default {
       const { byName } = state.modules;
       const c0 = ctx();
       renderPanel(state, c0);
+      // Before the early return below: an empty catalogue is exactly when the
+      // operator most wants to see that a saved bench is there to put back.
+      renderSaved(state);
       const names = BENCH_CARDS.filter((n) => byName[n]);
       if (!names.length) {
         held.clear();
@@ -467,6 +845,12 @@ export default {
 
     const off = store.subscribe(render);
     render();
-    return { dispose() { off(); charts.dispose(); }, focus };
+    // Files, so nothing changes them behind us: read once here and again
+    // after every save or delete, rather than on a timer.
+    loadBenches();
+    return {
+      dispose() { off(); charts.dispose(); clearTimeout(saveArmedTimer); },
+      focus,
+    };
   },
 };

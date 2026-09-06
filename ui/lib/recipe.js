@@ -1,4 +1,11 @@
-// A saved recipe against the bench it is reopened on — `lib/recipe.js`.
+// A saved bench against the bench it is reopened on — `lib/recipe.js`.
+//
+// Two things are saved to a file and compared with the bench when they come
+// back: a **recipe** (`POST /pipelines/save`, the pipeline tab) and the
+// **bench settings** themselves (`POST /bench/save`, the bench tab). Both
+// records carry the same `bench: {module: {param: {value, source}}}` block,
+// which is why one `drift` reads both — a bench preset is a recipe record
+// with no tree, and a record with no tree covers every module in it.
 //
 // A recipe's tree carries only what its nodes override; every other value a
 // node runs with is the module's bench value at start time. So a recipe is
@@ -84,6 +91,68 @@ export function coveredBy(tree, rows) {
   };
   visit(tree, []);
   return Object.fromEntries(per);
+}
+
+/**
+ * The `MODULES` row of the bench tab, as one object — `views/bench.js`.
+ *
+ * That row is the only thing about saved benches that is permanently on
+ * screen, and it answers exactly one question: **which saved bench this is,
+ * and whether the bench has moved since**. Everything else — the name field,
+ * the file list, the drift table — is behind the `⋯` beside it, because a
+ * control reached for less than once a session does not sit on the screen
+ * (`ui-rules` §14's fourth question).
+ *
+ * Four states, and the row says which:
+ *
+ *   `none`   nothing saved yet — the row says so, or the `⋯` beside it is a
+ *            glyph with nothing to explain it
+ *   `idle`   files exist, none open against the bench: the count
+ *   `match`  one open, and the bench is what it holds
+ *   `drift`  one open, and `moved` lists every value that differs
+ *
+ * Pure, so `recipe.test.mjs` holds the four down without a browser.
+ */
+export function savedBenchModel(benches, loadedName, byName) {
+  const files = benches || [];
+  const file = loadedName ? files.find((f) => f.name === loadedName) || null : null;
+  if (!file || !recorded(file)) {
+    return { state: files.length ? 'idle' : 'none', name: null, count: files.length, moved: [] };
+  }
+  const moved = drift(file, byName);
+  return {
+    state: moved.length ? 'drift' : 'match',
+    name: file.name,
+    count: files.length,
+    moved,
+  };
+}
+
+/**
+ * The file stem a name is saved under: `app.py: _RECIPE_STEM`, in JS.
+ *
+ * Here because the console has to compare a typed name with the names the
+ * service already has, and a raw name never matches a stemmed one — so the
+ * "this will write over ⟨name⟩" arming silently did not fire for any name
+ * with a space in it, which is most of them. Both tabs' Save use this.
+ *
+ * The two halves are pinned to the same table:
+ * `tests/test_service_api.py: test_a_name_becomes_the_same_file_stem_on_both_sides`
+ * and `recipe.test.mjs: a name becomes the file stem the service writes`.
+ */
+export function fileStem(name) {
+  return String(name === null || name === undefined ? '' : name)
+    .trim().replace(/[^A-Za-z0-9_.-]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+/**
+ * One drifted value, for the note that lists them. Volts to three places
+ * because that is what the cards show; an array as its elements.
+ */
+export function showValue(v, unit) {
+  if (typeof v === 'number') return unit === 'V' ? v.toFixed(3) : Number.isInteger(v) ? String(v) : v.toFixed(3);
+  if (Array.isArray(v)) return v.map((x) => showValue(x, unit)).join(', ');
+  return v === null || v === undefined ? '—' : String(v);
 }
 
 function same(a, b) {
