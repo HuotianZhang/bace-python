@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>J–V 槽位 — 172 px 那一列</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="fonts/fonts.css">
+<link rel="stylesheet" href="style.css">
+<!--
+  A comparison harness, not a deliverable — `rail-density.html` and
+  `bench-head.html` are the two before it, and this one has the same job:
+  a layout claim settled with a number the browser produced, not one somebody
+  typed.
+
+  #64: `.res` opened a second grid track of 172 px at every width ≥ 980,
+  for the `.shot` block — and only the `bace` panel has one, and only once a
+  run has produced a shot. So on both J–V cards, and on `bace` before its
+  first shot, a third of the result slot was held empty and the drawing was
+  built to what was left.
+
+  Both specimens on this page are the same card, from the same fixtures,
+  through the same `lib/card.js` and `lib/results.js` the console uses. The
+  only thing that differs between A and B is one selector: A re-asserts the
+  pre-#64 rule through `.v-old`, B is `style.css` as it stands. Every number
+  under them is read off the live layout after the fonts land.
+-->
+<style>
+/* ==========================================================================
+   页面外壳。console 自己的调色板在 .frame 里，照 `style.css` 原样显示 ——
+   它是 light-only 的仪器（ui-rules §1），在深色页面上也不改色。
+   ========================================================================== */
+:root {
+  --pg-bg: #f7f5f4; --pg-panel: #ffffff; --pg-ink: #1c1a19; --pg-dim: #726d6a;
+  --pg-faint: #9c9694; --pg-rule: #ded9d7; --pg-hair: #ebe6e4;
+  --pg-accent: #ec3013; --pg-ok: #3f7d53; --pg-warn: #b06a00; --pg-chip: #efeceb;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --pg-bg: #161514; --pg-panel: #1e1c1b; --pg-ink: #f0ecea; --pg-dim: #a49d9a;
+    --pg-faint: #7d7674; --pg-rule: #3a3634; --pg-hair: #2a2726;
+    --pg-accent: #ff6448; --pg-ok: #6fae84; --pg-warn: #d79a3f; --pg-chip: #2a2726;
+  }
+}
+:root[data-theme="dark"] {
+  --pg-bg: #161514; --pg-panel: #1e1c1b; --pg-ink: #f0ecea; --pg-dim: #a49d9a;
+  --pg-faint: #7d7674; --pg-rule: #3a3634; --pg-hair: #2a2726;
+  --pg-accent: #ff6448; --pg-ok: #6fae84; --pg-warn: #d79a3f; --pg-chip: #2a2726;
+}
+
+html, body { margin: 0; }
+* { box-sizing: border-box; }
+body {
+  background: var(--pg-bg); color: var(--pg-ink);
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  font-size: 14px; line-height: 1.55; -webkit-font-smoothing: antialiased;
+}
+.pnum { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 34px 26px 72px; }
+
+.eyebrow {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 10.5px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--pg-faint);
+}
+h1 {
+  font-family: 'Archivo', 'IBM Plex Sans', system-ui, sans-serif;
+  font-weight: 800; letter-spacing: -.02em;
+  font-size: 33px; line-height: 1.12; margin: 8px 0 0; text-wrap: balance;
+}
+.lede { max-width: 68ch; color: var(--pg-dim); margin: 12px 0 0; }
+.lede b { color: var(--pg-ink); font-weight: 600; }
+.lede code, p code, td code, li code {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: .9em;
+  background: var(--pg-chip); padding: 0 3px;
+}
+h2 {
+  font-family: 'Archivo', 'IBM Plex Sans', system-ui, sans-serif;
+  font-weight: 800; letter-spacing: -.015em; font-size: 20px;
+  margin: 44px 0 0; padding-top: 18px; border-top: 1px solid var(--pg-rule);
+}
+h2 + p { color: var(--pg-dim); margin: 8px 0 0; max-width: 68ch; }
+
+/* -- 宽度控制 ------------------------------------------------------------ */
+.controls {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+  margin: 26px 0 0; padding: 11px 14px;
+  background: var(--pg-panel); border: 1px solid var(--pg-rule);
+  position: sticky; top: 0; z-index: 5;
+}
+.controls .lab {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 10px; font-weight: 500; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--pg-faint);
+}
+.wbtns { display: flex; }
+.wbtn {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px;
+  padding: 3px 11px; cursor: pointer;
+  border: 1px solid var(--pg-rule); border-right: 0;
+  background: var(--pg-panel); color: var(--pg-dim);
+}
+.wbtn:last-child { border-right: 1px solid var(--pg-rule); }
+.wbtn.on { background: var(--pg-ink); border-color: var(--pg-ink); color: var(--pg-bg); }
+.wnote { color: var(--pg-faint); font-size: 12px; }
+
+/* -- 样例 ---------------------------------------------------------------- */
+.specs { display: flex; flex-direction: column; gap: 22px; margin: 22px 0 0; }
+.spec { background: var(--pg-panel); border: 1px solid var(--pg-rule); padding: 13px 14px 14px; }
+.spec-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.spec-head h3 {
+  font-family: 'Archivo', 'IBM Plex Sans', system-ui, sans-serif;
+  font-size: 15px; font-weight: 800; margin: 0;
+}
+.spec-head .px {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px;
+  color: var(--pg-dim); margin-left: auto;
+}
+.spec-head .px.win { color: var(--pg-ok); font-weight: 600; }
+.spec-note { color: var(--pg-dim); font-size: 12.5px; margin: 5px 0 11px; max-width: 74ch; }
+.spec-note .hatch {
+  background: repeating-linear-gradient(135deg, rgba(236,48,19,.16) 0 5px, transparent 5px 10px);
+  border-bottom: 1px dashed rgba(236,48,19,.55); padding: 0 2px;
+}
+.holder { overflow: hidden; }
+.frame-scale { transform-origin: top left; }
+
+/* The console's own surface, as `style.css` paints it — the page around it
+   may be dark, the instrument is not.
+
+   An outline, not a border: the frame's width has to be the console's viewport
+   width exactly, or `.cards`' auto-fill lands on a different track size and the
+   numbers on this page stop being the numbers in the console. `.view` keeps
+   `style.css`'s own `16px 18px`; only the 40 px bottom gutter goes, and that
+   is height, not width. */
+.frame { background: #ffffff; color: #201e1d; outline: 1px solid var(--pg-rule); outline-offset: -1px; }
+.frame .view { padding-bottom: 12px; overflow: visible; }
+
+/* A · 现状: the pre-#64 rule, re-asserted. Same declarations, one extra class
+   for the specificity and the source order to carry it past `:has()`. */
+@media (min-width: 980px) {
+  .v-old .card.mod.wide .cb.split > .res {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 172px;
+    gap: 0 14px;
+    align-items: start;
+  }
+  .v-old .card.mod.wide .cb.split > .res > * { grid-column: 1; margin-bottom: 12px; }
+  .v-old .card.mod.wide .cb.split > .res > *:last-child { margin-bottom: 0; }
+  .v-old .card.mod.wide .cb.split > .res > .shot { grid-column: 2; grid-row: 1 / -1; margin-bottom: 0; }
+}
+/* Where the 172 px goes, drawn on the slot itself: an empty track is the one
+   thing a screenshot of it cannot show. */
+.ghost { position: absolute; top: 0; right: 0; bottom: 0; width: 172px; pointer-events: none;
+  background: repeating-linear-gradient(135deg, rgba(236,48,19,.10) 0 6px, transparent 6px 12px);
+  border-left: 1px dashed rgba(236,48,19,.55); }
+.frame .cb.split > .res { position: relative; }
+
+/* -- 读数表 -------------------------------------------------------------- */
+table.tally { border-collapse: collapse; width: 100%; margin: 14px 0 0; font-size: 13px; }
+table.tally th, table.tally td { text-align: left; padding: 5px 12px 5px 0; border-bottom: 1px solid var(--pg-hair); vertical-align: baseline; }
+table.tally th { color: var(--pg-faint); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+table.tally td.n { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.tally td.d { font-family: 'IBM Plex Mono', ui-monospace, monospace; white-space: nowrap; }
+table.tally td.d.up { color: var(--pg-ok); font-weight: 600; }
+table.tally td.d.same { color: var(--pg-faint); }
+table.tally tr.grp th { padding-top: 14px; color: var(--pg-ink); font-size: 12px; letter-spacing: 0; text-transform: none; font-weight: 700; }
+
+.foot { color: var(--pg-faint); font-size: 12px; margin: 30px 0 0; max-width: 74ch; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="eyebrow">ui/jv-width.html · #64</div>
+<h1>J–V 槽位里那一列 172 px</h1>
+<p class="lede">
+  <code>.res</code> 在 ≥980 px 处开出第二条 <b>172 px</b> 的网格轨道，是给
+  <code>.shot</code> 那一块数字用的。可是只有 <code>bace</code> 的面板会放
+  <code>.shot</code>，而且要等第一发打完才放。于是两张 J–V 卡，以及
+  <b>还没开跑的 <code>bace</code></b>，都在为一块不存在的内容付 172 px + 14 px 的
+  gap ——「图占槽位 67 %」这句话就是这么来的。
+</p>
+<p class="lede">
+  下面 A 和 B 是同一张卡：同一份 fixture，同一个 <code>lib/card.js</code> 和
+  <code>lib/results.js</code>。A 用 <code>.v-old</code> 把改之前的规则原样加回来，
+  B 就是现在的 <code>style.css</code>。两者之间只差一个选择器。
+  A 上那片斜线，是那条轨道实际占掉的地方。
+</p>
+
+<div class="controls">
+  <span class="lab">视窗宽度</span>
+  <div class="wbtns" id="wbtns"></div>
+  <span class="wnote" id="wnote"></span>
+</div>
+
+<h2>J–V（暗扫）</h2>
+<p>这张卡的全部内容就是一张图和它底下四行字。第二条轨道从头到尾是空的。</p>
+<div class="specs" id="specs-jv"></div>
+
+<h2>读数</h2>
+<p>都是排版完成、字体落地之后从实际盒子上量的；缩放显示的样例已按缩放系数还原。</p>
+<table class="tally" id="tally"></table>
+
+<h2>对照：<code>bace</code>，跑过之后</h2>
+<p>
+  这一对是控制组。<code>bace</code> 的面板里确实有 <code>.shot</code>，
+  所以那条轨道该开，也确实还开着 —— A 和 B 应当一模一样。
+</p>
+<div class="specs" id="specs-bace"></div>
+
+<p class="foot">
+  样例由 <code>fixtures/modules_sim.json</code> + <code>fixtures/hello_sim.json</code>
+  生成；曲线来自 <code>fixtures/stream_jv_sim.jsonl</code>（暗扫是把它的节点改名、
+  只留 dark 那一条），瞬态来自 <code>fixtures/stream_bace_sim.jsonl</code>。
+  没有服务在跑，也不需要。
+</p>
+
+</div>
+
+<script type="module">
+import { createStore } from './lib/store.js';
+import { parseJsonl, replayInto } from './lib/replay.js';
+import { h } from './lib/dom.js';
+import { moduleCard } from './lib/card.js';
+import { resultPanel, runFor, RESULT_CARDS } from './lib/results.js';
+
+const WIDTHS = [1280, 1440, 1600, 1920, 2560];
+let width = 1920;
+
+/* -- the store, off the fixtures the console develops against -------------- */
+const store = createStore({ schedule: (fn) => fn() });
+store.applyHello(await (await fetch('fixtures/hello_sim.json')).json());
+store.applyModules(await (await fetch('fixtures/modules_sim.json')).json());
+
+const jvFrames = parseJsonl(await (await fetch('fixtures/stream_jv_sim.jsonl')).text());
+// The dark sweep on the `jv` card: the same recording with its node renamed
+// and the light curve dropped, which is what `jv` (jv_dark) produces. The
+// recorded stream is a `jv_bace`, and #64 was photographed on `jv`.
+const dark = JSON.parse(JSON.stringify(jvFrames)).map((f) => {
+  f.run_id = '20260903_195655-000';
+  if (f.node_path === 'jv_bace') f.node_path = 'jv';
+  const d = f.data || {};
+  for (const k of ['kind', 'module', 'node_path']) if (d[k] === 'jv_bace') d[k] = 'jv';
+  if (d.detail && d.detail.module === 'jv_bace') d.detail.module = 'jv';
+  if (d.tree && d.tree.module === 'jv_bace') d.tree.module = 'jv';
+  return f;
+}).filter((f) => !(f.type === 'JVCurveDone' && f.data.index === 1));
+for (const f of dark) {
+  if (f.type === 'JVFinished') f.data.curves = f.data.curves.filter((c) => c.dark);
+  if (f.type === 'JVStarted') f.data.n_curves = 1;
+}
+replayInto(store, dark);
+replayInto(store, parseJsonl(await (await fetch('fixtures/stream_bace_sim.jsonl')).text()));
+
+/* -- one card, built the way `views/bench.js` builds it -------------------- */
+const noop = () => {};
+function card(name) {
+  const state = store.getState();
+  const entry = state.modules.byName[name];
+  const ctx = {
+    bench: state.bench, busy: false,
+    checksFor: () => [], hasResult: (n) => RESULT_CARDS.has(n),
+    toggle: noop, docOpen: () => false, toggleDoc: noop,
+    edit: noop, act: noop, run: noop,
+  };
+  const el = moduleCard(entry, ctx, new Set());
+  const slot = el.querySelector('.res');
+  if (slot) slot.replaceChildren(
+    ...resultPanel(name, { entry, found: runFor(state, name), bench: state.bench }).flat()
+      .filter(Boolean));
+  return el;
+}
+
+const VARIANTS = [
+  { cls: 'v-old', key: 'A', name: 'A · 现状', ghost: true,
+    note: () => ['第二条轨道无条件开。图只拿到剩下的，',
+      h('span.hatch', '斜线那一片'), '没有任何东西会进去。'] },
+  { cls: 'v-new', key: 'B', name: 'B · 改后', ghost: false,
+    note: () => [h('code', '.res:has(> .shot)'), ' —— 有东西放，才开这条轨道。图拿到整个槽位。'] },
+];
+
+const specsJv = document.getElementById('specs-jv');
+const specsBace = document.getElementById('specs-bace');
+const frames = [];
+
+function build(holderEl, module, withGhost) {
+  holderEl.replaceChildren();
+  for (const v of VARIANTS) {
+    const frame = h('div', { class: 'frame ' + v.cls });
+    frame.style.width = width + 'px';
+    const view = h('div.view', h('div.cards', card(module)));
+    frame.append(view);
+    const scale = h('div.frame-scale', frame);
+    const holder = h('div.holder', scale);
+    const px = h('span.px', { text: '—' });
+    holderEl.append(h('div.spec',
+      h('div.spec-head', h('h3', { text: v.name }), px),
+      h('p.spec-note', v.note()),
+      holder));
+    if (withGhost && v.ghost) {
+      const res = frame.querySelector('.res');
+      if (res) res.append(h('div.ghost'));
+    }
+    frames.push({ v, module, frame, scale, holder, px });
+  }
+}
+
+/* -- the reading ----------------------------------------------------------
+   Everything comes off the live layout. `getBoundingClientRect` is
+   post-transform, so every length is divided by the scale the specimen is
+   shown at — the numbers are the console's, not the page's. */
+function read(frame, k) {
+  const res = frame.querySelector('.res');
+  const fig = frame.querySelector('.res figure.chart');
+  const svg = fig && fig.querySelector('svg.chart-svg');
+  const w = (el) => el.getBoundingClientRect().width / k;
+  const hgt = (el) => el.getBoundingClientRect().height / k;
+  const out = {
+    res: w(res), chart: fig ? w(fig) : 0, chartH: fig ? hgt(fig) : 0,
+    cardH: hgt(frame.querySelector('.card.mod')),
+    cols: getComputedStyle(res).gridTemplateColumns,
+    shot: Boolean(res.querySelector('.shot')),
+  };
+  out.spare = out.res - out.chart;
+  out.share = out.chart / out.res;
+  if (svg) {
+    // The x-axis tick labels are the only centred text `charts/frame.js`
+    // emits (`text-anchor: middle`, one row above the axis title, which is
+    // anchored `end`), so the bottom-most centred row is the tick row on any
+    // chart. Their minimum edge-to-edge gap is what "标签拥挤" is.
+    const ts = [...svg.querySelectorAll('text')].map((t) => {
+      const r = t.getBoundingClientRect();
+      return { s: t.textContent, anchor: t.getAttribute('text-anchor'),
+               x: r.x / k, y: r.y / k, w: r.width / k };
+    });
+    const mid = ts.filter((t) => t.anchor === 'middle');
+    if (mid.length) {
+      const ymax = Math.max(...mid.map((t) => t.y));
+      const row = mid.filter((t) => t.y > ymax - 4).sort((a, b) => a.x - b.x);
+      out.xn = row.length;
+      out.xgap = row.length > 1
+        ? Math.min(...row.slice(1).map((t, i) => t.x - (row[i].x + row[i].w))) : null;
+    }
+    // A decade of the log axis, in pixels: "拐点被压扁" measured.
+    const dec = ts.filter((t) => /^1(e[−-]?\d+)?$/.test(t.s.trim())).sort((a, b) => a.y - b.y);
+    out.decades = dec.length;
+    out.decadePx = dec.length > 1 ? (dec[dec.length - 1].y - dec[0].y) / (dec.length - 1) : null;
+  }
+  return out;
+}
+
+const tally = document.getElementById('tally');
+const ROWS = [
+  ['槽位 .res', (r) => r.res, 'px', 'flat'],
+  ['figure.chart', (r) => r.chart, 'px', 'up'],
+  ['空掉的', (r) => r.spare, 'px', 'down'],
+  ['图占槽位', (r) => 100 * r.share, '%', 'up'],
+  ['图高', (r) => r.chartH, 'px', 'up'],
+  ['x 轴刻度数', (r) => r.xn, '个', 'up'],
+  ['x 轴标签最小间距', (r) => r.xgap, 'px', 'up'],
+  ['每十倍程（对数轴）', (r) => r.decadePx, 'px', 'up'],
+  ['卡片高', (r) => r.cardH, 'px', 'flat'],
+];
+
+function fmt(v, unit) {
+  if (v === null || v === undefined) return '—';
+  return (Math.round(v * 10) / 10).toFixed(1) + ' ' + unit;
+}
+
+function renderTally(groups) {
+  tally.replaceChildren();
+  tally.append(h('tr',
+    h('th', { text: '' }), h('th', { text: 'A · 现状' }),
+    h('th', { text: 'B · 改后' }), h('th', { text: '差' })));
+  for (const g of groups) {
+    tally.append(h('tr.grp', h('th', { colSpan: 4, text: g.title })));
+    for (const [label, pick, unit, dir] of ROWS) {
+      const a = pick(g.a);
+      const b = pick(g.b);
+      let d = '—';
+      let cls = 'd same';
+      if (a !== null && b !== null && a !== undefined && b !== undefined) {
+        const delta = b - a;
+        if (Math.abs(delta) < 0.6) { d = '不变'; cls = 'd same'; }
+        else {
+          const pct = a ? Math.round((100 * delta) / a) : 0;
+          d = `${delta > 0 ? '+' : ''}${(Math.round(delta * 10) / 10).toFixed(1)} ${unit}`
+            + (a ? ` · ${pct > 0 ? '+' : ''}${pct} %` : '');
+          cls = 'd ' + ((dir === 'up' && delta > 0) || (dir === 'down' && delta < 0) ? 'up' : 'same');
+        }
+      }
+      tally.append(h('tr',
+        h('td', { text: label }),
+        h('td.n', { text: fmt(a, unit) }),
+        h('td.n', { text: fmt(b, unit) }),
+        h('td', { class: cls, text: d })));
+    }
+  }
+}
+
+function layout() {
+  const wrapW = specsJv.clientWidth;
+  const k = Math.min(1, wrapW / width);
+  const groups = {};
+  for (const f of frames) {
+    f.scale.style.transform = `scale(${k})`;
+    const r = read(f.frame, k);
+    f.px.textContent = `图 ${Math.round(r.chart)} px / 槽位 ${Math.round(r.res)} px`
+      + ` · ${Math.round(100 * r.share)} %`;
+    f.px.classList.toggle('win', r.share > 0.95);
+    const cardBox = f.frame.querySelector('.card.mod').getBoundingClientRect();
+    const frameBox = f.frame.getBoundingClientRect();
+    f.holder.style.height = Math.ceil(frameBox.height) + 'px';
+    // The frame stays the console's full width — `.cards` auto-fill depends on
+    // it — and the holder shows the card and its own gutters, nothing else.
+    f.holder.style.width = Math.ceil(cardBox.width + 2 * (cardBox.x - frameBox.x)) + 'px';
+    (groups[f.module] = groups[f.module] || {})[f.v.key === 'A' ? 'a' : 'b'] = r;
+  }
+  renderTally([
+    { title: 'jv · 暗扫（没有 .shot）', ...groups.jv },
+    { title: 'bace · 跑过（有 .shot）—— 控制组', ...groups.bace },
+  ]);
+  document.getElementById('wnote').textContent =
+    `样例按 ${(100 * k).toFixed(0)} % 缩放显示；读数是还原到 ${width} px 之后的值。`;
+}
+
+function rebuild() {
+  frames.length = 0;
+  build(specsJv, 'jv', true);
+  build(specsBace, 'bace', false);
+  // Two frames, so the charts must observe their containers before anything
+  // is measured: `charts/frame.js` sizes off a ResizeObserver.
+  requestAnimationFrame(() => requestAnimationFrame(layout));
+}
+
+const wbtns = document.getElementById('wbtns');
+function renderBtns() {
+  wbtns.replaceChildren(...WIDTHS.map((w) => h('button.wbtn', {
+    type: 'button', class: w === width ? 'on' : '', text: String(w),
+    onclick: () => { width = w; renderBtns(); rebuild(); },
+  })));
+}
+renderBtns();
+rebuild();
+window.addEventListener('resize', () => requestAnimationFrame(layout));
+document.fonts && document.fonts.ready.then(() => requestAnimationFrame(layout));
+window.__ready = true;
+</script>
+</body>
+</html>

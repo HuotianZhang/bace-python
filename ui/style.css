@@ -850,18 +850,36 @@ button.armed { background: var(--alert); border-color: var(--alert); color: #fff
 
    This only became possible once a chart was built to the width it is given
    (`charts/frame.js`): while the container merely zoomed a fixed viewBox,
-   taking 170 px for a column shrank the chart's type with it. */
+   taking 170 px for a column shrank the chart's type with it.
+
+   **The second column opens only where there is a shot to put in it** —
+   `:has(> .shot)`, the same shape as `.pf:has(> .seg)` above, and for the same
+   reason: a track that exists whether or not anything sits in it is a track
+   that charges every card for one card's content. `results.js` puts a `.shot`
+   in the `bace` panel and only once a run has produced one, so unqualified
+   this rule billed 172 px + the 14 px gap to every J–V card and to `bace`
+   itself before its first shot — a third of the slot, held empty, on the
+   card whose whole content is one drawing (#64). Every rule in the block
+   carries the guard: without it the fallback flex column would add its 12 px
+   `gap` to a `margin-bottom` meant for grid rows and space the panels twice.
+
+   `:has()` is live, so the `bace` card reflows once, at shot one, as the
+   column opens under it. That is the right moment for it: the panel is
+   growing the `.shot` block and turning two placeholders into two drawings on
+   the same frame, so the width is one of several things that move — where the
+   alternative was 172 px held empty through the whole of setup, which is
+   exactly when the operator is reading the timing diagram beside it. */
 @media (min-width: 980px) {
-  .card.mod.wide .cb.split > .res {
+  .card.mod.wide .cb.split > .res:has(> .shot) {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 172px;
     gap: 0 14px;
     align-items: start;
   }
-  .card.mod.wide .cb.split > .res > * { grid-column: 1; margin-bottom: 12px; }
-  .card.mod.wide .cb.split > .res > *:last-child { margin-bottom: 0; }
+  .card.mod.wide .cb.split > .res:has(> .shot) > * { grid-column: 1; margin-bottom: 12px; }
+  .card.mod.wide .cb.split > .res:has(> .shot) > *:last-child { margin-bottom: 0; }
   /* The block spans the column so it stays put while the charts flow past it. */
-  .card.mod.wide .cb.split > .res > .shot { grid-column: 2; grid-row: 1 / -1; margin-bottom: 0; }
+  .card.mod.wide .cb.split > .res:has(> .shot) > .shot { grid-column: 2; grid-row: 1 / -1; margin-bottom: 0; }
 }
 
 /* Label over value, so the pair reads down a 172 px column instead of across
