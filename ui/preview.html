@@ -55,7 +55,21 @@ const api = {
   },
   action: async () => ({ bench: store.getState().bench }),
   startRun: async () => { throw Object.assign(new Error('offline'), { text: 'offline harness: POST /runs was not sent' }); },
+  // The bench save, in memory. There is no `<out>` here, so a saved bench
+  // lasts until the tab is reloaded — enough for the row the bench tab draws
+  // over it (name, picker, drift note, apply), which is the point of the
+  // harness: the real one writes a file and this one does not have to.
+  savedBench: async () => ({ presets: presets.slice().sort((a, b) => b.saved_at - a.saved_at) }),
+  saveBench: async (name) => {
+    const { order, byName } = store.getState().modules;
+    const bench = Object.fromEntries(order.map((n) => [n, Object.fromEntries(
+      (byName[n].params || []).map((p) => [p.name, { value: p.value, source: p.source }]))]));
+    const record = { name, saved_at: Date.now() / 1000, bench };
+    presets = [...presets.filter((p) => p.name !== name), record];
+    return { name, path: `<offline>/bench/${name}.json` };
+  },
 };
+let presets = [];
 
 let stripStatus = null;
 function notify(text, level = 'warn', checks = null) {

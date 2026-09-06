@@ -114,6 +114,13 @@ class TreeRequest(BaseModel):
     name: str = ""
 
 
+class BenchSaveRequest(BaseModel):
+    """`POST /bench/save`: the file the whole bench is written to."""
+
+    model_config = ConfigDict(extra="forbid")
+    name: str = ""
+
+
 class MonitorRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     interval_s: float = 1.0
@@ -250,9 +257,21 @@ def _hello(session: Session) -> dict:
             "type": "Hello", "data": data, "decimated": {}}
 
 
+def _bench_values(session: Session, names: list[str]) -> dict[str, dict[str, dict]]:
+    """`{module: {param: {value, source}}}` for `names`, as the bench has them
+    now -- the layer a node's own overrides sit on, and the only statement of
+    what a module will run with that does not depend on the session outliving
+    the operator's afternoon."""
+    out: dict[str, dict[str, dict]] = {}
+    for module in names:
+        resolved = session.catalogue.param_set(module).resolve()
+        out[module] = {n: {"value": jsonable(pv.value), "source": pv.source.value}
+                       for n, pv in resolved.items()}
+    return out
+
+
 def _bench_snapshot(session: Session, tree_obj: dict) -> dict[str, dict[str, dict]]:
-    """`{module: {param: {value, source}}}` for every module the tree names,
-    as the bench has them now -- the layer a node's own overrides sit on. A
+    """The bench a recipe is saved against: every module the tree names. A
     tree that does not parse records nothing: the save still succeeds, as it
     did before, and the file says so by having no `bench`."""
     try:
@@ -264,12 +283,47 @@ def _bench_snapshot(session: Session, tree_obj: dict) -> dict[str, dict[str, dic
         module = getattr(node, "module", None)
         if module and module not in names and module in session.catalogue.names():
             names.append(module)
-    out: dict[str, dict[str, dict]] = {}
-    for module in names:
-        resolved = session.catalogue.param_set(module).resolve()
-        out[module] = {n: {"value": jsonable(pv.value), "source": pv.source.value}
-                       for n, pv in resolved.items()}
+    return _bench_values(session, names)
+
+
+def _saved_records(folder: str, keys: tuple[str, ...]) -> list[dict]:
+    """Every `*.json` under `folder`, newest first, with `keys` lifted out of
+    each record beside its `name` and `path`.
+
+    A file that will not parse is listed with its `error` rather than
+    dropped: the operator saved it, so a picker that silently omits it says
+    the save never happened. Same rule for both save folders, which is why
+    this is one function.
+    """
+    out: list[dict] = []
+    if not os.path.isdir(folder):
+        return out
+    for entry in os.scandir(folder):
+        if not entry.name.endswith(".json"):
+            continue
+        try:
+            with open(entry.path, encoding="utf-8") as fh:
+                record = json.load(fh)
+            if not isinstance(record, dict):
+                raise ValueError(f"not an object: {type(record).__name__}")
+        except (OSError, ValueError) as exc:
+            record = {"error": f"{type(exc).__name__}: {exc}"}
+        out.append({"name": entry.name[:-5], "path": entry.path,
+                    "saved_at": record.get("saved_at"),
+                    **{k: record.get(k) for k in keys},
+                    **({"error": record["error"]} if "error" in record else {})})
+    out.sort(key=lambda r: r.get("saved_at") or 0, reverse=True)
     return out
+
+
+def _write_record(folder: str, stem: str, record: dict) -> str:
+    """`<folder>/<stem>.json`, created and overwritten without asking -- the
+    console arms the second click, which is where a confirmation belongs."""
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, f"{stem}.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(record, fh, indent=1, allow_nan=False)
+    return path
 
 
 def _stem(name: str) -> str:
@@ -362,6 +416,42 @@ def create_app(session: Session, *, ui_dir: str | None = None,
         # A park still queued behind a run inside a long VISA call answers
         # `pending: true` rather than a 504 that cancelled it.
         return {**out, "bench": session.bench_snapshot()}
+
+    @app.post("/bench/save")
+    async def save_bench(body: BenchSaveRequest):
+        """Write the whole bench to `<out>/bench/<name>.json`.
+
+        The edited layer is a *session*: it lives in the catalogue and goes
+        when the process does, so an afternoon of tuning six cards was until
+        now recoverable only from the operator's memory or from a recipe
+        saved on the pipeline tab -- which records the bench for the modules
+        one tree happens to name, as a by-product of saving a structure.
+        This saves the bench for its own sake, every module of it.
+
+        The record is the recipe's `bench` block widened to the whole
+        catalogue: `{module: {param: {"value", "source"}}}`, resolved, so the
+        file says both what a value is and which layer it came from. There is
+        deliberately no route that loads one back. Putting a saved value onto
+        the bench is `PUT /modules/{m}/params`, the same edit a card's field
+        makes, one module at a time -- so a value the spec now refuses is
+        refused with the sentence it would have got from the field, and the
+        rest of the file still lands. A load route would have to invent an
+        all-or-nothing rule for the whole catalogue at once, and one that
+        fails leaves the operator with the bench they were replacing and no
+        idea which value stopped it.
+        """
+        stem = _stem(body.name)
+        if not stem:
+            return _error(422, "name: saved bench settings need a name", param="name")
+        record = {"name": stem, "saved_at": time.time(),
+                  "bench": _bench_values(session, session.catalogue.names())}
+        path = _write_record(os.path.join(session.out, "bench"), stem, record)
+        return {"name": stem, "path": path}
+
+    @app.get("/bench/saved")
+    async def saved_bench():
+        """Every saved bench under `<out>/bench`, newest first, values included."""
+        return {"presets": _saved_records(os.path.join(session.out, "bench"), ("bench",))}
 
     # -- /modules --------------------------------------------------------------
     @app.get("/modules")
@@ -551,9 +641,6 @@ def create_app(session: Session, *, ui_dir: str | None = None,
         stem = _stem(body.name or str(body.tree.get("name") or ""))
         if not stem:
             return _error(422, "name: a saved recipe needs a name", param="name")
-        folder = os.path.join(session.out, "recipes")
-        os.makedirs(folder, exist_ok=True)
-        path = os.path.join(folder, f"{stem}.json")
         # The tree carries only what its nodes override; everything else a
         # node runs with is the module's bench value *at start time*. A file
         # that held the tree alone was an instance without its main
@@ -564,31 +651,17 @@ def create_app(session: Session, *, ui_dir: str | None = None,
         # The UI compares them with the bench when the recipe is reopened.
         record = {"name": stem, "saved_at": time.time(), "tree": body.tree,
                   "bench": _bench_snapshot(session, body.tree)}
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(record, fh, indent=1, allow_nan=False)
+        path = _write_record(os.path.join(session.out, "recipes"), stem, record)
         return {"name": stem, "path": path}
 
     @app.get("/pipelines/saved")
     async def saved_pipelines():
-        """Every recipe under `<out>/recipes`, newest first, trees included."""
-        folder = os.path.join(session.out, "recipes")
-        out = []
-        if os.path.isdir(folder):
-            for entry in os.scandir(folder):
-                if not entry.name.endswith(".json"):
-                    continue
-                try:
-                    with open(entry.path, encoding="utf-8") as fh:
-                        record = json.load(fh)
-                except (OSError, ValueError) as exc:
-                    record = {"error": f"{type(exc).__name__}: {exc}"}
-                out.append({"name": entry.name[:-5], "path": entry.path,
-                            "saved_at": record.get("saved_at"), "tree": record.get("tree"),
-                            # Absent on a recipe saved before the bench was recorded.
-                            "bench": record.get("bench"),
-                            **({"error": record["error"]} if "error" in record else {})})
-        out.sort(key=lambda r: r.get("saved_at") or 0, reverse=True)
-        return {"recipes": out}
+        """Every recipe under `<out>/recipes`, newest first, trees included.
+
+        `bench` is null on a recipe saved before the bench was recorded with
+        it; `lib/recipe.js: recorded` is what the console says about that."""
+        return {"recipes": _saved_records(os.path.join(session.out, "recipes"),
+                                          ("tree", "bench"))}
 
     # -- /monitors -----------------------------------------------------------------------
     @app.post("/monitors/power", status_code=202)

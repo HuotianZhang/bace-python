@@ -5,6 +5,15 @@
 // here is the six generated module cards, and M4's live monitor will go inside
 // the running one.
 //
+// The one thing on this tab that is not a card or a switch is the **Bench
+// settings** row: the values the cards make live in the catalogue's edited
+// layer, which is a session, so an afternoon of tuning six of them went when
+// the service did. `POST /bench/save` writes the whole bench to a file and
+// `GET /bench/saved` lists them; putting one back is the ordinary `PUT` a
+// field makes, one module at a time, so a value the spec now refuses is
+// refused with the sentence the field would have given and the rest of the
+// file still lands.
+//
 // This file owns almost nothing. `fields.js` decides which rows a card has,
 // `card.js` draws them, and the service owns every value and its provenance.
 // What is left is the loop: an edit `PUT`s and re-renders from the entry that
@@ -13,7 +22,9 @@
 // value is a second opinion about a number the service is the authority on.
 
 import { h, fill, keyed } from './../lib/dom.js';
+import * as fmt from './../lib/format.js';
 import { moduleCard } from './../lib/card.js';
+import { drift, recorded, restore, showValue, fileStem } from './../lib/recipe.js';
 import { BENCH_CARDS, cardModel, cardRuns } from './../lib/fields.js';
 import { panelModel, renderInstruments } from './../lib/instruments.js';
 import { RESULT_CARDS, createChartThrottle, resultKeys, resultPanel, runFor } from './../lib/results.js';
@@ -29,8 +40,12 @@ export default {
     // runs, and the values on a card are also where every pipeline node of
     // that module starts. The shape says which is which; nothing is labelled.
     const panel = h('div.instruments');
+    // Between the switches and the cards, because that is what it is about:
+    // everything on the cards below, and nothing the switches do (a switch is
+    // an action on the bench, and an action is not a setting to save).
+    const settings = h('div.benchsave');
     const body = h('div.cards');
-    fill(container, panel, body);
+    fill(container, panel, settings, body);
 
     /**
      * A card asked for by name — `#/bench?module=bace`, the pipeline tab's
@@ -87,25 +102,30 @@ export default {
      */
     let pressing = false;
     let missed = false;
-    body.addEventListener('pointerdown', (e) => {
-      if (e.target.closest('button')) pressing = true;
-    });
-    // `click` fires after `pointerup`, so release on the later of the two —
-    // and on `pointercancel`, or a drag off the button would freeze the card.
-    for (const kind of ['click', 'pointercancel']) {
-      body.addEventListener(kind, () => {
-        pressing = false;
-        if (missed) { missed = false; render(); }
-      }, true);
+    // Both zones this view redraws that have a text field beside a button:
+    // the cards, and the Bench settings row, whose name field commits on the
+    // same blur its own Save button causes.
+    for (const zone of [settings, body]) {
+      zone.addEventListener('pointerdown', (e) => {
+        if (e.target.closest('button')) pressing = true;
+      });
+      // `click` fires after `pointerup`, so release on the later of the two —
+      // and on `pointercancel`, or a drag off the button would freeze the card.
+      for (const kind of ['click', 'pointercancel']) {
+        zone.addEventListener(kind, () => {
+          pressing = false;
+          if (missed) { missed = false; render(); }
+        }, true);
+      }
+      zone.addEventListener('pointerup', () => {
+        // Nothing landed on a button: no `click` is coming, so release here.
+        setTimeout(() => {
+          if (!pressing) return;
+          pressing = false;
+          if (missed) { missed = false; render(); }
+        }, 0);
+      });
     }
-    body.addEventListener('pointerup', () => {
-      // Nothing landed on a button: no `click` is coming, so release here.
-      setTimeout(() => {
-        if (!pressing) return;
-        pressing = false;
-        if (missed) { missed = false; render(); }
-      }, 0);
-    });
 
     const opened = (name) => {
       if (!open.has(name)) open.set(name, new Set());
@@ -212,6 +232,254 @@ export default {
       // neither of them is `detail`.
       notify(err.text || String(err), err.level || 'warn', err.checks || null);
     };
+
+    // -- saved bench settings ---------------------------------------------
+    //
+    // The cards' values are the catalogue's *edited* layer, and that layer is
+    // a session: it lives in the process and goes with it. Until now the only
+    // way to keep an afternoon of tuning was to save a pipeline recipe, which
+    // records the bench for the modules one tree happens to name, as a
+    // by-product of saving a structure the operator may not want.
+    //
+    // So: `POST /bench/save` writes the whole catalogue's values to
+    // `<out>/bench/<name>.json`, `GET /bench/saved` lists them, and there is
+    // **no load route**. Putting a saved bench back is `PUT
+    // /modules/{m}/params`, one module at a time — the same edit a field
+    // makes — so a value the spec now refuses is refused with the sentence
+    // the field would have given, and the modules that took theirs keep it.
+    // A load route would have had to invent an all-or-nothing rule for the
+    // whole catalogue at once, and one that fails leaves the operator with
+    // the bench they were trying to replace and no idea which value stopped
+    // it.
+    //
+    // And the load says what it will do first. Overwriting the bench is not
+    // undoable and not a read-back: picking a name lists every value that
+    // would move — `bace.vpre  saved 1.020 · bench 0.800` — and the button
+    // under the list is what moves them. `lib/recipe.js: drift` is the same
+    // comparison the pipeline tab makes when a recipe is reopened, because a
+    // bench preset *is* a recipe record with no tree.
+
+    /** `GET /bench/saved`, newest first. Re-read after every save. */
+    let presets = [];
+    /** What the next Save will be called, and what a pick fills in. */
+    let presetName = '';
+    /** The preset being compared with the bench, until it is applied or
+     *  dismissed. Never applied by picking it: picking shows the list. */
+    let loadedPreset = null;
+    /** A Save that would write over an existing file, armed for that one
+     *  stem — the six seconds Park uses, and the pipeline tab's Save. */
+    let saveArmed = null;
+    let saveArmedTimer = null;
+    /** A save on the wire, so a double-click writes one file and not two. */
+    let saving = false;
+
+    function armSave(name) {
+      saveArmed = name;
+      clearTimeout(saveArmedTimer);
+      saveArmedTimer = name ? setTimeout(() => { saveArmed = null; render(); }, 6000) : null;
+    }
+
+    async function loadPresets() {
+      let answer;
+      try {
+        answer = (await api.savedBench()).presets || [];
+      } catch (err) {
+        // A list that will not answer is not an empty list. Emptying it would
+        // draw "none saved yet" over a folder full of files and invite a Save
+        // under a name that then writes over one with no arming, so the list
+        // stays as it was and the strip says the refresh did not land.
+        notify(`the saved bench settings could not be listed · ${err.text || String(err)}`, 'warn');
+        render();
+        return;
+      }
+      presets = answer;
+      // The picked file, as the service now has it — its values, not the
+      // copy taken when it was picked.
+      if (loadedPreset) loadedPreset = presets.find((p) => p.name === loadedPreset.name) || null;
+      render();
+    }
+
+    /** Pick one: never an apply, always the comparison. */
+    function pickPreset(name) {
+      const found = presets.find((p) => p.name === name) || null;
+      loadedPreset = found;
+      if (found) {
+        presetName = found.name;
+        if (found.error) {
+          notify(`${found.name} will not open · ${found.error}`, 'warn');
+          loadedPreset = null;
+        } else if (!recorded(found)) {
+          notify(`${found.name} has no bench values in it — there is nothing to put back.`, 'warn');
+          loadedPreset = null;
+        } else if (!drift(found, store.getState().modules.byName).length) {
+          // No note is drawn for a file that matches, so this is the whole
+          // answer to the click, and without it the pick does nothing visible.
+          notify(`the bench already matches ${found.name}.`, 'ok');
+        }
+      }
+      render();
+    }
+
+    async function savePreset() {
+      if (saving) return;                    // the second click of a double-click
+      const name = fileStem(presetName);
+      if (!name) {
+        notify('saved bench settings need a name — type one in the field first.', 'warn');
+        return;
+      }
+      // A name that is already a file: say what it will replace and take a
+      // second click for it. `presets` is the service's list, re-read after
+      // every save, so this is what is on disk rather than a guess.
+      if (saveArmed !== name && presets.some((p) => p.name === name)) {
+        const was = presets.find((p) => p.name === name);
+        armSave(name);
+        notify(`${name} already exists${was && was.saved_at ? ` — saved ${fmt.clock(was.saved_at)}` : ''}. `
+          + 'Click again to write over it, or type another name.', 'warn');
+        // `notify` draws the strip and nothing else; the button has to say
+        // what the second click will do, or the arming is invisible where
+        // the finger already is.
+        render();
+        return;
+      }
+      armSave(null);
+      saving = true;
+      try {
+        const out = await api.saveBench(name);
+        notify(`saved ${out.name} → ${out.path}`, 'ok');
+        // The name as the service wrote it, so the next Save over the same
+        // file arms rather than replacing it silently.
+        presetName = out.name;
+        await loadPresets();
+        // Saved from this bench, so the file and the bench agree; the note
+        // has nothing to say until the bench moves under it.
+        loadedPreset = presets.find((p) => p.name === out.name) || null;
+      } catch (err) { fail(err); } finally { saving = false; }
+      render();
+    }
+
+    /**
+     * Put the listed values back, one module at a time.
+     *
+     * Inside the `edits` chain, exactly as a field's edit is, and for the
+     * same reason: a Run or a DC clicked while six `PUT`s are on the wire
+     * must not go with the bench half-replaced. A module the service refuses
+     * leaves `refused` set, which is what stops that Run — and the ones that
+     * landed stay landed, because the note redraws from the bench and will
+     * say what is still unlike the file.
+     */
+    function applyPreset(moved) {
+      const bodies = restore(moved);
+      const names = Object.keys(bodies);
+      const label = loadedPreset ? loadedPreset.name : 'the saved settings';
+      edits = edits.then(async () => {
+        const bad = [];
+        for (const [module, params] of Object.entries(bodies)) {
+          try {
+            // The response *is* the module as the bench now has it, which is
+            // what every card and every node form draws from.
+            store.applyModule(await api.setParams(module, params));
+          } catch (err) { bad.push(module); fail(err); }
+        }
+        await revalidate(names);
+        refused = bad.length > 0;
+        const said = bad.length
+          ? `${label}: ${fmt.plural(bad.length, 'module')} of ${names.length} refused — the rest is on the bench`
+          : `bench set to ${label} · ${fmt.plural(moved.length, 'value')}`;
+        notify(said, bad.length ? 'warn' : 'ok');
+        render();
+      });
+      return edits;
+    }
+
+    /** Everything the row draws from, as one object. Pure. */
+    function settingsModel(state) {
+      const name = fileStem(presetName);
+      return {
+        name,
+        moved: loadedPreset && recorded(loadedPreset)
+          ? drift(loadedPreset, state.modules.byName) : [],
+        overwrites: presets.some((p) => p.name === name),
+        armed: Boolean(name) && saveArmed === name,
+      };
+    }
+
+    function renderSettings(state) {
+      const m = settingsModel(state);
+      keyed(settings, JSON.stringify([presetName, m,
+        presets.map((p) => [p.name, p.saved_at]),
+        loadedPreset && loadedPreset.name]), () => settingsRow(m));
+    }
+
+    function settingsRow(m) {
+      return h('div.inst.bset',
+        h('div.zh',
+          h('span.zt', 'Bench settings'),
+          h('span.zn', { text: presets.length ? fmt.plural(presets.length, 'file') + ' saved' : 'none saved yet' })),
+        h('div.namerow',
+          h('span.l', 'name'),
+          h('input.v', {
+            value: presetName,
+            placeholder: 'the bench as it is now',
+            'aria-label': 'the name to save the bench under',
+            title: 'the file: <out>/bench/<name>.json',
+            onchange: (e) => { presetName = e.target.value; render(); },
+          }),
+          presets.length
+            ? h('select.v', {
+              'aria-label': 'compare the bench with saved settings',
+              title: 'compare the bench with a saved one — picking never changes it',
+              onchange: (e) => pickPreset(e.target.value),
+            }, h('option', { value: '' }, 'saved settings …'),
+            ...presets.map((p) => h('option', {
+              value: p.name,
+              selected: loadedPreset && loadedPreset.name === p.name ? true : null,
+            }, p.name)))
+            : null,
+          h('button', {
+            class: m.armed ? 'btns armed' : 'btns',
+            // Not disabled while the save is on the wire: `saving` is checked
+            // synchronously in `savePreset`, and disabling would re-render
+            // between the mousedown that blurs the name field and the mouseup
+            // that clicks — the failure the whole pointer guard is about.
+            title: m.armed || m.overwrites
+              ? `${m.name} already exists — saving writes over it`
+              : 'writes every module’s values to a file, so they outlive this session',
+            onclick: savePreset,
+          }, m.armed ? `overwrite ${m.name}?` : 'Save settings')),
+        settingsNote(m));
+    }
+
+    /**
+     * What picking a preset would change, before it changes it.
+     *
+     * The same shape the pipeline tab's drift note has, and the same
+     * comparison behind it — with one difference that matters: there, the
+     * note is a reading about a run that will happen anyway, and here it *is*
+     * the load. Nothing on the bench moves until the button under the list is
+     * clicked, because replacing the bench is not undoable and the operator
+     * should not have to click to find out what a file contains.
+     */
+    function settingsNote(m) {
+      if (!loadedPreset || !m.moved.length) return null;
+      return h('div.recipe-note',
+        h('div.rn-head',
+          h('span', { text: `${fmt.plural(m.moved.length, 'value')} on the bench `
+            + `${m.moved.length === 1 ? 'differs' : 'differ'} from ${loadedPreset.name}:` }),
+          h('span', { style: { flex: '1' } }),
+          h('button.btns', {
+            title: 'puts these values onto the bench, one module at a time',
+            onclick: () => applyPreset(m.moved),
+          }, `↺ bench to ${loadedPreset.name}`),
+          h('button.btng', {
+            title: 'keep the bench as it is',
+            onclick: () => { loadedPreset = null; render(); },
+          }, 'keep bench')),
+        h('div.rn-list', m.moved.map((it) => h('div.rn-row',
+          h('span.l', { text: `${it.module}.${it.name}` }),
+          h('span.v', { text: `saved ${showValue(it.saved, it.unit)}` }),
+          h('span.v.now', { text: `bench ${showValue(it.now, it.unit)}` }),
+          h('i', { text: it.unit })))));
+    }
 
     const ctx = () => {
       const state = store.getState();
@@ -361,6 +629,9 @@ export default {
       const { byName } = state.modules;
       const c0 = ctx();
       renderPanel(state, c0);
+      // Before the early return below: an empty catalogue is exactly when the
+      // operator most wants to see that a saved bench is there to put back.
+      renderSettings(state);
       const names = BENCH_CARDS.filter((n) => byName[n]);
       if (!names.length) {
         held.clear();
@@ -467,6 +738,12 @@ export default {
 
     const off = store.subscribe(render);
     render();
-    return { dispose() { off(); charts.dispose(); }, focus };
+    // Files, so nothing changes them behind us: read once here and again
+    // after every save, rather than on a timer.
+    loadPresets();
+    return {
+      dispose() { off(); charts.dispose(); clearTimeout(saveArmedTimer); },
+      focus,
+    };
   },
 };

@@ -28,7 +28,7 @@ repo root for the offline bench at `/ui/replay.html`, which needs
 | `lib/card.js` | the generated card and the one field component every parameter goes through: provenance rendered, `doc` under the field and `doc_full` on hover |
 | `lib/instruments.js` | the bench tab's Instruments panel: shutter, LED and relay as switches whose lit position is the read-back, the LED's levels beside it; `panelModel` is pure and tested |
 | `lib/route.js` | the hash both ways: `#/bench?module=bace` parses to a route and a query, and `benchHash` writes the link a node form points at its bench card with |
-| `lib/recipe.js` | a saved recipe against the bench it is reopened on: `drift` lists where the bench moved since the save (skipping what every node overrides or a loop binds), `restore` is the `PUT` that puts it back; pure and tested |
+| `lib/recipe.js` | a saved bench against the bench it is reopened on — a pipeline recipe (`POST /pipelines/save`) and the bench tab's own settings file (`POST /bench/save`) carry the same `bench` block, so one comparison reads both: `drift` lists where the bench moved since the save (for a recipe, skipping what every node overrides or a loop binds; for a bench file, which has no tree, every module in it), `restore` is the `PUT` that puts it back, and `fileStem` is `app.py: _RECIPE_STEM` in JS — without it a Save's "this will write over ⟨name⟩" arming never fired for a name with a space in it. Pure and tested |
 | `lib/watch.js` | when to ask `GET /bench` again — which frames move the bench, and the throttle that collapses a scan's worth of them into one request per 700 ms |
 | `lib/dom.js` | `h()`, and `keyed()`: rebuild an element only when its model differs from the one already on screen |
 | `lib/svg.js` | `h()` in the SVG namespace, because `createElement('svg')` is an `HTMLUnknownElement` — a tag with the right name and no geometry |
@@ -49,8 +49,8 @@ repo root for the offline bench at `/ui/replay.html`, which needs
 | `lib/title.js` | the window title (2026-09-05, `docs/ux-screening.md` finding 1): the console's only channel to an operator who is not looking at it — a `NeedsOperator` pause, the run and its outermost loop, and an ending they were not there to see. A second rendering of `monitorModel`, so it cannot disagree with the monitor; `document.title` and nothing else, because it needs no permission and works behind another window |
 | `lib/undo.js` | the way back for the pipeline tree (2026-09-05, `docs/ux-screening.md` finding 2): a bounded stack of whole snapshots, hung off `views/pipeline.js`'s one mutation funnel, so `✕`, the recipe picker and `↺ bench` are all recoverable. The tree is the only thing in this console the service holds no layer underneath, and so the only thing that could be lost |
 | `lib/replay.js`, `replay.html` | the offline bench: fixtures fed into the same store the socket feeds |
-| `preview.html` | the bench tab itself with no service: the real shell and `views/bench.js` over the modules and Hello fixtures with a stub API, from the Round 3 review. `#/rig` mounts the rig tab instead, whose drawings need no service either |
-| `views/` | bench is M2's six generated cards with M3's charts in three of them; pipeline is M5's editor and schedule; results is M6's grid, drawn from `GET /runs` and `GET /runs/{id}` and nothing else; rig is R3·4: the chain, one shot at three scales with the swept axis taken from the `bace` card, and the read-back under them |
+| `preview.html` | the bench tab itself with no service: the real shell and `views/bench.js` over the modules and Hello fixtures with a stub API, from the Round 3 review. Its bench save is in memory — a saved bench lasts until the tab is reloaded, which is enough to work on the row that draws it. `#/rig` mounts the rig tab instead, whose drawings need no service either |
+| `views/` | bench is M2's six generated cards with M3's charts in three of them, the Instruments panel above them and the Bench settings row between the two (below); pipeline is M5's editor and schedule; results is M6's grid, drawn from `GET /runs` and `GET /runs/{id}` and nothing else; rig is R3·4: the chain, one shot at three scales with the swept axis taken from the `bace` card, and the read-back under them |
 | `fonts/` | IBM Plex Sans and Mono, Archivo — 24 woff2, 387 KB, lifted out of the Round 3 mockup by `tools/extract_ui_fonts.py`. Nothing is fetched from a network at runtime |
 | `fixtures/` | see below |
 | `tests/` | `node --test ui/tests/…` — and `tests/test_ui.py` runs them from the Python suite, skipping where there is no Node |
@@ -573,5 +573,48 @@ the pure function an entry becomes rows through, so its output is the key, and
 a card is replaced *in place* so rebuilding one does not blur a field in
 another. Idle with a monitor ticking: zero rebuilds. Through a scan: six, in
 the three cards whose read-back row actually moved.
+
+### What the Bench settings row is, and why it does not have a Load button
+
+*2026-09-06.* The values on the six cards are the catalogue's **edited** layer,
+and that layer is a session: it lives in the service process and goes with it.
+An afternoon of tuning was recoverable only by saving a pipeline recipe, which
+records the bench for the modules one tree happens to name, as a by-product of
+saving a structure the operator may not want. So the bench saves for its own
+sake — `POST /bench/save` writes every module of the catalogue to
+`<out>/bench/<name>.json`, `GET /bench/saved` lists them, and the row that
+drives the two sits between the Instruments panel and the cards: what it is
+about is everything below it, and nothing the switches above it do (a switch is
+an action on the bench, and an action is not a setting to save).
+
+**There is no Load button, and no load route.** Two decisions, made for the
+same reason and worth separating:
+
+*The service does not load.* Putting a saved value back is `PUT
+/modules/{m}/params`, one module at a time — the same edit a field makes — so a
+value the spec now refuses is refused with the sentence the field would have
+given, and the modules that took theirs keep them. A load route would have had
+to invent an all-or-nothing rule for nine modules, and an all-or-nothing that
+fails leaves the operator holding the bench they were trying to replace with no
+idea which value stopped it.
+
+*The console says what it will do before it does it.* Picking a name from the
+list never moves anything: it draws the comparison — `bace.n_loops  saved 100 ·
+bench 20`, one line per value — and the button under the list is what sends the
+`PUT`s. Replacing the bench is not undoable and is not a read-back, so it is
+not something to find out about by clicking. That comparison is `lib/recipe.js:
+drift`, the same one the pipeline tab makes when a recipe is reopened, because
+a bench file *is* a recipe record with no tree.
+
+Two smaller things fell out of building it. The pointer guard that holds a
+render back between a card's mousedown and its mouseup — without which a text
+field's `change` fires during the blur the button press causes, the card
+redraws, and the click lands on a button that no longer exists — now covers
+this row too, whose name field has exactly that shape. And the Save arming
+(`⟨name⟩ already exists — click again`) compares the **stem** the service will
+write rather than the name as typed: `cool down` is the file `cool_down`, so
+the pipeline tab's arming had never once fired for a name with a space in it,
+which is most of them. `lib/recipe.js: fileStem` is that rule in JS, pinned to
+the service's by one table asserted on both sides.
 
 The phases, and what each one has to prove, are in `docs/ui-plan.md`.

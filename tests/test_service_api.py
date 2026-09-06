@@ -808,6 +808,109 @@ def test_recipes_are_saved_under_out(service):
     assert next(s for s in saved if s["name"] == "cool_down")["tree"] == canonical()
 
 
+def test_the_bench_is_saved_and_put_back_a_module_at_a_time(service):
+    """`POST /bench/save` and `GET /bench/saved` -- the console's bench tab.
+
+    The edited layer is a session: six cards tuned over an afternoon go when
+    the process does. A recipe records the bench, but only for the modules
+    one tree names and only as a by-product of saving a structure, so this
+    saves the bench for its own sake -- every module of the catalogue,
+    resolved, value and source.
+
+    There is no load route on purpose. Putting a saved value back is the
+    ordinary `PUT /modules/{m}/params`, so a value the spec now refuses is
+    refused with the sentence a field would have got, and this asserts the
+    round trip the console makes out of the two.
+    """
+    client, session = service
+    assert client.get("/bench/saved").json() == {"presets": []}
+    assert client.post("/bench/save", json={"name": "  "}).status_code == 422
+    assert client.post("/bench/save", json={}).json()["param"] == "name"
+
+    client.put("/modules/bace/params", json={"vpre": 1.02})
+    r = client.post("/bench/save", json={"name": "before the dark scan"})
+    assert r.status_code == 200 and r.json()["name"] == "before_the_dark_scan"
+    path = r.json()["path"]
+    assert os.path.dirname(path) == os.path.join(session.out, "bench")
+    with open(path, encoding="utf-8") as fh:
+        record = json.load(fh)
+    assert set(record) == {"name", "saved_at", "bench"}
+    assert set(record["bench"]) == set(session.catalogue.names()), "the whole bench, not a tree's slice"
+    assert record["bench"]["bace"]["vpre"] == {"value": 1.02, "source": "edited"}
+
+    # The bench moves on, and the file is the only record of what it was.
+    client.put("/modules/bace/params", json={"vpre": 0.4})
+    assert client.get("/modules/bace").json()["params"]
+    listed = client.get("/bench/saved").json()["presets"]
+    assert [p["name"] for p in listed] == ["before_the_dark_scan"]
+    assert listed[0]["bench"]["bace"]["vpre"]["value"] == 1.02
+    assert "tree" not in listed[0], "a bench preset is not a recipe"
+
+    # The load: one `PUT` per module, the same edit a card's field makes.
+    r = client.put("/modules/bace/params", json={"vpre": listed[0]["bench"]["bace"]["vpre"]["value"]})
+    assert r.status_code == 200
+    assert session.catalogue.param_set("bace").get("vpre").value == 1.02
+
+    # A second save under the same name writes over it -- the console arms
+    # the second click, which is where a confirmation belongs.
+    assert client.post("/bench/save", json={"name": "before/the dark scan"}).json()["name"] \
+        == "before_the_dark_scan"
+    assert len(client.get("/bench/saved").json()["presets"]) == 1
+    paths = {(e["method"], e["path"]) for e in client.get("/").json()["routes"]}
+    assert ("POST", "/bench/save") in paths and ("GET", "/bench/saved") in paths
+
+
+#: The name an operator types and the file it becomes. Asserted against the
+#: service below and against the console's own half in
+#: `ui/tests/recipe.test.mjs: a name becomes the file stem the service writes`
+#: -- the console needs the stem to tell whether a Save would write over an
+#: existing file, and a raw name never matches a stemmed one.
+STEMS = [
+    ("cool down", "cool_down"),
+    ("before/the dark scan", "before_the_dark_scan"),
+    ("  evening  ", "evening"),
+    ("a.b-c_1", "a.b-c_1"),
+    ("!!!", ""),
+    ("", ""),
+    ("_leading and trailing_", "leading_and_trailing"),
+    ("20260906", "20260906"),
+]
+
+
+def test_a_name_becomes_the_same_file_stem_on_both_sides(service):
+    """One table, two implementations, and no build step to share one."""
+    client, session = service
+    for typed, stem in STEMS:
+        if not stem:
+            assert client.post("/bench/save", json={"name": typed}).status_code == 422
+            continue
+        assert client.post("/bench/save", json={"name": typed}).json()["name"] == stem
+        assert os.path.exists(os.path.join(session.out, "bench", f"{stem}.json"))
+
+
+def test_a_saved_file_that_will_not_parse_is_listed_with_its_reason(service):
+    """Both save folders, one rule (`app._saved_records`).
+
+    A picker that silently omits a file the operator saved says the save
+    never happened. So a file that will not parse is a row with an `error`
+    and no values, and the ones beside it still list.
+    """
+    client, session = service
+    client.post("/bench/save", json={"name": "good"})
+    client.post("/pipelines/save", json={"tree": canonical(), "name": "good"})
+    for folder in ("bench", "recipes"):
+        with open(os.path.join(session.out, folder, "torn.json"), "w", encoding="utf-8") as fh:
+            fh.write("{oh dear")
+        with open(os.path.join(session.out, folder, "list.json"), "w", encoding="utf-8") as fh:
+            fh.write("[1, 2]")
+    for url, key in (("/bench/saved", "presets"), ("/pipelines/saved", "recipes")):
+        rows = {r["name"]: r for r in client.get(url).json()[key]}
+        assert set(rows) == {"good", "torn", "list"}
+        assert "error" in rows["torn"] and "JSONDecodeError" in rows["torn"]["error"]
+        assert "error" in rows["list"] and "not an object" in rows["list"]["error"]
+        assert rows["torn"]["saved_at"] is None and "error" not in rows["good"]
+
+
 def test_with_the_331_named_a_temperature_pipeline_settles_over_the_api(tmp_path):
     """The same routes, no pause: under `--sim` a named console attaches the
     stand-in, the Dry run says so, the run settles, the console's readings and

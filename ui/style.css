@@ -364,6 +364,19 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase;
   color: var(--grey);
 }
+
+/* -- saved bench settings: the edited layer, made to outlive the session ---
+   `views/bench.js`. The same box as the Instruments panel, between it and the
+   cards, because that is what it is about: everything on the cards below, and
+   nothing the switches above do. The drift list it opens is the pipeline
+   tab's `.recipe-note`, unchanged — it is the same comparison. */
+.benchsave:empty { display: none; }
+.bset .zn { font-size: 11px; color: var(--grey); }
+.bset .namerow { gap: 10px; }
+/* Bounded rather than free: the row is one line, and a name field that grew
+   to the width of a 430px-column grid pushed Save off the end of it. */
+.bset .namerow input.v { max-width: 20em; }
+
 .cards::before {
   content: 'Modules'; display: block; grid-column: 1 / -1;
   font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase;

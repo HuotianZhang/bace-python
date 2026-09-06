@@ -1,4 +1,11 @@
-// A saved recipe against the bench it is reopened on — `lib/recipe.js`.
+// A saved bench against the bench it is reopened on — `lib/recipe.js`.
+//
+// Two things are saved to a file and compared with the bench when they come
+// back: a **recipe** (`POST /pipelines/save`, the pipeline tab) and the
+// **bench settings** themselves (`POST /bench/save`, the bench tab). Both
+// records carry the same `bench: {module: {param: {value, source}}}` block,
+// which is why one `drift` reads both — a bench preset is a recipe record
+// with no tree, and a record with no tree covers every module in it.
 //
 // A recipe's tree carries only what its nodes override; every other value a
 // node runs with is the module's bench value at start time. So a recipe is
@@ -84,6 +91,33 @@ export function coveredBy(tree, rows) {
   };
   visit(tree, []);
   return Object.fromEntries(per);
+}
+
+/**
+ * The file stem a name is saved under: `app.py: _RECIPE_STEM`, in JS.
+ *
+ * Here because the console has to compare a typed name with the names the
+ * service already has, and a raw name never matches a stemmed one — so the
+ * "this will write over ⟨name⟩" arming silently did not fire for any name
+ * with a space in it, which is most of them. Both tabs' Save use this.
+ *
+ * The two halves are pinned to the same table:
+ * `tests/test_service_api.py: test_a_name_becomes_the_same_file_stem_on_both_sides`
+ * and `recipe.test.mjs: a name becomes the file stem the service writes`.
+ */
+export function fileStem(name) {
+  return String(name === null || name === undefined ? '' : name)
+    .trim().replace(/[^A-Za-z0-9_.-]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+/**
+ * One drifted value, for the note that lists them. Volts to three places
+ * because that is what the cards show; an array as its elements.
+ */
+export function showValue(v, unit) {
+  if (typeof v === 'number') return unit === 'V' ? v.toFixed(3) : Number.isInteger(v) ? String(v) : v.toFixed(3);
+  if (Array.isArray(v)) return v.map((x) => showValue(x, unit)).join(', ');
+  return v === null || v === undefined ? '—' : String(v);
 }
 
 function same(a, b) {

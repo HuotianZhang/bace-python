@@ -61,6 +61,18 @@ export function createApi({ base = '', fetch: fetchImpl = globalThis.fetch } = {
     /** One of the explicit actions; the service never performs them itself. */
     action: (name, args, { wait = true } = {}) =>
       call('POST', `/bench/actions/${encodeURIComponent(name)}`, args || {}, { wait }),
+    /**
+     * The whole bench to `<out>/bench/<name>.json` — every module of the
+     * catalogue, resolved, value and source. The edited layer is a session,
+     * and this is what outlives it.
+     */
+    saveBench: (name) => call('POST', '/bench/save', { name }),
+    /** Every saved bench, newest first, values included. */
+    savedBench: () => call('GET', '/bench/saved'),
+    // There is no `loadBench`. A saved value goes back onto the bench through
+    // `setParams` — the same edit a card's field makes — so one the spec now
+    // refuses is refused with the sentence the field would have given, and
+    // the rest of the file still lands (`views/bench.js: applyPreset`).
 
     // -- the catalogue -----------------------------------------------------
     modules: () => call('GET', '/modules'),
