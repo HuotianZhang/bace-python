@@ -754,9 +754,11 @@ test('the running mean and its band are the service\'s own, not a statistic of t
 });
 
 test('the charge axis is one power of ten for the whole chart, never a prefix per value', () => {
-  assert.deepEqual(chargeUnit([3.65e-10, 4.1e-10]), { factor: 1e-10, label: 'Q / 1e-10 C' });
-  assert.deepEqual(chargeUnit([-2.3e-12, 9e-13]), { factor: 1e-12, label: 'Q / 1e-12 C' });
-  assert.equal(chargeUnit([]).label, 'Q / 1e-12 C');
+  // The caption is drawn inside the same `<svg>` as the ticks, so its
+  // exponent takes the axis's own U+2212 rather than a hyphen (#68).
+  assert.deepEqual(chargeUnit([3.65e-10, 4.1e-10]), { factor: 1e-10, label: 'Q / 1e−10 C' });
+  assert.deepEqual(chargeUnit([-2.3e-12, 9e-13]), { factor: 1e-12, label: 'Q / 1e−12 C' });
+  assert.equal(chargeUnit([]).label, 'Q / 1e−12 C');
 });
 
 test('a shot without traces still puts its point on the loop curve', () => {

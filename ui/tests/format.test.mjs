@@ -8,8 +8,9 @@ import assert from 'node:assert/strict';
 import { charge, sigmaQ, volts, kelvin, intensity, duration, keptOf, plural, sig, ABSENT } from '../lib/format.js';
 
 test('a charge keeps five to six significant figures, in the archive\'s own spelling', () => {
-  assert.equal(charge(3.65257e-10), '3.65257e-10 C');
-  assert.equal(charge(-1.7183827170358963e-10), '-1.71838e-10 C');
+  assert.equal(charge(3.65257e-10), '3.65257e−10 C');
+  assert.equal(charge(-1.7183827170358963e-10), '−1.71838e−10 C',
+    'both signs are U+2212 — the mantissa\'s and the exponent\'s (#68)');
   assert.equal(charge(null), ABSENT);
 });
 

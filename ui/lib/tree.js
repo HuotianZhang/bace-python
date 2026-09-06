@@ -25,6 +25,8 @@
 // The DOM is `views/pipeline.js`; this is pure, and `ui/tests/tree.test.mjs`
 // holds it down against a recorded validate with no browser in the way.
 
+import { minus } from './format.js';
+
 /**
  * The three loops, as data — label, fields, and how a row summarises one.
  *
@@ -492,8 +494,8 @@ export function loopSummary(node, resolved) {
   const dp = spec.decimals;
   const parts = [];
   if (values && values.length) {
-    const first = values[0].toFixed(dp);
-    const last = values[values.length - 1].toFixed(dp);
+    const first = minus(values[0].toFixed(dp));
+    const last = minus(values[values.length - 1].toFixed(dp));
     parts.push(values.length === 1 ? `${first} ${spec.unit}` : `${first} → ${last} ${spec.unit}`);
     parts.push(String(values.length));
   } else if (form === 'range') {
@@ -508,7 +510,7 @@ export function loopSummary(node, resolved) {
 }
 
 function fmtNum(v, dp) {
-  return v === undefined || v === null || Number.isNaN(Number(v)) ? '—' : Number(v).toFixed(dp);
+  return v === undefined || v === null || Number.isNaN(Number(v)) ? '—' : minus(Number(v).toFixed(dp));
 }
 
 /** `2 loops · 2 modules` — a count of what is in the tree, not of what it runs. */

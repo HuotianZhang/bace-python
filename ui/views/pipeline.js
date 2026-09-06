@@ -848,7 +848,7 @@ export default {
             }),
             h('div.lst', { style: { gridTemplateColumns: `repeat(${row.values.length}, auto)` } },
               row.values.map((value) => h('span.h', {
-                text: spec && spec.count ? String(value) : Number(value).toFixed(spec ? spec.decimals : 2),
+                text: fmt.minus(spec && spec.count ? String(value) : Number(value).toFixed(spec ? spec.decimals : 2)),
               })),
               settles
                 ? settles.map((s) => h('span', { text: s === null || s === undefined ? fmt.ABSENT : fmt.duration(s) }))
@@ -1197,9 +1197,9 @@ export default {
           h('div.cs', { text: `the cells it fills · ${fmt.plural(grid.count, 'module run')} over ${grid.temperatures.length} × ${grid.levels.length}` }),
           h('div.lst', { style: { gridTemplateColumns: `auto repeat(${grid.levels.length}, 1fr)` } },
             h('span.h', 'T / K'),
-            grid.levels.map((led) => h('span.h', { text: Number(led).toFixed(3) })),
+            grid.levels.map((led) => h('span.h', { text: fmt.minus(Number(led).toFixed(3)) })),
             grid.temperatures.flatMap((t) => [
-              h('span', { style: { fontWeight: '500' }, text: t === null ? fmt.ABSENT : String(t) }),
+              h('span', { style: { fontWeight: '500' }, text: t === null ? fmt.ABSENT : fmt.minus(String(t)) }),
               ...grid.levels.map((led) => h('span', {
                 style: { color: 'var(--grey)' },
                 text: grid.cell(t, led).map((leaf) => leaf.module).join(' → ') || fmt.ABSENT,

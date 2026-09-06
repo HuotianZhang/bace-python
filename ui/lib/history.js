@@ -119,7 +119,12 @@ export function runGroups(rows, { live = {} } = {}) {
       state,
       level: stateLevel(state),
       counts: fmt.keptOf(row.kept, row.requested),
-      outcome: row.outcome_text || '',
+      // Composed by `service/journal.py`, not here, and it is the console's
+      // longest run of numbers: `Q -5.651e-13 ± 0.0e+00 C · 1/1` (#68). The
+      // wire and the on-disk journal keep their ASCII — a journal is a record
+      // and records get parsed — so the glyph is decided at the boundary, and
+      // by `minusIn`, because the same field also carries `failed: <path>`.
+      outcome: fmt.minusIn(row.outcome_text || ''),
       at: stamp(row.started_at || row.queued_at),
       identity,
       voc: vocRange(row),

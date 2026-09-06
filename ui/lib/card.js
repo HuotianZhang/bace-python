@@ -202,10 +202,15 @@ export function field(spec, ctx, model, { segmented = false, accent = false, lab
       : provenance(spec, ctx, model, editable)), docLine(spec, ctx, model));
 }
 
-/** The value as text, for a field the operator may not type into. */
+/**
+ * The value as text, for a field the operator may not type into — and so the
+ * one that gets the real minus. `input()` below renders the same `typed()`
+ * without it: what is in an `<input>` is on its way back through
+ * `Number(raw)`, and `Number('−0.2')` is `NaN` (#68).
+ */
 function display(spec) {
   if (spec.value === null || spec.value === undefined) return fmt.ABSENT;
-  return typed(spec);
+  return fmt.minus(typed(spec));
 }
 
 /**

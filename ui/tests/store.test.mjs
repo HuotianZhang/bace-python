@@ -398,7 +398,7 @@ test('a current density is mA/cm² on the wire, and stays mA/cm² on screen', ()
   // never picks a prefix: one J-V curve printed part in mA/cm² and part in
   // nA/cm² is a column that cannot be read down.
   assert.equal(density(20.0), '20.0 mA/cm²');
-  assert.equal(density(-1.9e-3), '-0.00190 mA/cm²');
+  assert.equal(density(-1.9e-3), '−0.00190 mA/cm²');
   assert.equal(density(0), '0 mA/cm²', 'a measured zero is a value, not an absence');
   assert.equal(density(null), '—', 'pixel_area_cm2 = 0 has no density at all');
 });
@@ -447,7 +447,7 @@ test('sigma_Q of zero is an absence, not a value', () => {
   // recorded; a zero-length error bar drawn as a bare dot is a lie.
   assert.equal(sigmaQ(0), null);
   assert.equal(sigmaQ(null), null);
-  assert.ok(sigmaQ(4e-11).startsWith('4.00e-11'));
+  assert.ok(sigmaQ(4e-11).startsWith('4.00e−11'));
 });
 
 test('the store remembers the traces the ring would replay, and no more', () => {

@@ -12,8 +12,15 @@
 // do `String(v).replace('-','−')` and the mono face aligns the real minus with
 // its digits, which is the difference between a column that reads down and one
 // that does not (`docs/ui-rules.md` §2).
+//
+// It used to be declared here, and being declared here is how the tables came
+// to disagree with the axes (#68): a rule about spelling a number lived in the
+// module that draws axes, so only axes kept it. It is `format.js`'s now, and
+// re-exported so `scale.MINUS` still reads as the axis's own.
 
-export const MINUS = '−';
+import { MINUS } from './format.js';
+
+export { MINUS };
 
 /** A linear scale. `f(v)` maps the domain onto the range; `f.invert` returns. */
 export function linear([d0, d1], [r0, r1]) {

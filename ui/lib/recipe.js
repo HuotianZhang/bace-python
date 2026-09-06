@@ -17,6 +17,8 @@
 //
 // `drift` is pure: the recipe's `bench` against the catalogue's entries.
 
+import { minus } from './format.js';
+
 /**
  * Every parameter whose bench value differs from what the recipe was saved
  * with: `[{module, name, saved, now, unit}]`, in catalogue order. Empty when
@@ -150,7 +152,7 @@ export function fileStem(name) {
  * because that is what the cards show; an array as its elements.
  */
 export function showValue(v, unit) {
-  if (typeof v === 'number') return unit === 'V' ? v.toFixed(3) : Number.isInteger(v) ? String(v) : v.toFixed(3);
+  if (typeof v === 'number') return minus(unit === 'V' ? v.toFixed(3) : Number.isInteger(v) ? String(v) : v.toFixed(3));
   if (Array.isArray(v)) return v.map((x) => showValue(x, unit)).join(', ');
   return v === null || v === undefined ? '—' : String(v);
 }

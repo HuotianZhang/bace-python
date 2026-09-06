@@ -63,7 +63,7 @@ test('a live bias output is the one alert on the rail, with its two levels', () 
   const bias = cell(model, 'bias');
   assert.equal(bias.value, 'LIVE');
   assert.equal(bias.level, 'alert');
-  assert.equal(bias.sub, '0.5000 → -0.25 V');
+  assert.equal(bias.sub, '0.5000 → −0.25 V');
   // §3: "should be the only thing on screen at that intensity".
   assert.equal(model.filter((c) => c.level === 'alert').length, 1);
 });

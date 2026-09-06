@@ -194,7 +194,7 @@ test('the summary excludes the partial cell from the span and says so', () => {
   const span = s.lines.find((l) => l.key === 'span');
   assert.match(span.text, /over 3 complete cells, 1 partial excluded/);
   assert.match(span.text, /all negative/);
-  assert.match(span.text, /^-\d\.\d+e-10 C → -\d\.\d+e-10 C/);
+  assert.match(span.text, /^−\d\.\d+e−10 C → −\d\.\d+e−10 C/);
   const sigma = s.lines.find((l) => l.key === 'sigma');
   assert.equal(sigma.text, 'recorded on every cell (4 of 4)');
   const intensity = s.lines.find((l) => l.key === 'intensity');

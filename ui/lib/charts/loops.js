@@ -115,12 +115,14 @@ export function loopSeries(node) {
   return out;
 }
 
-/** `Q / 1e-12 C`: one power of ten for the axis, chosen from the data, never per value. */
+/** `Q / 1e−12 C`: one power of ten for the axis, chosen from the data, never per value. */
 export function chargeUnit(values) {
   let peak = 0;
   for (const v of values) if (finite(v) && Math.abs(v) > peak) peak = Math.abs(v);
   const e = peak > 0 ? Math.floor(Math.log10(peak)) : -12;
-  return { factor: 10 ** e, label: `Q / 1e${e} C` };
+  // The caption sits in the same `<svg>` as the ticks, so a hyphen here put
+  // both glyphs inside one chart — `1e-12` under an axis labelled `1e−8` (#68).
+  return { factor: 10 ** e, label: `Q / 1e${fmt.minus(String(e))} C` };
 }
 
 /** How the run this node belongs to ended, for the caption on a truncated one. */

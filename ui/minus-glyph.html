@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>负号的两个字形 — 量过再决定</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="fonts/fonts.css">
+<!--
+  一个比较用的台子，不是交付物 —— 和 `rail-density.html`、`bench-head.html`
+  同一个体例，也同一个用途：在决定之前，先有东西可看。
+
+  #68 报的是同一张 `jv` 卡上并排的两个字形：左边刻度是 `−0.2`（U+2212），
+  下面指标表是 `-109 nA`（U+002D）。issue 给的理由是「真负号和数字对齐」，
+  给的改法是「`format.js` 出口统一 `.replaceAll('-', scale.MINUS)`」。
+
+  这一页要回答的是那条理由和那个改法各自成立到什么程度。三件事都是量出来的，
+  不是写下来的：
+
+    * 两个字形在 console 真正用的四种字号 / 三种字体下的宽度和墨迹（下面第一张表，
+      页面加载后用 canvas 和 Range 量的）；
+    * 一列读数在换字形前后的横向抖动（第二节的样例，同一列并排）；
+    * 屏幕上到底有多少个 —— `tools/minus_census.py` 驱动真 console 走六个屏，
+      逐个文本节点数。四个方案的数字在第三节。
+
+  结论先写在这里，省得往下翻：
+
+    **等宽字体里根本没有对齐问题。** IBM Plex Mono 的 `-` 和 `−` 步进完全相同
+    （四个字号下都是 ±0.000 px），笔画高度也一样。差的只有墨迹长度 —— 真负号长
+    1.5–1.7 倍。所以 Mono 里这是「一张卡上两个字形代表同一件事」，不是排版问题。
+
+    **抖动是真的，但不在 issue 说的地方。** IBM Plex Sans 和 Archivo 是比例字体，
+    `-` 比数字窄 1.8–3.5 px，而 `−` 恰好和数字等宽。屏幕上最大的一处
+    （results 的运行列表，Sans 11px）整行读数因此差 4.3 px —— 那正是
+    `ui-rules` §2 说的「收敛过程中横向抖动的电荷值是 bug，不是风格」。
+
+    **issue 的改法覆盖不到一半的位置。** 屏幕上 8 处，`format.js` 只拥有 6 处；
+    最大的一处 `outcome_text` 是 `service/journal.py` 在 Python 里拼好发过来的，
+    根本不在 `ui/` 里。而在出口无差别 `replaceAll` 会把 `label('jv-dark')` 变成
+    `jv−dark` —— 名字里的连字符不是负号。
+
+    **合入的是 V3**：`format.js` 拥有 `MINUS`，逐个数值 formatter 转换；
+    名字和计数不转；`<input>` 的值、grid 的键、CSV 和文件名保持 ASCII，
+    由 `ui/tests/minus.test.mjs` 两头钉住。
+-->
+<style>html, body { margin: 0; } img { max-width: 100%; } [hidden] { display: none !important; }</style>
+</head>
+<body>
+
+<style>
+:root {
+  --pg-bg: #f7f5f4;
+  --pg-panel: #ffffff;
+  --pg-ink: #1c1a19;
+  --pg-dim: #726d6a;
+  --pg-faint: #9c9694;
+  --pg-rule: #ded9d7;
+  --pg-hair: #ebe6e4;
+  --pg-accent: #ec3013;
+  --pg-ok: #3f7d53;
+  --pg-warn: #b06a00;
+  --pg-chip: #efeceb;
+  --pg-ink-hy: #b06a00;
+  --pg-ink-mi: #3f7d53;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --pg-bg: #161514; --pg-panel: #1e1c1b; --pg-ink: #f0ecea; --pg-dim: #a49d9a;
+    --pg-faint: #7d7674; --pg-rule: #3a3634; --pg-hair: #2a2726; --pg-accent: #ff6448;
+    --pg-ok: #6fae84; --pg-warn: #d79a3f; --pg-chip: #2a2726;
+    --pg-ink-hy: #d79a3f; --pg-ink-mi: #6fae84;
+  }
+}
+:root[data-theme="dark"] {
+  --pg-bg: #161514; --pg-panel: #1e1c1b; --pg-ink: #f0ecea; --pg-dim: #a49d9a;
+  --pg-faint: #7d7674; --pg-rule: #3a3634; --pg-hair: #2a2726; --pg-accent: #ff6448;
+  --pg-ok: #6fae84; --pg-warn: #d79a3f; --pg-chip: #2a2726;
+  --pg-ink-hy: #d79a3f; --pg-ink-mi: #6fae84;
+}
+
+body {
+  background: var(--pg-bg); color: var(--pg-ink);
+  font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  font-size: 15px; line-height: 1.6;
+}
+.wrap { max-width: 1180px; margin: 0 auto; padding: 44px 28px 90px; }
+.eyebrow {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--pg-faint); margin: 0 0 10px;
+}
+h1 { font-family: 'Archivo', 'IBM Plex Sans', sans-serif; font-size: 30px; line-height: 1.2; margin: 0 0 16px; font-weight: 700; }
+h2.sec {
+  font-family: 'Archivo', 'IBM Plex Sans', sans-serif; font-size: 19px; margin: 52px 0 14px;
+  padding-top: 20px; border-top: 1px solid var(--pg-rule); font-weight: 700;
+}
+.lede { color: var(--pg-dim); max-width: 78ch; margin: 0 0 14px; }
+.lede b { color: var(--pg-ink); font-weight: 600; }
+code, .num { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: .92em; font-variant-numeric: tabular-nums; }
+code { background: var(--pg-chip); padding: 1px 5px; border-radius: 3px; }
+.hy { color: var(--pg-ink-hy); }
+.mi { color: var(--pg-ok); }
+
+table.m { border-collapse: collapse; margin: 8px 0 4px; font-size: 13.5px; width: 100%; }
+table.m th, table.m td { padding: 5px 14px 5px 0; text-align: left; border-bottom: 1px solid var(--pg-hair); vertical-align: baseline; }
+table.m th { font-weight: 600; font-size: 11px; color: var(--pg-faint); text-transform: uppercase; letter-spacing: .06em; }
+table.m td.n, table.m th.n { font-family: 'IBM Plex Mono', ui-monospace, monospace; text-align: right; font-variant-numeric: tabular-nums; }
+table.m td.who { color: var(--pg-dim); font-size: 12.5px; }
+table.m tr.mono td { background: color-mix(in srgb, var(--pg-ok) 7%, transparent); }
+.tag { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10.5px; padding: 1px 5px; border-radius: 3px; background: var(--pg-chip); color: var(--pg-dim); }
+.tag.win { background: color-mix(in srgb, var(--pg-ok) 18%, transparent); color: var(--pg-ok); }
+.tag.bad { background: color-mix(in srgb, var(--pg-accent) 15%, transparent); color: var(--pg-accent); }
+
+/* -- 样例：两列同样的读数，只有字形不同 ---------------------------------- */
+.specs { display: flex; gap: 26px; flex-wrap: wrap; margin: 18px 0 6px; }
+.spec {
+  background: var(--pg-panel); border: 1px solid var(--pg-rule); border-radius: 5px;
+  padding: 14px 16px 12px; min-width: 268px;
+}
+.spec h3 {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; margin: 0 0 2px;
+  letter-spacing: .05em; text-transform: uppercase; color: var(--pg-faint); font-weight: 600;
+}
+.spec .sub { font-size: 11.5px; color: var(--pg-dim); margin: 0 0 10px; }
+.col { display: grid; grid-template-columns: 1fr 1fr; gap: 0 22px; }
+.col .ch { font-size: 10.5px; color: var(--pg-faint); font-family: 'IBM Plex Mono', ui-monospace, monospace; padding-bottom: 4px; border-bottom: 1px solid var(--pg-hair); margin-bottom: 5px; }
+.col .v { white-space: pre; font-variant-numeric: tabular-nums; }
+.col .v.right { text-align: right; }
+.rule { border-left: 1px dashed var(--pg-accent); }
+
+/* -- 字形放大：墨迹画出来 ------------------------------------------------- */
+.zoom { display: flex; gap: 30px; flex-wrap: wrap; align-items: flex-end; margin: 16px 0 4px; }
+.zoom figure { margin: 0; }
+.zoom figcaption { font-size: 11.5px; color: var(--pg-dim); margin-top: 6px; font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+.zoom canvas { background: var(--pg-panel); border: 1px solid var(--pg-rule); border-radius: 4px; display: block; }
+
+.note { font-size: 12.5px; color: var(--pg-faint); max-width: 78ch; margin: 6px 0 0; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<div class="wrap">
+
+  <p class="eyebrow">BACE console · ui/lib/format.js · issue #68</p>
+  <h1>负号的两个字形，量过再决定</h1>
+
+  <p class="lede">
+    同一张 <code>jv</code> 卡上，左边刻度写 <span class="mi num">−0.2</span>（U+2212），
+    下面指标表写 <span class="hy num">-109 nA</span>（U+002D）。
+    Issue 给的理由是「真负号和数字对齐」。这一页先把「对齐」量出来 ——
+    因为在 console 用得最多的那个字体里，<b>它根本不动</b>。
+  </p>
+
+  <h2 class="sec">一 · 两个字形，在 console 自己的字体和字号下</h2>
+  <p class="lede">
+    下表在页面加载后实测：步进（advance）用一个字符的 <code>Range</code> 量，
+    墨迹（ink）把字号放大四倍画进 canvas 再扫描 alpha 通道。
+    「整行 Δ」是 <code>1.09061e-12 C</code> 这一条读数换成真负号后宽出来的量 ——
+    一行里有两个符号，尾数一个、指数一个。
+  </p>
+  <table class="m" id="metrics">
+    <thead><tr>
+      <th>字体</th><th class="n">px</th>
+      <th class="n">- 步进</th><th class="n">− 步进</th><th class="n">数字步进</th>
+      <th class="n">步进 Δ</th>
+      <th class="n">- 墨迹</th><th class="n">− 墨迹</th><th class="n">墨迹比</th>
+      <th class="n">整行 Δ</th>
+      <th>console 里用在哪</th>
+    </tr></thead>
+    <tbody><tr><td colspan="11" class="who">量测中…</td></tr></tbody>
+  </table>
+  <p class="note" id="metrics-note"></p>
+
+  <div class="zoom" id="zoom"></div>
+
+  <h2 class="sec">二 · 一列读数，换字形前后</h2>
+  <p class="lede">
+    左右两列是同样的数，只有字形不同；虚线是右对齐的边。
+    <b>Mono 两列完全重合</b> —— 等宽字体里符号和数字同宽，列不会动。
+    <b>Sans 和 Archivo 里右列更宽</b>，而且宽出来的量取决于这一行有几个符号，
+    所以一个正负来回跳的电荷值会横向抖 —— <code>ui-rules</code> §2 点名的正是这个。
+  </p>
+  <div class="specs" id="specs"></div>
+
+  <h2 class="sec">三 · 四个改法，跑真 console 数出来的</h2>
+  <p class="lede">
+    <code>tools/minus_census.py</code> 驱动 <code>--sim --fast</code> 上的真 console
+    走六个屏（bench 的四个动作、pipeline、results、rig），
+    逐个文本节点数，按「是符号 / 是连字符 / 在 <code>&lt;input&gt;</code> 里」分三类。
+    要看的是第三列：<b>屏幕上仍以 ASCII 连字符呈现的符号</b>。
+    每一格都是同一条命令、同一个刚起的 service 跑出来的。
+  </p>
+  <table class="m">
+    <thead><tr>
+      <th>方案</th><th>改了什么</th>
+      <th class="n">剩余错字形</th><th class="n">剩余位置</th>
+      <th class="n">JS 套件</th><th>代价</th>
+    </tr></thead>
+    <tbody>
+      <tr>
+        <th>V0 现状</th>
+        <td class="who">—</td>
+        <td class="n"><b>81</b></td><td class="n">8</td>
+        <td class="n">330 过</td>
+        <td class="who">轴和表在同一张卡上说两种话</td>
+      </tr>
+      <tr>
+        <th>V1 issue 原文</th>
+        <td class="who"><code>format.js</code> 出口无差别 <code>replaceAll</code></td>
+        <td class="n">38</td><td class="n">2</td>
+        <td class="n">325 过 · <span class="tag bad">5 挂</span></td>
+        <td class="who">
+          名字也被改：<code>label('jv-dark')</code> → <span class="hy num">jv−dark</span>，
+          <code>plural(2,'module-run')</code> → <span class="hy num">2 module−runs</span>
+        </td>
+      </tr>
+      <tr>
+        <th>V2 逐个 formatter</th>
+        <td class="who">同上，但只作用在数值 formatter，指数也换</td>
+        <td class="n">30</td><td class="n">2</td>
+        <td class="n">330 过</td>
+        <td class="who">名字安全了；覆盖率和 V1 一样 —— 剩下的两处不归 <code>format.js</code></td>
+      </tr>
+      <tr class="mono">
+        <th>V3 合入</th>
+        <td class="who">V2 ＋ 服务端拼好的句子、图注、树、漂移注、卡片只读值</td>
+        <td class="n"><b>0</b></td><td class="n">0</td>
+        <td class="n">340 过 <span class="tag win">+10</span></td>
+        <td class="who">多一个 <code>minusIn</code>（只换句子里的符号），和一份两头都钉住的测试</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p class="lede" style="margin-top:16px">
+    <b>V1 和 V2 覆盖率一样，说明问题不在 <code>replaceAll</code> 怎么写。</b>
+    屏幕上 8 处，<code>format.js</code> 只拥有 6 处。剩下两处是：
+    图注 <code>Q / 1e-12 C</code>（<code>charts/loops.js</code> 的模板串，
+    和它上面写着 <span class="mi num">1e−8</span> 的刻度在<b>同一个 <code>&lt;svg&gt;</code> 里</b>），
+    以及 results 运行列表里最长的那一条 <code>outcome_text</code> ——
+    它是 <code>service/journal.py</code> 在 Python 里拼好发过来的，
+    <b>整个 <code>ui/</code> 里都找不到</b>。
+  </p>
+  <p class="lede">
+    那一条也是为什么 V3 需要第二个函数。<code>outcome_text</code> 同一个字段
+    还会送 <code>failed: &lt;路径&gt;</code>，旁边的运行标签带日期，
+    所以对它不能无差别替换：<code>minusIn</code> 只换「开头是数字的」和「指数自己的」那种连字符，
+    <code>2026-08-07</code>、<code>/tmp/a-b</code>、<code>jv-dark</code> 一律不动。
+    判断哪个连字符是符号的那条规则，普查工具和修复函数用的是同一条。
+  </p>
+
+  <h2 class="sec">四 · 另一半：哪里必须留 ASCII</h2>
+  <p class="lede">
+    「出口统一替换」最危险的地方不是它改了什么，是它<b>不知道这个值要去哪</b>。
+    console 上有三条路，值走上去以后是给机器读的，真负号在那里是故障不是修复：
+  </p>
+  <table class="m">
+    <thead><tr><th>路</th><th>谁读</th><th>放真负号会怎样</th><th>V3 怎么保证</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>&lt;input&gt;</code> 的值</td>
+        <td class="who">operator 改完，console <code>Number(raw)</code> 提交</td>
+        <td class="who"><code>Number('−0.200')</code> 是 <code>NaN</code></td>
+        <td class="who"><code>card.js</code> 里 <code>display()</code> 过 <code>minus</code>，<code>input()</code> 不过</td>
+      </tr>
+      <tr>
+        <td><code>tKey</code> / <code>ledKey</code></td>
+        <td class="who">results 的 T × LED 网格按这个键找格子</td>
+        <td class="who">建表和查表拼法不一致，负数格子静默丢失</td>
+        <td class="who">不碰；测试里建一个 <code>Map</code> 两头查一次</td>
+      </tr>
+      <tr>
+        <td><code>csvOf</code> / <code>fileStem</code></td>
+        <td class="who">电子表格；文件系统</td>
+        <td class="who">表格把 <span class="mi num">−1.7e−10</span> 当文本</td>
+        <td class="who">本来就从原始值拼，测试拿真 fixture 断言导出里一个 U+2212 都没有</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="lede" style="margin-top:14px">
+    所以 <code>ui/tests/minus.test.mjs</code> 是两半的，而且第二半才是它存在的理由：
+    读的一半断言真负号，机器的一半断言 ASCII。
+    被测的是<b>那条边界</b>，不是那个字形。
+  </p>
+
+</div>
+
+<script>
+// 页面上所有数字都是这里量出来的。用手打的数字结束一场排版争论，等于没结束
+// —— 和 `rail-density.html` 的高度、`bench-head.html` 的 px 一个道理。
+
+const SITES = [
+  ["'IBM Plex Mono'", 9.5, '图表刻度'],
+  ["'IBM Plex Mono'", 11, '指标表、图表读数条'],
+  ["'IBM Plex Mono'", 11.5, 'shot 行'],
+  ["'IBM Plex Mono'", 13, '台架栏、rig 读回表'],
+  ["'IBM Plex Sans'", 9, '图注'],
+  ["'IBM Plex Sans'", 11, 'results 运行列表'],
+  ["'Archivo'", 12, 'shot 标题'],
+];
+
+// shot 行里真实的一条负电荷，两个符号：尾数一个、指数一个。
+const ROW = '-1.09061e-12 C';
+
+const probe = document.createElement('div');
+probe.style.cssText = 'position:absolute;left:-9999px;top:0;white-space:pre;';
+document.body.appendChild(probe);
+
+function advance(font, size, text) {
+  probe.style.font = `${size}px ${font}`;
+  probe.textContent = text;
+  return probe.getBoundingClientRect().width;
+}
+
+// 步进说的是下一个字从哪开始，不是笔画在哪。墨迹得自己扫。
+const cv = document.createElement('canvas');
+cv.width = 240; cv.height = 80;
+const cx = cv.getContext('2d', { willReadFrequently: true });
+
+function ink(font, size, ch, k = 4) {
+  cx.clearRect(0, 0, cv.width, cv.height);
+  cx.font = `${size * k}px ${font}`;
+  cx.fillStyle = '#000';
+  cx.textBaseline = 'alphabetic';
+  cx.fillText(ch, 20, 60);
+  const d = cx.getImageData(0, 0, cv.width, cv.height).data;
+  let x0 = 1e9, x1 = -1, y0 = 1e9, y1 = -1;
+  for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) {
+    if (d[(y * cv.width + x) * 4 + 3] > 40) {
+      if (x < x0) x0 = x; if (x > x1) x1 = x;
+      if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+  }
+  return x1 < 0 ? null : { w: (x1 - x0 + 1) / k, mid: (60 - (y0 + y1) / 2) / k };
+}
+
+function fmt(n, dp = 3) { return n.toFixed(dp); }
+
+function fillMetrics() {
+  const body = document.querySelector('#metrics tbody');
+  body.textContent = '';
+  let monoMax = 0, propMin = Infinity;
+  for (const [font, size, where] of SITES) {
+    const name = font.replace(/'/g, '');
+    const aHy = advance(font, size, '-');
+    const aMi = advance(font, size, '−');
+    const aDg = advance(font, size, '0');
+    const iHy = ink(font, size, '-');
+    const iMi = ink(font, size, '−');
+    const dRow = advance(font, size, ROW.replaceAll('-', '−')) - advance(font, size, ROW);
+    const mono = Math.abs(aMi - aHy) < 0.01;
+    if (mono) monoMax = Math.max(monoMax, Math.abs(dRow));
+    else propMin = Math.min(propMin, dRow);
+    const tr = document.createElement('tr');
+    if (mono) tr.className = 'mono';
+    const cells = [
+      [name, ''], [size, 'n'],
+      [fmt(aHy), 'n'], [fmt(aMi), 'n'], [fmt(aDg), 'n'],
+      [(aMi - aHy >= 0 ? '+' : '') + fmt(aMi - aHy), 'n'],
+      [fmt(iHy.w, 2), 'n'], [fmt(iMi.w, 2), 'n'], [fmt(iMi.w / iHy.w, 2) + '×', 'n'],
+      [(dRow >= 0 ? '+' : '') + fmt(dRow), 'n'],
+      [where, 'who'],
+    ];
+    for (const [text, cls] of cells) {
+      const td = document.createElement('td');
+      if (cls) td.className = cls;
+      td.textContent = text;
+      tr.appendChild(td);
+    }
+    body.appendChild(tr);
+  }
+  document.getElementById('metrics-note').textContent =
+    `绿底的四行是等宽的 IBM Plex Mono：步进 Δ 全是 0，整行 Δ 最大 ${fmt(monoMax)} px —— `
+    + `列一步不动，差的只是墨迹长度。比例字体那三行整行至少宽 ${fmt(propMin)} px，`
+    + `那才是 ui-rules §2 说的横向抖动。`;
+}
+
+function fillZoom() {
+  const host = document.getElementById('zoom');
+  host.textContent = '';
+  for (const [font, label] of [["'IBM Plex Mono'", 'IBM Plex Mono'], ["'IBM Plex Sans'", 'IBM Plex Sans']]) {
+    for (const [ch, name] of [['-', 'U+002D hyphen-minus'], ['−', 'U+2212 minus']]) {
+      const fig = document.createElement('figure');
+      const c = document.createElement('canvas');
+      c.width = 150; c.height = 120;
+      const g = c.getContext('2d');
+      const dpr = 1;
+      // 一个数字垫底，好看清笔画和数字的关系。
+      g.font = `96px ${font}`;
+      g.textBaseline = 'alphabetic';
+      g.fillStyle = 'rgba(128,128,128,.28)';
+      g.fillText('0', 20, 100);
+      g.fillStyle = getComputedStyle(document.body).color;
+      g.fillText(ch, 20, 100);
+      // 数字的步进，画成竖线：真负号的墨迹落在里面，连字符的缩在中间。
+      const adv = g.measureText('0').width;
+      g.strokeStyle = 'rgba(236,48,19,.5)';
+      g.setLineDash([3, 3]);
+      g.beginPath(); g.moveTo(20, 8); g.lineTo(20, 112);
+      g.moveTo(20 + adv, 8); g.lineTo(20 + adv, 112); g.stroke();
+      fig.appendChild(c);
+      const cap = document.createElement('figcaption');
+      cap.textContent = `${label} · ${name}`;
+      fig.appendChild(cap);
+      host.appendChild(fig);
+    }
+  }
+}
+
+function fillSpecs() {
+  // 一个 bace 节点的四条读数，正负都有 —— 这就是 shot 行里那一列。
+  const READS = ['-1.09061e-12 C', '3.65257e-10 C', '-4.49 mA/cm²', '-0.1312 V', '20.0 mA/cm²'];
+  const host = document.getElementById('specs');
+  host.textContent = '';
+  for (const [font, size, where] of SITES) {
+    if (size !== 11 && !(font.includes('Archivo'))) continue;   // 三种字体各一个代表
+    const name = font.replace(/'/g, '');
+    const card = document.createElement('div');
+    card.className = 'spec';
+    card.innerHTML = `<h3>${name} · ${size}px</h3><p class="sub">${where}</p>`;
+    const col = document.createElement('div');
+    col.className = 'col';
+    const head = (t) => { const d = document.createElement('div'); d.className = 'ch'; d.textContent = t; return d; };
+    col.appendChild(head('- U+002D'));
+    col.appendChild(head('− U+2212'));
+    for (const r of READS) {
+      for (const [text, cls] of [[r, ''], [r.replaceAll('-', '−'), 'rule']]) {
+        const d = document.createElement('div');
+        d.className = 'v right ' + cls;
+        d.style.font = `${size}px ${font}`;
+        d.style.fontVariantNumeric = 'tabular-nums';
+        d.textContent = text;
+        col.appendChild(d);
+      }
+    }
+    card.appendChild(col);
+    host.appendChild(card);
+  }
+}
+
+function run() {
+  fillMetrics();
+  fillZoom();
+  fillSpecs();
+}
+
+// 字体没落地之前量到的是回退字体，那等于没量。
+if (document.fonts && document.fonts.ready) {
+  Promise.all([
+    document.fonts.load('11px "IBM Plex Mono"'),
+    document.fonts.load('11px "IBM Plex Sans"'),
+    document.fonts.load('12px "Archivo"'),
+  ]).then(() => document.fonts.ready).then(run);
+} else {
+  window.addEventListener('load', run);
+}
+</script>
+
+</body>
+</html>

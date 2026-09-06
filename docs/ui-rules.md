@@ -79,6 +79,25 @@ that names a parameter says what it is for. A reader who has to go and look up
   `design/README.md`.)
 - **Tabular figures everywhere a number can change.** A charge that jitters
   horizontally while it converges is a bug, not a style.
+- **The minus sign is U+2212 `−`, never the ASCII hyphen** — and the rule has
+  two halves, because the second is the one that bites. A number **a reader
+  sees** takes the real minus: the axis, the metric table, the rail, the shot
+  rows, the schedule, the drift note, and the exponent as well as the mantissa
+  (`3.65257e−10`). A number **a machine reads back** keeps its ASCII: the value
+  inside an `<input>`, which the console commits through `Number(raw)` and
+  which `Number('−0.2')` answers `NaN` for; the keys the results grid finds a
+  cell by; the CSV; a file stem. So this is never a replacement bolted on at
+  one module's exit — that reaches neither the sentences the service composes
+  (`outcome_text`) nor the captions the charts build, and it turns
+  `jv-dark` into `jv−dark` on its way past. `format.js` owns the glyph;
+  `format.minus` converts a number, `format.minusIn` converts only the signs
+  inside a sentence, and `ui/tests/minus.test.mjs` holds both halves down.
+  What it is worth is measured in `ui/minus-glyph.html`, and it is not what a
+  first reading suggests: in the mono face the *column never moves* — the two
+  glyphs have the same advance — and the cost is a stroke 1.5–1.7× shorter
+  meaning the same thing beside one that is not. The horizontal jitter above
+  is real in the proportional faces, where a hyphen is 1.8–3.5 px narrower
+  than a digit and a real minus is exactly a digit wide.
 - Significant figures carry meaning, because they are what the measurement
   resolves: **charge to 5–6** (`3.65257e-10 C`), **V_oc to 4 decimals**,
   **current density to 3**, **temperature to 1 decimal**, traces to 3.

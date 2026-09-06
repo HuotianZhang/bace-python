@@ -23,6 +23,7 @@
 import { s, root } from '../svg.js';
 import { h, fill } from '../dom.js';
 import * as scale from '../scale.js';
+import * as fmt from '../format.js';
 
 /** A model colour is a `style.css` token name, or a literal hex from a ramp. */
 export function paint(colour) {
@@ -510,7 +511,8 @@ function attachCursor(svg, model, cursor, readout) {
         parts.push(`${series.label} ${series.format ? series.format(point.y) : point.y}`);
       }
     }
-    readout.textContent = `${model.x.format ? model.x.format(value) : value.toFixed(2)}  ·  ${parts.join('  ·  ')}`;
+    readout.textContent = fmt.minusIn(
+      `${model.x.format ? model.x.format(value) : value.toFixed(2)}  ·  ${parts.join('  ·  ')}`);
   };
 
   svg.addEventListener('pointermove', (event) => {

@@ -8,6 +8,47 @@
 
 export const ABSENT = '—';           // an em dash: nothing was recorded
 
+/**
+ * **`−` is U+2212, not a hyphen** (`ui-rules` §2) — the one convention the
+ * axes have always kept and the tables never did, so a `jv` card carried both
+ * glyphs at once: `−0.2` on the scale at the left and `-109 nA` in the metric
+ * table below it (#68).
+ *
+ * It lives here rather than in `scale.js`, where it was, because it is a rule
+ * about how a *number* is spelled and not about how an *axis* is drawn — the
+ * axis was simply the only place that had one. `scale.js` re-exports it.
+ *
+ * The replacement is per-formatter and not a wrapper over everything this
+ * module exports, because a hyphen is not always a minus: `label`, `keptOf`
+ * and `plural` render *names and counts*, where a hyphen is a hyphen. And
+ * every formatter below writes for a reader. A value on its way into an
+ * `<input>`, a map key or a CSV field takes a different road and keeps its
+ * ASCII (`ui/tests/minus.test.mjs` holds both halves down).
+ */
+export const MINUS = '−';
+
+/** Every `-` in a rendered number, including the one in an exponent (#68). */
+export function minus(text) {
+  return text.replaceAll('-', MINUS);
+}
+
+/**
+ * The signs in a *sentence* — for text this module did not build and cannot
+ * assume is all number.
+ *
+ * `GET /runs` sends `outcome_text` already composed
+ * (`service/journal.py`: `Q -5.651e-13 ± 0.0e+00 C · 1/1`), and it is the
+ * largest single run of hyphens on screen. But the same field also carries
+ * `failed: …`, whose text is an error message with paths and hyphenated words
+ * in it, and the run labels beside it carry dates. So this replaces a `-` only
+ * where it is a sign: one that opens a number, or the exponent's own — the
+ * same test `tools/minus_census.py` uses to decide what it is looking at.
+ */
+export function minusIn(text) {
+  return String(text).replace(/(^|[^0-9A-Za-z_])-(?=[0-9.])|(?<=[0-9][eE])-(?=[0-9])/g,
+    (m, lead) => (lead === undefined ? MINUS : lead + MINUS));
+}
+
 /** Significant figures, in fixed or scientific notation as the magnitude asks. */
 export function sig(value, figures) {
   if (value === null || value === undefined || Number.isNaN(value)) return ABSENT;
@@ -15,17 +56,20 @@ export function sig(value, figures) {
   const exponent = Math.floor(Math.log10(Math.abs(value)));
   if (exponent < -4 || exponent >= 6) return scientific(value, figures);
   const decimals = Math.max(0, figures - 1 - exponent);
-  return value.toFixed(Math.min(decimals, 20));
+  return minus(value.toFixed(Math.min(decimals, 20)));
 }
 
-/** `3.65257e-10` — the archive's own spelling for a charge. */
+/** `3.65257e−10` — the archive's own spelling for a charge, with a real minus. */
 export function scientific(value, figures = 6) {
   if (value === null || value === undefined || Number.isNaN(value)) return ABSENT;
   const text = value.toExponential(Math.max(0, figures - 1));
-  return text.replace(/e([+-])(\d)$/, 'e$1$2');
+  // Last, so the `[+-]` above still matches what `toExponential` wrote: the
+  // exponent's sign is the one the issue names, and it is the one a wrapper
+  // bolted on at the module's exit would have had to reach through.
+  return minus(text.replace(/e([+-])(\d)$/, 'e$1$2'));
 }
 
-/** Charge to 5–6 significant figures: `3.65257e-10 C`. */
+/** Charge to 5–6 significant figures: `3.65257e−10 C`. */
 export function charge(q, { unit = true } = {}) {
   if (q === null || q === undefined) return ABSENT;
   return scientific(q, 6) + (unit ? ' C' : '');
@@ -44,7 +88,7 @@ export function sigmaQ(std) {
 /** V_oc and every other potential: four decimals. */
 export function volts(v, { decimals = 4, unit = true } = {}) {
   if (v === null || v === undefined || Number.isNaN(v)) return ABSENT;
-  return v.toFixed(decimals) + (unit ? ' V' : '');
+  return minus(v.toFixed(decimals)) + (unit ? ' V' : '');
 }
 
 /**
@@ -80,7 +124,7 @@ export function amps(a) {
 /** Temperature to one decimal. */
 export function kelvin(k, { unit = true } = {}) {
   if (k === null || k === undefined || Number.isNaN(k)) return ABSENT;
-  return k.toFixed(1) + (unit ? ' K' : '');
+  return minus(k.toFixed(1)) + (unit ? ' K' : '');
 }
 
 /**
