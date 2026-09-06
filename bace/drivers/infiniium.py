@@ -101,6 +101,7 @@ class Infiniium:
         self.last_autorange_windows: list[tuple[float, float, bool]] = []
         self.last_autorange_unchanged = False
         self.last_y_increment = 0.0
+        self.last_count_after_reset: int | None = None
 
     # -- session ----------------------------------------------------------
     def identify(self) -> str:
@@ -173,6 +174,10 @@ class Infiniium:
 
     #: seconds between `:WAV:COUN?` polls while an average accumulates
     poll_s = 0.1
+    #: the most acquisitions the averager could fold per second -- the pulse
+    #: generator's rate, 500 Hz on this rig -- used only to tell a stale buffer
+    #: from an average that completed inside one command round trip
+    max_trigger_hz = 500.0
 
     def _reset_averager(self, count: int) -> None:
         """Empty the averager and arm it for `count` acquisitions.
@@ -182,10 +187,16 @@ class Infiniium:
         is stopped first because `:CDIS` on a stopped scope erases the record
         outright, whereas on a running one it only promises the next
         acquisition will replace it.
+
+        `last_count_after_reset` is `:WAV:COUN?` read back while still stopped,
+        after the `:CDIS`: zero (or no answer) says the record was erased, so
+        `_wait_for_averages` need not second-guess a count that completes
+        quickly; the previous count still standing says it was not.
         """
         self._io.write(":STOP;")
         self._configure_acquisition(averaging=False, count=count)
         self._io.write(":CDIS;")
+        self.last_count_after_reset = self._query_count()
         self._configure_acquisition(averaging=True, count=count)
 
     def _single_shot(self, timeout_s: float) -> None:
@@ -211,35 +222,49 @@ class Infiniium:
             return None
 
     def _wait_for_averages(self, count: int, source: str,
-                           timeout_s: float) -> int | None:
+                           timeout_s: float, started: float) -> int | None:
         """Block until the averager has folded `count` acquisitions of `source`.
 
         Polls `:WAV:COUN?` -- the one readback that says how many records are
         in the average; `:ADER?` is set after every single acquisition and
         would return after the first (2026-09-05). Returns the count reached,
         or None when the firmware does not answer `:WAV:COUN?` numerically and
-        the wait had to fall back to the per-acquisition flag.
+        the wait had to fall back to the per-acquisition flag. `started` is
+        `time.monotonic()` from just before the `:RUN`.
 
-        The first answer, taken within milliseconds of `:RUN`, must be short of
-        `count`: if the averager already holds a complete average before it
-        has acquired anything, it was not emptied, and the fetch would return
-        the previous acquisition -- silently, which is how 2026-09-06 happened.
-        That is an error, not a warning. Counts under eight are exempt, because
-        eight triggers can arrive inside one round trip.
+        A complete count on the first answer is refused as a stale buffer --
+        the fetch would return the previous acquisition, silently, which is how
+        2026-09-06 happened -- **unless the record can have completed
+        honestly**. It can when `_reset_averager` read the count back as empty
+        after its `:CDIS`, or when enough time has passed since `:RUN` for
+        `max_trigger_hz` to have delivered `count` triggers: the first run on
+        the fixed driver (2026-09-06, session 024017) died on the 16-average
+        trigger probe with `:WAV:COUN? = 16`, because 16 acquisitions take
+        32 ms at 500 Hz and this scope's first query after a reconfigure
+        answers in ~150 ms (`HANDOFF.md`, trap 8). Two hundred cannot arrive
+        inside a round trip, which is the case the check is for.
         """
         self._io.write(f":WAV:SOUR {source};")
         deadline = time.monotonic() + timeout_s
         n = self._query_count()
+        answered = time.monotonic()
         if n is None:
             self._wait_for_acquisition(max(0.0, deadline - time.monotonic()))
             return None
-        if count >= 8 and n >= count:
-            raise ScopeError(
-                f"the averager did not restart: :WAV:COUN? answered {n} before the "
-                f"first acquisition of a {count}-average record, so the buffer still "
-                "holds the previous acquisition. :CDIS did not empty it on this "
-                "firmware -- fetching now would return the last trace again"
-            )
+        if n >= count:
+            emptied = self.last_count_after_reset is not None and \
+                self.last_count_after_reset == 0
+            possible = (answered - started) * self.max_trigger_hz
+            if not emptied and count > possible:
+                raise ScopeError(
+                    f"the averager did not restart: :WAV:COUN? answered {n} "
+                    f"{answered - started:.3f} s after :RUN, when at most "
+                    f"{possible:.0f} of the {count} acquisitions could have arrived "
+                    f"at {self.max_trigger_hz:g} Hz, and it read "
+                    f"{self.last_count_after_reset} after the :CDIS. The buffer "
+                    "still holds the previous acquisition -- fetching now would "
+                    "return the last trace again"
+                )
         while n < count:
             if time.monotonic() >= deadline:
                 raise ScopeError(
@@ -655,8 +680,9 @@ class Infiniium:
             )
         self._reset_averager(n_averages)
         self._clear_acquisition_flag()      # for the fallback wait only
+        started = time.monotonic()
         self._io.write(":RUN;")
-        self._wait_for_averages(n_averages, source, timeout_s)
+        self._wait_for_averages(n_averages, source, timeout_s, started)
         # Stop first. Reading a channel while the scope is still acquiring can
         # return a partial record or none at all -- and stopped, the count
         # read back below is the count of the record fetched.

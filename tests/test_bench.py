@@ -606,6 +606,39 @@ def test_an_averager_that_will_not_empty_is_refused_not_fetched():
     assert not io.fetched_counts, "nothing must be fetched from a stale buffer"
 
 
+def test_a_short_average_that_completes_inside_the_round_trip_is_not_a_stale_buffer():
+    """The first run on the fixed driver (2026-09-06, session 024017) died on
+    the 16-average trigger probe: `:WAV:COUN?` answered 16 at the first look,
+    because 16 triggers at 500 Hz take 32 ms and the scope's first query after
+    a reconfigure answers in ~150 ms. The averager *had* emptied -- it read 0
+    after the :CDIS -- and that, or the elapsed time, must clear it."""
+    from bace.drivers.infiniium import Infiniium
+
+    class Fast(_AccumulatingScope):
+        def query(self, command):
+            if "WAV:COUN" in command and self.running:
+                self.log.append(command)
+                self.count = 16                  # complete before we could look
+                return "16"
+            return super().query(command)
+
+    io = Fast()
+    scope = Infiniium(io)
+    scope._ranged = True
+    probe = scope.acquire(16, autorange_first=False)
+    assert probe.count == 16
+    assert scope.last_count_after_reset == 0
+
+    # The same answer from a scope that does not empty on :CDIS, but where the
+    # round trip was long enough for 16 triggers: accepted on elapsed time.
+    io = Fast(empties=False, count=16)
+    scope = Infiniium(io)
+    scope._ranged = True
+    scope.max_trigger_hz = 1e9                   # 16 arrive inside any round trip
+    assert scope.acquire(16, autorange_first=False).count == 16
+    assert scope.last_count_after_reset == 16
+
+
 def test_a_stalled_average_times_out_saying_how_far_it_got():
     from bace.drivers.infiniium import Infiniium, ScopeError
 
