@@ -100,8 +100,35 @@ JVCURVE_SCALARS: tuple[str, ...] = ("index", "label", "dark", "led_level_v", "di
 JVCURVE_ARRAYS: tuple[str, ...] = ("voltage", "current", "density")
 SPIKE_LAG_NS = 0.25
 """Above this light-to-dark lag of the displacement spike the shot is
-judged jittered. Good shots on the rig align to 0.01-0.07 ns; the six bad
-ones of 2026-09-05 sat 0.33-1.15 ns apart (`core.diagnostics`)."""
+*suspect*. Good shots on the rig align to 0.01-0.07 ns; the six bad ones of
+2026-09-05 sat 0.33-1.15 ns apart (`core.diagnostics`).
+
+**A lag on its own is not jitter, and on this rig it usually is not**
+(measured 2026-09-06/07, `docs/analysis/2026-09-06/spike-lag-and-dark-charge.md`).
+The light trace is the displacement spike *plus* the charge being extracted,
+and adding a real signal to the spike moves the correlation peak without
+moving the spike: a synthetic trace built from a no-light acquisition with
+its spike untouched, plus the measured photocurrent, reproduced the observed
+lag to 0.01 ns at every temperature from 220 to 290 K. Shifting the dark
+trace by the lag cancels only 4 % of the light-dark difference, so the two
+traces do not differ by a time shift at all -- they differ in shape, because
+they carry different amounts of extracted charge. Re-integrating after such
+a shift moves Q by ~1 %.
+
+So this threshold alone is not a verdict. Jitter smears what a shift cannot:
+`SPIKE_EDGE_NS` and `SPIKE_PEAK_MISMATCH` are the other two symptoms the
+2026-09-05 incident had (edges 8-13 ns instead of 6, spikes 4-14 % apart),
+and a `warn` needs the lag *and* one of them."""
+
+SPIKE_EDGE_NS = 8.0
+"""A displacement spike whose 10-90 % edge is slower than this was smeared.
+The rig's good shots are 6.0-6.5 ns; the jittered ones were 8-13 ns."""
+
+SPIKE_PEAK_MISMATCH = 0.02
+"""How far the two spikes' heights may differ before the pair is judged to
+have been taken under different conditions. Good shots agree to 1 %; the
+jittered ones were 4-14 % apart. The height is the same pulse into the same
+network, so a mismatch is the acquisition's, not the device's."""
 
 VERDICT_KEYS: tuple[str, ...] = ("rail_light", "rail_dark", "rail_run_light", "rail_run_dark",
                                  "shared_extreme", "peak_light_a", "peak_dark_a",
@@ -255,19 +282,14 @@ def shot_verdict(light_y, dark_y,
     averages_light, averages_dark, sync_edge_light_ns, sync_edge_dark_ns,
     level, text, ...diagnostics}`.
 
-    Three rules. The third is the shot's *alignment* (2026-09-05,
-    `core.diagnostics`): the light and dark displacement spikes must sit on
-    top of each other, because `light - dark` is what the photocurrent is.
-    On six shots of the first hardware day they were 0.3-1.2 ns apart -- the
-    trigger had jittered for the length of the shot -- and the 50 mA spike's
-    residual was reported as a photocurrent ten times the real one, with the
-    charge's sign flipped, while every rail check passed. `spike_lag_ns`
-    beyond `SPIKE_LAG_NS` is `warn`: "Q of this shot is not a charge". The
-    edge times and the sync edges are reported beside it so the two sides of
-    the trigger chain can be told apart; the average counts say whether the
-    digitiser folded what was asked. All need `dt` (and the `Trace`s for the
-    counts and the syncs); called with bare arrays they are None and the
-    judgement is the two rail rules alone.
+        lag = align.get("spike_lag_ns")
+        if lag is not None:
+            # Above the threshold and still `ok` means the two corroborating
+            # symptoms of jitter are absent, so the lag is the extracted
+            # charge riding on the spike (see `_smeared`). Say which, or the
+            # operator reads a number they were once told meant a void shot.
+            parts.append(f"spikes {abs(lag):.2f} ns apart"
+                         + (" · charge, not jitter" if abs(lag) > SPIKE_LAG_NS else ""))
 
     The two rail rules, both about a single trace (03-states section C, corrected):
 
@@ -300,6 +322,7 @@ def shot_verdict(light_y, dark_y,
                     "is nothing to judge and nothing to integrate"}
     else:
         light, dark = light_arr, dark_arr
+        smeared = _smeared(align, _peak(light), _peak(dark))
         rail_light, rail_dark = _rail_samples(light), _rail_samples(dark)
         run_light, run_dark = _rail_run(light), _rail_run(dark)
         shared = bool(light.min() == dark.min() or light.max() == dark.max())
@@ -315,14 +338,15 @@ def shot_verdict(light_y, dark_y,
                     "does not sit on one value, so the window is probably too small "
                     "even though the auto-range did not say so")
             level = "warn"
-        elif align["spike_lag_ns"] is not None and abs(align["spike_lag_ns"]) > SPIKE_LAG_NS:
-            lag = align["spike_lag_ns"]
+        elif smeared:
+            lag, why = align["spike_lag_ns"], smeared
             edges = ", ".join(f"{e:.1f}" for e in (align["edge_light_ns"], align["edge_dark_ns"])
                               if e is not None)
             text = (f"the light and dark displacement spikes are {abs(lag):.2f} ns apart "
-                    f"(spike edges {edges} ns): the trigger jittered during this shot, "
-                    "so their difference leaves the spike in the photocurrent and Q "
-                    "of this shot is not a charge. " + _sync_side(align))
+                    f"and {why} (spike edges {edges} ns): that pair is the signature of "
+                    "the trigger jittering for the length of the shot, so their "
+                    "difference leaves the spike in the photocurrent and Q of this shot "
+                    "is not a charge. " + _sync_side(align, sync_light, sync_dark))
             level = "warn"
         else:
             level, text = "ok", _ok_text(rail_light, rail_dark, shared, diag, align)
@@ -380,11 +404,50 @@ def _alignment(light: np.ndarray, dark: np.ndarray, dt: float | None,
             for k, v in out.items()}
 
 
-def _sync_side(align: Mapping[str, Any]) -> str:
+def _smeared(align: Mapping[str, Any], peak_light: float | None,
+             peak_dark: float | None) -> str:
+    """Why this shot looks jittered rather than merely lagged -- or `""`.
+
+    **The lag alone does not say jitter.** The light trace is the
+    displacement spike plus the charge being extracted, and adding that
+    charge moves the correlation peak while the spike itself stands still:
+    on the rig, a no-light acquisition with its spike untouched plus the
+    measured photocurrent reproduced the observed lag to 0.01 ns, and
+    shifting the dark trace by the lag cancelled only 4 % of the light-dark
+    difference (2026-09-06/07). A rule that warned on the lag alone called
+    177 of 492 good shots void, and told the operator to distrust a charge
+    that was within ~1 % of right.
+
+    Jitter does something a superimposed signal cannot: it smears the edge
+    the scope triggered on and lowers the spike, differently in the two
+    traces. So a warning needs the lag **and** one of those -- both were
+    present in the 2026-09-05 incident, neither is present in a shot whose
+    only oddity is that the device extracted charge.
+    """
+    lag = align.get("spike_lag_ns")
+    if lag is None or abs(lag) <= SPIKE_LAG_NS:
+        return ""
+    edges = [e for e in (align.get("edge_light_ns"), align.get("edge_dark_ns")) if e is not None]
+    if edges and max(edges) > SPIKE_EDGE_NS:
+        return f"the spike edge is {max(edges):.1f} ns where a settled shot is 6 ns"
+    if peak_light and peak_dark:
+        worst = max(abs(peak_light), abs(peak_dark))
+        if worst and abs(abs(peak_light) - abs(peak_dark)) / worst > SPIKE_PEAK_MISMATCH:
+            return (f"the two spikes differ in height by "
+                    f"{100 * abs(abs(peak_light) - abs(peak_dark)) / worst:.0f} %")
+    return ""
+
+
+def _sync_side(align: Mapping[str, Any], sync_light: Any = None,
+               sync_dark: Any = None) -> str:
     """Which side of the trigger chain the sync edges point at."""
     edges = [align.get("sync_edge_light_ns"), align.get("sync_edge_dark_ns")]
     if all(e is None for e in edges):
-        return "No sync trace was fetched, so which side jitters cannot be said."
+        if sync_light is None and sync_dark is None:
+            return "No sync trace was fetched, so which side jitters cannot be said."
+        # Fetched, but `core.diagnostics.sync_edge_ns` could not measure it.
+        return ("A sync trace was fetched but no edge could be read off it, so "
+                "which side jitters cannot be said.")
     text = "/".join("?" if e is None else f"{e:.1f}" for e in edges)
     return (f"The sync edges are {text} ns: if those are as sharp as on good shots, the "
             "jitter is between the sync and the 81150A's pulse; if they are smeared "
@@ -403,7 +466,12 @@ def _ok_text(rail_light: int, rail_dark: int, shared: bool, diag: Mapping[str, A
     if align:
         lag = align.get("spike_lag_ns")
         if lag is not None:
-            parts.append(f"spikes {abs(lag):.2f} ns apart")
+            # Above the threshold and still `ok` means the two corroborating
+            # symptoms of jitter are absent, so the lag is the extracted
+            # charge riding on the spike (see `_smeared`). Say which, or the
+            # operator reads a number they were once told meant a void shot.
+            parts.append(f"spikes {abs(lag):.2f} ns apart"
+                         + (" · charge, not jitter" if abs(lag) > SPIKE_LAG_NS else ""))
         edge = align.get("edge_light_ns")
         if edge is not None:
             parts.append(f"edge {edge:.1f} ns")

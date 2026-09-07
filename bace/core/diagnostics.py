@@ -108,6 +108,15 @@ def sync_edge_ns(sync: np.ndarray, dt: float, t0: float) -> float | None:
 
     None when the trace has no edge there (a flat sync is the "no sync"
     case the trigger calibration already refuses).
+
+    **The sync may be a narrow pulse, not a step** (2026-09-07). This rig's is
+    5.5 ns wide -- 11 samples of the 400 in the search window -- and the levels
+    were taken as the window's 5th and 95th percentiles, which for a pulse that
+    brief are both the baseline: the span came out 0.038 V against the 0.30 V
+    the test demanded, so **every shot on this rig reported no sync edge**, and
+    the shot verdict said "No sync trace was fetched" while the trace sat in the
+    file. A step is still read as a step; a window that is nearly all one level
+    is now read as a spike on a baseline instead, which is what a pulse is.
     """
     a = np.asarray(sync, dtype=float)
     if a.size < 16 or not dt or not np.isfinite(dt) or np.ptp(a) <= 0:
@@ -120,7 +129,18 @@ def sync_edge_ns(sync: np.ndarray, dt: float, t0: float) -> float | None:
     w = a[lo:hi]
     low, high = float(np.percentile(w, 5)), float(np.percentile(w, 95))
     if high - low < 0.25 * np.ptp(a):
-        return None
+        # Not a step: the window is nearly all one level. Either there is no
+        # sync at all, or the sync is a *pulse* too brief to move a percentile
+        # -- this rig's is 5.5 ns, 11 samples of 400, so its 95th percentile is
+        # still the baseline. Read it as a spike instead: the bulk is the
+        # baseline, the excursion is the pulse, and its leading edge is the one
+        # the scope triggered on -- `_crossing_time`, the same walk
+        # `edge_10_90_ns` makes over the displacement spike.
+        base = float(np.median(w))
+        k = int(np.argmax(np.abs(w - base)))
+        if abs(float(w[k]) - base) < 0.25 * np.ptp(a):
+            return None
+        return _crossing_time(w, k, base, float(w[k]), dt)
     # the edge: the largest single-step change inside the window says which
     # way it goes; the 10/90 levels are then crossed on either side of it
     d = np.diff(w)
