@@ -20,3 +20,31 @@ export function parseHash(hash) {
 export function benchHash(module) {
   return module ? `#/bench?module=${encodeURIComponent(module)}` : '#/bench';
 }
+
+/**
+ * Take the mounted view down and put the next one up.
+ *
+ * The teardown is wrapped because a `dispose` that throws must not stop the
+ * swap, and one did: `views/bench.js` cleared a timer under the name
+ * `views/pipeline.js` gives its own, which in a module is a `ReferenceError`.
+ * It threw out of the router *after* the hash had changed, so every click from
+ * the bench to another tab moved the address bar and left the bench on the
+ * screen — a console that looked frozen until the page was reloaded, and
+ * looked fine from every other tab.
+ *
+ * The view coming down is gone as far as the operator is concerned; whatever
+ * it failed to release is a leak, and a leak is a smaller thing than a tab
+ * that does not open.
+ */
+export function swapView(mounted, mount, { onError = viewFailed } = {}) {
+  try {
+    if (mounted && mounted.dispose) mounted.dispose();
+  } catch (error) {
+    onError(error);
+  }
+  return mount();
+}
+
+function viewFailed(error) {
+  console.error('a view did not come down cleanly:', error);
+}

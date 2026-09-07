@@ -849,7 +849,13 @@ export default {
     // after every save or delete, rather than on a timer.
     loadBenches();
     return {
-      dispose() { off(); charts.dispose(); clearTimeout(saveArmedTimer); },
+      // `armedTimer` — the overwrite/delete arming above. It was
+      // `saveArmedTimer`, which is `views/pipeline.js`'s name for its own and
+      // is not declared here: a module is strict, so `dispose` threw a
+      // `ReferenceError` and took the router's swap down with it. The hash had
+      // already changed, so clicking another tab from the bench moved the
+      // address bar and left the bench on screen until the page was reloaded.
+      dispose() { off(); charts.dispose(); clearTimeout(armedTimer); },
       focus,
     };
   },
