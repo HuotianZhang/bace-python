@@ -292,6 +292,65 @@ def test_the_console_suite_passes():
     assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-2000:]
 
 
+LINTED = tuple(os.path.join("ui", *parts) for parts in (
+    ("lib",), ("views",), ("app.js",), ("replay-page.js",), ("tests",)))
+"""What `no-undef` runs over: every module the console loads, and its tests."""
+
+
+def _eslint():
+    """The eslint on PATH, or the one `npx` can reach without installing."""
+    found = shutil.which("eslint")
+    if found:
+        return [found]
+    npx = shutil.which("npx")
+    if npx is None:
+        return None
+    probe = subprocess.run([npx, "--no-install", "eslint", "--version"],
+                           cwd=REPO, capture_output=True, text=True)
+    return [npx, "--no-install", "eslint"] if probe.returncode == 0 else None
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="no Node on this machine (the lab PC has none)")
+def test_no_console_module_reads_a_name_it_never_declared():
+    """`ui/eslint.config.mjs`: one rule, `no-undef`, over everything the
+    console loads.
+
+    The bench's `dispose` once cleared `saveArmedTimer` -- the pipeline tab's
+    name for its own timer, and not declared on the bench, whose timer had
+    been renamed in the same change (#82). A module is strict, so the read
+    threw out of the router after the hash had moved, and every click from
+    the bench to another tab left the bench on screen until a reload. No
+    test mounts a view, so none saw it; a static read of the names does,
+    with no browser and before anything is clicked.
+
+    eslint is a desk tool like Node: absent, this skips and says how to get
+    it. Present, a name read and never declared is a failure here, not a
+    frozen console on the bench.
+    """
+    eslint = _eslint()
+    if eslint is None:
+        pytest.skip("no eslint on this machine: npm install -g eslint, or npx eslint once with a network")
+    result = subprocess.run(
+        [*eslint, "-c", os.path.join("ui", "eslint.config.mjs"), *LINTED],
+        cwd=REPO, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-2000:]
+
+
+def test_the_lint_reaches_every_module_the_console_loads():
+    """`LINTED` names directories, and a new one beside them would be missed
+    silently -- so every `.js` under `ui/` that is not a page's own inline
+    asset has to fall under one of the paths the lint is given.
+    """
+    linted = {os.path.normpath(os.path.join(REPO, p)) for p in LINTED}
+    modules = [os.path.normpath(m) for pattern in ("*.js", "*.mjs")
+               for m in glob.glob(os.path.join(UI, "**", pattern), recursive=True)]
+    unreached = sorted(
+        os.path.relpath(m, REPO) for m in modules
+        if not any(m == root or m.startswith(root + os.sep) for root in linted)
+        and os.path.basename(m) != "eslint.config.mjs")
+    assert not unreached, f"not under any of {LINTED}: {unreached}"
+
+
 def test_every_console_suite_is_reached_by_the_one_that_runs_them():
     """The guard the hardcoded list did not have.
 
