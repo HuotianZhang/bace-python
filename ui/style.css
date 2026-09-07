@@ -1433,3 +1433,127 @@ table.qgrid td { padding: 0; }
 .pw-chart[hidden] { display: none; }
 .pw-chart .chart-svg { max-height: 210px; }
 .pw-chart .chart-readout { min-height: 13px; }
+
+/* -- the SMU panel (`lib/smu.js`, `views/smu.js`, `keithley.html`) ----------
+   The Keithley's own front panel. Everything on it is a bench action, so it
+   is the switch family throughout (`ui-rules` §14) and it borrows `.irow`,
+   `.sw` and `.p` from the Instruments row rather than inventing a look for
+   the same consequence.
+
+   Two departures, both earned. The **display** is the only place in this
+   console with numbers this large: it is read across a probe station from
+   arm's length, which is the one thing the console does that a screen at
+   reading distance does not have to serve. And the lit `on` of the output
+   switch is the **alert** register, not the accent — §3 reserves that
+   intensity for a live source and this is one. */
+.smu { max-width: 780px; }
+.view .smu { margin-top: 4px; }
+
+.smu-display {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 10px 12px 8px;
+  background: var(--ink); color: #fff;
+}
+.smu-cells { display: flex; gap: 26px; align-items: baseline; flex-wrap: wrap; }
+.smu-cell { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.smu-q {
+  font-family: var(--font-head); font-weight: 700; font-size: 11px;
+  color: rgba(255,255,255,.5); width: 1.1em;
+}
+/* Which quantity the source is holding — the accent's job everywhere else in
+   this console (§3), and the only mark either cell gets: both numbers are
+   measurements and neither may be labelled as the setpoint. */
+.smu-q.driven { color: #ff9783; }
+.smu-v {
+  font-size: 26px; line-height: 1.15; font-weight: 500;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.smu-role {
+  font-size: 9px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase;
+  color: rgba(255,255,255,.45);
+}
+/* Stale is the monitor not delivering, which on this bench means a run has the
+   GPIB. The numbers stay — they were true when they were taken — and go dim,
+   with the word beside them. Blanking them would lose the last thing known. */
+.smu-display.stale .smu-v { color: rgba(255,255,255,.45); }
+
+.smu-annunciators {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  font-family: var(--font-num); font-size: 11px; color: rgba(255,255,255,.65);
+}
+.smu-source-line { color: rgba(255,255,255,.85); }
+.smu-annunciators .muted { color: rgba(255,255,255,.5); }
+.ann {
+  font-family: var(--font-num); font-size: 9px; font-weight: 600; letter-spacing: .08em;
+  padding: 0 4px; border: 1px solid rgba(255,255,255,.35); color: rgba(255,255,255,.8);
+}
+.ann.crit { border-color: #ff9783; background: var(--alert); color: #fff; }
+.ann.warn { border-color: #ffcf8a; color: #ffcf8a; }
+
+.smu-controls { display: flex; flex-direction: column; gap: 9px; }
+.smu-switches { display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; }
+.smu-boxes { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; }
+.smu-field { display: inline-flex; align-items: baseline; gap: 5px; }
+.smu-field .n {
+  font-family: var(--font-head); font-weight: 700; font-size: 9px;
+  text-transform: uppercase; letter-spacing: .09em; color: var(--grey); white-space: nowrap;
+}
+.smu-field input.v {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 12px;
+  border: 1px solid transparent; border-bottom-color: var(--rule);
+  background: transparent; color: inherit; padding: 1px 3px; width: 6.4em; text-align: right;
+}
+.smu-field input.v:hover { border-color: var(--rule); }
+.smu-field input.v:focus { border-color: var(--accent); outline: none; background: var(--paper); }
+.smu-field i { font-style: normal; color: var(--grey); font-size: 10px; }
+.smu-field.dim input.v { color: var(--grey); border-bottom-color: var(--fill); }
+.smu-field.dim i { color: var(--rule); }
+
+/* A live output is the loudest thing on the screen and is meant to be. */
+.smu .sw .p.on.alert {
+  background: var(--alert); border-color: var(--alert); color: #fff;
+  box-shadow: inset 0 -3px 0 var(--accent-dark);
+}
+.smu .irow.live .n { color: var(--alert); }
+
+.smu-refresh { gap: 9px; flex-wrap: wrap; }
+.smu-refresh .smu-once {
+  padding: 4px 12px; font-size: 12px; font-family: var(--font-num); font-weight: 400;
+  border: 1px solid var(--ink); background: var(--paper); color: var(--ink); cursor: pointer;
+}
+.smu-refresh .smu-once:disabled { cursor: not-allowed; opacity: .45; }
+.smu-refresh .smu-once:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.smu-notes { display: flex; flex-direction: column; gap: 4px; }
+.smu-notes:empty { display: none; }
+.smu-notes .note { margin: 0; font-size: 11.5px; line-height: 1.4; max-width: 78ch; }
+.smu-notes .note.info { color: var(--grey); }
+.smu-notes .note.warn { color: var(--warn); }
+.smu-notes .note.crit { color: var(--alert); }
+
+/* Inferred, not read back: the same dashed treatment the rail and the
+   Instruments row use, over the whole card rather than one switch — while a
+   run holds the bench nothing on this panel is a read-back. */
+.smu.inferred .sw { border-style: dashed; }
+.smu.inferred .sw .p.on { box-shadow: inset 0 -3px 0 var(--grey); }
+
+/* -- `keithley.html`: the same panel in a window of its own ---------------- */
+body.standalone .view { padding: 14px 14px 18px; }
+body.standalone .smu { max-width: none; }
+body.standalone .bar .smu-title {
+  display: flex; align-items: center; font-family: var(--font-num); font-size: 11px;
+  color: rgba(255,255,255,.6); letter-spacing: .04em; text-transform: uppercase;
+}
+body.standalone .bar a.chip { text-decoration: none; display: inline-flex; align-items: center; }
+.smu-say {
+  flex: 0 0 auto; margin: 0; padding: 7px 14px;
+  border-top: 1px solid var(--rule); background: var(--fill);
+  display: flex; align-items: baseline; gap: 10px; font-size: 12px;
+}
+.smu-say[hidden] { display: none; }
+.smu-say .note.warn { color: var(--warn); }
+.smu-say .note.crit { color: var(--alert); }
+.smu-say button.p {
+  border: 1px solid var(--rule); background: var(--paper); color: var(--grey);
+  font-family: var(--font-num); font-size: 11px; padding: 1px 8px; cursor: pointer;
+}

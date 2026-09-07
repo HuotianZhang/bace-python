@@ -51,10 +51,18 @@ import time
 from typing import Any, Callable
 
 from ..experiment import events as E
-from .rigs import power_reading, read_temperature_console
+from .rigs import power_reading, read_temperature_console, smu_reading
 
 MAX_INTERVAL_S = 3600.0
 MIN_INTERVAL_S = 0.01
+
+SMU_MONITOR_S = 1.0
+"""What the SMU monitor runs at when nobody says otherwise -- the panel's
+display refresh. One second is slower than the 2400's own display and faster
+than anyone reading a settling number needs: at NPLC 1 a reading is four
+apertures, 80 ms on 50 Hz mains, so a tick costs eight percent of the bus and
+leaves the rest of it to whoever wants it. The panel offers 0.2 s to 5 s, the
+same switch the power monitor has."""
 
 TEMPERATURE_MONITOR_S = 5.0
 """What the temperature monitor runs at when nobody says otherwise, and the
@@ -103,6 +111,15 @@ class Monitor:
         """One reading, or raise. Run on the monitor's own thread."""
         raise NotImplementedError
 
+    def ready(self) -> bool:
+        """Whether there is anything to read *now*. A monitor whose instrument
+        is only sometimes readable says so here instead of raising every tick
+        -- a `False` counts as a skip, like a bus it could not take, and a
+        raise counts as a failure and warns the strip. The difference matters:
+        an SMU with its output off is not an instrument that has stopped
+        answering."""
+        return True
+
     def last_info(self) -> dict | None:
         """The last reading as the `/monitors` entry shows it."""
         return None
@@ -140,7 +157,9 @@ class Monitor:
 
     def _loop(self) -> None:
         while not self._stop.is_set():
-            if self.bus is None:
+            if not self.ready():
+                self.skipped += 1
+            elif self.bus is None:
                 self._read_once()
             elif self.bus.acquire(blocking=False):
                 try:
@@ -208,6 +227,51 @@ class PowerMonitor(Monitor):
                 "wavelength_nm": last.wavelength_nm}
 
 
+class SmuMonitor(Monitor):
+    """Read the Keithley every `interval_s` and emit `SmuReading`s -- the
+    front panel's own display, which free-runs while its output is on.
+
+    On the bus, so it takes `bus` exactly as `TemperatureMonitor` does and
+    skips a tick it cannot have to itself. That is the same rule for a
+    different reason: a run does not merely compete with this monitor, it
+    *ends* it -- every measurement routine opens with `*RST`, which puts the
+    instrument back to 0 V on its reset compliance and clears the panel. So
+    `ready` refuses to read a panel that is no longer applied, and the panel
+    the console draws goes back to unapplied rather than showing the numbers
+    the operator last typed over an instrument that has forgotten them.
+
+    `ready` also covers the ordinary case: the output is off. The 2400 shows
+    dashes there and `read_panel` raises, so without this every tick with the
+    output off would be counted a failure and would put a `warn` on the strip
+    saying the instrument had stopped answering. It is answering; there is
+    nothing to answer with.
+    """
+
+    name = "smu"
+    what = "Keithley 2400"
+
+    def __init__(self, smu: Any, *, emit: Callable[[E.Event], None],
+                 interval_s: float = 1.0, bus: Any = None):
+        if smu is None:
+            raise ValueError("no SourceMeter on this bench to monitor")
+        super().__init__(emit=emit, interval_s=interval_s, bus=bus)
+        self.smu = smu
+
+    def ready(self) -> bool:
+        return (getattr(self.smu, "panel", None) is not None
+                and bool(getattr(self.smu, "output_enabled", False)))
+
+    def read(self) -> E.Event:
+        return smu_reading(self.smu)
+
+    def last_info(self) -> dict | None:
+        last = self.last
+        if not isinstance(last, E.SmuReading):
+            return None
+        return {"volts": last.volts, "amps": last.amps, "compliance": last.compliance,
+                "function": last.function, "level": last.level}
+
+
 class TemperatureMonitor(Monitor):
     """Read the 331 every `interval_s` and emit `TemperatureRead`s
     (`source = "instrument"`, `"console"`, or `"simulated"` under `--sim`).
@@ -255,4 +319,5 @@ class TemperatureMonitor(Monitor):
         return {"kelvin": last.kelvin, "setpoint_k": last.setpoint_k, "source": last.source}
 
 
-__all__ = ["Monitor", "PowerMonitor", "TemperatureMonitor", "MAX_INTERVAL_S", "MIN_INTERVAL_S"]
+__all__ = ["Monitor", "PowerMonitor", "SmuMonitor", "TemperatureMonitor",
+           "MAX_INTERVAL_S", "MIN_INTERVAL_S", "SMU_MONITOR_S"]

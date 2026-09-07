@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=760">
+<title>Keithley 2400 — bace</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="fonts/fonts.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="standalone">
+<div id="app">
+  <noscript>The panel is a program, not a document: it needs JavaScript.</noscript>
+</div>
+<script type="module">
+// The SourceMeter panel in a window of its own.
+//
+// `docs/service-plan.md` already has this shape for the two instruments with
+// their own consoles — "既有的独立 console 保持独立", the 1918-C on :8918 and
+// the 331 on :8331 — and this is the same idea for the one instrument the
+// service itself owns: an operator at the probe station wants the Keithley on
+// screen, beside a plot or a lab book, without the console's four tabs and a
+// rail full of instruments they are not using.
+//
+// It is the *same* service and the *same* bench lock, not a second client with
+// its own ideas: `views/smu.js` exports the panel's actions and `lib/smu.js`
+// the panel itself, so this page is a socket, a store and those two. Open it
+// beside the console and both stay right — the display's monitor runs in the
+// service, and every action answers with the read-back that followed it.
+//
+//     python -m bace.service --sim --fast --port 8900 --ui ui
+//     open http://127.0.0.1:8900/ui/keithley.html
+import { createApi } from './lib/api.js';
+import { createStore } from './lib/store.js';
+import { createStream } from './lib/stream.js';
+import { h, fill, keyed } from './lib/dom.js';
+import { smuPanelModel, createSmuPanel } from './lib/smu.js';
+import { smuContext } from './views/smu.js';
+
+const api = createApi({});
+const store = createStore({ schedule: (fn) => requestAnimationFrame(fn) });
+
+const chipsEl = h('span.chips');
+const barEl = h('div.bar',
+  h('span.wordmark', 'bace'),
+  h('span.smu-title', 'keithley 2400'),
+  h('span.spacer'),
+  chipsEl);
+const panelEl = h('main.view');
+// One line for a refusal, because this window has no strip to put it on. The
+// console's rule holds here too (`app.js: dismiss`): it is replaced by the
+// next message and by nothing else — never by a timer, because a refusal that
+// faded on its own is exactly what this exists beside.
+const sayEl = h('p.smu-say', { hidden: true });
+
+document.getElementById('app').replaceChildren(barEl, panelEl, sayEl);
+
+let said = null;
+function notify(text, level = 'warn') {
+  said = { text, level };
+  draw(store.getState());
+}
+
+async function refreshMonitors() {
+  try { store.applyMonitors((await api.monitors()).monitors); } catch { /* /bench will say */ }
+}
+
+const panel = createSmuPanel(smuContext({ api, store, notify, after: refreshMonitors }));
+fill(panelEl, panel.el);
+
+function draw(state) {
+  panel.update(smuPanelModel(state));
+  const connection = state.connection || {};
+  keyed(chipsEl, JSON.stringify([connection.state, (state.session || {}).mode,
+                                 state.benchState]), () => [
+    h('span.chip', { text: (state.session || {}).mode || '—' }),
+    h('span', { class: 'chip state ' + (state.benchState || 'idle'),
+                text: state.benchState || 'idle' }),
+    // `live` is the socket's word for connected (`lib/stream.js`); every other
+    // state — connecting, behind, offline, closed — is worth seeing on a panel
+    // whose display comes down that socket.
+    h('span', { class: 'chip ' + (connection.state === 'live' ? '' : 'bad'),
+                text: connection.state || 'idle' }),
+    // The way back, inside the chips so it is spaced and centred like them.
+    h('a.chip', { href: 'index.html#/smu',
+                  title: 'the whole console, on this tab' }, 'console'),
+  ]);
+  sayEl.hidden = !said;
+  if (said) {
+    keyed(sayEl, said.level + said.text, () => [
+      h('span', { class: 'note ' + said.level, text: said.text }),
+      h('button.p', { type: 'button', onclick: () => { said = null; draw(store.getState()); } },
+        'dismiss'),
+    ]);
+  }
+}
+
+const stream = createStream({
+  onHello: (frame) => { store.applyHello(frame); refreshMonitors(); },
+  onFrame: (frame) => store.applyFrame(frame),
+  onStatus: (status) => store.applyConnection(status),
+  onSessionChange: () => { store.reset(); refreshMonitors(); },
+});
+// `createStream` does not open the socket; `start` does, and without it this
+// page draws a bench it polled and a display that never moves.
+stream.start(0);
+
+// The bench snapshot is not on the stream except in `Hello`, and a by-hand
+// action in the console next door moves it. Every action here answers with the
+// read-back that followed it, so this is only the slow backstop — the panel is
+// wrong for at most one of these between two consoles.
+async function pollBench() {
+  try { store.applyBench(await api.bench(), { readBack: true }); } catch { /* the socket says */ }
+}
+pollBench();
+setInterval(pollBench, 3000);
+
+store.subscribe(draw);
+draw(store.getState());
+</script>
+</body>
+</html>

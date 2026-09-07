@@ -33,6 +33,7 @@ with no VISA backend and the tests never touch one.
 """
 from __future__ import annotations
 
+import dataclasses
 import math
 import os
 import threading
@@ -41,7 +42,8 @@ from typing import Any, Callable
 
 from ..bench.checks import fingerprint
 from ..core.illumination import IlluminationError, LedDrive
-from ..drivers.keithley2400 import SourceMeterConfig
+from ..drivers.keithley2400 import (PanelReading, PanelSetup, SourceMeterConfig,
+                                   SourceMeterError)
 from ..drivers.lakeshore331 import (ConsoleTemperatureController,
                                     open_temperature_controller)
 from ..drivers.simulated import SimulatedRig, make_bench
@@ -67,6 +69,7 @@ ACTIONS: tuple[str, ...] = (
     "shutter-open", "shutter-shut",
     "relay-to-sourcemeter", "relay-to-amplifier",
     "read-power",
+    "smu-source", "smu-on", "smu-read",
 )
 """The bench actions, in the contract's order. `action()` refuses any other
 name with `KeyError`, which the route turns into a 404."""
@@ -81,6 +84,13 @@ re-sign every charge, the two timing constants of the chain, and the two
 ceilings. Addresses are not shown; they cannot be wrong without the
 instrument being missing, which is reported on its own."""
 
+SMU_PANEL_FIELDS: tuple[str, ...] = (
+    "function", "level", "current_compliance_a", "voltage_compliance_v",
+    "nplc", "averaging", "terminals", "four_wire", "source_range")
+"""The `smu-source` body: every `PanelSetup` field, all optional. What is not
+sent keeps the value the panel already holds, so moving a level is a body of
+one key -- the panel is a state the operator edits, not a form they resubmit."""
+
 ACTION_BEFORE: dict[str, tuple[tuple[str, str], ...]] = {
     "set-33220a-pol-inv": (("led", "polarity"),),
     "set-33220a-pol-norm": (("led", "polarity"),),
@@ -91,6 +101,8 @@ ACTION_BEFORE: dict[str, tuple[tuple[str, str], ...]] = {
     "led-off": (("led", "output"),),
     "bias-off": (("bias", "output"),),
     "smu-off": (("smu", "output"),),
+    "smu-on": (("smu", "output"),),
+    "smu-source": (("smu", "panel"),),
     "shutter-open": (("shutter", "open"),),
     "shutter-shut": (("shutter", "open"),),
     "relay-to-sourcemeter": (("relay", "position"),),
@@ -321,6 +333,36 @@ def power_reading(meter, *, samples: int = 1) -> E.PowerReading:
     return E.PowerReading(watts=float(watts), trustworthy=trustworthy,
                           wavelength_nm=wavelength, source=str(source),
                           averaged=averaged)
+
+
+def panel_wire(setup: PanelSetup | None) -> dict | None:
+    """A `PanelSetup` as the read-back carries it, with the two things a
+    screen would otherwise have to re-derive from `function`: which unit the
+    level is in, and which of the two compliances is the one that bites."""
+    if setup is None:
+        return None
+    out = dataclasses.asdict(setup)
+    out["unit"] = setup.unit
+    out["limit"] = setup.limit
+    return out
+
+
+def reading_wire(reading: PanelReading, *, at: float | None = None) -> dict:
+    """One panel reading as `smu-read` answers it."""
+    return {"volts": reading.volts, "amps": reading.amps, "ohms": reading.ohms,
+            "compliance": reading.compliance, "function": reading.function,
+            "level": reading.level, "at": time.time() if at is None else float(at)}
+
+
+def smu_reading(smu: Any) -> E.SmuReading:
+    """One `SmuReading` from a SourceMeter that is on the panel, real or
+    simulated. Raises `SourceMeterError` when it is not on the panel or the
+    output is off -- neither is a reading, and neither may be answered with
+    a number."""
+    r = smu.read_panel()
+    return E.SmuReading(volts=float(r.volts), amps=float(r.amps), ohms=r.ohms,
+                        compliance=r.compliance, function=r.function,
+                        level=float(r.level))
 
 
 def apply_led(led, mode: str, *, level: float | None = None,
@@ -816,7 +858,7 @@ class Bench:
                      "frequency_hz": None},
             "smu": {"output": None,
                     "compliance": {"current_a": None, "voltage_v": None},
-                    "ceiling": self._ceiling()},
+                    "ceiling": self._ceiling(), **self.smu_panel_block()},
             "shutter": {"open": None, "how": "cached"},
             "led": {"output": None, "polarity": "?", "mode": "?", "high_v": None,
                     "low_v": None, "frequency_hz": None},
@@ -897,7 +939,7 @@ class Bench:
     def _smu_state(self) -> dict:
         smu = self.rig.smu
         out = {"output": None, "compliance": {"current_a": None, "voltage_v": None},
-               "ceiling": self._ceiling()}
+               "ceiling": self._ceiling(), "panel": None, "panel_defaults": None}
         if not _usable(smu):
             return out
         cfg = getattr(smu, "config", None)
@@ -907,7 +949,8 @@ class Bench:
         else:
             compliance = {"current_a": _float_or_none(getattr(smu, "compliance_a", None)),
                           "voltage_v": None}
-        out.update({"output": _read_output(smu), "compliance": compliance})
+        out.update({"output": _read_output(smu), "compliance": compliance,
+                    **self.smu_panel_block()})
         return out
 
     def _shutter_state(self) -> dict:
@@ -1195,6 +1238,118 @@ class Bench:
         self._need("smu").disable_output()
         return {"output": False}
 
+    # -- the SMU panel ------------------------------------------------------
+    # The Keithley by itself: source something, read what comes back, switch
+    # the output on and off. No module, no run, no file -- the instrument's own
+    # front panel, reachable from a browser because the service holds the only
+    # GPIB session on this bench and so nobody else can reach the instrument at
+    # all while it is up.
+    def panel_defaults(self) -> PanelSetup:
+        """The panel a cold instrument opens on: the `SourceMeterConfig` in
+        force, sourcing 0 V, with either compliance brought under the bench's
+        ceiling. Never above `rig.toml` even if `run.toml` is."""
+        cfg = getattr(self.rig.smu, "config", None)
+        if not isinstance(cfg, SourceMeterConfig):
+            cfg = SourceMeterConfig()
+        ceiling = self._ceiling()
+        return PanelSetup.from_config(dataclasses.replace(
+            cfg,
+            current_compliance_a=min(cfg.current_compliance_a, ceiling["current_a"]),
+            voltage_compliance_v=min(cfg.voltage_compliance_v, ceiling["voltage_v"])))
+
+    def smu_panel_block(self) -> dict:
+        """`{panel, panel_defaults}` **as they are now**, for a snapshot to lay
+        over its cached copy.
+
+        Neither is a read-back and neither can go stale, because neither comes
+        off the instrument: `panel` is the driver's own record of what this
+        process configured, which `*RST` clears at the head of every
+        measurement routine, and `panel_defaults` is computed from `rig.toml`.
+        So there is no instrument to touch and nothing to infer -- which
+        matters, because `GET /bench` serves the read-back Start took and a run
+        does not read back at its end. Cached, a panel a run had already reset
+        went on being drawn as applied until somebody pressed re-read, and the
+        console would have offered a switch-on the instrument would have
+        answered at 0 V on its reset compliance.
+        """
+        return {"panel": panel_wire(getattr(self.rig.smu, "panel", None)),
+                "panel_defaults": panel_wire(self.panel_defaults())}
+
+    def _check_panel_ceiling(self, setup: PanelSetup) -> None:
+        """`rig.toml`'s two ceilings, over the panel.
+
+        The compliances are what those keys were written for. **The source
+        level is bounded by the same two**, which is new: until the panel
+        there was no way to type a level at all -- a sweep's ends come from a
+        module's parameters and `measure_voc`/`measure_jsc` source zero -- so
+        the one number an operator can now put straight onto the device had
+        nothing over it. `max_voltage_compliance_v` is the bench's statement
+        of the most voltage this device may see and `max_current_compliance_a`
+        the most current, whichever end of the instrument they arrive from, so
+        they are the right ceilings and no third key is invented to hold the
+        same number twice.
+        """
+        ceiling = self._ceiling()
+        if setup.current_compliance_a > ceiling["current_a"]:
+            raise BenchActionRefused(
+                "crit", f"current compliance {setup.current_compliance_a:g} A is above "
+                        f"this bench's ceiling of {ceiling['current_a']:g} A "
+                        "(rig.toml [sourcemeter] max_current_compliance_a)")
+        if setup.voltage_compliance_v > ceiling["voltage_v"]:
+            raise BenchActionRefused(
+                "crit", f"voltage compliance {setup.voltage_compliance_v:g} V is above "
+                        f"this bench's ceiling of {ceiling['voltage_v']:g} V "
+                        "(rig.toml [sourcemeter] max_voltage_compliance_v)")
+        limit, unit, key = ((ceiling["voltage_v"], "V", "max_voltage_compliance_v")
+                            if setup.function == "voltage"
+                            else (ceiling["current_a"], "A", "max_current_compliance_a"))
+        if abs(setup.level) > limit:
+            raise BenchActionRefused(
+                "crit", f"sourcing {setup.level:g} {unit} is past this bench's ceiling "
+                        f"of {limit:g} {unit} (rig.toml [sourcemeter] {key})")
+
+    def _act_smu_source(self, args: dict, led: dict) -> dict:
+        """Set the source. Every field optional and merged onto the panel the
+        instrument already holds, so moving a level is a body of one key."""
+        self._only(args, *SMU_PANEL_FIELDS)
+        smu = self._need("smu")
+        base = getattr(smu, "panel", None) or self.panel_defaults()
+        try:
+            setup = dataclasses.replace(base, **_panel_args(args))
+        except TypeError as exc:                            # pragma: no cover - _only guards it
+            raise ValueError(str(exc)) from None
+        self._check_panel_ceiling(setup)
+        try:
+            applied = smu.apply_panel(setup)
+        except SourceMeterError as exc:
+            raise BenchActionRefused("warn", str(exc)) from None
+        return {"panel": panel_wire(applied), "output": _read_output(smu)}
+
+    def _act_smu_on(self, args: dict, led: dict) -> dict:
+        """Output on. Refused until something has told the instrument what to
+        source: after a `*RST` -- which every measurement routine opens with --
+        the 2400 is at 0 V on a 100 uA compliance, and an output switched on
+        there is not the source the panel is drawing."""
+        self._only(args)
+        smu = self._need("smu")
+        if getattr(smu, "panel", None) is None:
+            raise BenchActionRefused(
+                "warn", "nothing has told the SourceMeter what to source: set the "
+                        "source first (smu-source), then switch the output on")
+        smu.enable_output(True)
+        return {"output": True, "panel": panel_wire(smu.panel)}
+
+    def _act_smu_read(self, args: dict, led: dict) -> dict:
+        """One reading, by hand -- `read-power`'s counterpart for the SMU.
+        The free-running display is the monitor; this is the spot check, and
+        it is the one that lands in the journal."""
+        self._only(args)
+        smu = self._need("smu")
+        try:
+            return reading_wire(smu.read_panel())
+        except SourceMeterError as exc:
+            raise BenchActionRefused("warn", str(exc)) from None
+
     def _act_shutter_open(self, args: dict, led: dict) -> dict:
         self._only(args)
         return apply_shutter(self._need("shutter"), True)
@@ -1251,6 +1406,79 @@ class Bench:
 
 
 # -- helpers ------------------------------------------------------------
+_FUNCTION_WORDS: dict[str, str] = {
+    "voltage": "voltage", "volt": "voltage", "volts": "voltage", "v": "voltage",
+    "current": "current", "amp": "current", "amps": "current", "a": "current",
+    "i": "current",
+}
+"""What the panel accepts for `function`. `V`/`I` because that is what is
+written on the instrument and on every axis label in this project; the
+canonical pair stays `voltage`/`current` on the wire."""
+
+
+def _panel_args(args: dict) -> dict:
+    """`smu-source`'s body as `PanelSetup` fields.
+
+    JSON has no integers and no enums, and the console's fields are typed by
+    hand, so `4` and `"4"` both arrive for `averaging` and both mean four. A
+    value that is not the shape of its field raises `ValueError` -- the route
+    answers that with a 422 carrying this sentence, and the sentence is what
+    the operator reads, so it names the field and quotes what they typed.
+    """
+    out: dict[str, Any] = {}
+    for name, raw in args.items():
+        if name == "function":
+            word = str(raw).strip().lower()
+            if word not in _FUNCTION_WORDS:
+                raise ValueError(f"function: {raw!r} is neither -- a 2400 sources "
+                                 "voltage or current")
+            out[name] = _FUNCTION_WORDS[word]
+        elif name == "terminals":
+            word = str(raw).strip().upper()[:4]
+            if word not in ("FRON", "REAR"):
+                raise ValueError(f"terminals: {raw!r} is neither FRON nor REAR")
+            out[name] = word
+        elif name == "four_wire":
+            out[name] = _as_bool(name, raw)
+        elif name == "averaging":
+            out[name] = _as_int(name, raw)
+        elif name == "source_range":
+            # Empty is how a form says "autorange", which is `None` on the wire.
+            out[name] = (None if raw is None or (isinstance(raw, str) and not raw.strip())
+                         else _as_float(name, raw))
+        else:
+            out[name] = _as_float(name, raw)
+    return out
+
+
+def _as_float(name: str, raw: Any) -> float:
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name}: {raw!r} is not a number") from None
+    if not math.isfinite(value):
+        raise ValueError(f"{name}: {raw!r} is not a finite number")
+    return value
+
+
+def _as_int(name: str, raw: Any) -> int:
+    value = _as_float(name, raw)
+    if value != int(value):
+        raise ValueError(f"{name}: {raw!r} is not a whole number")
+    return int(value)
+
+
+def _as_bool(name: str, raw: Any) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    word = str(raw).strip().lower()
+    if word in ("true", "1", "on", "yes"):
+        return True
+    if word in ("false", "0", "off", "no"):
+        return False
+    raise ValueError(f"{name}: {raw!r} is neither true nor false")
+
+
 def _levels(dev: Any) -> tuple[float | None, float | None]:
     """`(high, low)` from a driver that keeps its last levels, else Nones.
     The simulated drivers do; the real ones report only what the protocol

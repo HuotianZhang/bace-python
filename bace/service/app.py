@@ -730,6 +730,24 @@ def create_app(session: Session, *, ui_dir: str | None = None,
             return _error(404, "no temperature monitor is running")
         return {"stopped": True, "monitors": session.monitors()}
 
+    @app.post("/monitors/smu", status_code=202)
+    async def start_smu_monitor(body: MonitorRequest | None = Body(default=None)):
+        """Start the SMU monitor -- the panel's free-running display, reading the
+        2400 between the worker's jobs. One at most, and nothing starts it from
+        boot: the panel is a by-hand surface, so this is its switch."""
+        if body is None:
+            return session.start_smu_monitor()
+        return session.start_smu_monitor(body.interval_s)
+
+    @app.delete("/monitors/smu")
+    async def stop_smu_monitor():
+        """Stop the SMU monitor; 404 when none is running. The output is left
+        exactly as it is -- switching a display off is not switching a source
+        off, and `smu-off` is the action that does that."""
+        if not session.stop_smu_monitor():
+            return _error(404, "no SMU monitor is running")
+        return {"stopped": True, "monitors": session.monitors()}
+
     @app.get("/monitors")
     async def monitors():
         """The observers running beside the bench."""

@@ -172,6 +172,14 @@ class LiveState:
                 if cfg is not None and cfg.dark_reference != "same":
                     self._set("bias", high_v=self._levels.high_dark,
                               low_v=self._levels.low_dark)
+        elif isinstance(ev, E.DCMeasured):
+            # The three DC quantities are each measured from a `*RST`, so by
+            # the time this arrives the SourceMeter is back at its reset state
+            # with the output off. Nothing is inferred about the SMU *panel*
+            # here, or anywhere: the driver keeps that itself and `*RST` clears
+            # it there, so `Session.bench_snapshot` serves the driver's own
+            # record rather than a guess laid over a stale one.
+            self._set("smu", output=False)
         elif isinstance(ev, JVStarted):
             self._set("smu", output=True)
         elif isinstance(ev, JVFinished):

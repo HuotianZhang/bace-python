@@ -118,6 +118,11 @@ develops against, the pinned rail and the chain strip, the six generated bench
 cards — a dark J–V can be run from the screen — and the charts, each in the card
 that owns it: the J–V, the transient with its shaded integration window and
 running integral, and the timing diagram that draws the shot the form describes
-before it is run. **M4 is next**: the live monitor. `HANDOFF.md` §3 carries the user's explicit instruction about the UI's
+before it is run. **M4–M6 are built too**: the live run monitor, the pipeline
+tab and the results grid. Beside them, since 2026-09-07, is a fifth tab and a
+page of its own — **the Keithley's front panel** (`#/smu`, or
+`/ui/keithley.html` in its own window): the SourceMeter driven by hand, source
+and read, with no module, no run, no file and no other instrument on the
+surface. `HANDOFF.md` §3 carries the user's explicit instruction about the UI's
 shape, and `docs/bace-console-round3.html` is the design the service contract
 was derived from.

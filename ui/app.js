@@ -21,9 +21,13 @@ import { createBenchWatch } from './lib/watch.js';
 import bench from './views/bench.js';
 import pipeline from './views/pipeline.js';
 import results from './views/results.js';
+import smu from './views/smu.js';
 import rig from './views/rig.js';
 
-const VIEWS = [bench, pipeline, results, rig];
+// The SMU tab sits between the work surfaces and the reference one, because
+// that is what it is: a bench surface that starts nothing. `ui/keithley.html`
+// is the same panel in a window of its own.
+const VIEWS = [bench, pipeline, results, smu, rig];
 const BY_ROUTE = Object.fromEntries(VIEWS.map((v) => [v.route, v]));
 
 const api = createApi({});

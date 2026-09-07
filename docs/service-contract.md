@@ -186,7 +186,7 @@ Wire format = `experiment.wire.envelope_to_wire(Envelope)`:
 ```
 
 - `run_id` is `null` and `node_path` is `""` for service-level events that
-  belong to no run (`BenchAction`, `PowerReading`, `TemperatureRead`, the bench
+  belong to no run (`BenchAction`, `PowerReading`, `SmuReading`, `TemperatureRead`, the bench
   `Verdict`s).
 - `node_path` for a manual run is the module name (`"bace"`); for a pipeline it
   is the tree position (`"T=250K/led=1.020V/bace"`, see §7). Events emitted by
@@ -376,7 +376,7 @@ to change.)
 - `RunQueued` (`experiment.events.RunQueued`; `service/journal.py run_queued()`
   builds the same line for a test or a script), `RunStateChanged`,
   `NodeStarted/NodeDone`, `Verdict`, `NeedsOperator`, `OperatorResumed`,
-  `BenchAction`, `TemperatureRead`, `PowerReading`, `SampleNamed` are all
+  `BenchAction`, `TemperatureRead`, `PowerReading`, `SmuReading`, `SampleNamed` are all
   journaled; so is every run event under the payload policy, `StepPhase`
   excepted.
 
@@ -577,6 +577,9 @@ Actions:
 | `shutter-open` / `shutter-shut` | `shutter.unblock()/shut()` | — |
 | `relay-to-sourcemeter` / `relay-to-amplifier` | reads both sources' outputs back first (`read_output`, refreshing the flags the interlock reads), then `router._move` via the public context managers (enter `router.dc()`/`transient()` and exit immediately, so the interlock runs) | a source is live, or a source did not answer its output query → `crit` Verdict, nothing moved |
 | `read-power` | one `PowerReading` from the meter | meter silent → `warn` |
+| `smu-source` | the SMU panel: `Keithley2400.apply_panel` with the body merged onto the panel the instrument already holds (`{}` opens on `rig.toml`/`run.toml`'s configuration, sourcing 0 V). Body keys are every `PanelSetup` field, all optional — `function` (`voltage`/`current`, and `V`/`I` are accepted), `level`, `current_compliance_a`, `voltage_compliance_v`, `nplc`, `averaging`, `terminals`, `four_wire`, `source_range` (empty/null = autorange). Result `{"panel", "output"}` | either compliance, **or a sourced level**, past `rig.toml`'s ceiling → `crit`, nothing sent; `function`/`terminals`/`four_wire` changed under a live output → `warn` (the instrument will not, and neither will this); the **first** apply with the output already on and no panel applied → `warn`, because that apply has to `*RST` and something else is driving; an unreadable value → 422 naming the field |
+| `smu-on` | `enable_output(True)` on the panel | nothing has set a source yet → `warn` (after a `*RST` the 2400 is at 0 V on a 100 µA compliance, which is not the source a panel is drawing) |
+| `smu-read` | one panel reading, `{"volts", "amps", "ohms", "compliance", "function", "level", "at"}` — both senses (`:FUNC:CONC ON`) and the instrument's own `Cmpl` (`:SENS:…:PROT:TRIP?`) | the panel is not applied, or the output is off → `warn`. With the output off a `:READ?` still answers, from a source disconnected inside the instrument, and the near-zero it returns looks exactly like a measurement |
 
 Unknown action → 404. The service never performs any of these on its own.
 
@@ -1201,6 +1204,49 @@ watchdog rides on reads, so suppressing reads for hours would have suppressed
 it too. The worker feeds it from its own sleeps (§7), which is a fault check
 and not a reading — no `TemperatureRead` is emitted from there, because a
 number taken mid-run is not the cryostat the shot around it was measured at.
+
+### The SMU panel's display
+
+`POST /monitors/smu {"interval_s": 1.0}` starts the third observer: the
+Keithley read every interval, emitting `SmuReading(volts, amps, ohms,
+compliance, function, level)` with `run_id` null and `node_path` `""`.
+`DELETE /monitors/smu` stops it — **and stops nothing else**: switching a
+display off is not switching a source off, and `smu-off` is the action that
+does that. Nothing starts it from boot; the panel is a by-hand surface and
+this is its switch. `SMU_MONITOR_S = 1 s` is the default, and the console
+offers 0.2 s to 5 s, the same switch the power monitor has.
+
+The 2400 is on GPIB, so this monitor takes `RunWorker.bus` exactly as the
+331's does, and skips a tick it cannot have to itself. It also skips a tick
+with **nothing to read** — the output off, or the panel not applied
+(`Monitor.ready`). Neither is a failure and neither is a number, and a
+monitor that raised on them would put a `Verdict(warn, "smu.console")` on the
+strip saying an instrument that is answering perfectly well had stopped.
+
+A run is not merely competition for this one: every measurement routine opens
+with `*RST`, which drops the panel and the compliance with it. So the panel
+*ends* at a run — `service/live.py` clears `instruments.smu.panel` the moment
+a run drives the SMU (`DCMeasured`, `JVStarted`, `JVFinished`), the read-back
+after the run confirms it from the instrument, and the console draws a panel
+that has to be applied again rather than one whose numbers the instrument has
+forgotten.
+
+`instruments.smu` carries two blocks for it: **`panel`** is the setup the
+instrument is actually in, `null` when it is in none, and **`panel_defaults`**
+is what a cold instrument would open on — the `SourceMeterConfig` in force
+with either compliance brought under `rig.toml`'s ceiling, sourcing 0 V. Both
+add `unit` (`V`/`A`, what `level` is in) and `limit` (the compliance that
+bites in this function), so a screen does not re-derive either from
+`function`.
+
+**Neither is a read-back, and neither is ever `inferred`.** `panel` is the
+driver's own record of what this process configured — no instrument is
+touched to read it, and `*RST` clears it there — and `panel_defaults` is
+computed from `rig.toml`. So `GET /bench` lays both on live, over the cached
+snapshot and over a run's overlay (`Bench.smu_panel_block`). It has to: the
+snapshot is the read-back **Start** took and a run does not read back at its
+end, so a cached `panel` a run's first `*RST` had already cleared went on
+being served as applied until somebody pressed re-read.
 
 ---
 

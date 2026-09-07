@@ -11,8 +11,8 @@ whether the instrument agrees.
 """
 from __future__ import annotations
 
+import dataclasses
 import json
-
 import re
 
 import numpy as np
@@ -20,7 +20,8 @@ import pytest
 
 from bace.config import ConfigError, load_rig, load_run
 from bace.drivers.agilent33220a import Agilent33220A, LedSourceError
-from bace.drivers.keithley2400 import Keithley2400, SourceMeterConfig
+from bace.drivers.keithley2400 import (Keithley2400, PanelSetup, SourceMeterConfig,
+                                      SourceMeterError)
 from bace.drivers.protocols import PowerMeter, SourceMeter
 
 
@@ -238,6 +239,174 @@ def test_the_sweep_budget_covers_what_the_2400_actually_takes():
 def test_a_one_point_sweep_is_refused():
     with pytest.raises(ValueError, match="at least two points"):
         Keithley2400(FakeIO()).sweep(0.0, 1.0, 1)
+
+
+# -- the 2400's front panel ----------------------------------------------
+# `apply_panel` / `read_panel`: the SMU driven by hand, with no measurement
+# routine around it. What separates this from the three DC quantities above is
+# that it is *not* reset between readings -- which is the whole point, and the
+# one thing that could silently stop being true.
+class PanelIO(FakeIO):
+    """`FakeIO` that answers `:READ?` with a V,I pair and a scripted `Cmpl`."""
+
+    def __init__(self, reads=None, tripped=False, **kw):
+        super().__init__(reads=reads or ["0.905142,-1.98234E-4"], **kw)
+        self.tripped = tripped
+
+    def query(self, cmd):
+        if ":PROT:TRIP?" in cmd:
+            self.log.append(cmd)
+            return "1" if self.tripped else "0"
+        return super().query(cmd)
+
+
+def test_the_panel_senses_both_quantities_and_leaves_the_output_off():
+    """The one place in this driver where the V element *is* a measurement:
+    `:SENS:FUNC` asks for both, so the panel's voltage is read and not the
+    setpoint the sweep files. And nothing here switches the output on --
+    applying a source and driving a device are two clicks on an instrument
+    and two calls here."""
+    io = PanelIO()
+    k = Keithley2400(io)
+    k.apply_panel(PanelSetup(function="voltage", level=0.5,
+                             current_compliance_a=0.01, voltage_compliance_v=2.0))
+    assert io.log.index("*RST") < io.log.index(":FUNC:CONC ON;")
+    assert ":SENS:FUNC 'VOLT:DC','CURR:DC';" in io.log
+    assert ":FORM ASC;:FORM:ELEM VOLT,CURR;" in io.log
+    assert ":SOUR:FUNC:MODE VOLT;" in io.log
+    assert ":SOUR:VOLT:RANG:AUTO ON;" in io.log
+    assert ":SOUR:VOLT:LEV 0.5;" in io.log
+    assert ":SENS:CURR:PROT:LEV 0.01;" in io.log
+    assert ":SENS:VOLT:PROT:LEV 2;" in io.log
+    assert k.output_enabled is False
+    assert not [c for c in io.log if c.startswith(":OUTP ON")]
+
+
+def test_the_knob_is_one_command_and_carries_nothing_with_it():
+    """A level moved on an applied panel writes the level and nothing else.
+    Not an optimisation: re-sending a compliance and a filter on every turn of
+    a knob is a different instrument state arriving between two readings."""
+    io = PanelIO()
+    k = Keithley2400(io)
+    setup = k.apply_panel(PanelSetup(function="voltage", level=0.0))
+    k.enable_output(True)
+    before = len(io.log)
+    k.apply_panel(dataclasses.replace(setup, level=0.25))
+    assert io.log[before:] == [":SOUR:VOLT:LEV 0.25;"]
+    assert k.panel.level == 0.25
+
+
+def test_the_live_output_locks_the_three_things_the_2400_will_not_change_under_it():
+    """`PANEL_STATIC`. `:ROUT:TERM` throws a switch inside the instrument and
+    `:SYST:RSEN` decides which leads are the voltmeter -- both are a change of
+    wiring -- and swinging the source between volts and amps under a live
+    output takes the device through whatever the transition is."""
+    io = PanelIO()
+    k = Keithley2400(io)
+    setup = k.apply_panel(PanelSetup())
+    k.enable_output(True)
+    for field, value in (("function", "current"), ("terminals", "REAR"), ("four_wire", True)):
+        with pytest.raises(SourceMeterError, match="output is ON"):
+            k.apply_panel(dataclasses.replace(setup, **{field: value}))
+    assert k.panel == setup, "a refused change leaves the panel where it was"
+    k.disable_output()
+    k.apply_panel(dataclasses.replace(setup, four_wire=True))
+    assert io.log[-1] == ":SYST:RSEN ON;"
+
+
+def test_an_output_somebody_else_left_on_is_not_dropped_silently():
+    """The first `apply_panel` has to `*RST`, and a reset drops the output. If
+    the instrument is driving with no panel applied then something else put it
+    there -- a previous session, a hand on the front panel -- and resetting it
+    out from under them without a word is the wrong half of "known state"."""
+    io = PanelIO()
+    k = Keithley2400(io)
+    k.enable_output(True)
+    before = len(io.log)
+    with pytest.raises(SourceMeterError, match="not on the panel"):
+        k.apply_panel(PanelSetup())
+    assert io.log[before:] == [], "nothing was sent, so nothing was dropped"
+    k.disable_output()
+    assert k.apply_panel(PanelSetup()).level == 0.0
+
+
+def test_a_measurement_takes_the_panel_away():
+    """Every routine here opens with `*RST`, which undoes every panel command
+    -- so after one the panel is not applied, and `read_panel` says so rather
+    than reading a source somebody else configured. This is the assertion that
+    keeps `_prepare` and the panel honest about each other."""
+    io = PanelIO(reads=["0.9,1e-6", "-2.0E-4", "0.9,1e-6"])
+    k = Keithley2400(io)
+    k.apply_panel(PanelSetup())
+    assert k.panel is not None
+    k.measure_jsc(settle_ms=0)
+    assert k.panel is None
+    with pytest.raises(SourceMeterError, match="not applied"):
+        k.read_panel()
+
+
+def test_reading_the_panel_needs_the_output_on():
+    """With the output off a `:READ?` still answers -- with the source
+    disconnected inside the instrument, so a near-zero that looks exactly like
+    a measurement of a dead device. The 2400 shows dashes there."""
+    k = Keithley2400(PanelIO())
+    k.apply_panel(PanelSetup())
+    with pytest.raises(SourceMeterError, match="output is OFF"):
+        k.read_panel()
+
+
+def test_the_reading_is_both_senses_and_the_compliance_light():
+    io = PanelIO(reads=["1.113120,5.00000E-2"], tripped=True)
+    k = Keithley2400(io)
+    k.apply_panel(PanelSetup(function="voltage", level=1.5, current_compliance_a=0.05))
+    k.enable_output(True)
+    reading = k.read_panel()
+    assert (reading.volts, reading.amps) == (1.11312, 0.05)
+    assert reading.compliance is True, "the instrument's own Cmpl, not a comparison here"
+    assert reading.level == 1.5 and reading.function == "voltage"
+    assert abs(reading.ohms - 1.11312 / 0.05) < 1e-9
+    # Sourcing volts, only the current limit can bite; the other TRIP is
+    # meaningless and is not asked for.
+    assert ":SENS:CURR:PROT:TRIP?" in io.log
+    assert ":SENS:VOLT:PROT:TRIP?" not in io.log
+    assert dataclasses.replace(reading, amps=0.0).ohms is None, "V/0 is not a resistance"
+
+
+def test_a_fixed_source_range_turns_the_autorange_off_with_it():
+    io = PanelIO()
+    Keithley2400(io).apply_panel(PanelSetup(function="current", level=1e-4,
+                                            source_range=1e-3))
+    assert ":SOUR:CURR:RANG:AUTO OFF;:SOUR:CURR:RANG 0.001;" in io.log
+    assert ":SOUR:CURR:LEV 0.0001;" in io.log
+
+
+def test_the_panel_refuses_what_the_2400_would_refuse():
+    """Refused here, with the field named, rather than by the instrument into
+    a `:SYST:ERR?` queue nobody reads."""
+    for kwargs, message in (
+        ({"function": "resistance"}, "sources volts or amps"),
+        ({"terminals": "SIDE"}, "FRON or REAR"),
+        ({"nplc": 50}, "between 0.01 and 10"),
+        ({"averaging": 0}, "between 1 and 100"),
+        ({"current_compliance_a": 0}, "positive limit"),
+        ({"source_range": -1}, "positive full-scale"),
+        ({"level": float("nan")}, "finite"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            PanelSetup(**kwargs)
+
+
+def test_the_panel_opens_on_the_bench_configuration():
+    """`rig.toml`/`run.toml`'s limits and timing, sourcing 0 V -- the safest
+    pair there is, and nothing invented."""
+    cfg = SourceMeterConfig(current_compliance_a=0.01, voltage_compliance_v=2.0,
+                            nplc=5.0, averaging=3, terminals="REAR", four_wire=True)
+    setup = PanelSetup.from_config(cfg)
+    assert (setup.function, setup.level) == ("voltage", 0.0)
+    assert (setup.current_compliance_a, setup.voltage_compliance_v) == (0.01, 2.0)
+    assert (setup.nplc, setup.averaging, setup.terminals, setup.four_wire) == (5.0, 3, "REAR", True)
+    assert setup.unit == "V" and setup.limit == 0.01
+    assert PanelSetup.from_config(cfg, function="current").limit == 2.0
 
 
 # -- Agilent 33220A -------------------------------------------------------
