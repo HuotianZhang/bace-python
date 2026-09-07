@@ -128,3 +128,102 @@ def resolve(explicit: str | None = None) -> str | None:
         if machine is None:
             return path
     return None
+
+
+# ------------------------------------------------------------ [dio] in rig.toml
+# Reading the DIO half of rig.toml belongs here rather than in `bace.config`,
+# which is the whole bench and reaches `core.axis` -- and so imports numpy. The
+# two programs that drive a DIO line by hand (`tools/shutter.py` and
+# `drivers/shutter_console.py`) have to run under whichever interpreter can load
+# the DELIB build on the machine, and that one may have nothing installed at
+# all. So: `tomllib`, the five keys, and the two refusals, with no other import.
+
+DIO_DEFAULTS: dict[str, object] = {
+    "module_id": 9,
+    "shutter_module_nr": 0,
+    "relay_module_nr": 1,
+    "channel": 0,
+    "dll_path": "",
+}
+"""What `[dio]` means when a key -- or the whole file -- is absent. The same
+values `RigConfig` and `bace.config.load_rig` apply, repeated because neither
+can be imported here; `tests/test_shutter_tool.py` asserts they still agree,
+so drift fails a test rather than pointing a tool at the wrong line."""
+
+
+class DioError(RuntimeError):
+    """A `[dio]` block that will not be acted on."""
+
+
+def find_rig(explicit: str | None = None) -> str | None:
+    """rig.toml as `bench.checks._find` finds it: a named path, else the working
+    directory, else beside the package.
+
+    A *named* file that is missing is an error -- a typo in `--rig` that
+    silently ran the built-in defaults would be a bench nobody described.
+    """
+    if explicit:
+        if not os.path.isfile(explicit):
+            raise DioError(f"no such file: {explicit}")
+        return explicit
+    here = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    for base in (os.getcwd(), here):
+        p = os.path.join(base, "rig.toml")
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def dio_settings(path: str | None) -> dict:
+    """The `[dio]` block with its defaults filled in, or `DioError`.
+
+    The two refusals are the DIO half of `bace.config.load_rig`'s validation.
+    A rig.toml the service refuses to start on must not be one a by-hand tool
+    acts on: the point of the file is that every program on this bench agrees
+    about which line is the shutter.
+    """
+    import tomllib
+
+    block: dict = {}
+    if path:
+        try:
+            with open(path, "rb") as fh:
+                block = tomllib.load(fh).get("dio", {}) or {}
+        except tomllib.TOMLDecodeError as exc:
+            raise DioError(f"{path}: {exc}") from exc
+    try:
+        cfg = {k: (str(block.get(k, v) or "") if isinstance(v, str)
+                   else int(block.get(k, v)))
+               for k, v in DIO_DEFAULTS.items()}
+    except (TypeError, ValueError) as exc:
+        raise DioError(f"[dio]: {exc}") from exc
+    if cfg["shutter_module_nr"] == cfg["relay_module_nr"]:
+        raise DioError(
+            f"[dio] puts the shutter and the relay both on module "
+            f"{cfg['shutter_module_nr']}. Driving the relay line as a shutter "
+            "moves the device between the amplifier and the Keithley with no "
+            "interlock in the way.")
+    if cfg["relay_module_nr"] == 0:
+        raise DioError(
+            "[dio] relay_module_nr = 0: module 0 is the shutter (measured on "
+            "the rig 2026-09-01), not the relay. The relay is module 1.")
+    return cfg
+
+
+def make_line(cfg: dict, *, module_nr: int | None = None, channel: int | None = None,
+              dll_path: str | None = None, settle_s: float = 0.4):
+    """One DIO line from a `[dio]` dict -- built, not opened.
+
+    The by-hand programs (`tools/shutter.py`, `drivers/shutter_console.py`)
+    both want the same four arguments off the same block, and each keeps its
+    own error handling around `open()`. `Shutter` is imported here rather than
+    at module scope: it reaches back into this module for the library search.
+    """
+    from .shutter import DEFAULT_CHANNEL, Shutter
+
+    return Shutter(dll_path or cfg["dll_path"] or None,
+                   module_id=int(cfg["module_id"]),
+                   module_nr=int(cfg["shutter_module_nr"] if module_nr is None
+                                 else module_nr),
+                   channel=DEFAULT_CHANNEL if channel is None else int(channel),
+                   settle_s=settle_s)

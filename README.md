@@ -56,7 +56,8 @@ bace/           the package
                 last-used, edited, inherited, derived — so the console can say so
   core/         the physics — axis, pulses, process, illumination, simulate.
                 Imports nothing outward
-  drivers/      seven Protocol contracts; real and simulated instruments satisfy both
+  drivers/      seven Protocol contracts; real and simulated instruments satisfy
+                both; shutter_console.py is the shutter as one page in a browser
   experiment/   the run itself — a synchronous generator of typed events;
                 wire.py puts them on the wire
   storage/      byte-exact legacy .dat, plus HDF5

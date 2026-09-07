@@ -23,7 +23,9 @@ import sys
 import pytest
 
 from bace.config import ConfigError, load_rig
-from bace.drivers.shutter import SimulatedShutter
+from bace.drivers import delib
+from bace.drivers.shutter import (DEFAULT_CHANNEL, DEFAULT_MODULE_ID,
+                                  SimulatedShutter)
 from bace.experiment.rig import RigConfig
 
 TOOL = pathlib.Path(__file__).resolve().parents[1] / "tools" / "shutter.py"
@@ -85,15 +87,18 @@ def test_it_imports_nothing_the_rig_interpreter_may_not_have() -> None:
         "the shutter driver.")
 
 
-def test_its_defaults_still_match_the_rig_config() -> None:
-    """Repeated constants, because `RigConfig` imports numpy. This is the
-    thing that fails instead of the tool driving the wrong line."""
-    assert cli.DEFAULT_SHUTTER_MODULE_NR == RigConfig.shutter_module_nr
-    assert cli.DEFAULT_RELAY_MODULE_NR == RigConfig.relay_module_nr
+def test_the_dio_defaults_still_match_the_rig_config() -> None:
+    """`delib.DIO_DEFAULTS` is a repeat of `RigConfig`'s and the driver's,
+    because neither can be imported under the rig's 32-bit interpreter. This
+    is the thing that fails instead of a tool driving the wrong line."""
+    assert delib.DIO_DEFAULTS["shutter_module_nr"] == RigConfig.shutter_module_nr
+    assert delib.DIO_DEFAULTS["relay_module_nr"] == RigConfig.relay_module_nr
+    assert delib.DIO_DEFAULTS["module_id"] == RigConfig.dio_module_id == DEFAULT_MODULE_ID
+    assert delib.DIO_DEFAULTS["channel"] == DEFAULT_CHANNEL
 
 
 def test_it_reads_the_rigs_own_dio_block() -> None:
-    cfg = cli.read_dio(str(pathlib.Path(cli.REPO_ROOT) / "rig.toml"))
+    cfg = delib.dio_settings(str(pathlib.Path(cli.REPO_ROOT) / "rig.toml"))
     rig = load_rig(str(pathlib.Path(cli.REPO_ROOT) / "rig.toml"))
     assert cfg["module_id"] == rig.dio_module_id
     assert cfg["shutter_module_nr"] == rig.shutter_module_nr
@@ -111,13 +116,13 @@ def test_a_rig_the_service_refuses_is_one_this_refuses(tmp_path, dio) -> None:
     path.write_text(dio, encoding="utf-8")
     with pytest.raises(ConfigError):
         load_rig(str(path))
-    with pytest.raises(cli.DioError):
-        cli.read_dio(str(path))
+    with pytest.raises(delib.DioError):
+        delib.dio_settings(str(path))
 
 
 def test_a_named_rig_that_is_missing_is_an_error(tmp_path) -> None:
-    with pytest.raises(cli.DioError):
-        cli.find_rig(str(tmp_path / "nope.toml"))
+    with pytest.raises(delib.DioError):
+        delib.find_rig(str(tmp_path / "nope.toml"))
 
 
 # -- what it does ---------------------------------------------------------

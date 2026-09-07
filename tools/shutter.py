@@ -15,11 +15,16 @@ thing it refuses is the one move that is not a shutter move: a `--module-nr`
 that names the relay.
 
 Nothing else is opened, on purpose -- no pyvisa, no scope, no generators, no
-service. `[dio]` is read out of rig.toml with `tomllib` rather than through
-`bace.config.load_rig`, which reaches `core.axis` and so imports numpy: this
-program has to run under whichever interpreter can load the DELIB build on
-the machine, and that one may have nothing installed at all. Outside the
-standard library it imports `bace.drivers.shutter` and nothing more.
+service. `[dio]` comes from `drivers.delib.dio_settings`, which reads the
+block with `tomllib` rather than through `bace.config.load_rig`: that reaches
+`core.axis` and so imports numpy, and this program has to run under whichever
+interpreter can load the DELIB build on the machine, which may have nothing
+installed at all. Outside the standard library it imports two driver modules
+and nothing more.
+
+For a switch instead of a command line, `python -m bace.drivers.shutter_console`
+serves the same line as one page in a browser. Only one process can hold the
+module, so run one or the other.
 
 BITNESS
     `ctypes` loads only the DELIB build matching the interpreter. The copy on
@@ -47,7 +52,6 @@ import argparse
 import os
 import struct
 import sys
-import tomllib
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -56,15 +60,9 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # was run under.
 sys.path.insert(0, REPO_ROOT)
 
-from bace.drivers.shutter import (DEFAULT_CHANNEL,  # noqa: E402
-                                  DEFAULT_MODULE_ID, Shutter, ShutterError)
-
-DEFAULT_SHUTTER_MODULE_NR = 0
-DEFAULT_RELAY_MODULE_NR = 1
-"""What `RigConfig` defaults these to (`bace/experiment/rig.py`), repeated
-rather than imported: `RigConfig` reaches `drivers.protocols`, which imports
-numpy. `tests/test_shutter_tool.py` asserts the two still agree, so a change
-there fails a test rather than leaving this tool driving the wrong line."""
+from bace.drivers.delib import (DioError, dio_settings,  # noqa: E402
+                                find_rig, make_line)
+from bace.drivers.shutter import DEFAULT_CHANNEL, ShutterError  # noqa: E402
 
 SETTLE_S = 0.4
 """After the line moves, before it is read back. What `bench.checks._dio_backend`
@@ -75,72 +73,6 @@ STATE = {1: "open  — light reaches the sample",
          0: "shut  — the dark state"}
 
 UNREADABLE = "unreadable — this DELIB build has no DapiDOReadback32"
-
-
-class DioError(RuntimeError):
-    """A rig.toml this tool will not act on."""
-
-
-def find_rig(explicit: str | None) -> str | None:
-    """rig.toml as `bench.checks._find` finds it: a named path, else the
-    working directory, else beside the package. A *named* file that is
-    missing is an error -- a typo in `--rig` that silently ran the built-in
-    defaults would be a bench nobody described."""
-    if explicit:
-        if not os.path.isfile(explicit):
-            raise DioError(f"no such file: {explicit}")
-        return explicit
-    for base in (os.getcwd(), REPO_ROOT):
-        p = os.path.join(base, "rig.toml")
-        if os.path.isfile(p):
-            return p
-    return None
-
-
-def read_dio(path: str | None) -> dict:
-    """The `[dio]` block with the defaults `bace.config.load_rig` applies.
-
-    The two refusals below are that function's DIO half (`bace/config.py`),
-    repeated because it cannot be imported here. A rig.toml the service
-    refuses to start on must not be one this tool acts on: the point of the
-    file is that both programs agree about which line is the shutter.
-    """
-    dio: dict = {}
-    if path:
-        try:
-            with open(path, "rb") as fh:
-                dio = tomllib.load(fh).get("dio", {}) or {}
-        except tomllib.TOMLDecodeError as exc:
-            raise DioError(f"{path}: {exc}") from exc
-    try:
-        cfg = {
-            "module_id": int(dio.get("module_id", DEFAULT_MODULE_ID)),
-            "shutter_module_nr": int(dio.get("shutter_module_nr",
-                                             DEFAULT_SHUTTER_MODULE_NR)),
-            "relay_module_nr": int(dio.get("relay_module_nr",
-                                           DEFAULT_RELAY_MODULE_NR)),
-            "channel": int(dio.get("channel", DEFAULT_CHANNEL)),
-            "dll_path": str(dio.get("dll_path", "") or ""),
-        }
-    except (TypeError, ValueError) as exc:
-        raise DioError(f"[dio]: {exc}") from exc
-    if cfg["shutter_module_nr"] == cfg["relay_module_nr"]:
-        raise DioError(
-            f"[dio] puts the shutter and the relay both on module "
-            f"{cfg['shutter_module_nr']}. Driving the relay line as a shutter "
-            "moves the device between the amplifier and the Keithley with no "
-            "interlock in the way.")
-    if cfg["relay_module_nr"] == 0:
-        raise DioError(
-            "[dio] relay_module_nr = 0: module 0 is the shutter (measured on "
-            "the rig 2026-09-01), not the relay. The relay is module 1.")
-    return cfg
-
-
-def make_shutter(cfg: dict, *, module_nr: int, channel: int,
-                 dll_path: str, settle_s: float) -> Shutter:
-    return Shutter(dll_path or None, module_id=cfg["module_id"],
-                   module_nr=module_nr, channel=channel, settle_s=settle_s)
 
 
 def main(argv=None, *, make=None) -> int:
@@ -172,7 +104,7 @@ def main(argv=None, *, make=None) -> int:
 
     try:
         rig_path = find_rig(a.rig)
-        cfg = read_dio(rig_path)
+        cfg = dio_settings(rig_path)
     except DioError as exc:
         print(f"rig.toml: {exc}")
         return 2
@@ -205,8 +137,8 @@ def main(argv=None, *, make=None) -> int:
             return 2
 
     try:
-        line = (make or make_shutter)(cfg, module_nr=module_nr, channel=channel,
-                                      dll_path=dll_path, settle_s=a.settle)
+        line = (make or make_line)(cfg, module_nr=module_nr, channel=channel,
+                                   dll_path=dll_path, settle_s=a.settle)
         line.open()
     except (ShutterError, OSError) as exc:
         print(f"\nno DIO on this machine: {exc}")
