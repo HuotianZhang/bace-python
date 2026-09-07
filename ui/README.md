@@ -56,6 +56,7 @@ repo root for the offline bench at `/ui/replay.html`, which needs
 | `fonts/` | IBM Plex Sans and Mono, Archivo — 24 woff2, 387 KB, lifted out of the Round 3 mockup by `tools/extract_ui_fonts.py`. Nothing is fetched from a network at runtime |
 | `fixtures/` | see below |
 | `tests/` | `node --test ui/tests/…` — and `tests/test_ui.py` runs them from the Python suite, skipping where there is no Node |
+| `eslint.config.mjs` | one rule, `no-undef`, over `lib/`, `views/`, `app.js`, `replay-page.js` and `tests/` (2026-09-07, #82): a name read and never declared is a `ReferenceError` in a strict module, and the one in the bench's `dispose` took the router down with it — every click off the bench moved the address bar and left the bench on screen, unsubscribed, until a reload. No test mounts a view, so none saw it; `npx eslint -c ui/eslint.config.mjs ui/lib ui/views ui/app.js ui/replay-page.js ui/tests` does, and `tests/test_ui.py` runs it, skipping where there is no eslint. The globals are the ones the console reads, listed by hand |
 
 Hash routing, because a `StaticFiles(html=True)` mount has no SPA fallback:
 `/ui/bench` would be a 404, `#/bench` is not.
