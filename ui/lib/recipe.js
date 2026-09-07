@@ -50,6 +50,19 @@ export function recorded(recipe) {
 }
 
 /**
+ * Whether there is a bench to compare the record with: at least one module
+ * it records is in the catalogue. `drift` skips a module the catalogue does
+ * not hold, so against no catalogue at all — before `GET /modules` answers,
+ * or just after `store.reset()` on a service restart — every record reads as
+ * moved-nothing, which is "✓ matches the bench" said about a bench nobody
+ * has seen. That is the one moment the row most needs to be right.
+ */
+export function comparable(recipe, byName) {
+  if (!recorded(recipe) || !byName) return false;
+  return Object.keys(recipe.bench).some((module) => Boolean(byName[module]));
+}
+
+/**
  * The `PUT` bodies that restore the recipe's bench: `{module: {param:
  * value}}`, one per module that drifted. A node's own override is not in
  * here — it is in the tree, and it never left.
@@ -116,7 +129,9 @@ export function coveredBy(tree, rows) {
 export function savedBenchModel(benches, loadedName, byName) {
   const files = benches || [];
   const file = loadedName ? files.find((f) => f.name === loadedName) || null : null;
-  if (!file || !recorded(file)) {
+  // No catalogue is no comparison, not a match: the row falls back to the
+  // count until the modules arrive, and `loaded` is kept so it then answers.
+  if (!file || !comparable(file, byName)) {
     return { state: files.length ? 'idle' : 'none', name: null, count: files.length, moved: [] };
   }
   const moved = drift(file, byName);

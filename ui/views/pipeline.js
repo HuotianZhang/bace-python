@@ -959,6 +959,11 @@ export default {
           h('input.v', {
             value: name, placeholder: 'pipeline',
             title: 'the folder stem: <out>/<name>_YYYYMMDD_HHMMSS',
+            // Kept as it is typed: the bar is rebuilt whenever its key moves
+            // (a validate answering, the arming lapsing), and a rebuild draws
+            // this field from `name` — which would otherwise be the last
+            // committed one, over whatever has been typed since.
+            oninput: (e) => { name = e.target.value.trim(); },
             onchange: (e) => { name = e.target.value.trim(); revalidate(); render(); },
           }),
           recipes.length
@@ -1112,7 +1117,13 @@ export default {
     function armSave(name) {
       saveArmed = name;
       clearTimeout(saveArmedTimer);
-      saveArmedTimer = name ? setTimeout(() => { saveArmed = null; render(); }, 6000) : null;
+      saveArmedTimer = name ? setTimeout(() => {
+        saveArmed = null;
+        // "…or type another name", the strip has just said; if the operator
+        // is doing that, a render now rebuilds the field under the caret.
+        // Its own `change` renders when they leave it.
+        if (!actionsBarEl.contains(document.activeElement)) render();
+      }, 6000) : null;
     }
 
     async function save() {

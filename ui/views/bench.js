@@ -25,7 +25,7 @@
 import { h, fill, keyed } from './../lib/dom.js';
 import * as fmt from './../lib/format.js';
 import { moduleCard } from './../lib/card.js';
-import { drift, recorded, restore, savedBenchModel, showValue, fileStem } from './../lib/recipe.js';
+import { drift, recorded, comparable, restore, savedBenchModel, showValue, fileStem } from './../lib/recipe.js';
 import { BENCH_CARDS, cardModel, cardRuns } from './../lib/fields.js';
 import { panelModel, renderInstruments } from './../lib/instruments.js';
 import { RESULT_CARDS, createChartThrottle, resultKeys, resultPanel, runFor } from './../lib/results.js';
@@ -104,10 +104,18 @@ export default {
      */
     let pressing = false;
     let missed = false;
-    // Both zones this view redraws that have a text field beside a button:
-    // the cards, and the saved-bench drawer, whose name field commits on the
-    // same blur its own Save button causes.
-    for (const zone of [savedEl, body]) {
+    /** Set on `dispose`: a `GET /bench/saved` that answers after the operator
+     *  has left the tab must not render into detached cards, nor re-arm the
+     *  chart timers `charts.dispose` has just cleared. */
+    let disposed = false;
+    // Every zone this view redraws that has a text field beside a button:
+    // the cards, the saved-bench drawer, whose name field commits on the same
+    // blur its own Save button causes — and the instruments panel, whose LED
+    // level fields sit beside the DC / pulse / off switches. Left out, an
+    // edited `led_v` followed by a click on DC committed the level, and the
+    // answer rebuilt the switch between the mousedown and the mouseup: the
+    // click had nothing to land on, and the LED stayed where it was.
+    for (const zone of [panel, savedEl, body]) {
       zone.addEventListener('pointerdown', (e) => {
         if (e.target.closest('button')) pressing = true;
       });
@@ -306,7 +314,15 @@ export default {
     function arm(kind, name) {
       armed = kind ? { kind, name } : null;
       clearTimeout(armedTimer);
-      armedTimer = kind ? setTimeout(() => { armed = null; render(); }, 6000) : null;
+      armedTimer = kind ? setTimeout(() => {
+        armed = null;
+        // The strip has just said "or type another name", and the operator
+        // may be doing exactly that: `armed` is in the drawer's key, so a
+        // render now rebuilds the name field under the caret. Leave it — the
+        // field's own `change` renders when they leave it, and the button
+        // reads as unarmed from then.
+        if (!savedEl.contains(document.activeElement)) render();
+      }, 6000) : null;
     }
 
     async function loadBenches() {
@@ -314,6 +330,7 @@ export default {
       try {
         answer = (await api.savedBench()).benches || [];
       } catch (err) {
+        if (disposed) return;
         // A list that will not answer is not an empty list. Emptying it would
         // draw "none saved" over a folder full of files and invite a Save
         // under a name that then writes over one with no arming, so the list
@@ -322,6 +339,7 @@ export default {
         render();
         return;
       }
+      if (disposed) return;
       benches = answer;
       if (loaded && !benches.some((b) => b.name === loaded)) loaded = null;
       render();
@@ -341,9 +359,14 @@ export default {
         loaded = null;
       } else {
         loaded = found.name;
+        const { byName } = store.getState().modules;
         // No note is drawn for a file that matches, so this is the whole
         // answer to the click; without it, opening one does nothing visible.
-        if (!drift(found, store.getState().modules.byName).length) {
+        // And no catalogue is not a match: `drift` has nothing to compare
+        // against and says nothing moved, which is not the same thing.
+        if (!comparable(found, byName)) {
+          notify(`${found.name} is open — the comparison follows once the module catalogue has arrived.`, 'ok');
+        } else if (!drift(found, byName).length) {
           notify(`the bench already matches ${found.name}.`, 'ok');
         }
       }
@@ -501,6 +524,11 @@ export default {
             placeholder: 'the bench as it is now',
             'aria-label': 'the name to save the bench under',
             title: 'the file: <out>/bench/<name>.json',
+            // Kept as it is typed, not only on `change`: a rebuild of the
+            // drawer (a store notify moving the drift note beside it) draws
+            // the field from `benchName`, and would otherwise draw the last
+            // committed name over whatever has been typed since.
+            oninput: (e) => { benchName = e.target.value; },
             onchange: (e) => { benchName = e.target.value; render(); },
           }),
           h('button', {
@@ -650,8 +678,16 @@ export default {
         async actInstrument(action, args) {
           await settled();
           if (refused) return stale();
+          // Re-derived after the edits land, as `act` below does: `args` was
+          // baked into the panel's model when it was drawn, and the click on
+          // DC that commits a freshly typed `led_v` arrives with the level
+          // from *before* the edit — so the LED came on at the old volts
+          // while the field beside it showed the new ones.
+          const state = store.getState();
+          const fresh = panelModel(state.bench, state.modules.byName.light || null).rows
+            .flatMap((row) => row.positions).find((p) => p.action === action);
           try {
-            const out = await api.action(action, args);
+            const out = await api.action(action, fresh ? fresh.args : args);
             if (out && out.bench) store.applyBench(out.bench, { readBack: true });
           } catch (err) { fail(err); }
         },
@@ -731,6 +767,7 @@ export default {
     }
 
     function render() {
+      if (disposed) return;
       if (pressing) { missed = true; return; }
       const state = store.getState();
       const { byName } = state.modules;
@@ -855,7 +892,7 @@ export default {
       // `ReferenceError` and took the router's swap down with it. The hash had
       // already changed, so clicking another tab from the bench moved the
       // address bar and left the bench on screen until the page was reloaded.
-      dispose() { off(); charts.dispose(); clearTimeout(armedTimer); },
+      dispose() { disposed = true; off(); charts.dispose(); clearTimeout(armedTimer); },
       focus,
     };
   },

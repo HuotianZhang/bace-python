@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { drift, recorded, restore, coveredBy, fileStem, showValue, savedBenchModel } from '../lib/recipe.js';
+import { drift, recorded, comparable, restore, coveredBy, fileStem, showValue, savedBenchModel } from '../lib/recipe.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const CATALOGUE = JSON.parse(fs.readFileSync(path.join(here, '..', 'fixtures', 'modules_sim.json'), 'utf8'));
@@ -165,6 +165,26 @@ test('one open and the bench has moved: every value, in catalogue order', () => 
   assert.equal(m.state, 'drift');
   assert.deepEqual(m.moved.map((d) => `${d.module}.${d.name}`), ['jv.step_v', 'bace.vpre']);
   assert.deepEqual(restore(m.moved), { jv: { step_v: 0.05 }, bace: { vpre: 0.8 } });
+});
+
+test('one open against no catalogue is not a match: the row waits for the modules', () => {
+  // `store.reset()` on a service restart, or the first draw before
+  // `GET /modules` answers: `drift` skips every module the catalogue does not
+  // hold, so with none it says nothing moved — and the row said "✓ matches
+  // the bench" about a bench nobody had seen.
+  assert.equal(comparable(file('evening'), {}), false);
+  assert.equal(comparable(file('evening'), null), false);
+  assert.equal(comparable(file('evening'), byName), true);
+  for (const empty of [{}, null, undefined]) {
+    const m = savedBenchModel([file('evening')], 'evening', empty);
+    assert.equal(m.state, 'idle', 'the count, until there is a bench to compare with');
+    assert.equal(m.name, null);
+    assert.equal(m.count, 1);
+  }
+  // A file recording only modules this bench does not have is the same case.
+  const foreign = { name: 'other_rig', saved_at: 1, bench: { tdcf: { delay_ns: { value: 5, source: 'edited' } } } };
+  assert.equal(comparable(foreign, byName), false);
+  assert.equal(savedBenchModel([foreign], 'other_rig', byName).state, 'idle');
 });
 
 test('a name that is no longer a file, and a file that will not parse, are idle', () => {
