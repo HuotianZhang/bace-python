@@ -97,23 +97,22 @@ def sync_lag_ns(sync_light: np.ndarray, sync_dark: np.ndarray,
                 dt: float, t0: float = 0.0) -> float | None:
     """Lag of the dark acquisition's trigger edge behind the light one, in ns.
 
-    **The one measurement that separates a real timing offset from the charge
-    coming out of the device**, and the reason the sync traces are fetched
-    beside every acquisition at all.
+    What it measures is the **trigger chain**, and only that. The sync is the
+    edge the scope triggered on: it carries no photocurrent and no device, so
+    if the two acquisitions were armed at different times it is offset by that
+    and by nothing else, where `spike_lag_ns` mixes any such offset with the
+    charge coming out of the device and cannot separate them.
 
-    `spike_lag_ns` cannot do it. The light trace is the displacement spike
-    *plus* the extracted charge, and that charge moves the correlation peak on
-    its own; subtracting one trace from the other, sliding one onto the other,
-    fitting the flank against the spike's derivative -- each of those mixes
-    the two, and with a large photocurrent a genuine offset hides inside the
-    charge's own contribution. The sync is the trigger edge itself. It carries
-    no photocurrent and no device at all, so if the two acquisitions really
-    were offset in time, it is offset by exactly that and by nothing else.
+    **What it does not measure**: everything downstream of the sync. The scope
+    triggers on the 81150A's sync while the field reaches the device a latency
+    later (`experiment.rig`), so a latency that differed between the two
+    acquisitions would move the displacement spikes while leaving these two
+    edges together. An aligned sync says the trigger did not move; it does not
+    say the spikes did not.
 
     Measured over the 240 shots of the 2026-09-06 220-295 K sweep: the spike
     lag runs 0.135 to 0.479 ns and grows with temperature, while this stays
-    inside **0.004 ns** at every point -- proof that nothing in the trigger
-    chain moved and the spike lag is the device's.
+    inside 0.004 ns at every point.
 
     Same sign convention as `spike_lag_ns`: positive means the dark edge came
     later.
@@ -137,11 +136,20 @@ def sync_lag_ns(sync_light: np.ndarray, sync_dark: np.ndarray,
         return None
     if sync_edge_ns(a, dt, t0) is None or sync_edge_ns(b, dt, t0) is None:
         return None
-    # The edge, by its steepest step -- the same way `sync_edge_ns` finds it,
-    # and for the same reason: a sync may be a narrow pulse or a step, and
+    # The edge, by its steepest step **inside the trigger window** -- the same
+    # place `sync_edge_ns` just validated one. Two reasons, one for each half:
+    # the steepest step because a sync may be a narrow pulse or a step and
     # "furthest from the median" picks noise out of a step's long high level
-    # (it read 18 ns of lag off the simulator's, which is a clean step).
-    i = int(np.argmax(np.abs(np.diff(a))))
+    # (it read 18 ns of lag off the simulator's, which is a clean step); the
+    # window because a record holding a larger transition elsewhere -- a
+    # reflection, a later pulse of the same train -- would otherwise align on
+    # that instead and correlate it against whatever the dark trace holds there.
+    trig = int(round(-float(t0) / dt))
+    edge_half = int(round(1e-7 / dt))
+    w_lo, w_hi = max(0, trig - edge_half), min(a.size, trig + edge_half)
+    if w_hi - w_lo < 8:
+        return None
+    i = w_lo + int(np.argmax(np.abs(np.diff(a[w_lo:w_hi]))))
     half = int(round(3e-8 / dt))
     lo, hi = max(0, i - half), min(a.size, i + half)
     if hi - lo < 8:

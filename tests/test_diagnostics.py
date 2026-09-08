@@ -117,9 +117,11 @@ def test_a_lag_with_sharp_edges_is_the_extracted_charge_and_not_a_warning():
     assert abs(v["spike_lag_ns"]) > W.SPIKE_LAG_NS, "the lag is there"
     assert v["edge_light_ns"] == pytest.approx(6.0, abs=0.6)
     assert abs(v["sync_lag_ns"]) < W.SYNC_LAG_NS, "the trigger did not move"
-    assert v["level"] == "ok", "a lag the sync says is not timing, with a sharp edge"
-    assert "charge, not jitter" in v["text"], "and the line says so, with the number"
-    assert "ns apart" in v["text"]
+    assert v["level"] == "ok", "a lag with a sharp edge and a steady trigger"
+    # the line reports what the sync measured, not what it means: the field
+    # reaches the device a latency after the edge the scope triggered on, so
+    # an aligned sync bounds the trigger chain and not the spikes
+    assert "sync 0.00 ns apart" in v["text"] and "ns apart" in v["text"]
 
 
 def test_a_lag_with_no_sync_to_check_it_against_is_not_called_charge():
@@ -131,8 +133,7 @@ def test_a_lag_with_no_sync_to_check_it_against_is_not_called_charge():
     v = W.shot_verdict(light.y, dark.y, {"autorange_passes": 1}, dt=DT,
                        light=light, dark=dark)
     assert v["sync_lag_ns"] is None and v["level"] == "ok"
-    assert "no sync to check the timing" in v["text"]
-    assert "charge, not jitter" not in v["text"]
+    assert "no sync to check the trigger" in v["text"]
 
 
 def test_spikes_of_different_height_are_not_by_themselves_jitter():
@@ -218,8 +219,22 @@ def test_a_sync_of_noise_or_glitches_gives_no_lag_at_all():
                        light=light, dark=dark,
                        sync_light=Trace(noise_a, DT, T0), sync_dark=Trace(noise_b, DT, T0))
     assert v["sync_lag_ns"] is None
-    assert "no sync to check the timing" in v["text"]
-    assert "charge, not jitter" not in v["text"]
+    assert "no sync to check the trigger" in v["text"]
+
+
+def test_the_sync_is_aligned_on_the_trigger_edge_not_the_largest_step():
+    """A record can hold a bigger transition than the trigger edge -- a
+    reflection, a later pulse of the same train. Aligning on that instead
+    correlates it against whatever the dark trace holds there."""
+    from bace.core.diagnostics import sync_lag_ns
+
+    late = int(round((-T0 + 4e-7) / DT))          # 400 ns after the trigger
+    a, b = sync(0.0).copy(), sync(0.0).copy()
+    a[late:late + 4] = 3.0                        # on the light record only
+    assert sync_lag_ns(a, b, DT, T0) == pytest.approx(0.0, abs=0.05)
+    a2, b2 = sync(0.0).copy(), sync(0.6).copy()
+    a2[late:late + 4] = 3.0
+    assert sync_lag_ns(a2, b2, DT, T0) == pytest.approx(0.6, abs=0.15)
 
 
 def test_a_photocurrent_cannot_hide_a_real_offset_from_the_sync():

@@ -126,16 +126,18 @@ offset in time, and the shot is void whatever the spikes look like -- the
 engine subtracts sample for sample, so an offset puts the 50 mA displacement
 spike into the photocurrent.
 
-The sync is the only place this can be read. A spike lag mixes a timing
-offset with the charge coming out of the device, and with a large
-photocurrent the offset hides inside it; the sync carries the trigger edge
-and nothing else (`core.diagnostics.sync_lag_ns`). Over the 240 shots of the
-220-295 K sweep the sync lag never left +-0.004 ns while the spike lag ran
-0.135 to 0.479 ns, so this threshold sits twenty-five times above the noise
-and well under any offset worth catching.
+A spike lag mixes a timing offset with the charge coming out of the device
+and cannot separate them; the sync carries the trigger edge and nothing else.
+Over the 240 shots of the 220-295 K sweep the sync lag never left +-0.004 ns
+while the spike lag ran 0.135 to 0.479 ns, so this threshold sits twenty-five
+times above the noise and well under any offset worth catching.
 
-Without sync traces there is nothing to test with, and the `ok` line says so
-rather than claiming the lag was checked."""
+It bounds the trigger chain and nothing downstream of it: the field reaches
+the device a latency after the sync edge, so a latency that differed between
+the two acquisitions would move the spikes with the syncs still together
+(`core.diagnostics.sync_lag_ns`). The `ok` line therefore reports what the
+sync measured rather than what it would mean, and says so when there is no
+sync to measure."""
 
 SPIKE_EDGE_NS = 8.0
 """A displacement spike whose 10-90 % edge is slower than this was smeared.
@@ -318,8 +320,8 @@ def shot_verdict(light_y, dark_y,
     being extracted on top of the spike, and that alone moves the correlation
     peak: see `_mistimed`, and `SPIKE_LAG_NS`. So a lag warns only beside a
     smeared edge; separately, sync traces that are apart warn on their own,
-    whatever the spikes say. A lag with neither is reported in the `ok` line
-    as "charge, not jitter". The edge times and the sync edges are reported beside it so
+    whatever the spikes say. A lag with neither goes on the `ok` line beside
+    what the sync measured, for the operator to read. The edge times and the sync edges are reported beside it so
     the two sides of the trigger chain can be told apart; the average counts
     say whether the digitiser folded what was asked. All need `dt` (and the
     `Trace`s for the counts and the syncs); called with bare arrays they are
@@ -459,15 +461,15 @@ def _mistimed(align: Mapping[str, Any]) -> str:
       leading edge comes out slower. `SPIKE_EDGE_NS`. This is the fault the
       2026-09-05 incident was.
     * **the sync traces are apart**, whatever the spikes say. They carry the
-      trigger edge and nothing else -- no photocurrent, no device -- so a
-      genuine offset between the two acquisitions shows there and a
-      charge-induced lag does not. This one is deliberately *not* gated
-      behind the spike lag: the charge's lag and a real offset move the spike
-      correlation in opposite directions, so half a nanosecond of offset can
-      leave the spike lag reading 0.08 ns while the acquisitions really are a
-      sample apart. `SYNC_LAG_NS`, and `core.diagnostics.sync_lag_ns` for why
-      nothing computed from the light and dark traces alone can stand in for
-      it.
+      trigger edge and nothing else, so the two acquisitions were armed at
+      different times and the engine subtracts sample for sample. This one is
+      deliberately *not* gated behind the spike lag: the charge's lag and a
+      real offset move the spike correlation in opposite directions, so half a
+      nanosecond of offset can leave the spike lag reading 0.08 ns while the
+      acquisitions really are a sample apart. `SYNC_LAG_NS`, and
+      `core.diagnostics.sync_lag_ns` for what the sync can and cannot say: it
+      bounds the trigger chain, and everything downstream of the sync edge is
+      outside it.
 
     The 2026-09-05 incident lowered the spikes as well, but a height
     difference between the two traces is not the acquisition's alone to
@@ -531,11 +533,15 @@ def _ok_text(rail_light: int, rail_dark: int, shared: bool, diag: Mapping[str, A
             # operator reads a number they were once told meant a void shot.
             note = ""
             if abs(lag) > SPIKE_LAG_NS:
-                # Only the sync can say the acquisitions were not offset; with
-                # no sync fetched the lag is unexplained, not explained, and
-                # the line must not say otherwise.
-                note = (" · charge, not jitter" if align.get("sync_lag_ns") is not None
-                        else " · no sync to check the timing")
+                # What the sync measured, not what it means. An aligned sync
+                # says the trigger chain did not move between the two
+                # acquisitions; it cannot say the spikes are aligned, because
+                # the field reaches the device a latency after the edge the
+                # scope triggered on. The number goes on the line and the
+                # reading is the operator's.
+                sync = align.get("sync_lag_ns")
+                note = (f" · sync {abs(sync):.2f} ns apart" if sync is not None
+                        else " · no sync to check the trigger")
             parts.append(f"spikes {abs(lag):.2f} ns apart" + note)
         edge = align.get("edge_light_ns")
         if edge is not None:
