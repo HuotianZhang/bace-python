@@ -354,13 +354,17 @@ WINDOWS_PORT_TAKEN = (10013, 10048)
 Windows does not answer a bound port with `EADDRINUSE` the way POSIX does: a
 second `bind` to a port somebody is already listening on raises **10013**,
 "an attempt was made to access a socket in a way forbidden by its access
-permissions". So the `EADDRINUSE` check below found nothing on the one
-platform this console is actually double-clicked on, and the operator who
-started it twice got the socket error this code exists to translate.
+permissions" -- that is the code when the holder did not ask for
+`SO_REUSEADDR`, which is exactly the second console. **10048**
+(`WSAEADDRINUSE`) is the other way it comes back. So the `EADDRINUSE` check
+below found nothing on the one platform this console is actually
+double-clicked on, and the operator who started it twice got the socket error
+this code exists to translate (measured 2026-09-08).
 
 Matched on `winerror` rather than on `errno`, which Python maps 10013 to
 `EACCES` -- and `EACCES` on POSIX is a privileged port, not a busy one, so
-matching it there would explain port 80 as a console that is already running.
+matching it there would explain `--port 80` as a console that is already
+running.
 """
 
 

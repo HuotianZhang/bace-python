@@ -100,15 +100,68 @@ JVCURVE_SCALARS: tuple[str, ...] = ("index", "label", "dark", "led_level_v", "di
 JVCURVE_ARRAYS: tuple[str, ...] = ("voltage", "current", "density")
 SPIKE_LAG_NS = 0.25
 """Above this light-to-dark lag of the displacement spike the shot is
-judged jittered. Good shots on the rig align to 0.01-0.07 ns; the six bad
-ones of 2026-09-05 sat 0.33-1.15 ns apart (`core.diagnostics`)."""
+*suspect*. Good shots on the rig align to 0.01-0.07 ns; the six bad ones of
+2026-09-05 sat 0.33-1.15 ns apart (`core.diagnostics`).
+
+**A lag on its own is not jitter, and on this rig it usually is not**
+(measured 2026-09-06/07, `docs/analysis/2026-09-06/spike-lag-and-dark-charge.md`).
+The light trace is the displacement spike *plus* the charge being extracted,
+and adding a real signal to the spike moves the correlation peak without
+moving the spike: a synthetic trace built from a no-light acquisition with
+its spike untouched, plus the measured photocurrent, reproduced the observed
+lag to 0.01 ns at every temperature from 220 to 290 K. Shifting the dark
+trace by the lag cancels only 4 % of the light-dark difference, so the two
+traces do not differ by a time shift at all -- they differ in shape, because
+they carry different amounts of extracted charge. Re-integrating after such
+a shift moves Q by ~1 %.
+
+So this threshold alone is not a verdict. Jitter smears what a shift cannot:
+a jittered average is the true spike convolved with the trigger's own
+scatter, which widens the leading edge. `SPIKE_EDGE_NS` is that, and a
+`warn` needs the lag *and* it."""
+
+SYNC_LAG_NS = 0.1
+"""Above this lag between the two acquisitions' *sync* traces they really were
+offset in time, and the shot is void whatever the spikes look like -- the
+engine subtracts sample for sample, so an offset puts the 50 mA displacement
+spike into the photocurrent.
+
+A spike lag mixes a timing offset with the charge coming out of the device
+and cannot separate them; the sync carries the trigger edge and nothing else.
+Over the 240 shots of the 220-295 K sweep the sync lag never left +-0.004 ns
+while the spike lag ran 0.135 to 0.479 ns, so this threshold sits twenty-five
+times above the noise and well under any offset worth catching.
+
+It bounds the trigger chain and nothing downstream of it: the field reaches
+the device a latency after the sync edge, so a latency that differed between
+the two acquisitions would move the spikes with the syncs still together
+(`core.diagnostics.sync_lag_ns`). The `ok` line therefore reports what the
+sync measured rather than what it would mean, and says so when there is no
+sync to measure."""
+
+SPIKE_EDGE_NS = 8.0
+"""A displacement spike whose 10-90 % edge is slower than this was smeared.
+The rig's good shots are 6.0-6.5 ns; the jittered ones were 8-13 ns.
+
+The **leading edge** and not the spike's height, though the 2026-09-05
+incident lowered both (by 4-14 %). A height difference between the light and
+dark spikes is not the acquisition's alone to explain: under the default
+`dark_reference = "translated"` the two traces repeat one voltage *swing*
+over different absolute ranges, so their capacitive terms agree only where
+`C(V)` is flat (`experiment.transient.RunConfig.dark_reference`). On this
+device the two spikes drift from 0.4 % apart at 220 K to 1.1 % at 295 K and
+are still climbing -- a device with more `C(V)` curvature would pass 2 %
+honestly, and it would do it in exactly the shots that also carry the
+charge-induced lag this rule exists to accept. The edge is not exposed to
+that: it is the generator's rise, and it measured 6.0-6.5 ns across the
+whole 220-295 K sweep while the spikes' *decay* moved by 11 ns."""
 
 VERDICT_KEYS: tuple[str, ...] = ("rail_light", "rail_dark", "rail_run_light", "rail_run_dark",
                                  "shared_extreme", "peak_light_a", "peak_dark_a",
                                  "spike_lag_ns", "edge_light_ns", "edge_dark_ns",
                                  "averages_light", "averages_dark",
-                                 "sync_edge_light_ns", "sync_edge_dark_ns", "level",
-                                 "text")
+                                 "sync_edge_light_ns", "sync_edge_dark_ns",
+                                 "sync_lag_ns", "level", "text")
 """The keys every verdict carries. A diagnostic may add to them, never
 replace one: a `shot_diagnostics()` that happened to return `level` would
 otherwise silently overrule the saturation check. `peak_*_a` is the signed
@@ -256,18 +309,23 @@ def shot_verdict(light_y, dark_y,
     level, text, ...diagnostics}`.
 
     Three rules. The third is the shot's *alignment* (2026-09-05,
-    `core.diagnostics`): the light and dark displacement spikes must sit on
-    top of each other, because `light - dark` is what the photocurrent is.
-    On six shots of the first hardware day they were 0.3-1.2 ns apart -- the
-    trigger had jittered for the length of the shot -- and the 50 mA spike's
-    residual was reported as a photocurrent ten times the real one, with the
-    charge's sign flipped, while every rail check passed. `spike_lag_ns`
-    beyond `SPIKE_LAG_NS` is `warn`: "Q of this shot is not a charge". The
-    edge times and the sync edges are reported beside it so the two sides of
-    the trigger chain can be told apart; the average counts say whether the
-    digitiser folded what was asked. All need `dt` (and the `Trace`s for the
-    counts and the syncs); called with bare arrays they are None and the
-    judgement is the two rail rules alone.
+    `core.diagnostics`; corrected 2026-09-07): the light and dark displacement
+    spikes must sit on top of each other, because `light - dark` is what the
+    photocurrent is. On six shots of the first hardware day they were
+    0.3-1.2 ns apart -- the trigger had jittered for the length of the shot --
+    and the 50 mA spike's residual was reported as a photocurrent ten times the
+    real one, with the charge's sign flipped, while every rail check passed.
+
+    **But a lag is not by itself jitter.** The light trace carries the charge
+    being extracted on top of the spike, and that alone moves the correlation
+    peak: see `_mistimed`, and `SPIKE_LAG_NS`. So a lag warns only beside a
+    smeared edge; separately, sync traces that are apart warn on their own,
+    whatever the spikes say. A lag with neither goes on the `ok` line beside
+    what the sync measured, for the operator to read. The edge times and the sync edges are reported beside it so
+    the two sides of the trigger chain can be told apart; the average counts
+    say whether the digitiser folded what was asked. All need `dt` (and the
+    `Trace`s for the counts and the syncs); called with bare arrays they are
+    None and the judgement is the two rail rules alone.
 
     The two rail rules, both about a single trace (03-states section C, corrected):
 
@@ -300,6 +358,7 @@ def shot_verdict(light_y, dark_y,
                     "is nothing to judge and nothing to integrate"}
     else:
         light, dark = light_arr, dark_arr
+        mistimed = _mistimed(align)
         rail_light, rail_dark = _rail_samples(light), _rail_samples(dark)
         run_light, run_dark = _rail_run(light), _rail_run(dark)
         shared = bool(light.min() == dark.min() or light.max() == dark.max())
@@ -315,14 +374,8 @@ def shot_verdict(light_y, dark_y,
                     "does not sit on one value, so the window is probably too small "
                     "even though the auto-range did not say so")
             level = "warn"
-        elif align["spike_lag_ns"] is not None and abs(align["spike_lag_ns"]) > SPIKE_LAG_NS:
-            lag = align["spike_lag_ns"]
-            edges = ", ".join(f"{e:.1f}" for e in (align["edge_light_ns"], align["edge_dark_ns"])
-                              if e is not None)
-            text = (f"the light and dark displacement spikes are {abs(lag):.2f} ns apart "
-                    f"(spike edges {edges} ns): the trigger jittered during this shot, "
-                    "so their difference leaves the spike in the photocurrent and Q "
-                    "of this shot is not a charge. " + _sync_side(align))
+        elif mistimed:
+            text = mistimed + " " + _sync_side(align, sync_light, sync_dark)
             level = "warn"
         else:
             level, text = "ok", _ok_text(rail_light, rail_dark, shared, diag, align)
@@ -360,14 +413,22 @@ def _alignment(light: np.ndarray, dark: np.ndarray, dt: float | None,
                light_tr: Any, dark_tr: Any, sync_light: Any, sync_dark: Any) -> dict[str, Any]:
     """The alignment and completeness numbers (`core.diagnostics`), None
     where the inputs cannot give them."""
-    from ..core.diagnostics import edge_10_90_ns, spike_lag_ns, sync_edge_ns
+    from ..core.diagnostics import (edge_10_90_ns, spike_lag_ns, sync_edge_ns,
+                                    sync_lag_ns)
     out: dict[str, Any] = {"spike_lag_ns": None, "edge_light_ns": None, "edge_dark_ns": None,
                            "averages_light": None, "averages_dark": None,
-                           "sync_edge_light_ns": None, "sync_edge_dark_ns": None}
+                           "sync_edge_light_ns": None, "sync_edge_dark_ns": None,
+                           "sync_lag_ns": None}
     if dt and light.size and dark.size:
         out["spike_lag_ns"] = spike_lag_ns(light, dark, dt)
         out["edge_light_ns"] = edge_10_90_ns(light, dt)
         out["edge_dark_ns"] = edge_10_90_ns(dark, dt)
+    yl, yd = getattr(sync_light, "y", None), getattr(sync_dark, "y", None)
+    if yl is not None and yd is not None and getattr(sync_light, "dt", None):
+        out["sync_lag_ns"] = sync_lag_ns(np.asarray(yl, dtype=float),
+                                         np.asarray(yd, dtype=float),
+                                         float(sync_light.dt),
+                                         float(getattr(sync_light, "t0", 0.0)))
     for key, tr in (("averages_light", light_tr), ("averages_dark", dark_tr)):
         count = getattr(tr, "count", None)
         out[key] = None if count is None else int(count)
@@ -380,11 +441,74 @@ def _alignment(light: np.ndarray, dark: np.ndarray, dt: float | None,
             for k, v in out.items()}
 
 
-def _sync_side(align: Mapping[str, Any]) -> str:
+def _mistimed(align: Mapping[str, Any]) -> str:
+    """Why this shot looks jittered rather than merely lagged -- or `""`.
+
+    **The lag alone does not say jitter.** The light trace is the
+    displacement spike plus the charge being extracted, and adding that
+    charge moves the correlation peak while the spike itself stands still:
+    on the rig, a no-light acquisition with its spike untouched plus the
+    measured photocurrent reproduced the observed lag to 0.01 ns, and
+    shifting the dark trace by the lag cancelled only 4 % of the light-dark
+    difference (2026-09-06/07). A rule that warned on the lag alone called
+    177 of 492 good shots void, and told the operator to distrust a charge
+    that was within ~1 % of right.
+
+    Two faults, tested independently, and only one of them needs the lag:
+
+    * **the edge is smeared** *and* the spikes are apart. A jittered average
+      is the true spike convolved with the trigger's own scatter, so the
+      leading edge comes out slower. `SPIKE_EDGE_NS`. This is the fault the
+      2026-09-05 incident was.
+    * **the sync traces are apart**, whatever the spikes say. They carry the
+      trigger edge and nothing else, so the two acquisitions were armed at
+      different times and the engine subtracts sample for sample. This one is
+      deliberately *not* gated behind the spike lag: the charge's lag and a
+      real offset move the spike correlation in opposite directions, so half a
+      nanosecond of offset can leave the spike lag reading 0.08 ns while the
+      acquisitions really are a sample apart. `SYNC_LAG_NS`, and
+      `core.diagnostics.sync_lag_ns` for what the sync can and cannot say: it
+      bounds the trigger chain, and everything downstream of the sync edge is
+      outside it.
+
+    The 2026-09-05 incident lowered the spikes as well, but a height
+    difference between the two traces is not the acquisition's alone to
+    explain -- see `SPIKE_EDGE_NS` -- and it grows with temperature on a
+    healthy device, in the very shots this rule exists to stop calling void.
+    """
+    lag = align.get("spike_lag_ns")
+    edges = [e for e in (align.get("edge_light_ns"), align.get("edge_dark_ns")) if e is not None]
+    # Jitter first: a smeared spike says so by itself, and it is the fault the
+    # 2026-09-05 incident actually was.
+    if lag is not None and abs(lag) > SPIKE_LAG_NS and edges and max(edges) > SPIKE_EDGE_NS:
+        return (f"the light and dark displacement spikes are {abs(lag):.2f} ns apart and "
+                f"the spike edge is {max(edges):.1f} ns where a settled shot is 6 ns: that "
+                "pair is the signature of the trigger jittering for the length of the "
+                "shot, so their difference leaves the spike in the photocurrent and Q of "
+                "this shot is not a charge.")
+    # The sync stands on its own, and must: the charge's lag and a real offset
+    # push the spike correlation in *opposite* directions, so half a nanosecond
+    # of offset can leave the spike lag reading 0.08 ns -- under the threshold,
+    # with the acquisitions genuinely a sample apart. Gating this behind the
+    # spike lag would have let exactly that through (2026-09-08).
+    offset = align.get("sync_lag_ns")
+    if offset is not None and abs(offset) > SYNC_LAG_NS:
+        return (f"the two sync traces are {abs(offset):.2f} ns apart: the acquisitions "
+                "really are offset in time, so the displacement spike does not cancel "
+                "in their difference and Q of this shot is not a charge.")
+    return ""
+
+
+def _sync_side(align: Mapping[str, Any], sync_light: Any = None,
+               sync_dark: Any = None) -> str:
     """Which side of the trigger chain the sync edges point at."""
     edges = [align.get("sync_edge_light_ns"), align.get("sync_edge_dark_ns")]
     if all(e is None for e in edges):
-        return "No sync trace was fetched, so which side jitters cannot be said."
+        if sync_light is None and sync_dark is None:
+            return "No sync trace was fetched, so which side jitters cannot be said."
+        # Fetched, but `core.diagnostics.sync_edge_ns` could not measure it.
+        return ("A sync trace was fetched but no edge could be read off it, so "
+                "which side jitters cannot be said.")
     text = "/".join("?" if e is None else f"{e:.1f}" for e in edges)
     return (f"The sync edges are {text} ns: if those are as sharp as on good shots, the "
             "jitter is between the sync and the 81150A's pulse; if they are smeared "
@@ -403,7 +527,22 @@ def _ok_text(rail_light: int, rail_dark: int, shared: bool, diag: Mapping[str, A
     if align:
         lag = align.get("spike_lag_ns")
         if lag is not None:
-            parts.append(f"spikes {abs(lag):.2f} ns apart")
+            # Above the threshold and still `ok` means the two corroborating
+            # symptoms of jitter are absent, so the lag is the extracted
+            # charge riding on the spike (see `_smeared`). Say which, or the
+            # operator reads a number they were once told meant a void shot.
+            note = ""
+            if abs(lag) > SPIKE_LAG_NS:
+                # What the sync measured, not what it means. An aligned sync
+                # says the trigger chain did not move between the two
+                # acquisitions; it cannot say the spikes are aligned, because
+                # the field reaches the device a latency after the edge the
+                # scope triggered on. The number goes on the line and the
+                # reading is the operator's.
+                sync = align.get("sync_lag_ns")
+                note = (f" · sync {abs(sync):.2f} ns apart" if sync is not None
+                        else " · no sync to check the trigger")
+            parts.append(f"spikes {abs(lag):.2f} ns apart" + note)
         edge = align.get("edge_light_ns")
         if edge is not None:
             parts.append(f"edge {edge:.1f} ns")

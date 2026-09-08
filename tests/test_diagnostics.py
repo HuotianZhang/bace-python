@@ -44,6 +44,26 @@ def spike(shift_ns: float = 0.0, smear_ns: float = 0.0, photo: float = 0.0) -> n
     return y + rng.normal(0, 2e-6, N)
 
 
+def extraction(amp: float = 1.4e-2, tau: float = 150.0, t0: float = 322.0,
+               rise: float = 3.0) -> np.ndarray:
+    """The charge coming out, as the rig's traces carry it: a 14 mA transient
+    that rises just after the 50 mA displacement spike's peak and decays over
+    150 ns, so it loads the spike's *decay* and leaves its leading flank
+    alone. That is the shape that moves the correlation peak while the spike
+    itself stands still -- lag -0.56 ns with both edges still 6.0 ns, which is
+    what the rig showed from 220 to 295 K."""
+    t = np.arange(N) * DT * 1e9
+    return -amp * (1 - np.exp(-(t - t0).clip(0) / rise)) * np.exp(-(t - t0).clip(0) / tau) * (t > t0)
+
+
+def sync(shift_ns: float = 0.0) -> np.ndarray:
+    """The trigger edge as this rig gives it: a 5.5 ns pulse at the trigger,
+    1.19 V. It carries no photocurrent and no device, so it is offset only
+    when the two acquisitions really are."""
+    t = np.arange(N) * DT * 1e9 + T0 * 1e9 - shift_ns
+    return 1.19 * np.exp(-(t / 2.8) ** 2)
+
+
 def test_a_dark_spike_half_a_nanosecond_late_is_measured_as_such():
     lag = spike_lag_ns(spike(0.0, photo=3e-4), spike(0.5), DT)
     assert lag is not None and lag == pytest.approx(0.5, abs=0.06)
@@ -75,6 +95,205 @@ def test_the_sync_edge_is_read_at_the_trigger_whichever_way_it_goes():
     assert sync_edge_ns(np.full(N, 0.01), DT, T0) is None, "a flat sync has no edge"
 
 
+def test_a_lag_with_sharp_edges_is_the_extracted_charge_and_not_a_warning():
+    """The correction of 2026-09-07, and the reason the rule needs two symptoms.
+
+    The light trace is the displacement spike *plus* the charge coming out,
+    and adding that charge moves the correlation peak while the spike itself
+    stands still. On the rig a no-light acquisition with its spike untouched,
+    plus the measured photocurrent, reproduced the observed lag to 0.01 ns at
+    every temperature from 220 to 290 K, and shifting the dark trace by the
+    lag cancelled only 4 % of the light-dark difference. The old rule called
+    177 of 492 good shots void on this alone.
+
+    Here the spikes are half a nanosecond apart with 6 ns edges and equal
+    heights: nothing was smeared, so nothing jittered.
+    """
+    light = Trace(spike(0.0) + extraction(), DT, T0, count=200)
+    dark = Trace(spike(0.0), DT, T0, count=200)   # not shifted by anything
+    aligned = Trace(sync(0.0), DT, T0)
+    v = W.shot_verdict(light.y, dark.y, {"autorange_passes": 1}, dt=DT,
+                       light=light, dark=dark, sync_light=aligned, sync_dark=aligned)
+    assert abs(v["spike_lag_ns"]) > W.SPIKE_LAG_NS, "the lag is there"
+    assert v["edge_light_ns"] == pytest.approx(6.0, abs=0.6)
+    assert abs(v["sync_lag_ns"]) < W.SYNC_LAG_NS, "the trigger did not move"
+    assert v["level"] == "ok", "a lag with a sharp edge and a steady trigger"
+    # the line reports what the sync measured, not what it means: the field
+    # reaches the device a latency after the edge the scope triggered on, so
+    # an aligned sync bounds the trigger chain and not the spikes
+    assert "sync 0.00 ns apart" in v["text"] and "ns apart" in v["text"]
+
+
+def test_a_lag_with_no_sync_to_check_it_against_is_not_called_charge():
+    """Without sync traces nothing can say whether the acquisitions were
+    offset, so the line reports the lag and says what it could not check --
+    it must not claim the lag was explained."""
+    light = Trace(spike(0.0) + extraction(), DT, T0, count=200)
+    dark = Trace(spike(0.0), DT, T0, count=200)
+    v = W.shot_verdict(light.y, dark.y, {"autorange_passes": 1}, dt=DT,
+                       light=light, dark=dark)
+    assert v["sync_lag_ns"] is None and v["level"] == "ok"
+    assert "no sync to check the trigger" in v["text"]
+
+
+def test_spikes_of_different_height_are_not_by_themselves_jitter():
+    """The incident lowered the spikes by 4-14 % as well as smearing them, but
+    a height difference is not the acquisition's alone to explain: under the
+    default `dark_reference = "translated"` the two traces repeat one swing
+    over different absolute voltage ranges, so their capacitive terms agree
+    only where C(V) is flat. On the rig the two spikes drift from 0.4 % apart
+    at 220 K to 1.1 % at 295 K and are still climbing -- and they do it in the
+    shots that also carry the charge-induced lag, which is exactly the pair
+    this rule must not call void."""
+    light = Trace(spike(0.0) + extraction(), DT, T0, count=200)
+    dark = Trace(spike(0.0) * 0.90, DT, T0, count=200)
+    v = W.shot_verdict(light.y, dark.y, {"autorange_passes": 1}, dt=DT,
+                       light=light, dark=dark)
+    assert abs(v["spike_lag_ns"]) > W.SPIKE_LAG_NS and v["edge_light_ns"] < W.SPIKE_EDGE_NS
+    assert v["level"] == "ok", "10 % apart in height, but nothing was smeared and nothing slid"
+    assert v["peak_light_a"] != v["peak_dark_a"], "the heights are still on the verdict"
+
+
+def test_a_real_offset_between_the_two_acquisitions_is_a_warning_however_sharp():
+    """The case a lag-and-edges rule would wave through: the light and dark
+    acquisitions genuinely offset in time -- a fixed timing difference, or too
+    few averages to smooth one out -- shifts a sharp spike without smearing
+    it. The engine subtracts sample for sample, so that leaves the 50 mA spike
+    in the photocurrent and Q is not a charge.
+
+    Sliding the dark trace back is what tells the two apart: it cancels 97 %
+    of the difference here and 0.1 % when the lag is the extracted charge."""
+    light = Trace(spike(0.0), DT, T0, count=200)
+    dark = Trace(spike(0.5), DT, T0, count=200)
+    v = W.shot_verdict(light.y, dark.y, {"autorange_passes": 1}, dt=DT,
+                       light=light, dark=dark,
+                       sync_light=Trace(sync(0.0), DT, T0),
+                       sync_dark=Trace(sync(0.5), DT, T0))
+    assert abs(v["spike_lag_ns"]) > W.SPIKE_LAG_NS
+    assert v["edge_light_ns"] == pytest.approx(6.0, abs=0.6), "nothing is smeared"
+    assert v["edge_dark_ns"] == pytest.approx(6.0, abs=0.6)
+    assert abs(v["sync_lag_ns"]) == pytest.approx(0.5, abs=0.1)
+    assert v["level"] == "warn", "sharp edges, but the traces really are offset"
+    assert "offset in time" in v["text"] and "not a charge" in v["text"]
+
+
+def test_an_offset_the_charge_hides_from_the_spike_lag_is_still_caught():
+    """Worse than masking the residual: the charge's lag and a real offset move
+    the spike correlation in *opposite* directions, so half a nanosecond of
+    offset reads as a 0.08 ns spike lag -- under the threshold, with the two
+    acquisitions genuinely a sample apart. The sync test cannot be gated
+    behind the spike lag or this walks through."""
+    light = Trace(spike(0.0) + extraction(), DT, T0, count=200)
+    dark = Trace(spike(0.5), DT, T0, count=200)
+    v = W.shot_verdict(light.y, dark.y, {"autorange_passes": 1}, dt=DT,
+                       light=light, dark=dark,
+                       sync_light=Trace(sync(0.0), DT, T0),
+                       sync_dark=Trace(sync(0.5), DT, T0))
+    assert abs(v["spike_lag_ns"]) < W.SPIKE_LAG_NS, "the spike lag hides it"
+    assert abs(v["sync_lag_ns"]) == pytest.approx(0.5, abs=0.1), "the sync does not"
+    assert v["level"] == "warn" and "offset in time" in v["text"]
+
+
+def test_a_sync_of_noise_or_glitches_gives_no_lag_at_all():
+    """A trace of digitiser noise has a peak-to-peak above zero and correlates
+    against another one to an arbitrary number -- -1.54 ns for these two --
+    and two single-sample glitches gave 1.5 ns. Either would be read as a
+    verdict: over the threshold it voids a good shot, under it the `ok` line
+    calls a spike lag "charge, not jitter" on a number that means nothing."""
+    from bace.core.diagnostics import sync_lag_ns
+
+    rng = np.random.default_rng(7)
+    noise_a, noise_b = rng.normal(0, 2e-3, N), rng.normal(0, 2e-3, N)
+    assert sync_lag_ns(noise_a, noise_b, DT, T0) is None
+    glitch_a, glitch_b = np.full(N, 0.01), np.full(N, 0.01)
+    glitch_a[int(round(-T0 / DT))] = 1.2
+    glitch_b[int(round(-T0 / DT)) + 3] = 1.2
+    assert sync_lag_ns(glitch_a, glitch_b, DT, T0) is None
+    # and a real pair still reads
+    assert sync_lag_ns(sync(0.0), sync(1.0), DT, T0) == pytest.approx(1.0, abs=0.15)
+
+    # the verdict must then say the timing was not checked, not that it was
+    light = Trace(spike(0.0) + extraction(), DT, T0, count=200)
+    dark = Trace(spike(0.0), DT, T0, count=200)
+    v = W.shot_verdict(light.y, dark.y, {"autorange_passes": 1}, dt=DT,
+                       light=light, dark=dark,
+                       sync_light=Trace(noise_a, DT, T0), sync_dark=Trace(noise_b, DT, T0))
+    assert v["sync_lag_ns"] is None
+    assert "no sync to check the trigger" in v["text"]
+
+
+def test_the_sync_is_aligned_on_the_trigger_edge_not_the_largest_step():
+    """A record can hold a bigger transition than the trigger edge -- a
+    reflection, a later pulse of the same train. Aligning on that instead
+    correlates it against whatever the dark trace holds there."""
+    from bace.core.diagnostics import sync_lag_ns
+
+    late = int(round((-T0 + 4e-7) / DT))          # 400 ns after the trigger
+    a, b = sync(0.0).copy(), sync(0.0).copy()
+    a[late:late + 4] = 3.0                        # on the light record only
+    assert sync_lag_ns(a, b, DT, T0) == pytest.approx(0.0, abs=0.05)
+    a2, b2 = sync(0.0).copy(), sync(0.6).copy()
+    a2[late:late + 4] = 3.0
+    assert sync_lag_ns(a2, b2, DT, T0) == pytest.approx(0.6, abs=0.15)
+
+
+def test_a_photocurrent_cannot_hide_a_real_offset_from_the_sync():
+    """The case that defeats every measure taken from the light and dark
+    traces alone: a 14 mA extraction current on top of a genuine 1 ns offset.
+    Its own contribution to the difference swamps the shift's, so residual
+    ratios and derivative fits both read "no shift" -- and the charge even
+    drags the spike lag back under half its true value. The sync is untouched
+    by any of that and reports the nanosecond."""
+    light = Trace(spike(0.0) + extraction(), DT, T0, count=200)
+    dark = Trace(spike(1.0), DT, T0, count=200)
+    v = W.shot_verdict(light.y, dark.y, {"autorange_passes": 1}, dt=DT,
+                       light=light, dark=dark,
+                       sync_light=Trace(sync(0.0), DT, T0),
+                       sync_dark=Trace(sync(1.0), DT, T0))
+    assert v["edge_light_ns"] == pytest.approx(6.0, abs=0.6), "nothing is smeared"
+    assert abs(v["sync_lag_ns"]) == pytest.approx(1.0, abs=0.15)
+    assert v["level"] == "warn"
+    assert "sync traces are" in v["text"] and "not a charge" in v["text"]
+
+
+def test_the_sync_edge_is_read_off_a_narrow_pulse_too():
+    """This rig's sync is a 5.5 ns pulse, not a step. Read with percentiles
+    over the +-100 ns window it looked flat -- 11 samples of 400 -- so every
+    shot reported no sync edge and the verdict said "No sync trace was
+    fetched" with the trace sitting in the file (2026-09-07)."""
+    t = np.arange(N) * DT + T0
+    pulse = 1.19 * np.exp(-(t / 2.8e-9) ** 2)
+    assert sync_edge_ns(pulse, DT, T0) == pytest.approx(3.5, abs=1.0)
+    assert sync_edge_ns(-pulse, DT, T0) == pytest.approx(3.5, abs=1.0)
+    assert sync_edge_ns(np.full(N, 0.01), DT, T0) is None, "still no edge on a flat sync"
+
+    # A single stray sample satisfies everything a pulse does -- it supplies
+    # both the excursion and most of the trace's range -- and the 10/90
+    # crossings then land on it together, so the edge came back 0.0 ns: a sync
+    # sharper than any real one, reported as if it had been measured. It has to
+    # last more than one sample, and the two crossings have to be distinct.
+    glitch = np.full(N, 0.01)
+    glitch[int(round(-T0 / DT))] = 1.2
+    assert sync_edge_ns(glitch, DT, T0) is None, "one stray sample is not an edge"
+    square = np.full(N, 0.01)
+    square[int(round(-T0 / DT)):int(round(-T0 / DT)) + 2] = 1.2
+    assert sync_edge_ns(square, DT, T0) is None, "an edge the sampler cannot resolve is not one"
+
+
+def test_a_sync_that_was_fetched_but_could_not_be_read_says_which():
+    """Two different states, and the operator acts on them differently: no
+    trace at all is a wiring or driver question, an unreadable one is a
+    diagnostics question."""
+    light = Trace(spike(0.0), DT, T0, count=200)
+    dark = Trace(spike(0.5, smear_ns=2.0), DT, T0, count=200)
+    flat = Trace(np.full(N, 0.01), DT, T0)
+    none = W.shot_verdict(light.y, dark.y, {}, dt=DT, light=light, dark=dark)
+    assert "No sync trace was fetched" in none["text"]
+    unread = W.shot_verdict(light.y, dark.y, {}, dt=DT, light=light, dark=dark,
+                            sync_light=flat, sync_dark=flat)
+    assert "fetched but no edge could be read" in unread["text"]
+
+
 def test_the_acceptance_run_of_2026_09_02_is_a_good_shot():
     """The service run that matched LabVIEW: spikes aligned to a hundredth
     of a nanosecond, 6-7 ns edges. The numbers the rule is calibrated on."""
@@ -93,14 +312,18 @@ def test_the_acceptance_run_of_2026_09_02_is_a_good_shot():
 
 # -- the verdict ------------------------------------------------------------
 def test_misaligned_spikes_are_a_warning_and_aligned_ones_are_said_so():
+    # `smear_ns=2` puts the dark spike's edge at 9 ns, inside the 8-13 ns the
+    # 2026-09-05 incident showed. A lag with a *sharp* edge is a different
+    # thing and is not a warning any more -- the test below it says why.
     light = Trace(spike(0.0, photo=3e-4), DT, T0, count=200)
-    dark = Trace(spike(0.5, smear_ns=1.0), DT, T0, count=200)
+    dark = Trace(spike(0.5, smear_ns=2.0), DT, T0, count=200)
     t = np.arange(N) * DT + T0
     sync = Trace(1.2 / (1 + np.exp(-t / (2e-9 / 4.4))), DT, T0)
     bad = W.shot_verdict(light.y, dark.y, {"autorange_passes": 1}, dt=DT, light=light, dark=dark,
                          sync_light=sync, sync_dark=sync)
     assert bad["level"] == "warn"
     assert "ns apart" in bad["text"] and "not a charge" in bad["text"]
+    assert "spike edge" in bad["text"], "the text names the symptom that corroborated the lag"
     assert bad["spike_lag_ns"] == pytest.approx(0.5, abs=0.06)
     assert bad["averages_light"] == 200 and bad["sync_edge_light_ns"] == pytest.approx(2.0, abs=0.6)
     assert "sync edges are" in bad["text"], "the text says which side to look at"

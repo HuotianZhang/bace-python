@@ -108,10 +108,12 @@ python -m bace.consoles.keithley --sim # just the Keithley's front panel, http:/
 
 ## Status
 
-The measurement half is written, tested, and proven on the rig: scope
+The measurement half is written, tested, and exercised on the rig: scope
 acquisition, auto-range, DIO identity, shutter, and first light on a real device
-all confirmed; against a LabVIEW run eight minutes away the port agrees to 4 %
-on charge (`HANDOVER-2026-09-02.md`).
+have all been run. A LabVIEW run and a port run eight minutes apart are set side
+by side in `HANDOVER-2026-09-02.md`, and a second pair in
+`acceptance/20260902_service-vs-labview/`; both carry the numbers, and what to
+make of them is the reader's.
 
 `service/` is built (2026-09-02): one process owning the instruments, wrapping
 the engine's event generators in HTTP + WebSocket — the bench read-back and its

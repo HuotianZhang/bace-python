@@ -273,8 +273,45 @@ trigger had jittered for the length of the shot, both displacement spikes
 were 4–14 % lower with 8–13 ns edges instead of 6, and the light and dark
 spikes sat 0.3–1.2 ns apart where a good shot aligns to 0.01 ns — so the
 50 mA spike no longer cancelled in `light − dark`. `spike_lag_ns` is the
-light-to-dark lag of the spike by cross-correlation, sub-sample; beyond
-`SPIKE_LAG_NS = 0.25` the shot is `warn`, "Q of this shot is not a charge".
+light-to-dark lag of the spike by cross-correlation, sub-sample.
+
+**Corrected 2026-09-07: a lag on its own is not jitter, and usually is not.**
+The light trace is the displacement spike *plus* the charge being extracted,
+and adding that charge moves the correlation peak while the spike itself
+stands still. Measured on the rig: a synthetic trace built from a no-light
+acquisition with its spike untouched, plus the measured photocurrent,
+reproduced the observed lag to 0.01 ns at every temperature from 220 to
+290 K; shifting the dark trace by the lag cancels only 4 % of the
+light−dark difference, and re-integrating after such a shift moves Q by
+~1 %. The lag-only rule had called 177 of 492 good shots void. A `warn` now
+needs the lag **and** one of two things a superimposed signal cannot produce.
+**The edge is smeared**: slower than `SPIKE_EDGE_NS = 8` ns, where good shots
+are 6.0–6.5. That is the fault the incident was, and a lag beside it warns.
+
+Separately, and **not gated behind the lag**, `sync_lag_ns` — the lag between
+the two acquisitions' own *sync* traces, on the verdict and in the HDF5
+diagnostics. Nothing computed from the light and dark traces alone can stand
+in for it: the light trace is the spike plus the extracted charge, and with a
+large photocurrent a real offset hides inside the charge's own contribution —
+worse, the two push the spike correlation in opposite directions, so half a
+nanosecond of offset can read as a 0.08 ns spike lag. The sync carries the
+trigger edge and nothing else. `SYNC_LAG_NS = 0.1` against a measured
+±0.004 ns across 600 real shots, where the spike lag ran 0.135–0.479 ns and
+grew with temperature — which is itself the proof that nothing in the trigger
+chain moved. With no sync fetched the `ok` line says "no sync to check the
+timing" rather than claiming the lag was explained. Over those 600 shots the
+rule warns on none.
+The incident lowered the spikes by 4–14 % as well, but a height difference
+between the two traces is not the acquisition's alone to explain — under
+`dark_reference = "translated"` they repeat one swing over different
+absolute ranges, so their capacitive terms agree only where `C(V)` is flat,
+and on this device they drift from 0.4 % apart at 220 K to 1.1 % at 295 K
+and are still climbing. The edge is not exposed to that: it is the
+generator's rise, and it held 6.0–6.5 ns across the whole sweep while the
+spikes' decay moved by 11 ns. A lag above
+`SPIKE_LAG_NS = 0.25` with neither of those stays `ok` and is reported in
+the line as "spikes 0.46 ns apart · charge, not jitter".
+
 `edge_*_ns` are the spikes' 10–90 % times and `sync_edge_*_ns` the same on
 the trigger channel, which the engine fetches out of the same record after
 each acquisition (`StepDone.sync_light/sync_dark`, volts, decimated on the
@@ -289,7 +326,14 @@ every acquisition (it was never emptied before, so `averages_dark` read
 `averages_light + ~27` and the dark trace was half light — `HANDOFF.md`
 trap 5), acquires with `:DIG` + `*OPC?`, which runs to the whole count, and
 refuses a short count as `ScopeError`; `null` now means only that the
-firmware did not answer `:WAV:COUN?` with a number. The recorder stores the same numbers per (loop, step) in
+firmware did not answer `:WAV:COUN?` with a number. `sync_edge_ns` reads a **narrow-pulse sync** as well as a step
+(2026-09-07): this rig's sync is 5.5 ns wide, 11 samples of the 400 in the
+search window, and the percentile test that found a step's two levels saw it
+as flat — so every shot reported no sync edge and the verdict said "No sync
+trace was fetched" with the trace sitting in the file. A window that is
+nearly all one level is now read as a spike on a baseline. The verdict also
+distinguishes the two states: nothing fetched, against fetched but no edge
+readable. The recorder stores the same numbers per (loop, step) in
 the HDF5 `diagnostics` group and the sync traces under `traces/sync_light`
 and `traces/sync_dark`. The `ok` line now reads
 "autorange pass 1 · no shared extreme · 1 rail sample · spikes 0.01 ns apart · edge 6.5 ns · 200 avg · sync edge 2.1 ns".

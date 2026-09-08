@@ -82,6 +82,95 @@ def spike_lag_ns(light: np.ndarray, dark: np.ndarray, dt: float) -> float | None
     return float(-(shift - (x.size - 1)) * dt * 1e9)
 
 
+MIN_SYNC_V = 0.1
+"""How far a sync trace must swing before there is an edge on it to align.
+
+The rig's sync is 1.19 V and its digitiser noise is about 2 mV, so this sits
+an order of magnitude clear of both. Without it `sync_lag_ns` correlates
+noise against noise and returns a number: a noise-only pair measured -1.54 ns
+here, which either voids a good shot or, worse, passes as proof that a real
+lag was checked. Same value as `experiment.transient.MIN_SYNC_SWING_V`, which
+is where the run refuses to measure at all."""
+
+
+def sync_lag_ns(sync_light: np.ndarray, sync_dark: np.ndarray,
+                dt: float, t0: float = 0.0) -> float | None:
+    """Lag of the dark acquisition's trigger edge behind the light one, in ns.
+
+    What it measures is the **trigger chain**, and only that. The sync is the
+    edge the scope triggered on: it carries no photocurrent and no device, so
+    if the two acquisitions were armed at different times it is offset by that
+    and by nothing else, where `spike_lag_ns` mixes any such offset with the
+    charge coming out of the device and cannot separate them.
+
+    **What it does not measure**: everything downstream of the sync. The scope
+    triggers on the 81150A's sync while the field reaches the device a latency
+    later (`experiment.rig`), so a latency that differed between the two
+    acquisitions would move the displacement spikes while leaving these two
+    edges together. An aligned sync says the trigger did not move; it does not
+    say the spikes did not.
+
+    Measured over the 240 shots of the 2026-09-06 220-295 K sweep: the spike
+    lag runs 0.135 to 0.479 ns and grows with temperature, while this stays
+    inside 0.004 ns at every point.
+
+    Same sign convention as `spike_lag_ns`: positive means the dark edge came
+    later.
+
+    **None unless both traces actually carry the edge**, which is not the same
+    as carrying samples. A trace of digitiser noise has a peak-to-peak above
+    zero and correlates against another one to an arbitrary lag -- measured
+    -1.54 ns on two noise traces -- and a pair of single-sample glitches gave
+    1.5 ns. Either would be read as a verdict: over `SYNC_LAG_NS` it voids a
+    good shot, under it the `ok` line calls a spike lag "charge, not jitter"
+    on the strength of a number that means nothing. So both traces must swing
+    at least `MIN_SYNC_V` and both must have an edge `sync_edge_ns` can read,
+    and when they do not this returns None and the caller says the timing
+    could not be checked (2026-09-08).
+    """
+    a = np.asarray(sync_light, dtype=float)
+    b = np.asarray(sync_dark, dtype=float)
+    if a.size == 0 or a.size != b.size or not dt or not np.isfinite(dt):
+        return None
+    if np.ptp(a) < MIN_SYNC_V or np.ptp(b) < MIN_SYNC_V:
+        return None
+    if sync_edge_ns(a, dt, t0) is None or sync_edge_ns(b, dt, t0) is None:
+        return None
+    # The edge, by its steepest step **inside the trigger window** -- the same
+    # place `sync_edge_ns` just validated one. Two reasons, one for each half:
+    # the steepest step because a sync may be a narrow pulse or a step and
+    # "furthest from the median" picks noise out of a step's long high level
+    # (it read 18 ns of lag off the simulator's, which is a clean step); the
+    # window because a record holding a larger transition elsewhere -- a
+    # reflection, a later pulse of the same train -- would otherwise align on
+    # that instead and correlate it against whatever the dark trace holds there.
+    trig = int(round(-float(t0) / dt))
+    edge_half = int(round(1e-7 / dt))
+    w_lo, w_hi = max(0, trig - edge_half), min(a.size, trig + edge_half)
+    if w_hi - w_lo < 8:
+        return None
+    i = w_lo + int(np.argmax(np.abs(np.diff(a[w_lo:w_hi]))))
+    half = int(round(3e-8 / dt))
+    lo, hi = max(0, i - half), min(a.size, i + half)
+    if hi - lo < 8:
+        return None
+    x = a[lo:hi] - a[lo:hi].mean()
+    y = b[lo:hi] - b[lo:hi].mean()
+    if not (np.abs(x).max() > 0 and np.abs(y).max() > 0):
+        return None
+    c = np.correlate(x, y, "full")
+    k = int(np.argmax(c))
+    if c[k] <= 0:
+        return None
+    shift = float(k)
+    if 0 < k < c.size - 1:
+        y0, y1, y2 = c[k - 1], c[k], c[k + 1]
+        denom = y0 - 2.0 * y1 + y2
+        if denom != 0:
+            shift += 0.5 * (y0 - y2) / denom
+    return float(-(shift - (x.size - 1)) * dt * 1e9)
+
+
 def edge_10_90_ns(trace: np.ndarray, dt: float) -> float | None:
     """The 10-90 % time of the displacement spike's leading edge, in ns.
 
@@ -108,6 +197,15 @@ def sync_edge_ns(sync: np.ndarray, dt: float, t0: float) -> float | None:
 
     None when the trace has no edge there (a flat sync is the "no sync"
     case the trigger calibration already refuses).
+
+    **The sync may be a narrow pulse, not a step** (2026-09-07). This rig's is
+    5.5 ns wide -- 11 samples of the 400 in the search window -- and the levels
+    were taken as the window's 5th and 95th percentiles, which for a pulse that
+    brief are both the baseline: the span came out 0.038 V against the 0.30 V
+    the test demanded, so **every shot on this rig reported no sync edge**, and
+    the shot verdict said "No sync trace was fetched" while the trace sat in the
+    file. A step is still read as a step; a window that is nearly all one level
+    is now read as a spike on a baseline instead, which is what a pulse is.
     """
     a = np.asarray(sync, dtype=float)
     if a.size < 16 or not dt or not np.isfinite(dt) or np.ptp(a) <= 0:
@@ -120,7 +218,37 @@ def sync_edge_ns(sync: np.ndarray, dt: float, t0: float) -> float | None:
     w = a[lo:hi]
     low, high = float(np.percentile(w, 5)), float(np.percentile(w, 95))
     if high - low < 0.25 * np.ptp(a):
-        return None
+        # Not a step: the window is nearly all one level. Either there is no
+        # sync at all, or the sync is a *pulse* too brief to move a percentile
+        # -- this rig's is 5.5 ns, 11 samples of 400, so its 95th percentile is
+        # still the baseline. Read it as a spike instead: the bulk is the
+        # baseline, the excursion is the pulse, and its leading edge is the one
+        # the scope triggered on -- `_crossing_time`, the same walk
+        # `edge_10_90_ns` makes over the displacement spike.
+        base = float(np.median(w))
+        k = int(np.argmax(np.abs(w - base)))
+        level = float(w[k])
+        if abs(level - base) < 0.25 * np.ptp(a):
+            return None
+        # A pulse is several samples wide -- this rig's is 11. One sample off
+        # the baseline is an acquisition glitch, and it satisfies everything
+        # above: it supplies both the excursion and most of the trace's range.
+        # `_crossing_time` would then find the 10 % and 90 % crossings on the
+        # same sample and return 0.0, and the verdict would report a sync edge
+        # sharper than any real one as if it had been measured. So the
+        # excursion must last more than one sample, and the two crossings must
+        # be distinct: an edge the sampler cannot resolve is not a measurement.
+        toward = np.sign(level - base)
+        above = (w - (base + 0.1 * (level - base))) * toward > 0
+        first, last = k, k
+        while first > 0 and above[first - 1]:
+            first -= 1
+        while last < w.size - 1 and above[last + 1]:
+            last += 1
+        if last - first < 1:
+            return None
+        edge = _crossing_time(w, k, base, level, dt)
+        return edge if edge > 0.0 else None
     # the edge: the largest single-step change inside the window says which
     # way it goes; the 10/90 levels are then crossed on either side of it
     d = np.diff(w)
