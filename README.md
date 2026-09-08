@@ -26,6 +26,10 @@ interpreter every other `.bat` in that folder calls. By hand it is
 `py -3 -m pip install -e .[lab,dev]` (or `.[service,dev]` without the rig),
 quoted in PowerShell as `'.[lab,dev]'`. `BENCH.md` has the detail.
 
+The standalone consoles under `examples/` are the exception: they share nothing
+with the package, so `Run Shutter Console.bat` and `Run Keithley Console.bat`
+need none of the above — only `pyvisa`, and only to drive the real instrument.
+
 ## Developing away from the bench (Linux, a container, a cloud session)
 
 The console can be built with no hardware at all: `--sim` assembles the rig from
