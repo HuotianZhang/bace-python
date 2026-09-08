@@ -74,6 +74,20 @@ because a typo that silently ran the defaults would be a bench nobody chose.
   runs out — a VISA call that never returns, which cannot be interrupted
   without writing to the bus from a second thread — the console says so on
   stderr instead of exiting quietly.
+* **"The instrument did not say" is not "off".** A `:OUTP?` that times out or
+  answers something unrecognised leaves the output *unknown*: the page draws
+  neither position, and a function, terminals or sensing change is refused
+  until the instrument answers again — those are the changes the interlock
+  exists to stop under a live source, and deciding them on the flag this
+  process last wrote is deciding them on a guess. A level or a compliance
+  still applies, because the one thing that must never be blocked is bringing
+  a source down. The simulated SourceMeter has no such query and no front
+  panel for anybody to touch, so there its cached flag *is* the truth.
+* **The page says when it cannot reach the console.** A stopped console used to
+  leave the last answer on screen indefinitely, chip and all, and the state
+  that must never be mistaken for is a source the page says is off. The chip
+  turns, the controls lock, and the note names the 2400's own OUTPUT key as
+  the way out that still works.
 * **A tightened compliance is written before the level it limits.** One click
   can do both — 0 V on a 50 mA limit to 5 V on 1 mA is an ordinary thing to
   type — and under a live output those are two separate writes on the bus.

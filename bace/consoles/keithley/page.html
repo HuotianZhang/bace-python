@@ -248,6 +248,13 @@ const FIELDS = [
 let state = null;
 let said = null;
 let inflight = false;
+// Set when a request to the console does not come back, cleared by the next
+// one that does. Without it the page kept drawing the last answer it ever
+// got -- a green "connected" chip, an output, a reading -- with nothing behind
+// it, so a console that had been stopped and an instrument sitting at that
+// state looked identical. The one it must not be mistaken for is a source the
+// page says is off.
+let linkDown = null;
 // Bumped whenever the instrument refuses a field. There is no "edited" layer
 // on this console -- a box *is* the instrument -- so a refused value left in
 // its box would be a number sitting beside a live source that the source is
@@ -277,6 +284,7 @@ async function call(path, body, options) {
       body: JSON.stringify(body || {}),
     });
     const answer = await r.json();
+    linkDown = null;                       // it answered, whatever it said
     if (!r.ok) {
       say(answer.error || (path + " → " + r.status), answer.level || "warn");
       formRev += 1;
@@ -291,7 +299,8 @@ async function call(path, body, options) {
     if (answer && answer.panel !== undefined) apply(answer);
     return r.ok ? answer : null;
   } catch (error) {
-    say(String(error && error.message || error), "crit");
+    linkDown = String((error && error.message) || error);
+    say(String((error && error.message) || error), "crit");
     return null;
   } finally {
     if (guarded) inflight = false;
@@ -314,8 +323,13 @@ async function refresh() {
   if (inflight) return;
   try {
     const r = await fetch("/api/state", { cache: "no-store" });
-    if (r.ok) { apply(await r.json()); draw(); }
-  } catch { /* the console is down; the chip says so on the next draw */ }
+    if (!r.ok) throw new Error("/api/state → " + r.status);
+    apply(await r.json());
+    linkDown = null;
+  } catch (error) {
+    linkDown = String((error && error.message) || error);
+  }
+  draw();
 }
 
 // -- drawing ---------------------------------------------------------------
@@ -329,9 +343,15 @@ function draw() {
 
   $("who").textContent = (inst.identity || "no instrument") + (inst.address ? "  ·  " + inst.address : "");
 
-  keyed($("chips"), JSON.stringify([inst.mode, inst.available, state.poll.running, state.poll.interval_s]), () => [
+  keyed($("chips"), JSON.stringify([inst.mode, inst.available, state.poll.running,
+                                    state.poll.interval_s, Boolean(linkDown)]), () => [
     inst.mode === "sim" ? el("span.chip.sim", { title: "every number here is a model, not a measurement", text: "simulated" }) : null,
-    el("span", { class: "chip" + (inst.available ? "" : " bad"), text: inst.available ? "connected" : "no instrument" }),
+    // Two different questions, and the page used to answer only the second:
+    // whether this page can reach the console, and whether the console has an
+    // instrument. A stopped console left "connected" on screen for ever.
+    linkDown
+      ? el("span.chip.bad", { title: linkDown, text: "no answer from the console" })
+      : el("span", { class: "chip" + (inst.available ? "" : " bad"), text: inst.available ? "connected" : "no instrument" }),
     el("span.chip", { text: state.poll.running ? "display " + state.poll.interval_s + " s" : "display off" }),
   ]);
 
@@ -365,11 +385,17 @@ function draw() {
 
   // The controls. Their key holds no counter that moves with a reading, or a
   // field could not be typed into.
+  // `linkDown` is in the key for the same reason the notes carry their text:
+  // a key too coarse to notice what changed leaves the page rendering the old
+  // thing. Without it the controls stayed enabled over a console that was no
+  // longer there, which is the state this whole flag exists to show.
   keyed($("controls"), JSON.stringify([inst.available, setup, state.output,
                                        state.poll.running, state.poll.interval_s,
-                                       formRev]), () => {
+                                       formRev, Boolean(linkDown)]), () => {
     if (!inst.available) return el("p.note.crit", { text: inst.unavailable || "no SourceMeter" });
-    const locked = live ? "the output is ON: switch it off to change this, then switch it back on" : null;
+    const locked = linkDown
+      ? "no answer from the console: nothing here reaches the instrument"
+      : live ? "the output is ON: switch it off to change this, then switch it back on" : null;
     // `alert` is a property of the *position*, not of the row: a live source is
     // the loudest thing on this screen, and `off` is the safe state — painting
     // whichever position happens to be lit in the alert colour would make the
@@ -404,7 +430,10 @@ function draw() {
           { label: "off", on: state.output === false,
             go: () => call("/api/output", { on: false }, { always: true }) },
           { label: "on", on: live, alert: true, go: () => call("/api/output", { on: true }) },
-        ], { loud: live }),
+        // Locked only when the console cannot be reached -- never for a live
+        // output, which is the one row that has to stay usable while the
+        // source is driving.
+        ], { loud: live, lock: linkDown ? "no answer from the console" : null }),
         el("div.boxes", FIELDS.map((f) => {
           const ceiling = f.ceiling ? state.ceiling[f.ceiling] : null;
           const unit = f.unit === "panel" ? setup.unit : f.unit;
@@ -449,6 +478,11 @@ function draw() {
   const notes = [];
   if (!applied && inst.available) notes.push({ level: "info", key: "unapplied",
     text: "the SourceMeter is not on the panel: nothing has told it what to source. Set the source to put it there — the output will not switch on until it is." });
+  if (linkDown) notes.push({ level: "crit", key: "linkdown",
+    text: "no answer from the console (" + linkDown + "). Everything below is the "
+          + "last thing it said and may no longer be true — including whether the "
+          + "output is on. If the source needs to come off, use the 2400's own "
+          + "OUTPUT key." });
   if (state.poll.last_error) notes.push({ level: "warn", key: "pollerr",
     text: "the last display reading failed: " + state.poll.last_error });
   if (inst.mode === "sim") notes.push({ level: "warn", key: "sim",

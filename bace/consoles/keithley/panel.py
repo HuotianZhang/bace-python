@@ -39,7 +39,8 @@ import time
 from typing import Any, Callable
 
 from ...drivers.keithley2400 import (PANEL_STATIC, PanelSetup, SourceMeterConfig,
-                                     SourceMeterError, panel_budget_for)
+                                     SourceMeterError, PANEL_BUDGET_MAX_S,
+                                     panel_budget_for)
 
 JOB_TIMEOUT_S = 30.0
 """The **floor** on how long a request waits for the worker: enough for any
@@ -378,6 +379,11 @@ class KeithleyPanel:
         at answer time because a driver's cached flag is only as fresh as the
         last thing this process did to it (`_fresh_output`)."""
         self._poll_s: float | None = None
+        self._output_seen = False
+        """Whether `_fresh_output` has ever completed. Before it has, `state`
+        may stand on the driver's flag -- `_open_real` read `:OUTP?` when it
+        opened the session, so it means something. After it has, `_output` is
+        the answer, including `None` for "the instrument did not say"."""
         self._output_asked_at = 0.0
         self._output_pending = False
         self._readings = 0
@@ -435,10 +441,22 @@ class KeithleyPanel:
         return confirmed.is_set() if self.available else True
 
     def shutdown_budget_s(self) -> float:
-        """How long `close` waits: the longest a read in flight can take, plus
-        room for the queued output-off behind it."""
+        """How long `close` waits: the longest read this panel accepts at all,
+        plus room for the queued output-off behind it.
+
+        The *ceiling* rather than the applied panel's own budget, because this
+        is asked before the worker can be seen. A source change already in
+        flight has not published its setup yet -- `smu.panel` is still the one
+        it is replacing -- so quick settings moving to NPLC 10 and a 100-deep
+        filter sized this wait at about 25 s for a read that then takes 175.
+        `close_with_budget` returned False, and the worker being a daemon
+        thread, the process ended with the queued output-off never run.
+
+        It costs nothing in the ordinary case: the wait is a bound, not a
+        sleep, and a worker that finishes ends it.
+        """
         budget = getattr(self.smu, "panel_budget_s", None)
-        return (float(budget()) if callable(budget) else JOB_TIMEOUT_S) + SHUTDOWN_MARGIN_S
+        return (PANEL_BUDGET_MAX_S if callable(budget) else JOB_TIMEOUT_S) + SHUTDOWN_MARGIN_S
 
     def read_budget_s(self) -> float:
         """How long a read job may take before the caller gives up on it. The
@@ -456,8 +474,11 @@ class KeithleyPanel:
             raise PanelUnavailable(self.unavailable or "no SourceMeter on this console")
         return self.smu
 
-    def _fresh_output(self, smu: Any) -> bool:
+    def _fresh_output(self, smu: Any) -> bool | None:
         """Ask the instrument whether its output is on, and cache the answer.
+
+        Returns True, False, or **None for "it did not say"** -- which is not
+        the same as off and must never be rounded down to it.
 
         **On the worker, and before anything decides on it.** `output_enabled`
         is the driver's cached flag, set when this process last wrote or read
@@ -473,12 +494,25 @@ class KeithleyPanel:
         it to touch -- so its cached flag *is* the truth.
         """
         read = getattr(smu, "read_output", None)
-        answer = read() if callable(read) else None
-        if answer is None:
-            answer = getattr(smu, "output_enabled", False)
+        if not callable(read):
+            # No such query. The simulated SourceMeter has no front panel for
+            # anybody to touch, so what this process last wrote *is* the truth
+            # there -- this is the only case the cached flag may stand in for
+            # an answer.
+            answer: bool | None = bool(getattr(smu, "output_enabled", False))
+        else:
+            # `read_output` returns None when the instrument was asked and did
+            # not give a usable answer -- a timed-out `:OUTP?`, or a reply
+            # `on_off` did not recognise. Falling back to the cache here read
+            # a flag this process wrote, which is exactly what the query
+            # exists to distrust: the cache says off, the operator switched
+            # the output on at the 2400 itself, and a function or wiring
+            # change sailed through the interlock under a live source.
+            answer = read()
         with self._lock:
-            self._output = bool(answer)
-        return bool(answer)
+            self._output = None if answer is None else bool(answer)
+            self._output_seen = True
+        return None if answer is None else bool(answer)
 
     # -- what the page draws ------------------------------------------------
     def state(self) -> dict:
@@ -490,11 +524,15 @@ class KeithleyPanel:
             poll = {"running": self._poll_s is not None, "interval_s": self._poll_s,
                     "readings": self._readings, "failures": self._failures,
                     "last_error": self._last_error}
+            asked, last = self._output_seen, self._output
         panel = getattr(self.smu, "panel", None) if self.available else None
         output: bool | None = None
         if self.available:
-            output = (self._output if self._output is not None
-                      else bool(getattr(self.smu, "output_enabled", False)))
+            # `None` once something has asked means the instrument did not
+            # say, and the page draws neither position. Standing on the
+            # driver's flag there would report a source off on the strength of
+            # what this process last wrote -- the memory the query distrusts.
+            output = last if asked else bool(getattr(self.smu, "output_enabled", False))
         return {
             "instrument": {"identity": self.identity, "address": self.address,
                            "mode": self.mode, "available": self.available,
@@ -590,12 +628,27 @@ class KeithleyPanel:
             smu = self._need()
             # Before `apply_panel`, whose `PANEL_STATIC` interlock reads this.
             self._fresh_output(smu)
+            live = self._output
             base = getattr(smu, "panel", None) or self.defaults
             if values.get("function", base.function) != base.function:
                 values.setdefault("level", 0.0)
                 values.setdefault("source_range", None)
             setup = dataclasses.replace(base, **values)      # ValueError -> 422
             self._check_ceiling(setup)
+            # `apply_panel`'s interlock refuses a `PANEL_STATIC` change under a
+            # live output. It decides on the driver's flag, which a failed
+            # `:OUTP?` leaves as whatever this process last wrote -- so when
+            # the instrument will not say, this refuses in its place rather
+            # than letting a function, terminals or sensing change through on
+            # a guess. A level or a compliance still applies: the one thing
+            # that must never be blocked is bringing a source down.
+            if live is None and any(getattr(setup, f) != getattr(base, f)
+                                    for f in PANEL_STATIC):
+                raise PanelRefused(
+                    "the SourceMeter did not answer :OUTP?, so this console cannot "
+                    "tell whether its output is live; a "
+                    f"{', '.join(PANEL_STATIC)} change is refused until it does. "
+                    "Levels and compliances still apply.", "crit")
             try:
                 smu.apply_panel(setup)
             except SourceMeterError as exc:
@@ -718,8 +771,13 @@ class KeithleyPanel:
             # Only once a source is set: with nothing applied, "nothing has
             # told the SourceMeter what to source" is the more useful of the
             # two true sentences, and it is `read_panel`'s own first check.
-            if not fresh and getattr(smu, "panel", None) is not None:
-                raise PanelRefused("the output is OFF: there is nothing to read")
+            if getattr(smu, "panel", None) is not None:
+                if fresh is None:
+                    raise PanelRefused(
+                        "the SourceMeter did not answer :OUTP?, so this console cannot "
+                        "say whether there is anything to read", "crit")
+                if not fresh:
+                    raise PanelRefused("the output is OFF: there is nothing to read")
             try:
                 self._tick()
             except SourceMeterError as exc:

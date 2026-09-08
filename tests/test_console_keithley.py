@@ -32,7 +32,8 @@ from bace.consoles.keithley.panel import (JOB_TIMEOUT_S, OUTPUT_WATCH_S, Keithle
                                           PanelPending, PanelRefused, PanelUnavailable,
                                           source_args)
 from bace.consoles.keithley.server import make_server, serve_forever
-from bace.drivers.keithley2400 import PanelSetup, SourceMeterConfig, panel_budget_for
+from bace.drivers.keithley2400 import (PanelSetup, SourceMeterConfig,
+                                       panel_budget_for)
 from bace.drivers.simulated import make_bench
 
 CEILING = {"current_a": 0.05, "voltage_v": 5.0}
@@ -993,3 +994,85 @@ def test_switching_the_output_off_is_not_swallowed_by_a_busy_page():
     # And the guard has to honour it, rather than the option being decorative.
     assert "const guarded = !(options && options.always);" in page
     assert "if (inflight && guarded) return null;" in page
+
+
+# -- round eight --------------------------------------------------------------
+def test_shutdown_waits_for_the_slowest_read_the_panel_will_accept(panel):
+    """`close` sizes its wait before it can see what the worker is inside. A
+    source change in flight has not published its setup yet — `smu.panel` is
+    still the one it is replacing — so quick settings moving to NPLC 10 and a
+    100-deep filter sized the wait at ~25 s for a read that then takes 175, and
+    the daemon worker was killed with the queued output-off never run.
+
+    The ceiling costs nothing: the wait is a bound, not a sleep.
+    """
+    panel.set_source({"function": "V", "level": 0.5, "nplc": 1.0, "averaging": 1})
+    assert panel.read_budget_s() == pytest.approx(JOB_TIMEOUT_S), "the read wait stays per-setup"
+    assert panel.shutdown_budget_s() >= panel_budget_for(10.0, 100), (
+        "shutdown must cover the slowest read this panel accepts, whatever is in flight")
+
+    # And it really is the ceiling, not the applied panel's own budget.
+    panel.set_source({"nplc": 10.0, "averaging": 100})
+    assert panel.shutdown_budget_s() >= panel.read_budget_s()
+
+
+def test_an_unanswered_output_query_is_unknown_and_never_off(panel):
+    """`read_output()` returns None when the instrument was *asked* and did not
+    give a usable answer — a timed-out `:OUTP?`, or a reply `on_off` did not
+    recognise. Falling back to the cached flag there believed exactly the
+    memory the query exists to distrust: the cache says off, the operator
+    switched the output on at the 2400 itself, and a wiring-class change went
+    through the interlock under a live source.
+    """
+    panel.set_source({"function": "V", "level": 0.5})
+    panel.smu.read_output = lambda: None
+    panel.smu._output = False                      # what this process last wrote
+
+    with pytest.raises(PanelRefused, match="did not answer"):
+        panel.set_source({"function": "current"})  # a PANEL_STATIC change
+    assert panel.state()["output"] is None, "unknown, and not the cache's 'off'"
+
+    # A level still applies: the one thing that must never be blocked is
+    # bringing a source down.
+    panel.set_source({"level": 0.0})
+    assert panel.state()["panel"]["level"] == 0.0
+
+    # And a read says which of the two it is.
+    with pytest.raises(PanelRefused, match="did not answer"):
+        panel.read()
+
+
+def test_no_such_query_still_stands_on_the_cache(panel):
+    """The simulated SourceMeter has no `read_output` — there is no front panel
+    on it for anybody to touch, so what this process last wrote *is* the truth.
+    That is the one case the fallback is allowed."""
+    assert not hasattr(type(panel.smu), "read_output")
+    panel.set_source({"function": "V", "level": 0.5})
+    panel.set_output(True)
+    assert panel.state()["output"] is True
+
+
+def test_the_page_says_when_it_cannot_reach_the_console():
+    """`refresh`'s catch claimed "the chip says so on the next draw" and did
+    neither: no state recorded, no redraw. So a stopped console left the last
+    answer on screen for ever — a green "connected" chip, an output, a
+    reading — and the state it must never be mistaken for is a source the page
+    says is off.
+
+    Asserted on the source, as the other page checks are. Verified in a
+    browser too: killing the console flips the chip to "no answer from the
+    console", locks the output row, and prints the note; restarting it
+    restores all three.
+    """
+    from bace.consoles.keithley.server import PAGE
+    page = open(PAGE, encoding="utf-8").read()
+
+    assert "let linkDown = null;" in page
+    assert "linkDown = null;" in page, "and something clears it again"
+    # The three places it has to reach, each of which was wrong on its own.
+    assert 'text: "no answer from the console"' in page, "the chip"
+    assert 'key: "linkdown"' in page, "the note, with the reason"
+    assert "formRev, Boolean(linkDown)" in page, (
+        "the controls' render key — without it they stayed enabled over a "
+        "console that was no longer there")
+    assert "OUTPUT key" in page, "and it names the way out that still works"

@@ -117,6 +117,12 @@ filter, the source range -- is what the 2400's own knob and keys change with
 the output on, so the panel changes those live too."""
 
 
+NPLC_LIMITS = (0.01, 10.0)
+AVERAGING_LIMITS = (1, 100)
+"""What `PanelSetup` accepts, named because the budget ceiling below is
+derived from them and the two must not drift apart."""
+
+
 def panel_budget_for(nplc: float, averaging: int) -> float:
     """How long one `read_panel` under *these* settings can take, with room.
 
@@ -135,6 +141,18 @@ def panel_budget_for(nplc: float, averaging: int) -> float:
     those is a read cut off mid-integration.
     """
     return 15.0 + 2.0 * max(1, int(averaging)) * 4.0 * float(nplc) / 50.0
+
+
+PANEL_BUDGET_MAX_S = panel_budget_for(NPLC_LIMITS[1], AVERAGING_LIMITS[1])
+"""The longest read this panel will ever accept -- NPLC 10 with a 100-deep
+filter, both legal on a 2400.
+
+Wanted where the caller cannot know which setup the worker is inside. Shutdown
+is the case: it sizes its wait before it can see what a source change already
+in flight is about to apply, and a wait sized on the panel that change is
+*replacing* ends with the worker killed mid-read and the queued output-off
+never run. A ceiling costs nothing there, because the wait is a bound and not
+a sleep -- the worker finishing early ends it."""
 
 
 @dataclass(frozen=True)
@@ -186,11 +204,12 @@ class PanelSetup:
                              f"one of {', '.join(PANEL_FUNCTIONS)}")
         if self.terminals not in ("FRON", "REAR"):
             raise ValueError(f"terminals is FRON or REAR, not {self.terminals!r}")
-        if not 0.01 <= float(self.nplc) <= 10.0:
-            raise ValueError(f"nplc is between 0.01 and 10 on a 2400, not {self.nplc:g}")
-        if not 1 <= int(self.averaging) <= 100:
-            raise ValueError("averaging is between 1 and 100 readings, not "
-                             f"{self.averaging}")
+        if not NPLC_LIMITS[0] <= float(self.nplc) <= NPLC_LIMITS[1]:
+            raise ValueError(f"nplc is between {NPLC_LIMITS[0]:g} and {NPLC_LIMITS[1]:g} "
+                             f"on a 2400, not {self.nplc:g}")
+        if not AVERAGING_LIMITS[0] <= int(self.averaging) <= AVERAGING_LIMITS[1]:
+            raise ValueError(f"averaging is between {AVERAGING_LIMITS[0]} and "
+                             f"{AVERAGING_LIMITS[1]} readings, not {self.averaging}")
         if self.source_range is not None and float(self.source_range) <= 0.0:
             raise ValueError("source_range is a positive full-scale value, or null "
                              "for the instrument's autorange")
