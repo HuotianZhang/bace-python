@@ -348,10 +348,30 @@ def serve(control: Control, host: str = DEFAULT_HOST,
 
 
 # ------------------------------------------------------------------- the main
-_PORT_TAKEN = {errno.EADDRINUSE, getattr(errno, "WSAEACCES", None),
-               getattr(errno, "EACCES", None)} - {None}
-"""The errnos that mean "somebody already has this port". Windows answers
-WSAEACCES where POSIX answers EADDRINUSE."""
+WINDOWS_PORT_TAKEN = (10013, 10048)
+"""`WSAEACCES` and `WSAEADDRINUSE`.
+
+Windows does not answer a bound port with `EADDRINUSE` the way POSIX does: a
+second `bind` to a port somebody is already listening on raises **10013**,
+"an attempt was made to access a socket in a way forbidden by its access
+permissions" -- that is the code when the holder did not ask for
+`SO_REUSEADDR`, which is exactly the second console. **10048**
+(`WSAEADDRINUSE`) is the other way it comes back. So the `EADDRINUSE` check
+below found nothing on the one platform this console is actually
+double-clicked on, and the operator who started it twice got the socket error
+this code exists to translate (measured 2026-09-08).
+
+Matched on `winerror` rather than on `errno`, which Python maps 10013 to
+`EACCES` -- and `EACCES` on POSIX is a privileged port, not a busy one, so
+matching it there would explain `--port 80` as a console that is already
+running.
+"""
+
+
+def _port_is_taken(exc: OSError) -> bool:
+    """Whether `exc` from `bind`/`listen` means somebody already has the port."""
+    return (getattr(exc, "errno", None) == errno.EADDRINUSE
+            or getattr(exc, "winerror", None) in WINDOWS_PORT_TAKEN)
 
 
 def main(argv: list[str] | None = None, *, make=None) -> int:
@@ -417,12 +437,7 @@ def main(argv: list[str] | None = None, *, make=None) -> int:
         # about a socket would send someone looking at the DIO.
         control.release()
         print(f"cannot listen on {a.host}:{a.port}: {exc}")
-        # EADDRINUSE is the POSIX answer. Windows gives WSAEACCES (10013)
-        # instead when the port is held by a socket that did not ask for
-        # SO_REUSEADDR, which is exactly the second console: the friendly
-        # line never printed there, and the whole point of it is that the
-        # operator double-clicked the .bat twice (measured 2026-09-08).
-        if getattr(exc, "errno", None) in _PORT_TAKEN:
+        if _port_is_taken(exc):
             print("  a shutter console is already running — its page is at "
                   f"http://{a.host}:{a.port}/")
         return 2

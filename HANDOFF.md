@@ -227,6 +227,74 @@ the new route turned "editable in `run.toml`" into "typeable in a text box".
 as it will be spelled. The plan's directory allocator (its collision section)
 is still open.
 
+**2026-09-08, CI** (`.github/workflows/tests.yml`). The suite on every push and
+pull request, on **ubuntu-latest and windows-latest**. Windows is the point:
+the lab PC runs WinPython, the `.dat` files are byte-exact with CRLF, and §3
+already records a defect that failed there and passed on Linux (a colon in
+`material` building a path segment). 3.11 on both — `requires-python`, and what
+the bench runs — plus 3.12 on Linux. Nothing touches an instrument, so the
+`rig` extra is not installed.
+
+Two things had to be fixed before it could be green, and both were defects in
+their own right:
+
+* **`pip install -e .[service,dev]` could not run the suite.** Starlette's
+  TestClient needs `httpx2` and nothing declared it, so
+  `tests/test_service_api.py` failed at *collection* with a message about a
+  package nothing here names. It is a test dependency, not a service one --
+  the service never makes an HTTP request -- so it went in `dev`.
+* **Seven tests skipped on every checkout, and the data was already here.**
+  `find_archive` looked at `$BACE_ARCHIVE`, a sandbox upload path and
+  `tests/data/`, but never at `bench-archive/`, which this repository carries.
+  So the numerical regression against the 2026-08-07 run (worst relative
+  difference 1.6e-06) and the byte-exact `.dat` round trip -- the two tests
+  that hold the port to the LabVIEW original -- ran only for whoever knew to
+  set the variable. `python -m pytest -q` is now **814 passed, nothing
+  skipped**.
+
+**2026-09-08, the Keithley console** (`bace/consoles/keithley/`, and its own
+README). The 2400 driven by hand: source a voltage or a current, hold a
+compliance, switch the output on, watch what comes back. No module, no run, no
+folder, no other instrument — and **not part of the service or of `ui/`**. One
+instrument, one process, one port:
+
+```
+python -m bace.consoles.keithley --sim     # no hardware, no VISA, no extras
+python -m bace.consoles.keithley           # GPIB0::24, from rig.toml -> :8924
+```
+
+It exists because every route to the SourceMeter went through a module, so
+reading a V_oc without filing a run meant leaving this program for the
+instrument's own keys. It is deliberately *not* a tab: **one process owns an
+instrument**, so a console and the service cannot both hold `GPIB0::24` — this
+is what you run instead of the service, the same reason the 1918-C has a
+console on `:8918` and the 331 one on `:8331` (`docs/service-plan.md`). The
+port follows that convention: the last two digits are the GPIB address.
+
+Two changes underneath it, and one thing to know:
+
+* **the driver grew a panel mode** (`keithley2400.PanelSetup`, `apply_panel`,
+  `read_panel`): configure once and read many, with `*RST` only on the way in
+  and only what moved written after that. The three DC routines could not be
+  reused — each opens with `*RST`, which would drop the output between every
+  reading. The separation runs both ways: `_prepare` clears the panel, so the
+  first measurement after a panel session leaves the instrument in none of the
+  state the panel put there and the panel knows. The panel senses **both**
+  quantities (`:FUNC:CONC ON`), which is the one place in that driver where the
+  V element of a `:READ?` is a measurement rather than the setpoint
+  `sweep_points` files. The simulated SourceMeter mirrors all of it and models
+  the relay on this path (`measure_dc` and `sweep_points` are only reached from
+  inside `router.dc()`, so the position cannot be wrong for them);
+* **`rig.toml`'s two ceilings now hold a typed level**, not only a compliance.
+  Until this console nothing could type a source level at all, so the one
+  number an operator can put straight onto the device had nothing over it. No
+  third key was invented: those two are the bench's statement of what the
+  device may see, whichever end of the instrument it arrives from;
+* the console is `http.server`, not FastAPI, so it needs no `service` extra —
+  and under `--sim` no VISA either. Its README is the worked example for
+  writing the next one (`panel.py` is what changes; `server.py` and the page
+  follow the panel's state object rather than the instrument).
+
 **Temperature** — wired since this handover was written (superseded here by
 `docs/service-contract.md` section 7). The Lake Shore 331 is at
 `GPIB0::7::INSTR`, and **this process opens it** (2026-09-03):
