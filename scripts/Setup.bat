@@ -51,6 +51,7 @@ echo == what came in
 py -3 -c "import bace.service, importlib.metadata as md; print('   bace ' + md.version('bace') + ', and the service imports')"
 if errorlevel 1 goto :notook
 py -3 -c "import pyvisa; print('   pyvisa ' + pyvisa.__version__ + ', so the real rig is reachable')"
+if errorlevel 1 goto :novisa
 
 echo.
 echo == ready
@@ -85,6 +86,19 @@ goto :stop
 echo.
 echo   The install reported success but bace.service will not import, so
 echo   something did not take. The traceback above names it.
+goto :stop
+
+:novisa
+echo.
+echo   Everything but the VISA layer is in: bace.service imports, so the
+echo   simulated rig and the console will work. pyvisa will not import,
+echo   and the traceback above says why, so this machine cannot reach the
+echo   real instruments yet.
+echo.
+echo   Nothing else can tell you this. bace.service imports its VISA
+echo   drivers only when a real rig is built, so it comes up clean on a
+echo   machine with no pyvisa at all -- which is the whole point of --sim,
+echo   and the reason this line is checked separately.
 goto :stop
 
 :stop
