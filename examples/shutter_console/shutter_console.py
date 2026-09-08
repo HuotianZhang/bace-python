@@ -348,6 +348,12 @@ def serve(control: Control, host: str = DEFAULT_HOST,
 
 
 # ------------------------------------------------------------------- the main
+_PORT_TAKEN = {errno.EADDRINUSE, getattr(errno, "WSAEACCES", None),
+               getattr(errno, "EACCES", None)} - {None}
+"""The errnos that mean "somebody already has this port". Windows answers
+WSAEACCES where POSIX answers EADDRINUSE."""
+
+
 def main(argv: list[str] | None = None, *, make=None) -> int:
     """`make(**kw)` builds the line; it defaults to the real one, or the
     simulated one under `--sim`, and the tests pass their own."""
@@ -411,7 +417,12 @@ def main(argv: list[str] | None = None, *, make=None) -> int:
         # about a socket would send someone looking at the DIO.
         control.release()
         print(f"cannot listen on {a.host}:{a.port}: {exc}")
-        if getattr(exc, "errno", None) == errno.EADDRINUSE:
+        # EADDRINUSE is the POSIX answer. Windows gives WSAEACCES (10013)
+        # instead when the port is held by a socket that did not ask for
+        # SO_REUSEADDR, which is exactly the second console: the friendly
+        # line never printed there, and the whole point of it is that the
+        # operator double-clicked the .bat twice (measured 2026-09-08).
+        if getattr(exc, "errno", None) in _PORT_TAKEN:
             print("  a shutter console is already running — its page is at "
                   f"http://{a.host}:{a.port}/")
         return 2
