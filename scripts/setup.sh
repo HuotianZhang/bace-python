@@ -204,17 +204,34 @@ with socket.socket() as probe:
     port = probe.getsockname()[1]
 
 out = tempfile.mkdtemp(prefix="bace-setup-")
+# The service's output goes to a file, never a pipe. It runs uvicorn at
+# log_level="info", so every request costs a line, and the live suite's rail
+# test polls /bench in a loop with no sleep in it. A pipe nobody reads fills
+# its 64 KB and then blocks uvicorn mid-log: the request never returns, the
+# suite polls a service that has stopped answering, and this script hangs until
+# someone kills it. Measured here -- wedged after 1127 requests, 6.5 s. A file
+# cannot block, and it still holds everything the failure path wants to print.
+log_path = os.path.join(out, "service.log")
+log = open(log_path, "w", encoding="utf-8", errors="replace")
 proc = subprocess.Popen(
     [sys.executable, "-m", "bace.service", "--sim", "--fast",
      "--port", str(port), "--ui", "ui/", "--out", out],
-    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    stdout=log, stderr=subprocess.STDOUT)
 
 def get(path, timeout=5.0):
     return urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=timeout)
 
+def said() -> str:
+    log.flush()
+    try:
+        with open(log_path, encoding="utf-8", errors="replace") as fh:
+            return fh.read()[-4000:]
+    except OSError:
+        return ""
+
 def die(why):
     proc.kill()
-    raise SystemExit(f"   {why}\n{proc.stdout.read() or '(the service said nothing)'}")
+    raise SystemExit(f"   {why}\n{said() or '(the service said nothing)'}")
 
 try:
     bench = None
@@ -297,6 +314,7 @@ finally:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:
         proc.kill()
+    log.close()
     shutil.rmtree(out, ignore_errors=True)
 print("   stopped      the port is free again and no run folder was left")
 EOF
