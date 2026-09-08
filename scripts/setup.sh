@@ -61,7 +61,13 @@ if [ "${BACE_NO_VENV:-}" != "1" ] \
     VENV=${BACE_VENV:-.venv}
     echo "== $PY is a system interpreter; building $VENV rather than installing into it"
     "$PY" -m venv "$VENV"
-    PY="$PWD/$VENV/bin/python"
+    # An absolute BACE_VENV is already a path; only a relative one wants $PWD in
+    # front of it. Gluing them unconditionally turned BACE_VENV=/tmp/bace-venv
+    # into $PWD//tmp/bace-venv/bin/python -- inside the checkout, and not there.
+    case $VENV in
+        /*) PY="$VENV/bin/python" ;;
+        *)  PY="$PWD/$VENV/bin/python" ;;
+    esac
 fi
 
 # `service,dev` is a console checkout: the API, the suite, and deliberately no
@@ -124,13 +130,21 @@ shopt -s nullglob
 CONSOLE_SUITES=(ui/tests/*.test.mjs)
 shopt -u nullglob
 SUITES=${#CONSOLE_SUITES[@]}
+# How that number splits is tests/test_ui.py's business: it runs every suite but
+# live.test.mjs, which needs a service to drive. Ask it rather than doing the
+# subtraction here, which would be wrong the day its exclusion list grows.
+UNDER_PYTEST=$("$PY" -c 'from tests.test_ui import _console_suites
+print(len(_console_suites()))' 2>/dev/null || echo "?")
 if [ "$SUITES" -eq 0 ]; then
     echo "   ui/tests/    no suites found. Either this checkout is missing ui/,"
     echo "                or the console's tests have moved and this line is stale."
 elif command -v node >/dev/null 2>&1; then
-    echo "   node         $(node --version), so the $SUITES suites under ui/tests/ run below"
+    echo "   node         $(node --version): $UNDER_PYTEST of the $SUITES suites under"
+    echo "                ui/tests/ run in the self-check, and live.test.mjs -- which"
+    echo "                needs a service and so runs nowhere else, CI included -- in"
+    echo "                the start-up check, which has one."
 else
-    echo "   node         NOT FOUND, so $SUITES suites under ui/tests/ will skip."
+    echo "   node         NOT FOUND, so all $SUITES suites under ui/tests/ will skip."
     echo "                Expected on the lab PC; on a desk machine the console is"
     echo "                unverified until you install Node."
 fi
@@ -166,6 +180,7 @@ else
     # goes to a temporary --out, so setting up leaves no journal behind.
     "$PY" - <<'EOF'
 import json
+import os
 import shutil
 import socket
 import subprocess
@@ -225,6 +240,28 @@ try:
     if "<title>BACE console</title>" not in page:
         die("/ui/ answered, but with something that is not the console's index.html:")
     print(f"   / -> /ui/    the real ui/, {len(page)} bytes")
+
+    # live.test.mjs is the one console suite pytest will not run -- it needs a
+    # service, and tests/test_ui.py excludes it for that reason -- so it runs
+    # nowhere else, CI included. There is a service right here. It drives the
+    # console's own stream.js and store.js against it: a run reaching `parked`,
+    # and a client dropped at 1008 replaying from `since` without a hole.
+    live = os.path.join("ui", "tests", "live.test.mjs")
+    if not os.path.exists(live):
+        print("   live suite   not in this checkout")
+    elif shutil.which("node") is None:
+        print("   live suite   NOT RUN -- no node, so nothing has driven this service")
+    else:
+        ran = subprocess.run(
+            ["node", "--test", live], capture_output=True, text=True,
+            env={**os.environ, "BACE_SERVICE": f"http://127.0.0.1:{port}"})
+        if ran.returncode != 0:
+            print(ran.stdout[-4000:] + ran.stderr[-2000:])
+            die("live.test.mjs failed against this service (its output above, "
+                "the service's own below):")
+        passed = next((line.split()[-1] for line in ran.stdout.splitlines()
+                       if line.startswith("# pass ")), "?")
+        print(f"   live suite   {passed} passed against it")
 finally:
     proc.terminate()
     try:

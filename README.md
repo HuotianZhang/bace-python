@@ -39,8 +39,11 @@ pyvisa on top for a Linux box that does have the instruments.
 It finishes by starting the service on a free port with the real `ui/` mounted,
 asking it for `/bench` and `/ui/`, and stopping it again — the suite boots the
 CLI too, but every test that mounts a console mounts a stub, so this is the only
-thing that proves the command above. `NO_TEST=1` skips the suite, `NO_SMOKE=1`
-skips the start-up check.
+thing that proves the command above. While that service is up it also runs
+`ui/tests/live.test.mjs`, the one console suite `tests/test_ui.py` excludes
+because it needs a running service: a run reaching `parked`, and a client
+dropped at 1008 replaying from `since` without a hole. Nothing else runs it, CI
+included. `NO_TEST=1` skips the suite, `NO_SMOKE=1` skips the start-up check.
 
 The console's own suite is Node's (`node --test ui/tests/`) and its lint is
 eslint's, and neither is installed by pip. They *skip* when absent — right for
