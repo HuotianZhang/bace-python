@@ -6,7 +6,7 @@
 // cell outlined and the never-run cell hatched, R2·3's summary strip, and
 // the selected node's numbers, flags, folder and provenance. Nothing on this
 // tab is computed from a folder name, and nothing opens an HDF5: the record
-// carries what a grid needs (`docs/naming-plan.md` rule 1, built for this).
+// carries what a grid needs (`docs/history/naming-plan.md` rule 1, built for this).
 //
 // Three decisions, each a rule from somewhere:
 //

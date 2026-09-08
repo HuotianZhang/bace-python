@@ -331,7 +331,7 @@ LabVIEW-panel-replica-combination-4-shutter-only-dark_20260902_012223`.
 It moves out of the name entirely and lives in the file header. It is already
 there: HDF5 `/metadata` carries `comment` verbatim, which is the split
 `naming.py` documents — *the name is a convenience, the file is the record*.
-`docs/ui-kickoff.md` already requires the console to show the sentence and not
+`docs/history/ui-kickoff.md` already requires the console to show the sentence and not
 the slug, so the console reads the metadata either way.
 
 `slug()` stays. It is still what a comment must pass through if it ever reaches

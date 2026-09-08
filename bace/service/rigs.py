@@ -379,7 +379,7 @@ def temperature_source(controller: Any) -> str:
     and we asked over HTTP, `simulated` for the stand-in.
 
     The first two are measured and the third is not, and a UI must never let
-    a simulated number read as a measured one (`docs/ui-kickoff.md`), so the
+    a simulated number read as a measured one (`docs/history/ui-kickoff.md`), so the
     fall-through is deliberately last: a driver that is neither is a
     stand-in.
     """

@@ -2,7 +2,7 @@
 //
 // Everything here is a pure function of what `GET /runs` and `GET /runs/{id}`
 // answer, and nothing else: the tab opens no HDF5 and parses no folder name.
-// That is what `docs/naming-plan.md` rule 1 bought — the identity travels
+// That is what `docs/history/naming-plan.md` rule 1 bought — the identity travels
 // with every run (`sample`), the temperature triple and the LED level sit on
 // every module node, and what a node measured (its axis, `q_mean`/`q_std`
 // per point, its curves' metrics, its shot counts) is on the node record
@@ -459,7 +459,7 @@ export function cellName(grid, cell) {
 // -- the temperature and V_oc, in words --------------------------------------
 
 /**
- * The temperature triple as a sentence — `docs/ui-kickoff.md`: *how* alone
+ * The temperature triple as a sentence — `docs/history/ui-kickoff.md`: *how* alone
  * does not separate the pause the operator typed a number into from the one
  * that ended without one, so both are rendered, and a `simulated` source
  * never reads as a measurement.

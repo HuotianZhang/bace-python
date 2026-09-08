@@ -203,7 +203,7 @@ def test_the_file_records_the_validated_polarity_and_sign_convention():
 def test_the_journals_of_the_rig_day_are_kept_and_readable():
     """Three sessions, in order: the run that refused to measure a silent
     CHAN3, the run that measured the wrong polarity beautifully, and the one
-    that was accepted. They are the evidence for HANDOFF section 6 defects 10
+    that was accepted. They are the evidence for `docs/notes.md` hardware defects 10
     and 11, and a realistic fixture if the journal readers ever need one."""
     import json
 

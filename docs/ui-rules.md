@@ -352,7 +352,7 @@ it is a number now.
 
 ## 13 · What the screen owes the person, not the sample
 
-Everything above is about what a screen must say. `docs/ux-screening.md`
+Everything above is about what a screen must say. `docs/history/ux-screening.md`
 (2026-09-05) is the other axis — what the flow *asks of* the operator — and it
 turned up one rule this file had not stated:
 

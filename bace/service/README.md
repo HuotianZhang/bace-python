@@ -9,7 +9,7 @@ pipeline tree. The browser console is its only intended client; until that
 exists, this file says how to drive it by hand.
 
 Every request and response shape is in `docs/service-contract.md`; the
-reasoning behind the layer is in `docs/service-plan.md`. Where this file and
+reasoning behind the layer is in `docs/history/service-plan.md`. Where this file and
 the contract disagree, the contract wins.
 
 ## Running it

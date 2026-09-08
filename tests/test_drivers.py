@@ -525,7 +525,7 @@ def test_the_illumination_object_drives_the_generator():
 # -- Agilent 81150A -------------------------------------------------------
 def _run_on_a_real_driver(io, **cfg_kw):
     """`run_transient_scan` with the real 81150A driver on a fake resource and
-    the simulated scope and shutter. The driver is not mocked: HANDOFF §9 is
+    the simulated scope and shutter. The driver is not mocked: `docs/notes.md` (inferences that were wrong) is
     about a test that mocked the driver and hid a real crash."""
     from bace.core.axis import bace_sweep
     from bace.drivers.agilent81150 import Agilent81150

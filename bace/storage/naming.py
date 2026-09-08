@@ -53,7 +53,7 @@ NAME_MAX = 24
 """Characters of `sample`, `material` and `pixel` the folder name will carry,
 each.
 
-`docs/naming-plan.md` asked for "a shorter limit than a comment's 64" and
+`docs/history/naming-plan.md` asked for "a shorter limit than a comment's 64" and
 measured its collision table at 24; this is that number. It is nearly three
 times the archive's longest identity field (`PTQ10IT4F`, nine) and half again
 the sixteen that all three of `s4_PTQ10IT4F_pxa` take together -- which is the
@@ -66,7 +66,7 @@ and an unbounded path segment is how a run folder reaches Windows' limit.
 `PTQ10IT4F-batch-2026-08-A` and `…-B` both reduce to
 `PTQ10IT4F-batch-2026-08`, and two batches of one material differing after
 character 24 is an ordinary thing for a lab to have. Nothing is lost -- every
-field is verbatim in `as_dict()`, and since `docs/naming-plan.md` rule 1 the
+field is verbatim in `as_dict()`, and since `docs/history/naming-plan.md` rule 1 the
 console reads the record and never parses a name -- but the *name* stops
 telling them apart, so the console shows what a value will be filed as while
 it is being typed rather than after the run. What it does not yet do is make
@@ -173,7 +173,7 @@ class RunMetadata:
         # `material = "PTQ10:IT-4F"` -- the service contract's own example --
         # built a path segment with a colon in it, which fails on the lab PC
         # and passes on Linux, and `sample = "a/b"` was two directories.
-        # `docs/naming-plan.md` §2 carried it as a live defect.
+        # `docs/history/naming-plan.md` §2 carried it as a live defect.
         parts = [p for p in self.identity_in_name() if p]
         if self.temperature_k is not None:
             parts.append(f"{self.temperature_k:g}K")

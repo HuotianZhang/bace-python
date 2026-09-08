@@ -1,7 +1,7 @@
 # Building `ui/` — direction and phases
 
 2026-09-02. How the console gets built and in what order. The brief is
-`docs/ui-kickoff.md`, the design is Round 3 (`docs/bace-console-round3.html`,
+`docs/history/ui-kickoff.md`, the design is Round 3 (`docs/bace-console-round3.html`,
 `docs/design/`), the API is `docs/service-contract.md`, the rendering rules are
 `docs/ui-rules.md`. This file adds only what those do not: the shape of the
 front end, and the order the work happens in.
@@ -283,7 +283,7 @@ The third shape — a live WebSocket frame, traces decimated with `stride` and
 by hand from the HDF5.
 
 **The fixtures do not exercise the reconnect path**, and one line of
-`docs/ui-kickoff.md` implies they do. (`tests/test_ui.py` now asserts the
+`docs/history/ui-kickoff.md` implies they do. (`tests/test_ui.py` now asserts the
 correction: all three journals are 0…N with no gap.) Its "real `seq` gaps" is not so: `seq` in
 all three files runs 0…N with no gap at all, which is what the journal is —
 one monotonic counter, and `StepPhase`, the only unjournalled frame, consumes
@@ -1005,7 +1005,7 @@ The tab as built is the artboard to iterate on — it draws from real records,
 which is what that pass was waiting for — and a Round 3 results artboard in
 Claude Design, if wanted, now has something to be drawn from.
 
-**What the view needed decided what the service writes** (`docs/naming-plan.md`
+**What the view needed decided what the service writes** (`docs/history/naming-plan.md`
 rule 1, built for this). Three things, all on the record and none in a folder
 name: the `[sample]` block travels on `RunQueued` and is exposed on every row
 of `GET /runs` and on `GET /runs/{id}`; every module node carries the
@@ -1031,7 +1031,7 @@ it, and the legend is R2·3's `□ σ_Q not recorded · ● σ_Q measured`. Ever
 flag is a sentence in the voice of `ui-rules` §10. And the temperature row
 says how it knows: `operator/operator` reads *typed by the operator at the
 pause*, `settled/simulated` reads *not a measurement*, `typed` reads *nobody
-read an instrument* — `how` and `source` both, as `docs/ui-kickoff.md` asks.
+read an instrument* — `how` and `source` both, as `docs/history/ui-kickoff.md` asks.
 
 **What it costs.** One `GET /runs?session=all` at mount and at every `parked`,
 one `GET /runs/{id}` per selection — 84 KB for the 2 × 2 fixture, two thirds
@@ -1193,8 +1193,8 @@ that have not started. They are here so they are not rediscovered there:
 
 | before | must be done |
 |---|---|
-| anything on the rig | ~~the folder-name defect in `docs/naming-plan.md` §2 — `material = "PTQ10:IT-4F"` builds a path segment with a colon, which fails on Windows and passes on Linux~~ **fixed 2026-09-05**: `RunMetadata.identity_in_name()` slugs all three identity fields into the name at `NAME_MAX = 24` and `as_dict()` keeps them verbatim. Brought forward ahead of the grid because `PUT /session/sample` made it typeable rather than only editable; `GET /session`'s `sample_in_name` is what the console previews |
-| M6 | ~~`docs/naming-plan.md` rule 1 — the journal carries the sample block and the temperature triple on every node, **and `GET /runs` exposes them on each row**; writing them into `SessionStarted` alone leaves `run_index()` emitting summaries with no identity~~ **built 2026-09-04**, in the service: `RunQueued.sample`, the triple from `RunContext.temperature()` on every node, and one `node_record` shape from both `GET /runs/{id}` sources |
+| anything on the rig | ~~the folder-name defect in `docs/history/naming-plan.md` §2 — `material = "PTQ10:IT-4F"` builds a path segment with a colon, which fails on Windows and passes on Linux~~ **fixed 2026-09-05**: `RunMetadata.identity_in_name()` slugs all three identity fields into the name at `NAME_MAX = 24` and `as_dict()` keeps them verbatim. Brought forward ahead of the grid because `PUT /session/sample` made it typeable rather than only editable; `GET /session`'s `sample_in_name` is what the console previews |
+| M6 | ~~`docs/history/naming-plan.md` rule 1 — the journal carries the sample block and the temperature triple on every node, **and `GET /runs` exposes them on each row**; writing them into `SessionStarted` alone leaves `run_index()` emitting summaries with no identity~~ **built 2026-09-04**, in the service: `RunQueued.sample`, the triple from `RunContext.temperature()` on every node, and one `node_record` shape from both `GET /runs/{id}` sources |
 | M6 | ~~a Round 3 design pass on results, with the user, in Claude Design~~ **R2·3 built as it stands, 2026-09-04**, its two open questions settled in the code; the iteration with the user is still to be had, on the built tab |
 | M3 | ~~nothing — the chart foundation is new code with no service dependency~~ **built 2026-09-03**; nothing in the service changed |
 | M4 | ~~nothing~~ **built 2026-09-03**; nothing in the service changed. The simulator's lit-photocurrent magnitude is a defect in `--sim`, not on the path |
@@ -1213,4 +1213,4 @@ the canonical tree against an unchanged service.
   M6: `GET /runs/{id}`'s `nodes`, one shape from this process and from the
   journal, with the per-point statistics on the node and never a trace.
 - **Whether to keep `[sample] temperature_k = 290.0` in the recipes.**
-  `docs/naming-plan.md` §4 states the problem; it is a bench-habit decision.
+  `docs/history/naming-plan.md` §4 states the problem; it is a bench-habit decision.

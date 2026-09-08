@@ -79,5 +79,5 @@ cat <<'EOF'
 
   GET / lists every route, /docs is the interactive page, and
   bace/service/README.md walks the whole operator flow by hand.
-  docs/ui-kickoff.md is where the console work starts.
+  docs/README.md indexes the documentation.
 EOF

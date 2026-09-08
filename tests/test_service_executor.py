@@ -316,7 +316,7 @@ def test_a_manual_run_takes_the_sessions_voc_as_the_source_it_is(tmp_path):
 
 
 def test_a_manual_node_records_the_typed_temperature_and_the_baseline_choice(tmp_path):
-    """`docs/naming-plan.md` rule 1. A manual run has no temperature node
+    """`docs/history/naming-plan.md` rule 1. A manual run has no temperature node
     above it, so `ctx.temperature_k` is never set -- and the node record used
     to say nothing about the temperature of exactly the runs whose folder name
     was the only record of it. `_node_detail` now asks the resolver the

@@ -1,12 +1,12 @@
 // What is mounted — the session's `[sample]` block, and the way to type it.
 //
-// The one finding in `docs/ux-screening.md` whose cost was permanent. Until
+// The one finding in `docs/history/ux-screening.md` whose cost was permanent. Until
 // `PUT /session/sample` existed the block came only from `run.toml`, which is
 // empty on a fresh checkout, and the only way to fill it was to edit the file
 // and restart the process that owns every instrument. So an operator who
 // mounted a device and started measuring filed every run of that session under
 // a name with no device in it — and the folder name *is* the record
-// (`docs/naming-plan.md`), which cannot be repaired afterwards without
+// (`docs/history/naming-plan.md`), which cannot be repaired afterwards without
 // renaming folders that other files point at. The top bar knew: it said
 // `no sample named`, and offered nothing.
 //

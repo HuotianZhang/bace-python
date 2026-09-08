@@ -1,6 +1,6 @@
 """Standalone instrument consoles: one instrument, one process, one port.
 
-`docs/service-plan.md` fixed this shape for the two instruments that already
+`docs/history/service-plan.md` fixed this shape for the two instruments that already
 had their own programs -- "the existing standalone consoles stay standalone",
 the 1918-C on :8918 and
 the Lake Shore 331 on :8331 -- and `bace/drivers/newport1918c/console.py` and

@@ -16,7 +16,7 @@ want by hand.
 the one that starts second gets a VISA error that reads like a cable fault. So
 stop the service before starting this, and stop this before starting the
 service. That constraint is exactly why the 1918-C and the 331 have consoles
-of their own (`docs/service-plan.md`), and this is the same shape for the 2400.
+of their own (`docs/history/service-plan.md`), and this is the same shape for the 2400.
 
 `rig.toml` supplies the address and the two bench ceilings; `run.toml`, if it
 is there, supplies the compliance, integration time and terminals the panel

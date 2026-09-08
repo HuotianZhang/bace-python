@@ -270,7 +270,7 @@ class RunRecord:
     error: str | None = None
     sample: dict = field(default_factory=dict)
     """The `[sample]` block the run was queued under -- its identity, kept on
-    the run and not only on the session (`docs/naming-plan.md` rule 1)."""
+    the run and not only on the session (`docs/history/naming-plan.md` rule 1)."""
     node_results: dict[str, dict] = field(default_factory=dict)
     """Per module node, what it measured, folded from the *journal* payload
     of its `RunFinished`, `JVFinished` and `StepDone` lines with the
@@ -690,7 +690,7 @@ class Session:
         `run.toml` and restart the process that owns every instrument, so a
         session opened on a fresh checkout filed every run of that day under
         a name with no device in it. The folder name is the record
-        (`docs/naming-plan.md`), and renaming afterwards is the hazard that
+        (`docs/history/naming-plan.md`), and renaming afterwards is the hazard that
         file is about, so this is the one thing on the screen whose cost was
         permanent.
 

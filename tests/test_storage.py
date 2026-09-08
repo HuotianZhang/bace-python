@@ -273,7 +273,7 @@ def test_folder_name_matches_the_archive_convention():
 ])
 def test_an_identity_field_is_one_path_segment(field, typed, filed):
     """Until 2026-09-05 these three went into the name as typed, which
-    `docs/naming-plan.md` §2 carried as a live defect: on the lab PC a colon
+    `docs/history/naming-plan.md` §2 carried as a live defect: on the lab PC a colon
     fails at folder creation, on Linux and the simulator it succeeds, so no
     test caught it. They are slugged now, at `NAME_MAX = 24`."""
     import datetime
