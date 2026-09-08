@@ -348,6 +348,28 @@ def serve(control: Control, host: str = DEFAULT_HOST,
 
 
 # ------------------------------------------------------------------- the main
+WINDOWS_PORT_TAKEN = (10013, 10048)
+"""`WSAEACCES` and `WSAEADDRINUSE`.
+
+Windows does not answer a bound port with `EADDRINUSE` the way POSIX does: a
+second `bind` to a port somebody is already listening on raises **10013**,
+"an attempt was made to access a socket in a way forbidden by its access
+permissions". So the `EADDRINUSE` check below found nothing on the one
+platform this console is actually double-clicked on, and the operator who
+started it twice got the socket error this code exists to translate.
+
+Matched on `winerror` rather than on `errno`, which Python maps 10013 to
+`EACCES` -- and `EACCES` on POSIX is a privileged port, not a busy one, so
+matching it there would explain port 80 as a console that is already running.
+"""
+
+
+def _port_is_taken(exc: OSError) -> bool:
+    """Whether `exc` from `bind`/`listen` means somebody already has the port."""
+    return (getattr(exc, "errno", None) == errno.EADDRINUSE
+            or getattr(exc, "winerror", None) in WINDOWS_PORT_TAKEN)
+
+
 def main(argv: list[str] | None = None, *, make=None) -> int:
     """`make(**kw)` builds the line; it defaults to the real one, or the
     simulated one under `--sim`, and the tests pass their own."""
@@ -411,7 +433,7 @@ def main(argv: list[str] | None = None, *, make=None) -> int:
         # about a socket would send someone looking at the DIO.
         control.release()
         print(f"cannot listen on {a.host}:{a.port}: {exc}")
-        if getattr(exc, "errno", None) == errno.EADDRINUSE:
+        if _port_is_taken(exc):
             print("  a shutter console is already running — its page is at "
                   f"http://{a.host}:{a.port}/")
         return 2
