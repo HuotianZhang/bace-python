@@ -52,8 +52,12 @@ because a typo that silently ran the defaults would be a bench nobody chose.
   `max_current_compliance_a` a sourced current: they are the bench's statement
   of what the device may see, whichever end of the instrument it arrives from,
   so no third key was invented to hold the same number twice.
-* **The output goes off when the console stops.** Ctrl-C, a closed terminal, an
-  exception out of the server — the source is switched off on the way out. A
+* **The output goes off when the console stops.** Ctrl-C, `kill`/`SIGTERM`, a
+  closed terminal (`SIGHUP`), Ctrl-Break on Windows, an exception out of the
+  server — each is caught and the source is switched off on the way out.
+  `SIGKILL` and Windows' `TerminateProcess` cannot be caught by anything, so
+  the output survives those; nothing in software fixes that, and the
+  instrument's own OUTPUT key does. A
   browser tab closing is not something to rely on for that. The off is
   *queued*, not waited for in the shutdown path, and the worker drains its
   queue on every way out: Ctrl-C can arrive while a read is in flight, and a
@@ -68,6 +72,17 @@ because a typo that silently ran the defaults would be a bench nobody chose.
   raises the VISA timeout for its own query — a flat 30 s would answer a
   healthy read with "the instrument did not answer", while the read went on
   running and whatever was queued behind it landed afterwards.
+* **The output state is asked of the instrument, never remembered.** The
+  operator has a hand on the 2400's own OUTPUT key, and a cached flag would
+  report a source off while it drives — worse, `apply_panel`'s interlock reads
+  the same flag, so it would permit a function or wiring change under a live
+  output. Every job that touches the bus re-reads `:OUTP?` first, and the
+  display's tick is what keeps it fresh between clicks.
+* **A bench ceiling that is not a finite positive number is refused at
+  start-up.** TOML accepts `nan`, and every comparison against a NaN is false,
+  so such a ceiling would wave through any level on the one surface where a
+  number goes straight onto the device. A limit that permits everything is
+  worse than no limit, because it looks like one.
 * **A request the caller gave up on does not reach the instrument later.** A
   job still waiting its turn is dropped when its `do()` times out; one already
   started cannot be recalled, and nothing here pretends otherwise. **Switching
@@ -124,12 +139,40 @@ shutting down) is a 503 carrying why; an output-off queued behind a read that
 has not finished is a **202** saying so, because it is coming. Every one of
 them carries the panel state alongside the error.
 
+Every POST must declare `Content-Type: application/json`, and that is a safety
+check rather than a parser's convenience — see below.
+
 ```bash
+J="content-type: application/json"
 curl -s localhost:8924/api/state | python -m json.tool
-curl -s localhost:8924/api/source -d '{"function":"I","level":0}'
-curl -s localhost:8924/api/output -d '{"on":true}'
-curl -s localhost:8924/api/read | python -c 'import json,sys; print(json.load(sys.stdin)["reading"])'
+curl -s -H "$J" localhost:8924/api/source -d '{"function":"I","level":0}'
+curl -s -H "$J" localhost:8924/api/output -d '{"on":true}'
+curl -s -H "$J" -X POST localhost:8924/api/read \
+  | python -c 'import json,sys; print(json.load(sys.stdin)["reading"])'
 ```
+
+### Loopback is not a wall
+
+Binding to `127.0.0.1` keeps a *network* out. It does not keep a **browser**
+out: any page the operator has open can `fetch("http://127.0.0.1:8924/api/output",
+{method: "POST", mode: "no-cors", body: '{"on": true}'})`, and the browser
+sends it — to a fixed port, on a machine whose console is a fixed program. The
+page cannot read the answer and does not need to; the side effect is a source
+driving a device. That is cross-site request forgery against an instrument, and
+it worked here until it was reviewed.
+
+Two independent checks, because neither is enough alone:
+
+* **`Content-Type: application/json` is required on every POST.** A `no-cors`
+  request may only set one of the simple types (`text/plain`,
+  `application/x-www-form-urlencoded`, `multipart/form-data`), so it is refused;
+  a cross-origin fetch that sets the header properly triggers a CORS preflight
+  this console does not answer.
+* **`Origin`, when the request carries one, must be loopback.** A browser sends
+  it on every cross-site POST; a non-browser client sends none.
+
+Either failing is a **403 with no state**: a page that may not ask is not told
+what the bench is doing either.
 
 ## Copying it for another instrument
 

@@ -67,11 +67,15 @@ def console(panel):
     thread.start()
     base = f"http://127.0.0.1:{server.server_port}"
 
-    def call(method: str, path: str, body: dict | None = None):
-        data = None if body is None else json.dumps(body).encode()
+    def call(method: str, path: str, body: dict | None = None, **headers: str):
+        # Every POST declares JSON, body or not — that is the rule the console
+        # enforces (`CONTROL_CONTENT_TYPE`) and what its own page sends.
+        data = b"" if body is None else json.dumps(body).encode()
+        head = {"Content-Type": "application/json"} if method == "POST" else {}
+        head.update(headers)
         request = urllib.request.Request(
-            base + path, data=data, method=method,
-            headers={"Content-Type": "application/json"} if data else {})
+            base + path, data=data if method == "POST" else None,
+            method=method, headers=head)
         try:
             with urllib.request.urlopen(request, timeout=10) as answer:
                 raw = answer.read()
@@ -285,6 +289,86 @@ def test_an_out_of_range_display_interval_is_refused(panel):
 
 
 # -- what the review of #86 turned up ----------------------------------------
+def test_a_page_on_another_site_cannot_drive_the_instrument(console, panel):
+    """Binding to loopback keeps a *network* out; it does not keep a browser
+    out. Any page the operator has open can `fetch(..., {mode: "no-cors"})` at
+    a fixed port on their own machine — it cannot read the answer, and does
+    not need to, because the side effect is a source driving a device.
+
+    Reproduced before the fix: a `text/plain` POST from `https://evil.example`
+    applied a 2 V source and switched the output on, both answered 200.
+    """
+    console("POST", "/api/source", {"function": "V", "level": 0.0})
+
+    # What `no-cors` is allowed to send: one of the simple content types.
+    for ctype in ("text/plain", "application/x-www-form-urlencoded",
+                  "multipart/form-data", ""):
+        status, out = console("POST", "/api/output", {"on": True},
+                              **{"Content-Type": ctype})
+        assert status == 403, f"{ctype!r} -> {status}"
+        assert "content-type" in out["error"].lower()
+    assert panel.smu.output_enabled is False, "nothing reached the instrument"
+
+    # And a properly-typed request that admits where it came from.
+    for origin in ("https://evil.example", "http://192.168.1.9:8924", "null"):
+        status, out = console("POST", "/api/output", {"on": True}, Origin=origin)
+        assert status == 403, f"{origin} -> {status}"
+        assert origin in out["error"] or "came from" in out["error"]
+    assert panel.smu.output_enabled is False
+
+    # The console's own page is loopback, by every name it may be opened
+    # under. Whatever the bench then says (409 here — the output is off), it
+    # is not the door being shut.
+    for origin in ("http://127.0.0.1:8924", "http://localhost:8924", "http://[::1]:8924"):
+        assert console("POST", "/api/read", None, Origin=origin)[0] != 403, origin
+
+
+def test_a_refused_cross_site_request_is_told_nothing_about_the_bench(console):
+    """403 and no state: a page that may not ask is not told what the bench is
+    doing either."""
+    status, out = console("POST", "/api/state", {}, **{"Content-Type": "text/plain"})
+    assert status == 403
+    assert "panel" not in out and "output" not in out
+
+
+def test_a_ceiling_that_is_not_a_number_is_refused_at_construction():
+    """TOML accepts `nan`, and every comparison against a NaN is false — so a
+    NaN ceiling would wave through any level and any compliance on the one
+    surface where a number goes straight onto the device."""
+    for bad in (float("nan"), float("inf"), 0.0, -1.0):
+        with pytest.raises(ValueError, match="finite positive number"):
+            KeithleyPanel(None, ceiling={"current_a": bad, "voltage_v": 5.0},
+                          defaults=SourceMeterConfig())
+        with pytest.raises(ValueError, match="finite positive number"):
+            KeithleyPanel(None, ceiling={"current_a": 0.05, "voltage_v": bad},
+                          defaults=SourceMeterConfig())
+
+
+def test_the_output_flag_is_asked_of_the_instrument_and_not_remembered(panel):
+    """The operator has a hand on the 2400's own OUTPUT key. A cached flag
+    reports a source off while it drives — and `apply_panel`'s interlock reads
+    the same flag, so it would permit a function or wiring change under a live
+    output, which is the one thing that check exists to stop.
+
+    `drivers/rigs.py` reaches for `read_output()` for exactly this reason.
+    """
+    asked: list[str] = []
+    truth = {"on": False}
+
+    # A SourceMeter with a front panel somebody else is touching.
+    panel.smu.read_output = lambda: (asked.append("?"), truth["on"])[1]
+    panel.set_source({"function": "I", "level": 0.0})
+    assert asked, "the source change asked before its interlock decided"
+
+    truth["on"] = True                                   # a hand on OUTPUT
+    panel.set_poll(0.1)
+    deadline = time.monotonic() + 2
+    while not panel.state()["output"] and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert panel.state()["output"] is True, "the display noticed within an interval"
+
+
+
 def test_the_output_route_never_coerces_a_value_into_a_live_source(console):
     """`bool("false")` is `True` in Python, so `{"on": "false"}` -- a request
     that plainly means off -- switched the source **on**. This is the one
@@ -539,6 +623,20 @@ def test_every_answer_carries_the_panel_even_when_something_broke(console, panel
     assert status == 500 and "boom" in out["error"]
     assert out["output"] is True, "the 500 says the source is on"
     assert "panel" in out
+
+
+def test_reading_with_nothing_to_read_is_a_refusal_and_not_an_error(console):
+    """"The output is off" and "no source is set" are things the bench will
+    not do *now*, with a sentence each. They reached the generic 500 until a
+    test of the cross-site check happened to ask for a reading with the output
+    off — the page disables the button, so nothing had ever asked."""
+    status, out = console("POST", "/api/read")
+    assert status == 409 and "not applied" in out["error"]
+
+    console("POST", "/api/source", {"function": "I", "level": 0.0})
+    status, out = console("POST", "/api/read")
+    assert status == 409 and "output is OFF" in out["error"]
+    assert out["level"] == "warn" and out["panel"] is not None
 
 
 def test_closing_the_console_switches_the_output_off():

@@ -94,6 +94,24 @@ class PanelRefused(RuntimeError):
         self.level = level
 
 
+def _ceiling(name: str, value: Any) -> float:
+    """A bench ceiling, or a refusal to start.
+
+    TOML accepts `nan`, and every comparison against a NaN is false -- so a
+    `max_current_compliance_a = nan` in `rig.toml` would make `_check_ceiling`
+    wave through any level and any compliance the operator typed, on the one
+    surface where a number goes straight onto the device. A limit that permits
+    everything is worse than no limit, because it looks like one.
+    """
+    number = float(value)
+    if not math.isfinite(number) or number <= 0.0:
+        raise ValueError(
+            f"rig.toml [sourcemeter] {name}: a bench ceiling must be a finite "
+            f"positive number, not {value!r}. Everything is under a ceiling that "
+            "is not one.")
+    return number
+
+
 class PanelPending(RuntimeError):
     """The job is queued and **will** run, but the caller stopped waiting.
 
@@ -327,8 +345,8 @@ class KeithleyPanel:
                  identity: str = "", address: str = "", mode: str = "rig",
                  unavailable: str = ""):
         self.smu = smu
-        self.ceiling = {"current_a": float(ceiling["current_a"]),
-                        "voltage_v": float(ceiling["voltage_v"])}
+        self.ceiling = {"current_a": _ceiling("current_a", ceiling["current_a"]),
+                        "voltage_v": _ceiling("voltage_v", ceiling["voltage_v"])}
         self.defaults = PanelSetup.from_config(dataclasses.replace(
             defaults,
             current_compliance_a=min(defaults.current_compliance_a, self.ceiling["current_a"]),
@@ -343,6 +361,11 @@ class KeithleyPanel:
         self._bus = _Bus()
         self._lock = threading.Lock()
         self._reading: dict | None = None
+        self._output: bool | None = None
+        """What the instrument last answered to `:OUTP?`, on the worker. None
+        until something has asked. Kept here rather than read off the driver
+        at answer time because a driver's cached flag is only as fresh as the
+        last thing this process did to it (`_fresh_output`)."""
         self._poll_s: float | None = None
         self._readings = 0
         self._failures = 0
@@ -420,6 +443,30 @@ class KeithleyPanel:
             raise PanelUnavailable(self.unavailable or "no SourceMeter on this console")
         return self.smu
 
+    def _fresh_output(self, smu: Any) -> bool:
+        """Ask the instrument whether its output is on, and cache the answer.
+
+        **On the worker, and before anything decides on it.** `output_enabled`
+        is the driver's cached flag, set when this process last wrote or read
+        it -- and the operator has a hand on the 2400's own OUTPUT key. Trusted
+        blind, that flag lets `/api/state` report a source off while it drives,
+        and lets `apply_panel`'s interlock permit a function or wiring change
+        under a live output, which is the one thing that check exists to stop.
+
+        `drivers/rigs.py` reaches for `read_output()` for exactly this reason
+        and says so: "the refusal exists for the generator somebody left ON
+        before the service started, which a cached flag reports as off". The
+        simulated SourceMeter has no such query -- there is no front panel on
+        it to touch -- so its cached flag *is* the truth.
+        """
+        read = getattr(smu, "read_output", None)
+        answer = read() if callable(read) else None
+        if answer is None:
+            answer = getattr(smu, "output_enabled", False)
+        with self._lock:
+            self._output = bool(answer)
+        return bool(answer)
+
     # -- what the page draws ------------------------------------------------
     def state(self) -> dict:
         """The whole panel as one JSON object. Touches no instrument: the
@@ -431,7 +478,10 @@ class KeithleyPanel:
                     "readings": self._readings, "failures": self._failures,
                     "last_error": self._last_error}
         panel = getattr(self.smu, "panel", None) if self.available else None
-        output = bool(getattr(self.smu, "output_enabled", False)) if self.available else None
+        output: bool | None = None
+        if self.available:
+            output = (self._output if self._output is not None
+                      else bool(getattr(self.smu, "output_enabled", False)))
         return {
             "instrument": {"identity": self.identity, "address": self.address,
                            "mode": self.mode, "available": self.available,
@@ -465,6 +515,8 @@ class KeithleyPanel:
         values = source_args(body)
         def job() -> None:
             smu = self._need()
+            # Before `apply_panel`, whose `PANEL_STATIC` interlock reads this.
+            self._fresh_output(smu)
             base = getattr(smu, "panel", None) or self.defaults
             if values.get("function", base.function) != base.function:
                 values.setdefault("level", 0.0)
@@ -510,6 +562,7 @@ class KeithleyPanel:
                     "nothing has told the SourceMeter what to source: set the source "
                     "first, then switch the output on")
             smu.enable_output(bool(on))
+            self._fresh_output(smu)                          # confirm, not assume
         # The wait is a read's budget, not the 30 s floor: the display may be
         # mid-tick, and a legal tick is 80 s.
         #
@@ -547,8 +600,19 @@ class KeithleyPanel:
         return self.state()
 
     def read(self) -> dict:
-        """One reading now, whatever the display is doing."""
-        self._bus.do(self._tick, timeout_s=self.read_budget_s())
+        """One reading now, whatever the display is doing.
+
+        "The output is off" and "nothing has set a source" are things the
+        bench will not do *now*, with a sentence each — a 409, like every
+        other refusal here. They reached the generic 500 until a test of the
+        cross-site check happened to ask for a reading with the output off.
+        """
+        def job() -> None:
+            try:
+                self._tick()
+            except SourceMeterError as exc:
+                raise PanelRefused(str(exc)) from None
+        self._bus.do(job, timeout_s=self.read_budget_s())
         return self.state()
 
     def errors(self) -> list[str]:
@@ -595,9 +659,14 @@ class KeithleyPanel:
         """
         if not self.available or getattr(self.smu, "panel", None) is None:
             return
-        if not getattr(self.smu, "output_enabled", False):
-            return
+        # The display is also what keeps the output flag honest: every tick
+        # asks the instrument, so a hand on the 2400's OUTPUT key is noticed
+        # within one interval rather than never. With the display off, the
+        # flag is only as fresh as the last thing the operator clicked -- and
+        # every one of those refreshes it too.
         try:
+            if not self._fresh_output(self.smu):
+                return
             self._tick()
         except Exception as exc:                             # noqa: BLE001
             with self._lock:
