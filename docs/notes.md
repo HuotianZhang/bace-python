@@ -117,6 +117,10 @@ None of these blocks a measurement.
    unknown provenance. Scales logged intensity and nothing else.
 6. **How many iterations `scale to maximum.vi`'s loop runs.** At least five,
    from the archive; the binary's count terminal was unwired.
+7. **`keithley2400.PanelSetup`, `apply_panel` and `read_panel`** have no
+   caller inside `bace/` since the Keithley console moved to `examples/` with
+   its own copy of the driver. Kept and tested; a candidate for deletion if
+   nothing takes it up.
 
 ## Closed questions
 

@@ -39,7 +39,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from .panel import (KeithleyPanel, PanelPending, PanelRefused, PanelUnavailable,
+from panel import (KeithleyPanel, PanelPending, PanelRefused, PanelUnavailable,
                     as_bool)
 
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "page.html")
@@ -188,10 +188,36 @@ def make_server(panel: KeithleyPanel, *, host: str, port: int) -> ThreadingHTTPS
                         f"-H 'content-type: {CONTROL_CONTENT_TYPE}'.")
             return None
 
+        def _drain(self) -> None:
+            """Read the request body the handler is about to answer without.
+
+            A refusal -- the cross-site 403, a 404 -- replies before `_body`
+            has run, and the client is still sending. Closing on unread data
+            resets the connection instead of finishing it: on Windows the
+            caller then gets WinError 10053 where POSIX still hands it the
+            403 (`test_a_page_on_another_site_cannot_drive_the_instrument`,
+            2026-09-08). The bytes are read and dropped -- refusing to parse
+            them is the point -- and never more than `MAX_BODY`.
+            """
+            if getattr(self, "_body_taken", False):
+                return
+            self._body_taken = True
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                return
+            left = min(length, MAX_BODY)
+            while left > 0:
+                chunk = self.rfile.read(min(left, 65536))
+                if not chunk:
+                    return
+                left -= len(chunk)
+
         def _body(self) -> dict:
             length = int(self.headers.get("Content-Length") or 0)
             if length > MAX_BODY:
                 raise ValueError(f"body is larger than {MAX_BODY} bytes")
+            self._body_taken = True
             if not length:
                 return {}
             raw = self.rfile.read(length)
@@ -204,6 +230,7 @@ def make_server(panel: KeithleyPanel, *, host: str, port: int) -> ThreadingHTTPS
             return parsed
 
         def _json(self, status: int, payload: Any) -> None:
+            self._drain()
             data = json.dumps(payload, allow_nan=False).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
@@ -240,12 +267,12 @@ def make_server(panel: KeithleyPanel, *, host: str, port: int) -> ThreadingHTTPS
 STOP_SIGNALS = ("SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK")
 """Every way of ending this program that software can catch.
 
-`SIGTERM` is what a service manager, a container, `kill` and Task Manager's
-"End task" send, and `SIGHUP` is a closed terminal -- both end Python through
-their *default* handlers, which do not unwind, so the `finally` below never
-runs and the SourceMeter is left driving. `SIGBREAK` is Ctrl-Break on Windows,
-where there is no SIGHUP. Each is installed only if this platform has it and
-this is the main thread.
+`SIGTERM` is what a service manager, a container, `kill` and `taskkill` without
+`/F` send, and `SIGHUP` is a closed terminal **on Linux and macOS** -- both end
+Python through their *default* handlers, which do not unwind, so the `finally`
+below never runs and the SourceMeter is left driving. `SIGBREAK` is Ctrl-Break
+on Windows, where there is no SIGHUP at all. Each is installed only if this
+platform has it and this is the main thread.
 
 **`SIGINT` is in here for the second Ctrl-C.** Python's own handler raises
 `KeyboardInterrupt`, which the `try` below catches once -- but the output-off
@@ -256,18 +283,31 @@ presses again, and the program they are trying to stop dies with the source
 still driving. Caught here instead, a second one sets an event that is already
 set and is absorbed.
 
-`SIGKILL` and Windows' `TerminateProcess` cannot be caught by anything, so the
-output survives them. Nothing in software fixes that; the instrument's own
-OUTPUT key does."""
+What is **not** in this tuple and looks as though it should be: **closing the
+console window on Windows.** That is `CTRL_CLOSE_EVENT`, which Python does not
+deliver as a signal -- `signal.signal` on Windows takes SIGINT, SIGTERM and
+SIGBREAK and nothing that corresponds to the X button -- so the process is
+killed without running the `finally` and the source is left driving. It is the
+one gesture whose two platforms genuinely differ, which is why `SIGHUP` above
+is named as Linux and macOS rather than "a closed terminal": on Windows the
+same intention is uncatchable. `Run Keithley Console.bat` tells the operator to
+press Ctrl-C instead, because that is the difference between a source off and a
+source driving in an empty room.
+
+`SIGKILL`, `TerminateProcess` (End Task), a logoff and a power cut are the same
+story. Nothing in software fixes any of them; the instrument's own OUTPUT key
+does."""
 
 
 def serve_forever(panel: KeithleyPanel, *, host: str, port: int,
                   on_ready: Any = None) -> None:
     """Run until interrupted, then put the output off (`panel.close`).
 
-    The `finally` is the point: whatever ends this program -- Ctrl-C, a
-    `kill`, a closed terminal, an exception out of the server -- the source is
-    switched off on the way out.
+    The `finally` is the point: whatever ends this program *through a signal it
+    can catch* -- Ctrl-C, a `kill`, a closed terminal on Linux or macOS, an
+    exception out of the server -- the source is switched off on the way out.
+    `STOP_SIGNALS` above says what that does and does not cover; the Windows
+    close button is the gap worth knowing about.
     """
     # The worker starts **before** anything that can fail, and everything after
     # it is inside the `try`. `make_server` raises when the port is taken --

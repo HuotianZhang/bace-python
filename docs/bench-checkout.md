@@ -13,8 +13,11 @@ and a `.json` with the full command transcript.
 From the repository root:
 
 ```
-py -3 -m pip install -e .[lab]
+py -3 -m pip install -e .[lab,dev]
 ```
+
+`scripts/Setup.bat` does the same by double-click. In PowerShell quote it,
+`pip install -e '.[lab,dev]'`, or the brackets are read as an index.
 
 `h5py` is optional but worth having: without it the `.dat` files are still
 written and the run is not lost, but there is no HDF5 alongside them.

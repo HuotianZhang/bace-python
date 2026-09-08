@@ -14,10 +14,14 @@ Python 3.11 or later.
 
 ```bash
 pip install -e .[service,dev]     # engine, HTTP service, tests. No VISA needed
-pip install -e .[lab]             # the above plus pyvisa, for the lab PC
+pip install -e .[lab,dev]         # the above plus pyvisa, for the lab PC
 ```
 
-`scripts/setup.sh` does the first line on Linux and then runs the suite.
+On Windows, `scripts\Setup.bat` (lab PC) or `scripts\Setup (sim).bat` (no
+instruments) does this into `py -3`, the interpreter every other `.bat` there
+uses. On Linux, `scripts/setup.sh` builds a `.venv`, installs, runs the suite,
+and starts the service once to prove the command below works; `BACE_NO_VENV=1`,
+`EXTRAS=rig` and `NO_TEST=1` adjust it.
 
 ## Run
 
@@ -41,10 +45,13 @@ python -m bace.bench --read --configure --acquire # one acquisition
 python -m bace.service --rig rig.toml --run run.toml --ui ui/
 ```
 
-**One instrument by hand**, without the service:
+**One instrument by hand**, without the service. The standalone consoles in
+`examples/` import nothing from the package and need only `pyvisa`, and only
+for the real instrument:
 
 ```bash
-python -m bace.consoles.keithley --sim    # the 2400's front panel, :8924
+python examples/keithley_console/keithley_console.py --sim   # the 2400, :8924
+python examples/shutter_console/shutter_console.py           # the shutter
 ```
 
 The `.bat` files in `scripts/` are double-click versions of the above for the
@@ -61,12 +68,11 @@ bace/
   storage/      legacy .dat (byte-exact) and HDF5
   bench/        the staged hardware check-out harness
   service/      FastAPI + WebSocket around the engine; owns the instruments
-  consoles/     standalone per-instrument panels
   params.py     where each parameter value came from
 ui/             the browser console: ES modules, no build step
 tools/          standalone rig scripts
-scripts/        .bat entry points and setup.sh
-examples/       demos against the simulator
+scripts/        .bat entry points, Setup.bat, setup.sh
+examples/       demos against the simulator, and the standalone consoles
 recipes/        named run.toml variants
 tests/          the suite
 docs/           documentation; see docs/README.md
@@ -92,7 +98,7 @@ rig is built.
 | `docs/service-contract.md` | every route, event and check the service implements |
 | `bace/service/README.md` | driving the service by hand |
 | `ui/README.md` | the console, file by file |
-| `bace/consoles/keithley/README.md` | the standalone-console pattern, worked |
+| `examples/README.md` | the demos and the standalone consoles; `keithley_console/README.md` is the worked example for writing another |
 | `CHANGELOG.md` | what changed, by date |
 
 ## Status
@@ -109,4 +115,5 @@ python -m pytest -q
 ```
 
 CI runs the suite on Ubuntu and Windows on every push. No test touches an
-instrument.
+instrument. The console's own suite (`node --test ui/tests/`) and its lint run
+from the Python suite when Node and eslint are present, and skip otherwise.

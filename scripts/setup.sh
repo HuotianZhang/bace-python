@@ -20,7 +20,18 @@
 #     from the repo root -- from anywhere else the service falls back to the
 #     built-in defaults, which is a recipe nobody chose. This script cd's there.
 #
-# Override the interpreter with PYTHON=..., skip the self-check with NO_TEST=1.
+# What it verifies, in order: the interpreter, the install, the Python suite,
+# and then the one command it tells you to run -- booted on a real socket with
+# the real ui/ mounted, because no test serves that (they mount a stub in a
+# temporary folder). What it cannot verify is the console's own suite: ui/ is
+# plain ES modules run by Node, a desk tool the lab PC does not have, so those
+# skip when Node is absent. The script says which case you are in rather than
+# reporting "ready" over a silent hole.
+#
+# Knobs: PYTHON=... chooses the interpreter, EXTRAS=rig adds an extra on top of
+# service,dev, NO_TEST=1 skips every test (pytest and the console's live suite,
+# leaving the start-up check's probes), NO_SMOKE=1 skips the start-up check
+# whole, BACE_VENV=... names the venv and BACE_NO_VENV=1 does without one.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -38,21 +49,120 @@ if ! "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'; t
     exit 1
 fi
 
-echo "== installing into $("$PY" -c 'import sys; print(sys.prefix)')"
-"$PY" -m pip install --quiet --upgrade pip
-"$PY" -m pip install --quiet -e '.[service,dev]'
+# A distro interpreter is not ours to install into. On Debian and Ubuntu -- which
+# is what a cloud session or a container is, nine times out of ten -- pip cannot
+# even upgrade itself there ("Cannot uninstall pip: RECORD file not found"), and
+# on images carrying the PEP 668 marker it refuses the install outright. So
+# unless we are already inside one, build a venv and use that. BACE_VENV=...
+# names it elsewhere; BACE_NO_VENV=1 installs into "$PY" as it stands, which is
+# what you want when the interpreter is already the container's own.
+VENV=""
+if [ "${BACE_NO_VENV:-}" != "1" ] \
+   && ! "$PY" -c 'import sys; sys.exit(0 if sys.prefix != sys.base_prefix else 1)'; then
+    VENV=${BACE_VENV:-.venv}
+    echo "== $PY is a system interpreter; building $VENV rather than installing into it"
+    "$PY" -m venv "$VENV"
+    # An absolute BACE_VENV is already a path; only a relative one wants $PWD in
+    # front of it. Gluing them unconditionally turned BACE_VENV=/tmp/bace-venv
+    # into $PWD//tmp/bace-venv/bin/python -- inside the checkout, and not there.
+    case $VENV in
+        /*) PY="$VENV/bin/python" ;;
+        *)  PY="$PWD/$VENV/bin/python" ;;
+    esac
+fi
+
+# `service,dev` is a console checkout: the API, the suite, and deliberately no
+# VISA. EXTRAS=rig adds pyvisa on top, for a Linux box that does have the
+# instruments; it adds to the pair rather than replacing it, so the check below
+# stays true whatever is asked for.
+EXTRAS="service,dev${EXTRAS:+,$EXTRAS}"
+
+echo "== installing into $("$PY" -c 'import sys; print(sys.prefix)')  [.[$EXTRAS]]"
+# A newer pip is a nicety. Never fail the setup over one.
+"$PY" -m pip install --quiet --upgrade pip || echo "   (pip could not upgrade itself; carrying on)"
+"$PY" -m pip install --quiet -e ".[$EXTRAS]"
 
 echo "== what came in"
 "$PY" - <<'EOF'
 import importlib.metadata as md
+import warnings
+
 for name in ("numpy", "scipy", "h5py", "fastapi", "uvicorn", "websockets", "pytest"):
     try:
         print(f"   {name:<12} {md.version(name)}")
     except md.PackageNotFoundError:
         raise SystemExit(f"   {name:<12} MISSING -- the install did not take")
+
 import bace.service            # noqa: F401  -- imports fastapi, so it fails loudly here
 print("   bace.service  imports")
+
+# What the suite needs here is not a package of a given name: it is a working
+# `fastapi.testclient`, and Starlette has already renamed its transport once
+# (httpx -> httpx2, both still accepted). Naming either would go stale at the
+# next rename, so ask the question the suite asks. Missing, this is not one
+# failing test: test_service_api.py raises at *collection* and takes the whole
+# run with it.
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")     # the httpx-is-deprecated notice, if it applies
+    try:
+        import fastapi.testclient       # noqa: F401
+    except Exception as exc:            # RuntimeError when no transport is installed
+        raise SystemExit(f"   TestClient   UNUSABLE -- {exc}")
+transport = "an unnamed transport"
+for name in ("httpx2", "httpx"):
+    try:
+        transport = f"{name} {md.version(name)}"
+        break
+    except md.PackageNotFoundError:
+        pass
+print(f"   TestClient   imports, over {transport}")
 EOF
+
+# ui/ has no build step, so pip installs none of it and the block above checks
+# none of it: the console's 20 suites are Node's own runner and its one lint
+# rule is eslint's. Both skip rather than fail when absent, which is right for
+# the lab PC -- it has neither -- and a trap on a desk machine, where "ready"
+# would then cover a console nothing had run. Name which case this is.
+echo "== the console half"
+# Counted with a glob rather than `ls | wc -l`: under `set -o pipefail` a glob
+# that matches nothing takes the whole script down with a bare exit 2, which is
+# the one way a setup script must never fail.
+shopt -s nullglob
+CONSOLE_SUITES=(ui/tests/*.test.mjs)
+shopt -u nullglob
+SUITES=${#CONSOLE_SUITES[@]}
+# How that number splits is tests/test_ui.py's business: it runs every suite but
+# live.test.mjs, which needs a service to drive. Ask it rather than doing the
+# subtraction here, which would be wrong the day its exclusion list grows.
+UNDER_PYTEST=$("$PY" -c 'from tests.test_ui import _console_suites
+print(len(_console_suites()))' 2>/dev/null || echo "?")
+if [ "$SUITES" -eq 0 ]; then
+    echo "   ui/tests/    no suites found. Either this checkout is missing ui/,"
+    echo "                or the console's tests have moved and this line is stale."
+elif command -v node >/dev/null 2>&1; then
+    echo "   node         $(node --version): $UNDER_PYTEST of the $SUITES suites under"
+    echo "                ui/tests/ run in the self-check."
+    # live.test.mjs drives the console's own stream.js, which takes
+    # globalThis.WebSocket -- absent before Node 22. Ask the interpreter rather
+    # than parsing its version string.
+    if node -e 'process.exit(typeof WebSocket === "function" ? 0 : 1)' >/dev/null 2>&1; then
+        echo "                live.test.mjs -- which needs a service, and so runs"
+        echo "                nowhere else, CI included -- runs in the start-up check."
+    else
+        echo "                live.test.mjs needs a WebSocket global this node has not"
+        echo "                got (v22+); the start-up check says so and skips it."
+    fi
+else
+    echo "   node         NOT FOUND, so all $SUITES suites under ui/tests/ will skip."
+    echo "                Expected on the lab PC; on a desk machine the console is"
+    echo "                unverified until you install Node."
+fi
+if command -v eslint >/dev/null 2>&1 || npx --no-install eslint --version >/dev/null 2>&1; then
+    echo "   eslint       present, so the no-undef pass over ui/ runs below"
+else
+    echo "   eslint       NOT FOUND, so the no-undef pass over ui/ will skip."
+    echo "                npm install -g eslint, or npx eslint once with a network."
+fi
 
 if [ "${NO_TEST:-}" = "1" ]; then
     echo "== self-check skipped (NO_TEST=1)"
@@ -62,18 +172,175 @@ else
     # One test fails only on the machine this port was written on (a stray
     # 64-bit delib64.dll in System32 makes the DIO backend findable when the
     # test needs it absent). On Linux there is no DELIB and it should pass.
-    "$PY" -m pytest -q
+    # -rs names every skip. A skip is a check that did not happen, and the
+    # only ones left on a clean checkout should be ones you can explain.
+    "$PY" -m pytest -q -rs
+fi
+
+if [ "${NO_SMOKE:-}" = "1" ]; then
+    echo "== start-up check skipped (NO_SMOKE=1)"
+else
+    echo "== start-up check"
+    # The suite boots the CLI in a subprocess, but every test that mounts a
+    # console mounts a stub index.html from a temporary folder -- nothing has
+    # ever served the real ui/. So run the exact command the block below
+    # prints, on a port the OS says is free, and check what a browser would
+    # get: the bench, the redirect, and the console's own page. The session
+    # goes to a temporary --out, so setting up leaves no journal behind.
+    "$PY" - <<'EOF'
+import json
+import os
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+
+with socket.socket() as probe:
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+
+out = tempfile.mkdtemp(prefix="bace-setup-")
+# The service's output goes to a file, never a pipe. It runs uvicorn at
+# log_level="info", so every request costs a line, and the live suite's rail
+# test polls /bench in a loop with no sleep in it. A pipe nobody reads fills
+# its 64 KB and then blocks uvicorn mid-log: the request never returns, the
+# suite polls a service that has stopped answering, and this script hangs until
+# someone kills it. Measured here -- wedged after 1127 requests, 6.5 s. A file
+# cannot block, and it still holds everything the failure path wants to print.
+log_path = os.path.join(out, "service.log")
+log = open(log_path, "w", encoding="utf-8", errors="replace")
+proc = subprocess.Popen(
+    [sys.executable, "-m", "bace.service", "--sim", "--fast",
+     "--port", str(port), "--ui", "ui/", "--out", out],
+    stdout=log, stderr=subprocess.STDOUT)
+
+def get(path, timeout=5.0):
+    return urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=timeout)
+
+def said() -> str:
+    log.flush()
+    try:
+        with open(log_path, encoding="utf-8", errors="replace") as fh:
+            return fh.read()[-4000:]
+    except OSError:
+        return ""
+
+def die(why):
+    proc.kill()
+    raise SystemExit(f"   {why}\n{said() or '(the service said nothing)'}")
+
+try:
+    bench = None
+    deadline = time.monotonic() + 60.0
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            die("the service exited before it answered:")
+        try:
+            with get("/bench", timeout=2.0) as r:
+                bench = json.loads(r.read().decode())
+            break
+        except (urllib.error.URLError, ConnectionError, TimeoutError):
+            time.sleep(0.2)
+    if bench is None:
+        die(f"nothing answered on 127.0.0.1:{port} within 60 s:")
+
+    session, chain = bench["session"], bench["chain"]
+    print(f"   /bench       {session['mode']}"
+          f"{' fast' if session.get('fast') else ''}, "
+          f"{len(bench['instruments'])} instruments, "
+          f"chain {chain['ok']}/{chain['total']}")
+
+    try:
+        with get("/") as r:                 # urllib follows the redirect for us
+            landed = r.geturl()
+        with get("/ui/") as r:
+            page = r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:   # a 404 here is a mount that is wrong
+        die(f"{exc.url} answered {exc.code} {exc.reason}:")
+    if not landed.endswith("/ui/"):
+        die(f"/ should land on the console and landed on {landed}:")
+    if "<title>BACE console</title>" not in page:
+        die("/ui/ answered, but with something that is not the console's index.html:")
+    print(f"   / -> /ui/    the real ui/, {len(page)} bytes")
+
+    # live.test.mjs is the one console suite pytest will not run -- it needs a
+    # service, and tests/test_ui.py excludes it for that reason -- so it runs
+    # nowhere else, CI included. There is a service right here. It drives the
+    # console's own stream.js and store.js against it: a run reaching `parked`,
+    # and a client dropped at 1008 replaying from `since` without a hole.
+    live = os.path.join("ui", "tests", "live.test.mjs")
+    node = shutil.which("node")
+    if os.environ.get("NO_TEST") == "1":
+        # NO_TEST=1 means no tests. These are tests -- six of them, half a
+        # minute -- and running them under a line that just said the suite was
+        # skipped would make the knob a lie. The probes above are not tests:
+        # they are what says the service came up, which is the point of this
+        # section, so NO_TEST keeps them and NO_SMOKE=1 is what drops them.
+        print("   live suite   skipped (NO_TEST=1)")
+    elif not os.path.exists(live):
+        print("   live suite   not in this checkout")
+    elif node is None:
+        print("   live suite   NOT RUN -- no node, so nothing has driven this service")
+    elif subprocess.run([node, "-e", "process.exit(typeof WebSocket === 'function' ? 0 : 1)"],
+                        capture_output=True).returncode != 0:
+        # ui/lib/stream.js takes `globalThis.WebSocket`, which Node grew late:
+        # v20 does not have it and neither does v21 unflagged, v22 does. Without
+        # it every connect throws, the stream reconnects on a timer, and the
+        # suite sits through its own deadlines rather than failing -- it hangs,
+        # which is the one outcome a setup script must never have. Ask the
+        # interpreter instead of trusting the version string.
+        version = subprocess.run([node, "--version"], capture_output=True,
+                                 text=True).stdout.strip()
+        print(f"   live suite   NOT RUN -- {version} has no WebSocket global, which"
+              f" stream.js needs (v22+)")
+    else:
+        ran = subprocess.run(
+            [node, "--test", live], capture_output=True, text=True,
+            env={**os.environ, "BACE_SERVICE": f"http://127.0.0.1:{port}"})
+        if ran.returncode != 0:
+            print(ran.stdout[-4000:] + ran.stderr[-2000:])
+            die("live.test.mjs failed against this service (its output above, "
+                "the service's own below):")
+        passed = next((line.split()[-1] for line in ran.stdout.splitlines()
+                       if line.startswith("# pass ")), "?")
+        print(f"   live suite   {passed} passed against it")
+finally:
+    proc.terminate()
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+    log.close()
+    shutil.rmtree(out, ignore_errors=True)
+print("   stopped      the port is free again and no run folder was left")
+EOF
+fi
+
+echo
+echo "== ready"
+
+if [ -n "$VENV" ]; then
+    cat <<EOF
+
+  the install went into $VENV. Activate it before anything below, or spell the
+  interpreter out as $VENV/bin/python:
+
+      source $VENV/bin/activate
+EOF
 fi
 
 cat <<'EOF'
-
-== ready
 
   serve the API with a simulated rig, every settle a no-op:
 
       python -m bace.service --sim --fast --port 8900
 
-  and once ui/ exists, serve it alongside at /ui (/ redirects there):
+  or with the console alongside it at /ui, which is the form the start-up
+  check above just ran and the one you want (/ redirects there):
 
       python -m bace.service --sim --fast --port 8900 --ui ui/
 

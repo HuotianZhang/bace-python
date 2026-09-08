@@ -7,9 +7,12 @@ Dated, newest first. Details and evidence are in `docs/`.
 - Repository reorganised for publication: `docs/figures/`, `docs/history/`,
   `docs/notes.md`, `examples/`, `ui/studies/`. The session hand-off file is
   gone; its engineering record is `docs/notes.md`.
-- Standalone Keithley 2400 console, `bace/consoles/keithley`: one instrument,
-  one process, one port, no service.
-- The shutter console moved out of the package to `examples/shutter_console/`.
+- Standalone Keithley 2400 console, `examples/keithley_console/`: one
+  instrument, one process, one port, importing nothing from the package. The
+  shutter console moved out of the package the same way.
+- `scripts/Setup.bat` and `Setup (sim).bat` install on Windows into `py -3`;
+  `scripts/setup.sh` builds a `.venv`, runs the suite, and starts the service
+  once to prove the run command.
 - CI runs the suite on Ubuntu and Windows.
 
 ## 2026-09-07
