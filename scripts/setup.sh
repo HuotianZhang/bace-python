@@ -141,9 +141,17 @@ if [ "$SUITES" -eq 0 ]; then
     echo "                or the console's tests have moved and this line is stale."
 elif command -v node >/dev/null 2>&1; then
     echo "   node         $(node --version): $UNDER_PYTEST of the $SUITES suites under"
-    echo "                ui/tests/ run in the self-check, and live.test.mjs -- which"
-    echo "                needs a service and so runs nowhere else, CI included -- in"
-    echo "                the start-up check, which has one."
+    echo "                ui/tests/ run in the self-check."
+    # live.test.mjs drives the console's own stream.js, which takes
+    # globalThis.WebSocket -- absent before Node 22. Ask the interpreter rather
+    # than parsing its version string.
+    if node -e 'process.exit(typeof WebSocket === "function" ? 0 : 1)' >/dev/null 2>&1; then
+        echo "                live.test.mjs -- which needs a service, and so runs"
+        echo "                nowhere else, CI included -- runs in the start-up check."
+    else
+        echo "                live.test.mjs needs a WebSocket global this node has not"
+        echo "                got (v22+); the start-up check says so and skips it."
+    fi
 else
     echo "   node         NOT FOUND, so all $SUITES suites under ui/tests/ will skip."
     echo "                Expected on the lab PC; on a desk machine the console is"
@@ -248,6 +256,7 @@ try:
     # console's own stream.js and store.js against it: a run reaching `parked`,
     # and a client dropped at 1008 replaying from `since` without a hole.
     live = os.path.join("ui", "tests", "live.test.mjs")
+    node = shutil.which("node")
     if os.environ.get("NO_TEST") == "1":
         # NO_TEST=1 means no tests. These are tests -- six of them, half a
         # minute -- and running them under a line that just said the suite was
@@ -257,11 +266,23 @@ try:
         print("   live suite   skipped (NO_TEST=1)")
     elif not os.path.exists(live):
         print("   live suite   not in this checkout")
-    elif shutil.which("node") is None:
+    elif node is None:
         print("   live suite   NOT RUN -- no node, so nothing has driven this service")
+    elif subprocess.run([node, "-e", "process.exit(typeof WebSocket === 'function' ? 0 : 1)"],
+                        capture_output=True).returncode != 0:
+        # ui/lib/stream.js takes `globalThis.WebSocket`, which Node grew late:
+        # v20 does not have it and neither does v21 unflagged, v22 does. Without
+        # it every connect throws, the stream reconnects on a timer, and the
+        # suite sits through its own deadlines rather than failing -- it hangs,
+        # which is the one outcome a setup script must never have. Ask the
+        # interpreter instead of trusting the version string.
+        version = subprocess.run([node, "--version"], capture_output=True,
+                                 text=True).stdout.strip()
+        print(f"   live suite   NOT RUN -- {version} has no WebSocket global, which"
+              f" stream.js needs (v22+)")
     else:
         ran = subprocess.run(
-            ["node", "--test", live], capture_output=True, text=True,
+            [node, "--test", live], capture_output=True, text=True,
             env={**os.environ, "BACE_SERVICE": f"http://127.0.0.1:{port}"})
         if ran.returncode != 0:
             print(ran.stdout[-4000:] + ran.stderr[-2000:])

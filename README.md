@@ -43,7 +43,10 @@ thing that proves the command above. While that service is up it also runs
 `ui/tests/live.test.mjs`, the one console suite `tests/test_ui.py` excludes
 because it needs a running service: a run reaching `parked`, and a client
 dropped at 1008 replaying from `since` without a hole. Nothing else runs it, CI
-included.
+included. It needs Node 22 or newer, because `stream.js` takes
+`globalThis.WebSocket` and v20 has none (nor v21, unflagged); on an older Node
+the start-up check says so and skips it, rather than letting it hang against its
+own reconnect timers. The other 19 suites are fine there.
 
 `NO_TEST=1` skips every test — pytest and that live suite both — while leaving
 the start-up check's probes, which are what say the service came up rather than
