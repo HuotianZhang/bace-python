@@ -48,9 +48,10 @@ if errorlevel 1 goto :pipfailed
 
 echo.
 echo == what came in
-py -3 -c "import bace.service, importlib.metadata as md; print('   bace ' + md.version('bace') + ', and the service imports')"
+py -3 -c "import bace.service.app, uvicorn, importlib.metadata as md; print('   bace ' + md.version('bace') + '; app and uvicorn import, which is what Run Service needs')"
 if errorlevel 1 goto :notook
-py -3 -c "import pyvisa; print('   pyvisa ' + pyvisa.__version__ + ', so the real rig is reachable')"
+py -3 -c "import pyvisa, sys; lib = str(pyvisa.ResourceManager().visalib.library_path); print('   pyvisa ' + pyvisa.__version__ + ', VISA backend ' + lib); sys.exit(2 if lib == 'py' else 0)"
+if errorlevel 2 goto :nobackend
 if errorlevel 1 goto :novisa
 
 echo.
@@ -86,6 +87,16 @@ goto :stop
 echo.
 echo   The install reported success but bace.service will not import, so
 echo   something did not take. The traceback above names it.
+goto :stop
+
+:nobackend
+echo.
+echo   Installed, but this machine has no vendor VISA. pyvisa fell back to
+echo   pyvisa-py, which cannot talk to GPIB, so the instruments are not
+echo   reachable from here even though every package is in place.
+echo.
+echo   Install NI-VISA -- the same one LabVIEW uses -- and run this again.
+echo   "Run Bench Check.bat" is what reports the backend properly once it is.
 goto :stop
 
 :novisa

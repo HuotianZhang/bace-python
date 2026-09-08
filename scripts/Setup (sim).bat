@@ -47,7 +47,7 @@ if errorlevel 1 goto :pipfailed
 
 echo.
 echo == what came in
-py -3 -c "import bace.service, importlib.metadata as md; print('   bace ' + md.version('bace') + ', and the service imports')"
+py -3 -c "import bace.service.app, uvicorn, importlib.metadata as md; print('   bace ' + md.version('bace') + '; app and uvicorn import, which is what Run Service needs')"
 if errorlevel 1 goto :notook
 
 echo.
