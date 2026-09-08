@@ -16,6 +16,7 @@ extended, and focused on **measurement** — analysis stays downstream.
 | `scripts/` | the double-click `.bat` entry points, one per bench stage; `setup.sh` for a Linux checkout |
 | `docs/ui-kickoff.md` | where the console work starts, with `docs/ui-rules.md` and `docs/design/` |
 | `ui/README.md` | the console itself — how to run it, the fixtures it develops against, and what each milestone owes. `docs/ui-plan.md` is the plan it follows |
+| `bace/consoles/keithley/README.md` | the standalone Keithley 2400 panel: one instrument, one process, one port, and the smallest complete example of that shape |
 
 ## Developing away from the bench (Linux, a container, a cloud session)
 
@@ -48,6 +49,14 @@ One test fails on the machine this port was written on — a stray 64-bit
 `delib64.dll` in System32 makes the DIO backend findable where the test needs it
 absent. There is no DELIB on Linux, so expect a clean run there.
 
+`.github/workflows/tests.yml` runs the suite on every push and pull request, on
+**ubuntu-latest and windows-latest** — Windows because the lab PC runs
+WinPython and this project has already been bitten by the difference (a colon
+in `material` built a path that failed there and passed on Linux; the `.dat`
+files are byte-exact with CRLF). No runner touches an instrument: the suite is
+the simulated rig and recorded transcripts throughout, so the `rig` extra is
+not installed.
+
 ## Layout
 
 ```
@@ -63,6 +72,8 @@ bace/           the package
   bench/        the staged hardware harness
   service/      FastAPI + WebSocket around the engine — the bench, the modules,
                 the runs, the pipeline tree. bace/service/README.md
+  consoles/     standalone per-instrument panels: one instrument, one process,
+                one port, no service and no ui/. keithley/ is the first
 ui/             the console — plain ES modules, no build step, served by the
                 service at /ui. ui/README.md; docs/ui-plan.md is the plan.
                 studies/ holds the layout comparisons, kept as record
@@ -93,10 +104,11 @@ before doing anything, so every relative path below still resolves.
 Everything runs end to end on the simulated rig, with no instruments present:
 
 ```
-python -m pytest -q                    # 806 passed, 7 skipped
+python -m pytest -q                    # 880 passed, and nothing skipped
 python -m examples.demo_scan           # a simulated transient scan
 python -m bace.bench                   # the offline stages of the bench harness
 python -m bace.service --sim --fast    # the service on the simulated rig, http://127.0.0.1:8900/
+python -m bace.consoles.keithley --sim # just the Keithley's front panel, http://127.0.0.1:8924/
 ```
 
 ## Status
@@ -120,6 +132,16 @@ process opens both (2026-09-03). Proven on the rig 2026-09-02:
 jv_dark → jv_bace → bace end to end on the lab PC, the bace matching a LabVIEW
 run fifteen minutes apart within the single-shot scatter. `bace/service/README.md`
 says how to run and drive it; `docs/service-contract.md` is what it was built to.
+
+`bace/consoles/` is the other half of that: one instrument, one process, one
+port, importing neither the service nor `ui/`. The service owns the *bench* —
+every instrument on it, one worker, runs and files — and there are times when
+what you want is one instrument by hand and nothing else. `consoles/keithley/`
+(2026-09-08) is the first: the 2400's own front panel served from the standard
+library, on `:8924` the way the 1918-C's console is on `:8918` and the 331's on
+`:8331`. One process owns an instrument, so it is what you run *instead of* the
+service, not beside it. Its README is also the worked example for writing the
+next one.
 
 `ui/` is under way, milestone by milestone (`docs/ui-plan.md`, and `ui/README.md`
 for what each one owes). **M0–M3 are built**: the event layer and the fixtures it

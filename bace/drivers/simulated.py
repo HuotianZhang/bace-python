@@ -32,6 +32,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from .keithley2400 import (PANEL_STATIC, PanelReading, PanelSetup,
+                          SourceMeterError, panel_budget_for)
 from .lakeshore331 import TemperatureError
 from .protocols import DCPoint, TemperatureReading, Trace
 
@@ -577,9 +579,17 @@ class SimulatedSourceMeter:
                  noise_a: float = 5e-7):
         self.bench = bench
         self._output = False
+        self._panel: PanelSetup | None = None
         self.compliance_a = compliance_a
         self.noise_a = noise_a
         self.clipped = False
+
+    def _prepare(self) -> None:
+        """What the real driver's `_prepare` does that is visible from outside
+        it: the `*RST` at the head of every measurement routine drops the panel,
+        so a panel left applied here would outlive a run and the console would
+        develop against a bench the rig does not have."""
+        self._panel = None
 
     def measure_dc(self, *, v_sat: float = -1.0,
                    settle_s: float | None = None) -> DCPoint:
@@ -595,6 +605,7 @@ class SimulatedSourceMeter:
         DC would otherwise pass every test and centre a real axis on the
         wrong number.
         """
+        self._prepare()
         d, b = self.bench.device, self.bench
         lit = b.shutter_open and b.led_mode in ("DC", "PULSE")
         i = d.led_current(b.led_drive_v) if lit else 0.0
@@ -634,6 +645,7 @@ class SimulatedSourceMeter:
         would on the bench."""
         if points < 2:
             raise ValueError("a sweep needs at least two points")
+        self._prepare()
         b = self.bench
         self.clipped = False
         for x in np.linspace(float(start_v), float(stop_v), int(points)):
@@ -643,6 +655,117 @@ class SimulatedSourceMeter:
             if abs(i) > self.compliance_a:
                 self.clipped = True
             yield float(x), float(np.clip(i, -self.compliance_a, self.compliance_a))
+
+    # -- the front panel ---------------------------------------------------
+    # The same three calls the real driver grew for `service`'s SMU panel, so
+    # the panel is developed and tested with no instrument. Two things this
+    # models that `measure_dc` and `sweep_points` above deliberately do not:
+    #
+    # * **the relay**. Those two are only ever reached from inside
+    #   `router.dc()`, which has already connected the SourceMeter, so the
+    #   position cannot be wrong there. The panel has no such module around
+    #   it -- the operator throws the relay, or does not -- and reading a
+    #   device that is not connected to the instrument is the mistake the
+    #   panel exists to make visible. Off the SourceMeter, this reads an open
+    #   circuit, which is what the bench would give.
+    # * **compliance as a clamp on both quantities**. A sweep clips the
+    #   current and says `clipped`; a panel has to say which of the two
+    #   limits is holding and what the *other* quantity did while it held,
+    #   because that is the front panel's `Cmpl` light.
+    @property
+    def panel(self) -> PanelSetup | None:
+        return self._panel
+
+    def apply_panel(self, setup: PanelSetup) -> PanelSetup:
+        was = self._panel
+        if was is None and self._output:
+            raise SourceMeterError(
+                "the output is ON and this instrument is not on the panel -- "
+                "something else is driving it. Switch the output off first; "
+                "applying a panel resets the instrument, which would drop it "
+                "with nothing said")
+        if was is not None and self._output:
+            changed = [f for f in PANEL_STATIC if getattr(setup, f) != getattr(was, f)]
+            if changed:
+                raise SourceMeterError(
+                    f"the output is ON: {', '.join(changed)} cannot be changed under "
+                    "it -- switch the output off, change it, switch it back on")
+        self._panel = setup
+        return setup
+
+    def panel_budget_s(self) -> float:
+        """The real driver's, so a console can ask either the same question.
+        Nothing here integrates, but the number a caller plans around must not
+        depend on which bench it is talking to."""
+        panel = self._panel
+        return panel_budget_for(panel.nplc if panel is not None else 1.0,
+                                panel.averaging if panel is not None else 1)
+
+    def read_panel(self) -> PanelReading:
+        panel = self._panel
+        if panel is None:
+            raise SourceMeterError("the panel is not applied to this instrument")
+        if not self._output:
+            raise SourceMeterError("the output is OFF: there is nothing to read")
+        b = self.bench
+        lit = b.shutter_open and b.led_mode in ("DC", "PULSE")
+        drive = b.led_drive_v if lit else 0.0
+        connected = b.relay == "sourcemeter"
+        noise = float(b.rng.normal(0.0, self.noise_a))
+        if panel.function == "voltage":
+            volts, amps, compliance = float(panel.level), noise, False
+            if connected:
+                amps = float(b.device.current(volts, drive)) + noise
+                if abs(amps) > panel.current_compliance_a:
+                    # The source cannot hold its level at that current, so it
+                    # holds the current instead and the voltage falls where
+                    # the device puts it.
+                    amps = math.copysign(panel.current_compliance_a, amps)
+                    volts, _ = self._solve_v(amps, drive, panel.voltage_compliance_v)
+                    compliance = True
+        else:
+            target = float(panel.level)
+            if connected:
+                volts, compliance = self._solve_v(target, drive, panel.voltage_compliance_v)
+                amps = (float(b.device.current(volts, drive)) + noise if compliance
+                        else target + noise)
+            elif abs(target) <= 1e-15:
+                # Nothing asked for, nothing to force: an open circuit takes
+                # 0 A at any voltage and the source sits where it is.
+                volts, amps, compliance = 0.0, noise, False
+            else:
+                # No path for the current, so the source runs to its voltage
+                # limit trying to push it.
+                volts = math.copysign(panel.voltage_compliance_v, target)
+                amps, compliance = noise, True
+        return PanelReading(volts=float(volts), amps=float(amps),
+                            compliance=compliance, function=panel.function,
+                            level=float(panel.level))
+
+    def _solve_v(self, target_a: float, drive_v: float,
+                 bound_v: float) -> tuple[float, bool]:
+        """`(volts, at the limit)` -- the voltage at which the device draws
+        `target_a`, bisected inside +-`bound_v`.
+
+        `SimulatedDevice.current` is strictly increasing in V (a diode, a
+        shunt and a photocurrent offset), so a bisection is exact to the
+        float and needs no derivative. Landing on the bound means the device
+        will not take that current inside the compliance, which is the
+        compliance."""
+        bound = abs(float(bound_v))
+        lo, hi = -bound, bound
+        current = self.bench.device.current
+        if current(lo, drive_v) >= target_a:
+            return lo, True
+        if current(hi, drive_v) <= target_a:
+            return hi, True
+        for _ in range(80):
+            mid = 0.5 * (lo + hi)
+            if current(mid, drive_v) < target_a:
+                lo = mid
+            else:
+                hi = mid
+        return 0.5 * (lo + hi), False
 
     def enable_output(self, on: bool = True) -> None:
         self._output = bool(on)
