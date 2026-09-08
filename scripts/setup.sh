@@ -38,14 +38,31 @@ if ! "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'; t
     exit 1
 fi
 
+# A distro interpreter is not ours to install into. On Debian and Ubuntu -- which
+# is what a cloud session or a container is, nine times out of ten -- pip cannot
+# even upgrade itself there ("Cannot uninstall pip: RECORD file not found"), and
+# on images carrying the PEP 668 marker it refuses the install outright. So
+# unless we are already inside one, build a venv and use that. BACE_VENV=...
+# names it elsewhere; BACE_NO_VENV=1 installs into "$PY" as it stands, which is
+# what you want when the interpreter is already the container's own.
+VENV=""
+if [ "${BACE_NO_VENV:-}" != "1" ] \
+   && ! "$PY" -c 'import sys; sys.exit(0 if sys.prefix != sys.base_prefix else 1)'; then
+    VENV=${BACE_VENV:-.venv}
+    echo "== $PY is a system interpreter; building $VENV rather than installing into it"
+    "$PY" -m venv "$VENV"
+    PY="$PWD/$VENV/bin/python"
+fi
+
 echo "== installing into $("$PY" -c 'import sys; print(sys.prefix)')"
-"$PY" -m pip install --quiet --upgrade pip
+# A newer pip is a nicety. Never fail the setup over one.
+"$PY" -m pip install --quiet --upgrade pip || echo "   (pip could not upgrade itself; carrying on)"
 "$PY" -m pip install --quiet -e '.[service,dev]'
 
 echo "== what came in"
 "$PY" - <<'EOF'
 import importlib.metadata as md
-for name in ("numpy", "scipy", "h5py", "fastapi", "uvicorn", "websockets", "pytest"):
+for name in ("numpy", "scipy", "h5py", "fastapi", "uvicorn", "websockets", "pytest", "httpx"):
     try:
         print(f"   {name:<12} {md.version(name)}")
     except md.PackageNotFoundError:
@@ -65,9 +82,20 @@ else
     "$PY" -m pytest -q
 fi
 
-cat <<'EOF'
+echo
+echo "== ready"
 
-== ready
+if [ -n "$VENV" ]; then
+    cat <<EOF
+
+  the install went into $VENV. Activate it before anything below, or spell the
+  interpreter out as $VENV/bin/python:
+
+      source $VENV/bin/activate
+EOF
+fi
+
+cat <<'EOF'
 
   serve the API with a simulated rig, every settle a no-op:
 

@@ -14,7 +14,10 @@ rig = ["pyvisa>=1.13", "pyvisa-py>=0.7"]
 service = ["fastapi>=0.110", "uvicorn>=0.29", "websockets>=12"]
 # The lab PC runs the service on the real rig, so it needs both: `pip install -e .[lab]`.
 lab = ["bace[rig,service]"]
-dev = ["pytest>=7"]
+# httpx is not a nicety: `fastapi.testclient.TestClient` is an httpx client with
+# the app wired in as its transport, so tests/test_service_api.py does not even
+# collect without it, and a collection error takes the whole run down with it.
+dev = ["pytest>=7", "httpx>=0.27"]
 
 [tool.setuptools.packages.find]
 include = ["bace*"]

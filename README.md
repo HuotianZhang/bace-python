@@ -25,8 +25,14 @@ only the `service` extra.
 
 ```bash
 bash scripts/setup.sh          # installs .[service,dev], then runs the suite
+source .venv/bin/activate      # only if setup.sh built one; it says so if it did
 python -m bace.service --sim --fast --port 8900 --ui ui/
 ```
+
+`setup.sh` builds `.venv` unless it is already running inside a virtualenv,
+because a distro interpreter is not ours to install into — Debian's pip cannot
+even upgrade itself in one. `BACE_NO_VENV=1` installs into `python3` as it
+stands, for a container whose interpreter is already its own.
 
 `--fast` makes every settle a no-op, so a 20-loop scan takes a second; it is
 refused on a real rig, where it would measure before the device had settled with
