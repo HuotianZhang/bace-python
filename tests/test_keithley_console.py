@@ -1171,6 +1171,28 @@ def test_a_misspelt_key_is_refused_and_never_a_default(tmp_path):
     assert (config.current_compliance_a, config.nplc) == (0.001, 5.0)
 
 
+def test_a_ceiling_that_is_not_a_number_is_a_sentence_and_not_a_traceback(tmp_path):
+    """TOML will carry `max_current_compliance_a = "50 mA"` quite happily, and
+    `float()` on it raises `ValueError` -- which `main` does not catch, because
+    it catches `ConfigError`. So the double-click launcher ended on a traceback
+    about `float` instead of the sentence it exists to print, on the one path
+    where the operator most needs to be told which ceilings are in force.
+
+    The `run.toml` side already translated its conversion failures; the
+    ceilings are the half where it matters more.
+    """
+    import keithley_console as entry
+
+    rig = tmp_path / "rig.toml"
+    rig.write_text('[sourcemeter]\nmax_current_compliance_a = "50 mA"\n')
+    args = ["--sim", "--rig", str(rig), "--port", "0"]
+
+    with pytest.raises(entry.ConfigError, match="could not convert"):
+        entry._load_config(entry.build_parser().parse_args(args))
+    # And `main` turns it into an exit code, not a traceback.
+    assert entry.main(args) == 2
+
+
 def test_the_repository_own_files_load_under_that_check():
     """The rule above is worth nothing if it refuses the bench's own files."""
     import keithley_console as entry
@@ -1180,3 +1202,31 @@ def test_the_repository_own_files_load_under_that_check():
         ["--rig", str(repo / "rig.toml"), "--run", str(repo / "run.toml")]))
     assert rig.max_current_compliance_a == 0.05
     assert config.current_compliance_a == 0.01, "run.toml's working value, not the ceiling"
+
+
+def test_nothing_promises_that_closing_the_window_switches_the_output_off():
+    """It does not, on the one platform the `.bat` exists for. Closing a
+    console window on Windows sends `CTRL_CLOSE_EVENT`, and `signal.signal`
+    there accepts SIGINT, SIGTERM and SIGBREAK — nothing that corresponds to
+    the X button — so the process is killed without running `serve_forever`'s
+    `finally` and the 2400 is left driving.
+
+    `SIGHUP` covers the same gesture on Linux and macOS, which is what made the
+    claim easy to write and wrong to keep: the two platforms genuinely differ
+    here, so the documentation has to name them separately rather than calling
+    it "a closed terminal" on both.
+    """
+    import server as server_module
+
+    bat = (FOLDER / "Run Keithley Console.bat").read_text(encoding="utf-8")
+    assert "close the window when you are done" not in bat
+    assert "CTRL_CLOSE_EVENT" in bat and "not the close button" in bat.lower()
+    assert "OUTPUT key" in bat, "and it names the thing that always works"
+
+    readme = (FOLDER / "README.md").read_text(encoding="utf-8")
+    assert "CTRL_CLOSE_EVENT" in readme
+    assert "a closed terminal (`SIGHUP`), Ctrl-Break" not in readme, \
+        "the unqualified claim, which was true only on POSIX"
+
+    # And the tuple itself is still only what can actually be caught.
+    assert server_module.STOP_SIGNALS == ("SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK")

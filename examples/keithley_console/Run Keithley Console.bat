@@ -1,6 +1,6 @@
 @echo off
 REM The Keithley 2400's front panel, in a browser. Double-click, use the page,
-REM close the window when you are done. The page opens by itself.
+REM press Ctrl-C in this window when you are done. The page opens by itself.
 REM
 REM     http://127.0.0.1:8924/
 REM
@@ -15,16 +15,21 @@ REM     error that reads like a cable fault. Stop one before starting the
 REM     other. The port says which instrument answers here - 8924 for GPIB 24,
 REM     the way the 1918-C console is on 8918 and the 331 on 8331.
 REM
-REM THE OUTPUT GOES OFF ON THE WAY OUT
-REM     Closing this window, Ctrl-C, or the machine sending this process a
-REM     stop signal all switch the source off first. It can take a moment: a
+REM STOP IT WITH Ctrl-C, NOT THE CLOSE BUTTON
+REM     Ctrl-C in this window switches the source off before exiting. So does
+REM     Ctrl-Break, and so does `taskkill` without /F. It can take a moment: a
 REM     reading at NPLC 10 with a 100-deep filter is 80 seconds of integration
 REM     and the off waits behind it. Pressing Ctrl-C again will not hurry it
 REM     and will not skip it.
 REM
-REM     What cannot be caught is End Task's hard kill and a power cut. If you
-REM     need the source off and this window is not responding, the 2400's own
-REM     OUTPUT key is the answer.
+REM     THE WINDOW'S X BUTTON IS NOT ONE OF THOSE. Windows sends the console
+REM     CTRL_CLOSE_EVENT, which Python does not deliver as a signal, so the
+REM     process is killed without running its shutdown and the 2400 is left
+REM     driving whatever it was driving. The same goes for End Task, a logoff,
+REM     and a power cut.
+REM
+REM     If the source needs to be off and this window will not take a Ctrl-C,
+REM     the 2400's own OUTPUT key is the answer and it always works.
 REM
 REM CONFIGURATION
 REM     rig.toml gives the GPIB address and the two bench ceilings; run.toml

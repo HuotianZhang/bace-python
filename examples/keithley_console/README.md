@@ -79,18 +79,25 @@ because a typo that silently ran the defaults would be a bench nobody chose.
   `max_current_compliance_a` a sourced current: they are the bench's statement
   of what the device may see, whichever end of the instrument it arrives from,
   so no third key was invented to hold the same number twice.
-* **The output goes off when the console stops.** Ctrl-C, `kill`/`SIGTERM`, a
-  closed terminal (`SIGHUP`), Ctrl-Break on Windows, an exception out of the
-  server — and the two ways it can fail to start at all: a port that turns out
+* **The output goes off when the console stops** — for the ways of stopping it
+  that software can catch. Ctrl-C (`SIGINT`), `kill`/`SIGTERM`, Ctrl-Break on
+  Windows (`SIGBREAK`), a closed terminal on Linux and macOS (`SIGHUP`), an
+  exception out of the server — and the two ways it can fail to start at all: a port that turns out
   to be taken, which is how starting the console twice ends, and a `rig.toml`
   ceiling or `run.toml` default the panel refuses. Both are found *after* the
   instrument is open and possibly already driving, left that way by whoever
   had it before. Each is caught and the source is switched off on the way out,
   the GPIB session with it; a taken port also gets a sentence rather than a
   traceback about a socket.
-  `SIGKILL` and Windows' `TerminateProcess` cannot be caught by anything, so
-  the output survives those; nothing in software fixes that, and the
-  instrument's own OUTPUT key does. A
+  **What cannot be caught, and where the difference bites: closing the console
+  window on Windows.** That is `CTRL_CLOSE_EVENT`, which Python does not
+  deliver as a signal at all — the process is killed without running its
+  shutdown, and the source is left driving. `SIGHUP` covers the same gesture on
+  Linux and macOS, which is why the two platforms are named separately above
+  rather than the terminal being called closed on both. `SIGKILL`, End Task's
+  `TerminateProcess`, a logoff and a power cut are the same story. Nothing in
+  software fixes any of them; the instrument's own OUTPUT key does, and
+  `Run Keithley Console.bat` says so where a Windows operator will read it. A
   browser tab closing is not something to rely on for that. The off is
   *queued*, not waited for in the shutdown path, and the worker drains its
   queue on every way out: Ctrl-C can arrive while a read is in flight, and a

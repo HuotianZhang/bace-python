@@ -230,11 +230,20 @@ def _load_config(a: argparse.Namespace) -> tuple[Rig, SourceMeterConfig]:
     path = a.rig or _find("rig.toml")
     if path:
         t = _table(path, "sourcemeter", frozenset(f.name for f in fields(Rig)))
-        rig = Rig(address=str(t.get("address", rig.address)),
-                  max_current_compliance_a=float(
-                      t.get("max_current_compliance_a", rig.max_current_compliance_a)),
-                  max_voltage_compliance_v=float(
-                      t.get("max_voltage_compliance_v", rig.max_voltage_compliance_v)))
+        try:
+            # `float()` on a value TOML happily carries as a string --
+            # `max_current_compliance_a = "50 mA"` -- raises `ValueError`, and
+            # `main` catches only `ConfigError`, so the double-click launcher
+            # ended on a traceback instead of the sentence it exists to print.
+            # The run config already did this; the ceilings are the half where
+            # it matters more.
+            rig = Rig(address=str(t.get("address", rig.address)),
+                      max_current_compliance_a=float(
+                          t.get("max_current_compliance_a", rig.max_current_compliance_a)),
+                      max_voltage_compliance_v=float(
+                          t.get("max_voltage_compliance_v", rig.max_voltage_compliance_v)))
+        except (TypeError, ValueError) as exc:
+            raise ConfigError(f"{path} [sourcemeter]: {exc}") from None
         print(f"rig.toml   {path}")
     else:
         print("rig.toml   not found; using the built-in bench ceilings "
@@ -378,6 +387,15 @@ def main(argv: list[str] | None = None) -> int:
         url = f"http://{a.host}:{server.server_port}/"
         print(f"\nthe panel  {url}   (Ctrl-C to stop; the output goes off on "
               "the way out)")
+        if os.name == "nt":
+            # On screen for the whole session, where the `.bat`'s comments are
+            # read once at most. Closing the window sends `CTRL_CLOSE_EVENT`,
+            # which Python does not deliver as a signal, so the shutdown never
+            # runs -- and the gesture an operator reaches for to end a console
+            # window is exactly the one that leaves the source driving.
+            print("           stop it with Ctrl-C, not the window's X: closing "
+                  "the window kills this\n           process without switching "
+                  "the output off.")
         if a.browser:
             import webbrowser
             webbrowser.open(url)
