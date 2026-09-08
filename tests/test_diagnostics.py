@@ -44,6 +44,18 @@ def spike(shift_ns: float = 0.0, smear_ns: float = 0.0, photo: float = 0.0) -> n
     return y + rng.normal(0, 2e-6, N)
 
 
+def extraction(amp: float = 1.4e-2, tau: float = 150.0, t0: float = 322.0,
+               rise: float = 3.0) -> np.ndarray:
+    """The charge coming out, as the rig's traces carry it: a 14 mA transient
+    that rises just after the 50 mA displacement spike's peak and decays over
+    150 ns, so it loads the spike's *decay* and leaves its leading flank
+    alone. That is the shape that moves the correlation peak while the spike
+    itself stands still -- lag -0.56 ns with both edges still 6.0 ns, which is
+    what the rig showed from 220 to 295 K."""
+    t = np.arange(N) * DT * 1e9
+    return -amp * (1 - np.exp(-(t - t0).clip(0) / rise)) * np.exp(-(t - t0).clip(0) / tau) * (t > t0)
+
+
 def test_a_dark_spike_half_a_nanosecond_late_is_measured_as_such():
     lag = spike_lag_ns(spike(0.0, photo=3e-4), spike(0.5), DT)
     assert lag is not None and lag == pytest.approx(0.5, abs=0.06)
@@ -89,13 +101,14 @@ def test_a_lag_with_sharp_edges_is_the_extracted_charge_and_not_a_warning():
     Here the spikes are half a nanosecond apart with 6 ns edges and equal
     heights: nothing was smeared, so nothing jittered.
     """
-    light = Trace(spike(0.0, photo=3e-4), DT, T0, count=200)
-    dark = Trace(spike(0.5), DT, T0, count=200)
+    light = Trace(spike(0.0) + extraction(), DT, T0, count=200)
+    dark = Trace(spike(0.0), DT, T0, count=200)   # not shifted by anything
     v = W.shot_verdict(light.y, dark.y, {"autorange_passes": 1}, dt=DT,
                        light=light, dark=dark)
     assert abs(v["spike_lag_ns"]) > W.SPIKE_LAG_NS, "the lag is there"
     assert v["edge_light_ns"] == pytest.approx(6.0, abs=0.6)
-    assert v["level"] == "ok", "a lag with a sharp edge is not jitter"
+    assert v["shift_cancels"] < 0.05, "sliding explains none of it, because nothing slid"
+    assert v["level"] == "ok", "a lag no slide explains, with a sharp edge, is not jitter"
     assert "charge, not jitter" in v["text"], "and the line says so, with the number"
     assert "ns apart" in v["text"]
 
@@ -109,13 +122,34 @@ def test_spikes_of_different_height_are_not_by_themselves_jitter():
     at 220 K to 1.1 % at 295 K and are still climbing -- and they do it in the
     shots that also carry the charge-induced lag, which is exactly the pair
     this rule must not call void."""
-    light = Trace(spike(0.0), DT, T0, count=200)
-    dark = Trace(spike(0.5) * 0.90, DT, T0, count=200)
+    light = Trace(spike(0.0) + extraction(), DT, T0, count=200)
+    dark = Trace(spike(0.0) * 0.90, DT, T0, count=200)
     v = W.shot_verdict(light.y, dark.y, {"autorange_passes": 1}, dt=DT,
                        light=light, dark=dark)
     assert abs(v["spike_lag_ns"]) > W.SPIKE_LAG_NS and v["edge_light_ns"] < W.SPIKE_EDGE_NS
-    assert v["level"] == "ok", "10 % apart in height, but nothing was smeared"
+    assert v["level"] == "ok", "10 % apart in height, but nothing was smeared and nothing slid"
     assert v["peak_light_a"] != v["peak_dark_a"], "the heights are still on the verdict"
+
+
+def test_a_real_offset_between_the_two_acquisitions_is_a_warning_however_sharp():
+    """The case a lag-and-edges rule would wave through: the light and dark
+    acquisitions genuinely offset in time -- a fixed timing difference, or too
+    few averages to smooth one out -- shifts a sharp spike without smearing
+    it. The engine subtracts sample for sample, so that leaves the 50 mA spike
+    in the photocurrent and Q is not a charge.
+
+    Sliding the dark trace back is what tells the two apart: it cancels 97 %
+    of the difference here and 0.1 % when the lag is the extracted charge."""
+    light = Trace(spike(0.0), DT, T0, count=200)
+    dark = Trace(spike(0.5), DT, T0, count=200)
+    v = W.shot_verdict(light.y, dark.y, {"autorange_passes": 1}, dt=DT,
+                       light=light, dark=dark)
+    assert abs(v["spike_lag_ns"]) > W.SPIKE_LAG_NS
+    assert v["edge_light_ns"] == pytest.approx(6.0, abs=0.6), "nothing is smeared"
+    assert v["edge_dark_ns"] == pytest.approx(6.0, abs=0.6)
+    assert v["shift_cancels"] > W.SHIFT_CANCELS
+    assert v["level"] == "warn", "sharp edges, but the traces really are offset"
+    assert "offset in time" in v["text"] and "not a charge" in v["text"]
 
 
 def test_the_sync_edge_is_read_off_a_narrow_pulse_too():

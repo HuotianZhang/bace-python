@@ -120,6 +120,17 @@ a jittered average is the true spike convolved with the trigger's own
 scatter, which widens the leading edge. `SPIKE_EDGE_NS` is that, and a
 `warn` needs the lag *and* it."""
 
+SHIFT_CANCELS = 0.5
+"""Above this fraction, sliding the dark trace by the measured lag explains
+the light-dark difference, so the lag is a real inter-acquisition offset and
+the shot is void whatever its edges look like -- the engine subtracts sample
+for sample, and an offset puts the 50 mA spike into the photocurrent.
+
+The two cases are two orders of magnitude apart, so the threshold sits in
+open country: a pure 0.5 ns offset cancels 97 %, one with a photocurrent on
+top 93 %, and the rig's charge-induced lags 3.5-4.6 %
+(`core.diagnostics.shift_cancels`)."""
+
 SPIKE_EDGE_NS = 8.0
 """A displacement spike whose 10-90 % edge is slower than this was smeared.
 The rig's good shots are 6.0-6.5 ns; the jittered ones were 8-13 ns.
@@ -141,8 +152,8 @@ VERDICT_KEYS: tuple[str, ...] = ("rail_light", "rail_dark", "rail_run_light", "r
                                  "shared_extreme", "peak_light_a", "peak_dark_a",
                                  "spike_lag_ns", "edge_light_ns", "edge_dark_ns",
                                  "averages_light", "averages_dark",
-                                 "sync_edge_light_ns", "sync_edge_dark_ns", "level",
-                                 "text")
+                                 "sync_edge_light_ns", "sync_edge_dark_ns",
+                                 "shift_cancels", "level", "text")
 """The keys every verdict carries. A diagnostic may add to them, never
 replace one: a `shot_diagnostics()` that happened to return `level` would
 otherwise silently overrule the saturation check. `peak_*_a` is the signed
@@ -299,9 +310,10 @@ def shot_verdict(light_y, dark_y,
 
     **But a lag is not by itself jitter.** The light trace carries the charge
     being extracted on top of the spike, and that alone moves the correlation
-    peak: see `_smeared`, and `SPIKE_LAG_NS`. So `warn` needs the lag *and* a
-    smeared edge; a lag on its own is reported in the `ok` line as "charge,
-    not jitter". The edge times and the sync edges are reported beside it so
+    peak: see `_smeared`, and `SPIKE_LAG_NS`. So `warn` needs the lag *and*
+    either a smeared edge or a difference that sliding the dark trace
+    actually cancels; a lag with neither is reported in the `ok` line as
+    "charge, not jitter". The edge times and the sync edges are reported beside it so
     the two sides of the trigger chain can be told apart; the average counts
     say whether the digitiser folded what was asked. All need `dt` (and the
     `Trace`s for the counts and the syncs); called with bare arrays they are
@@ -400,14 +412,18 @@ def _alignment(light: np.ndarray, dark: np.ndarray, dt: float | None,
                light_tr: Any, dark_tr: Any, sync_light: Any, sync_dark: Any) -> dict[str, Any]:
     """The alignment and completeness numbers (`core.diagnostics`), None
     where the inputs cannot give them."""
-    from ..core.diagnostics import edge_10_90_ns, spike_lag_ns, sync_edge_ns
+    from ..core.diagnostics import (edge_10_90_ns, shift_cancels, spike_lag_ns,
+                                    sync_edge_ns)
     out: dict[str, Any] = {"spike_lag_ns": None, "edge_light_ns": None, "edge_dark_ns": None,
                            "averages_light": None, "averages_dark": None,
-                           "sync_edge_light_ns": None, "sync_edge_dark_ns": None}
+                           "sync_edge_light_ns": None, "sync_edge_dark_ns": None,
+                           "shift_cancels": None}
     if dt and light.size and dark.size:
         out["spike_lag_ns"] = spike_lag_ns(light, dark, dt)
         out["edge_light_ns"] = edge_10_90_ns(light, dt)
         out["edge_dark_ns"] = edge_10_90_ns(dark, dt)
+        if out["spike_lag_ns"] is not None:
+            out["shift_cancels"] = shift_cancels(light, dark, dt, out["spike_lag_ns"])
     for key, tr in (("averages_light", light_tr), ("averages_dark", dark_tr)):
         count = getattr(tr, "count", None)
         out[key] = None if count is None else int(count)
@@ -433,20 +449,38 @@ def _smeared(align: Mapping[str, Any]) -> str:
     177 of 492 good shots void, and told the operator to distrust a charge
     that was within ~1 % of right.
 
-    Jitter does something a superimposed signal cannot: the average is the
-    true spike convolved with the trigger's own scatter, so the leading edge
-    comes out slower. That is the one corroborating symptom used here. The
-    incident lowered the spikes as well, but a height difference between the
-    two traces is not the acquisition's alone to explain -- see
-    `SPIKE_EDGE_NS` -- and it grows with temperature on a healthy device, in
-    the very shots this rule exists to stop calling void.
+    Two things corroborate, and they cover the two ways a lag can be real:
+
+    * **the difference is a shift.** Slide the dark trace by the lag; if that
+      cancels most of the light-dark difference the two acquisitions were
+      genuinely offset in time, whatever the edges look like -- a fixed
+      offset between them, or too few averages to smooth one out, shifts a
+      sharp spike without smearing it. `SHIFT_CANCELS`, and
+      `core.diagnostics.shift_cancels` for the numbers: 97 % for a real
+      offset against 4 % for a charge-induced lag.
+    * **the edge is smeared.** A jittered average is the true spike convolved
+      with the trigger's own scatter, so the leading edge comes out slower.
+      `SPIKE_EDGE_NS`.
+
+    The 2026-09-05 incident lowered the spikes as well, but a height
+    difference between the two traces is not the acquisition's alone to
+    explain -- see `SPIKE_EDGE_NS` -- and it grows with temperature on a
+    healthy device, in the very shots this rule exists to stop calling void.
     """
     lag = align.get("spike_lag_ns")
     if lag is None or abs(lag) <= SPIKE_LAG_NS:
         return ""
+    # The edge first: a smeared spike is jitter whatever the slide then says,
+    # and a jittered pair is differently *shaped*, so sliding it back cancels
+    # little (13 % on the synthetic incident) and would otherwise let the
+    # weaker symptom name the fault.
     edges = [e for e in (align.get("edge_light_ns"), align.get("edge_dark_ns")) if e is not None]
     if edges and max(edges) > SPIKE_EDGE_NS:
         return f"the spike edge is {max(edges):.1f} ns where a settled shot is 6 ns"
+    cancels = align.get("shift_cancels")
+    if cancels is not None and cancels > SHIFT_CANCELS:
+        return (f"sliding the dark trace by it cancels {100 * cancels:.0f} % of their "
+                "difference, so the two acquisitions really are offset in time")
     return ""
 
 

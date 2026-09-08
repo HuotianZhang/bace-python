@@ -82,6 +82,49 @@ def spike_lag_ns(light: np.ndarray, dark: np.ndarray, dt: float) -> float | None
     return float(-(shift - (x.size - 1)) * dt * 1e9)
 
 
+def shift_cancels(light: np.ndarray, dark: np.ndarray, dt: float,
+                  lag_ns: float) -> float | None:
+    """How much of the spike-region difference a time shift explains: 0 to 1.
+
+    Slide `dark` by `lag_ns` so its spike lands on the light one, and compare
+    the largest remaining `light - dark` excursion around the spike with the
+    one before the slide. **This separates the two things a lag can mean**,
+    and they need opposite verdicts:
+
+    * a real inter-acquisition offset -- a fixed timing difference between the
+      light and dark acquisitions, or too few averages to smooth one out --
+      leaves the traces identical apart from the shift, so sliding one back
+      cancels nearly all of the difference. Measured on synthetic pairs:
+      **97 %** for a pure 0.5 ns offset, 93 % with a photocurrent on top. The
+      engine subtracts sample for sample, so an offset like that puts the
+      50 mA spike straight into the photocurrent and Q is not a charge.
+    * the extracted charge riding on the spike moves the correlation peak
+      while the spike itself stands still, so sliding removes almost nothing:
+      **3.5-4.6 %** across the rig's 220-295 K sweep (2026-09-06/07).
+
+    Two orders of magnitude apart, which is why `service.wire` can use it as a
+    verdict. None when there is no spike, no lag, or the window does not fit.
+    """
+    a = np.asarray(light, dtype=float)
+    b = np.asarray(dark, dtype=float)
+    if a.size == 0 or a.size != b.size or not dt or not np.isfinite(dt):
+        return None
+    if lag_ns is None or not np.isfinite(lag_ns):
+        return None
+    i = int(np.argmax(np.abs(a)))
+    lo = max(0, i - int(round(SPIKE_WINDOW_BEFORE_S / dt)))
+    hi = min(a.size, i + int(round(SPIKE_WINDOW_AFTER_S / dt)))
+    if hi - lo < 8:
+        return None
+    t = np.arange(a.size) * dt
+    slid = np.interp(t, t - float(lag_ns) * 1e-9, b)
+    before = float(np.abs((a - b)[lo:hi]).max())
+    after = float(np.abs((a - slid)[lo:hi]).max())
+    if before <= 0.0:
+        return None
+    return float(max(0.0, 1.0 - after / before))
+
+
 def edge_10_90_ns(trace: np.ndarray, dt: float) -> float | None:
     """The 10-90 % time of the displacement spike's leading edge, in ns.
 
