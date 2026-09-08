@@ -1,44 +1,62 @@
-# The Keithley 2400 console
+# Keithley console
 
-The instrument's own front panel, in a browser. One instrument, one process,
-one port — and **nothing from `bace.service` and nothing from `ui/`**.
+The 2400's own front panel, in a browser. One instrument, one process, one
+port.
 
-```bash
-python -m bace.consoles.keithley --sim     # no hardware, no VISA, no extras
-python -m bace.consoles.keithley           # GPIB0::24, from rig.toml
+```
+py -3 keithley_console.py --sim        try it with no hardware at all
+py -3 keithley_console.py              GPIB0::24, from rig.toml
+py -3 keithley_console.py --browser    the page opened for you
 ```
 
-Then open <http://127.0.0.1:8924/>. Source a voltage or a current, hold a
-compliance, switch the output on, watch what comes back. No module, no run, no
-folder, and no other instrument — no relay, no shutter, no LED, no scope.
+Then <http://127.0.0.1:8924/>. On Windows, `Run Keithley Console.bat` is the
+double-click form. Source a voltage or a current, hold a compliance, switch the
+output on, watch what comes back. No module, no run, no folder, and no other
+instrument — no relay, no shutter, no LED, no scope. Nothing here writes a file.
+
+## Standalone on purpose
+
+This folder imports **nothing** from `bace/` — not the drivers, not the config,
+not the service, and not the UI. Copy it to a machine with the SourceMeter and
+a Python 3.11 and it runs; there is nothing else to install, and under `--sim`
+not even a VISA backend. `smu.py` and `simulated.py` are therefore a deliberate
+second copy of what `bace/drivers/keithley2400.py` and `bace/drivers/simulated.py`
+do properly — go there for the three DC quantities, the J-V sweep, the sign
+conventions and the bench history behind each. None of that is here; a front
+panel does not need it.
+
+`tests/test_keithley_console.py` holds the standalone property down in a
+subprocess, because it is the one most easily lost by accident.
 
 ## Why it is a separate program
 
-**One process owns an instrument.** The console and `bace.service` cannot both
-hold `GPIB0::24`, and the one that starts second gets a VISA error that reads
-like a cable fault. So this is what you run *instead of* the service, when the
-Keithley is what you want by hand: a V_oc on a probe station, a compliance
-check on a new pixel, a look at a diode before it is worth queueing a run.
+**One process owns an instrument.** This console and the BACE service cannot
+both hold `GPIB0::24`, and the one that starts second gets a VISA error that
+reads like a cable fault. So this is what you run *instead of* the service,
+when the Keithley is what you want by hand: a V_oc on a probe station, a
+compliance check on a new pixel, a look at a diode before it is worth queueing
+a run.
 
 That constraint is why the 1918-C has a console on `:8918` and the 331 one on
-`:8331` (`docs/service-plan.md`, "the existing standalone consoles stay standalone"). This is the same
-shape for the 2400, and `8924` continues the convention: the last two digits
-are the instrument's GPIB address, so the port says which instrument answers.
+`:8331` (`docs/service-plan.md`). This is the same shape for the 2400, and
+`8924` continues the convention: the last two digits are the instrument's GPIB
+address, so the port says which instrument answers.
 
 ## What it needs
 
-Nothing but the base install. `http.server` rather than FastAPI, so there is
-no `service` extra; `--sim` builds `drivers.simulated.SimulatedSourceMeter`, so
-there is no VISA backend either and the console comes up on a laptop or in a
-container. On a real bench, `pip install -e .[rig]` for pyvisa.
+The standard library, and `pyvisa` for the real instrument (`pip install
+pyvisa`, plus NI-VISA or Keysight's runtime). `--sim` needs neither — no VISA
+backend and no instrument — so the page comes up on a laptop or in a
+container.
 
 | | |
 |---|---|
 | `rig.toml` `[sourcemeter]` | the VISA address, and the two **bench ceilings** |
 | `run.toml` `[sourcemeter]` | the compliance, NPLC, filter and terminals the panel opens on |
 
-Both are found by name in the working directory, as everything else in this
-project finds them. A missing file is a printed warning and the built-in
+Both are looked for by name in the folder you start from and then beside
+`keithley_console.py`, so on a bare machine a copy of either can simply sit in
+this folder. A missing file is a printed warning and the built-in
 defaults; a file that is *named* (`--rig`, `--run`) and missing is an error,
 because a typo that silently ran the defaults would be a bench nobody chose.
 
@@ -103,7 +121,7 @@ because a typo that silently ran the defaults would be a bench nobody chose.
   100-deep filter are both legal on a 2400 and both accepted here, and that
   pair is `100 x 4 x 10 / 50 Hz` = 80 s of integration (four apertures per
   averaged reading, because `:FUNC:CONC ON` measures both and auto-zeroes
-  each). So a read job waits `Keithley2400.panel_budget_s` and `read_panel`
+  each). So a read job waits `smu.panel_budget_for` and `read_panel`
   raises the VISA timeout for its own query — a flat 30 s would answer a
   healthy read with "the instrument did not answer", while the read went on
   running and whatever was queued behind it landed afterwards.
@@ -145,11 +163,12 @@ because a typo that silently ran the defaults would be a bench nobody chose.
   never waits behind a reading and a reading never lands in the middle of a
   click.
 
-Under `--sim` the relay is put on the SourceMeter and the cell is lit, because
-there is no relay on this console to move and no lamp to switch; `--sim-dark`
-gives the unlit case. Every simulated number is a model of a solar cell and the
-page says so in the bar — a simulated V_oc must never be mistaken for a
-measured one.
+Under `--sim` the cell is lit, so sourcing 0 A shows a plausible V_oc the
+moment the output goes on; `--sim-dark` gives the unlit case. `simulated.py` is
+a single-diode model in pure Python — no relay and no shutter, because there is
+no bench here to model, and no numpy, so the folder runs under whatever Python
+is on the machine. **Every simulated number is a model** and the page says so
+in the bar: a simulated V_oc must never be mistaken for a measured one.
 
 ## The API
 
@@ -211,18 +230,23 @@ what the bench is doing either.
 
 ## Copying it for another instrument
 
-This is the smallest complete example of the shape, and it is three files:
+This is the smallest complete example of the shape. Five files, and only two
+of them are about the 2400:
 
 | | |
 |---|---|
+| `keithley_console.py` | the command line: the two config files, opening the session, and the one warning worth printing when it will not start |
 | `panel.py` | the instrument and the one thread allowed to touch it. No HTTP. The policy a panel needs on top of a driver: the ceilings, what is refused and why, and what the display does between jobs |
 | `server.py` | `http.server`, six routes, and the three kinds of "no". Knows nothing about the 2400 |
 | `page.html` | one file — inline CSS and JS, system fonts, nothing fetched. Draws `GET /api/state` and posts back |
+| `smu.py`, `simulated.py` | the instrument and a model of what it is pointed at. **The only two files an instrument gets to change** |
 
-For another instrument, `panel.py` is what changes: give it a driver from
-`bace/drivers/`, decide what the ceilings are and what the display reads, and
-keep the worker exactly as it is. `server.py` and the page follow the panel's
-state object rather than the instrument, so most of both survives the copy.
+For another instrument, swap those last two and edit `panel.py`: decide what
+the ceilings are, what the display reads, and which fields cannot be changed
+under a live output. Keep the worker in `panel.py` exactly as it is — it is
+the part that took eight rounds of review to get right. `server.py` and the
+page follow the panel's state object rather than the instrument, so most of
+both survives the copy untouched.
 
 The one rule not to lose in the copying: **the driver keeps the instrument's
 state, and the console keeps none of it.** `panel` in the state object is

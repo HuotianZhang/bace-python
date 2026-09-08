@@ -1,29 +1,46 @@
-"""The Keithley 2400 console: one instrument, one process, one port.
+"""The Keithley 2400's front panel, in a browser. One instrument, one port.
 
-    python -m bace.consoles.keithley --sim          # no hardware, no VISA
-    python -m bace.consoles.keithley                # GPIB0::24, from rig.toml
-    python -m bace.consoles.keithley --address GPIB0::24::INSTR --port 8925
+    py -3 keithley_console.py --sim        try it with no hardware at all
+    py -3 keithley_console.py              GPIB0::24, from rig.toml
+    py -3 keithley_console.py --address GPIB0::24::INSTR --port 8925
 
-Then open http://127.0.0.1:8924/.
+Then <http://127.0.0.1:8924/>. On Windows, `Run Keithley Console.bat` is the
+double-click form.
 
-**This is not `bace.service` and does not import it.** It opens the
-SourceMeter itself, serves one page from the standard library, and touches no
-other instrument -- no relay, no shutter, no LED, no scope -- and writes no
-file. It is what to run *instead of* the service when the Keithley is what you
-want by hand.
+Source a voltage or a current, hold a compliance, switch the output on, watch
+what comes back. No module, no run, no folder, and no other instrument — no
+relay, no shutter, no LED, no scope. Nothing here writes a file.
 
-**One process owns the instrument.** The two cannot both hold `GPIB0::24`, and
-the one that starts second gets a VISA error that reads like a cable fault. So
-stop the service before starting this, and stop this before starting the
-service. That constraint is exactly why the 1918-C and the 331 have consoles
-of their own (`docs/service-plan.md`), and this is the same shape for the 2400.
+## Standalone on purpose
+
+This folder imports **nothing** from `bace/` — not the drivers, not the config,
+not the service, and not the UI. Copy it to a machine with the SourceMeter and
+a Python 3.11 and it runs; there is nothing else to install, and under `--sim`
+not even a VISA backend. `smu.py` and `simulated.py` are therefore a deliberate
+second copy of what `bace/drivers/keithley2400.py` and `bace/drivers/
+simulated.py` do properly — go there for the measurement routines, the J-V
+sweep and the bench history. `tests/test_keithley_console.py` holds the
+standalone property down, in a subprocess, because it is the one most easily
+lost by accident.
+
+## One process owns the instrument
+
+The service and this console cannot both hold `GPIB0::24`, and the one that
+starts second gets a VISA error that reads like a cable fault. So stop the
+service before starting this, and stop this before starting the service. That
+constraint is exactly why the 1918-C and the 331 have consoles of their own,
+and this is the same shape for the 2400. The port says which: 8924 the way the
+1918-C's is 8918 and the 331's is 8331 — the last two digits are the GPIB
+address.
+
+## Configuration
 
 `rig.toml` supplies the address and the two bench ceilings; `run.toml`, if it
 is there, supplies the compliance, integration time and terminals the panel
-opens on. Both are found by name in the working directory as everything else
-in this project finds them, and a missing file is a printed warning and the
-built-in defaults -- **a file that is named and missing is an error**, because
-a typo in `--rig` that silently ran the defaults would be a bench nobody chose.
+opens on. Both are looked for by name in the working directory and beside this
+file. A missing file is a printed warning and the built-in defaults — **a file
+that is named and missing is an error**, because a typo in `--rig` that
+silently ran the defaults would be a bench nobody chose.
 
 `--host` is refused unless it is a loopback address. There is no
 authentication and this program drives a source into somebody's device, which
@@ -36,20 +53,38 @@ import errno
 import ipaddress
 import os
 import sys
+import tomllib
+from dataclasses import dataclass
 from typing import Any
 
-from ...bench.checks import _find
-from ...config import ConfigError, load_rig, load_run
-from ...drivers.keithley2400 import SourceMeterConfig
-from ...experiment.rig import RigConfig
-from .panel import POLL_DEFAULT_S, POLL_MAX_S, POLL_MIN_S, KeithleyPanel
-from .server import serve_forever
+from panel import POLL_DEFAULT_S, POLL_MAX_S, POLL_MIN_S, KeithleyPanel
+from server import serve_forever
+from simulated import SimulatedSourceMeter
+from smu import SourceMeterConfig
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8924
-"""8924 the way the 1918-C's console is on 8918 and the 331's on 8331: the
-last two digits are the instrument's GPIB address, so the port says which
-instrument answers on it."""
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+class ConfigError(RuntimeError):
+    """A file that was named and could not be used."""
+
+
+@dataclass(frozen=True)
+class Rig:
+    """`rig.toml [sourcemeter]` — the bench, not a measurement.
+
+    The two ceilings are the limits no recipe may exceed, because a 2400 will
+    happily push 1 A into a small cell. This console is the one surface in the
+    project where an operator types a level straight onto the device, so they
+    are what stands over that number.
+    """
+
+    address: str = "GPIB0::24::INSTR"
+    max_current_compliance_a: float = 0.05
+    max_voltage_compliance_v: float = 5.0
 
 
 def is_loopback(host: str) -> bool:
@@ -66,7 +101,8 @@ WINDOWS_PORT_TAKEN = (10013, 10048)
 """`WSAEACCES` and `WSAEADDRINUSE`. Windows does not answer a bound port with
 `EADDRINUSE`: a second `bind` raises 10013. Matched on `winerror` rather than
 `errno`, which Python maps 10013 to `EACCES` -- and `EACCES` on POSIX is a
-privileged port, not a busy one."""
+privileged port, not a busy one, so matching it there would explain `--port 80`
+as a console that is already running."""
 
 
 def _port_is_taken(exc: OSError) -> bool:
@@ -77,7 +113,7 @@ def _port_is_taken(exc: OSError) -> bool:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="python -m bace.consoles.keithley",
+        prog="keithley_console.py",
         description="The Keithley 2400's front panel, in a browser. One "
                     "instrument, no runs, no files.",
         formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -100,31 +136,76 @@ def build_parser() -> argparse.ArgumentParser:
                         "0 leaves it off (default %(default)s)")
     p.add_argument("--timeout-ms", type=int, default=20000,
                    help="VISA timeout for the session (default %(default)s)")
+    p.add_argument("--browser", action="store_true",
+                   help="open the page once the server is bound")
     return p
 
 
-def _load_config(a: argparse.Namespace) -> tuple[RigConfig, SourceMeterConfig]:
-    """`rig.toml` and `run.toml`, named or found. A named file that is not
-    there is an error; a file nobody named is a warning and the defaults."""
-    rig, smu = RigConfig(), SourceMeterConfig()
-    path = a.rig or _find("rig.toml")
+def _find(name: str) -> str | None:
+    """The working directory first, then beside this file.
+
+    The same order the package uses, and the reason is the same: a bench has
+    one `rig.toml` at the root of its checkout, and somebody who has copied
+    this folder onto a bare machine can drop one in next to the script.
+    """
+    for base in (os.getcwd(), HERE):
+        path = os.path.join(base, name)
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def _table(path: str, section: str) -> dict:
+    """One table out of a TOML file, or `{}` when it has no such section."""
+    try:
+        with open(path, "rb") as handle:
+            return dict(tomllib.load(handle).get(section, {}))
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise ConfigError(f"{path}: {exc}") from None
+
+
+def _load_config(a: argparse.Namespace) -> tuple[Rig, SourceMeterConfig]:
+    """`rig.toml` and `run.toml`, named or found.
+
+    Deliberately narrow: only `[sourcemeter]` out of each, and only the keys a
+    panel opens on. The package reads these files properly, validating every
+    section against the whole recipe; a console that refused to start because
+    an *oscilloscope* stanza was malformed would be refusing for a reason it
+    cannot act on.
+    """
+    rig, config = Rig(), SourceMeterConfig()
+
     if a.rig and not os.path.isfile(a.rig):
         raise ConfigError(f"--rig {a.rig!r}: no such file")
+    path = a.rig or _find("rig.toml")
     if path:
-        rig = load_rig(path)
+        t = _table(path, "sourcemeter")
+        rig = Rig(address=str(t.get("address", rig.address)),
+                  max_current_compliance_a=float(
+                      t.get("max_current_compliance_a", rig.max_current_compliance_a)),
+                  max_voltage_compliance_v=float(
+                      t.get("max_voltage_compliance_v", rig.max_voltage_compliance_v)))
         print(f"rig.toml   {path}")
     else:
         print("rig.toml   not found; using the built-in bench ceilings "
               f"({rig.max_current_compliance_a:g} A / {rig.max_voltage_compliance_v:g} V)")
-    path = a.run or _find("run.toml")
+
     if a.run and not os.path.isfile(a.run):
         raise ConfigError(f"--run {a.run!r}: no such file")
+    path = a.run or _find("run.toml")
     if path:
-        smu = load_run(path)[3]
+        t = _table(path, "sourcemeter")
+        fields = {f: t[f] for f in
+                  ("current_compliance_a", "voltage_compliance_v", "nplc",
+                   "averaging", "terminals", "four_wire") if f in t}
+        try:
+            config = SourceMeterConfig(**fields)
+        except (TypeError, ValueError) as exc:
+            raise ConfigError(f"{path} [sourcemeter]: {exc}") from None
         print(f"run.toml   {path}")
     else:
         print("run.toml   not found; the panel opens on the driver's defaults")
-    return rig, smu
+    return rig, config
 
 
 def _release(smu: Any) -> None:
@@ -153,21 +234,11 @@ def _release(smu: Any) -> None:
 def _open_simulated(dark: bool):
     """A simulated SourceMeter with a cell in front of it.
 
-    The relay is put on the SourceMeter here because there is no relay on this
-    console to move -- the simulated bench models one (`drivers/simulated.py`),
-    and off the SourceMeter's side the panel would read an open circuit for a
-    reason no button on this page could fix. Lit unless `--sim-dark`, so
-    sourcing 0 A shows a plausible V_oc the moment the output goes on and the
-    panel demonstrates something.
+    Lit unless `--sim-dark`, so sourcing 0 A shows a plausible V_oc the moment
+    the output goes on and the panel demonstrates something rather than a row
+    of zeroes.
     """
-    from ...drivers.simulated import make_bench
-    sim = make_bench(seed=0)
-    sim.bench.relay = "sourcemeter"
-    if not dark:
-        sim.bench.shutter_open = True
-        sim.bench.led_mode = "DC"
-        sim.bench.led_drive_v = 1.020
-    return sim.smu
+    return SimulatedSourceMeter(lit=not dark, seed=0)
 
 
 def _open_real(address: str, config: SourceMeterConfig, timeout_ms: int):
@@ -177,9 +248,9 @@ def _open_real(address: str, config: SourceMeterConfig, timeout_ms: int):
     try:
         import pyvisa
     except ImportError as exc:
-        return None, "", (f"pyvisa is not installed ({exc}); pip install -e .[rig], "
+        return None, "", (f"pyvisa is not installed ({exc}); pip install pyvisa, "
                           "or run with --sim")
-    from ...drivers.keithley2400 import Keithley2400
+    from smu import Keithley2400
     try:
         rm = pyvisa.ResourceManager()
         res = rm.open_resource(address)
@@ -222,7 +293,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"configuration: {exc}", file=sys.stderr)
         return 2
 
-    address = a.address or rig.sourcemeter_address
+    address = a.address or rig.address
     if a.sim:
         smu, identity, why = _open_simulated(a.sim_dark), "simulated 2400", ""
         address = "simulated"
@@ -238,18 +309,10 @@ def main(argv: list[str] | None = None) -> int:
             defaults=smu_config, identity=identity, address=address,
             mode="sim" if a.sim else "rig", unavailable=why)
     except Exception as exc:                                 # noqa: BLE001
-        # The panel validates the bench ceilings and the defaults `run.toml`
-        # opens on, and by here the instrument is already open -- `_open_real`
-        # has identified it and read its output, which may be live, left that
-        # way by whoever had it before. This construction is outside
-        # `serve_forever` and therefore outside the `finally` that switches
-        # that output off, so a `nan` ceiling or an out-of-range NPLC exited
-        # with the source driving and the session held.
         # Deliberately every exception, not just the `ValueError` the ceilings
         # raise today: what must not depend on which exception a later edit
-        # introduces here is that the instrument is put down. `_load_config`
-        # already owns the "configuration:" prefix, so this says which step
-        # failed rather than guessing at a cause.
+        # introduces here is that the instrument is put down. By this point
+        # `_open_real` has identified it and read an output that may be live.
         _release(smu)
         print(f"the panel could not be built: {exc}", file=sys.stderr)
         return 2
@@ -264,8 +327,12 @@ def main(argv: list[str] | None = None) -> int:
     def ready(server) -> None:
         if a.poll:
             panel.set_poll(a.poll)
-        print(f"\nthe panel  http://{a.host}:{server.server_port}/   (Ctrl-C to stop; "
-              "the output goes off on the way out)")
+        url = f"http://{a.host}:{server.server_port}/"
+        print(f"\nthe panel  {url}   (Ctrl-C to stop; the output goes off on "
+              "the way out)")
+        if a.browser:
+            import webbrowser
+            webbrowser.open(url)
 
     try:
         serve_forever(panel, host=a.host, port=a.port, on_ready=ready)
@@ -273,8 +340,7 @@ def main(argv: list[str] | None = None) -> int:
         # Almost always the console started twice. A traceback about a socket
         # would send somebody looking at the instrument — and the instrument
         # is fine; `serve_forever`'s own `finally` has already switched its
-        # output off on the way out. Same treatment, and the same reasoning,
-        # as `examples/shutter_console`.
+        # output off on the way out.
         print(f"cannot listen on {a.host}:{a.port}: {exc}", file=sys.stderr)
         if _port_is_taken(exc):
             print(f"  a Keithley console is already running — its page is at "

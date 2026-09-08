@@ -39,7 +39,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from .panel import (KeithleyPanel, PanelPending, PanelRefused, PanelUnavailable,
+from panel import (KeithleyPanel, PanelPending, PanelRefused, PanelUnavailable,
                     as_bool)
 
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "page.html")

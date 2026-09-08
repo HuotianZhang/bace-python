@@ -1,15 +1,17 @@
-"""The standalone Keithley console — `bace.consoles.keithley`.
+"""`examples/keithley_console/`: the 2400's front panel in a browser.
 
-Two things this file is here to hold down, both of which are what "standalone"
-means rather than what the panel does:
+That folder is a standalone example — it imports nothing from `bace/`, so it
+can be copied to a machine with the SourceMeter and a Python and nothing else.
+Being standalone is the property most easily lost by accident, so it is the
+first thing asserted here, in a subprocess.
 
-* **it imports nothing from `bace.service` and nothing from `ui/`**, and it
-  serves HTTP from the standard library — so it comes up on a checkout with
-  neither the `service` extra nor a VISA backend, which is the whole point of
-  a console you run in front of an instrument;
-* **one thread touches the instrument.** Every request goes through the
-  panel's worker, and the free-running display is what that worker does
-  between jobs — so a reading can never land in the middle of a click.
+The rest is what the page depends on, and it is mostly one invariant seen from
+different sides: **the console must never show a source as off while it
+drives.** Every refusal, every budget, every re-read of `:OUTP?` below is that
+one thing. Under it sits the other: **one thread touches the instrument** —
+every request goes through the panel's worker, and the free-running display is
+what that worker does between jobs, so a reading can never land in the middle
+of a click.
 
 Driven over real HTTP against a real server on an ephemeral port, because the
 transport is the part a stdlib server is most likely to get wrong (a missing
@@ -17,8 +19,11 @@ Content-Length hangs a browser and no unit test would see it).
 """
 from __future__ import annotations
 
+import importlib
 import json
 import pathlib
+import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -26,28 +31,27 @@ import urllib.request
 
 import pytest
 
-from bace.consoles.keithley.__main__ import build_parser, is_loopback, main
-from bace.consoles.keithley import panel as panel_module
-from bace.consoles.keithley.panel import (JOB_TIMEOUT_S, OUTPUT_WATCH_S, KeithleyPanel,
-                                          PanelPending, PanelRefused, PanelUnavailable,
-                                          source_args)
-from bace.consoles.keithley.server import make_server, serve_forever
-from bace.drivers.keithley2400 import (PanelSetup, SourceMeterConfig,
-                                       panel_budget_for)
-from bace.drivers.simulated import make_bench
+FOLDER = pathlib.Path(__file__).resolve().parents[1] / "examples" / "keithley_console"
+# The folder is what a copy of it would be: on `sys.path`, with nothing else
+# from this checkout reachable by name. That is also how `keithley_console.py`
+# finds its own siblings when it is run as a script.
+sys.path.insert(0, str(FOLDER))
+
+from keithley_console import build_parser, is_loopback, main
+import panel as panel_module
+from panel import (JOB_TIMEOUT_S, OUTPUT_WATCH_S, KeithleyPanel, PanelPending,
+                   PanelRefused, PanelUnavailable, source_args)
+from server import make_server, serve_forever
+from smu import PanelSetup, SourceMeterConfig, panel_budget_for
+from simulated import SimulatedSourceMeter
 
 CEILING = {"current_a": 0.05, "voltage_v": 5.0}
 
 
 def make_panel(*, lit: bool = True, ceiling: dict | None = None,
                defaults: SourceMeterConfig | None = None) -> KeithleyPanel:
-    sim = make_bench(seed=1)
-    sim.bench.relay = "sourcemeter"
-    if lit:
-        sim.bench.shutter_open = True
-        sim.bench.led_mode = "DC"
-        sim.bench.led_drive_v = 1.020
-    return KeithleyPanel(sim.smu, ceiling=ceiling or dict(CEILING),
+    return KeithleyPanel(SimulatedSourceMeter(lit=lit, seed=1),
+                         ceiling=ceiling or dict(CEILING),
                          defaults=defaults or SourceMeterConfig(),
                          identity="simulated 2400", address="simulated", mode="sim")
 
@@ -115,33 +119,58 @@ def _module_level_imports(module) -> set[str]:
     return names
 
 
-def test_the_console_imports_neither_the_service_nor_a_visa_backend():
-    """The claim in the module docstring, asserted rather than left in prose.
+def test_it_imports_nothing_from_the_package_or_off_the_shelf() -> None:
+    """The property the folder exists for, asserted in a subprocess.
 
-    `bace.service` is FastAPI + uvicorn behind an extra and `pyvisa` is behind
-    another; a console that pulled in either at import time would not come up
-    on the machine it is written for. `pyvisa` *is* imported by `_open_real`,
-    inside the function, so a real bench reaches it and `--sim` never does.
+    A fresh interpreter, only the folder on the path, importing the entry
+    point the way running the script does. Anything from `bace/` — or numpy,
+    or FastAPI, or a VISA backend — appearing in `sys.modules` afterwards means
+    somebody reached back into the checkout and the folder no longer runs on a
+    machine that has only the instrument and a Python.
     """
-    from bace.consoles.keithley import __main__ as cli
-    from bace.consoles.keithley import panel as panel_module
-    from bace.consoles.keithley import server as server_module
+    code = (
+        "import sys;"
+        f"sys.path.insert(0, {str(FOLDER)!r});"
+        "import keithley_console;"
+        "print(sorted(n for n in sys.modules if n.split('.')[0] in "
+        "('bace', 'numpy', 'scipy', 'pyvisa', 'h5py', 'fastapi', 'uvicorn', "
+        "'websockets', 'starlette')))"
+    )
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "[]", (
+        "examples/keithley_console pulled in " + out.stdout.strip() +
+        ". The folder must stay copy-and-run: standard library only, and "
+        "nothing from bace/.")
+
+
+def test_the_folder_carries_everything_it_needs() -> None:
+    for name in ("keithley_console.py", "panel.py", "server.py", "smu.py",
+                 "simulated.py", "page.html", "README.md",
+                 "Run Keithley Console.bat"):
+        assert (FOLDER / name).is_file(), f"examples/keithley_console/{name} is missing"
+
+
+def test_pyvisa_is_reached_only_for_a_real_instrument():
+    """`pyvisa` is imported *inside* `_open_real`, so a real bench reaches it
+    and `--sim` never does — which is what lets the folder come up on a laptop
+    with no VISA runtime installed at all."""
+    import keithley_console as cli
+    import server as server_module
 
     for module in (panel_module, server_module, cli):
         for name in _module_level_imports(module):
-            assert "service" not in name, f"{module.__name__} imports {name}"
             assert name not in ("fastapi", "uvicorn", "pyvisa", "websockets"), name
-    assert "pyvisa" not in _module_level_imports(cli), "opened inside `_open_real`"
     assert "pyvisa" in open(cli.__file__, encoding="utf-8").read(), \
         "and the real bench still reaches it"
-    # The panel is the instrument's; opening a session is the CLI's job.
+    # The panel is the instrument's; opening a session is the entry point's job.
     assert "pyvisa" not in open(panel_module.__file__, encoding="utf-8").read()
 
 
 def test_the_page_is_one_file_that_fetches_nothing_from_a_network():
     """A bench PC may have no route out, and a console whose fonts or scripts
     came from a CDN would come up unstyled or not at all."""
-    from bace.consoles.keithley.server import PAGE
+    from server import PAGE
     page = open(PAGE, encoding="utf-8").read()
     assert "<script" in page and page.count("<script") == 1
     for forbidden in ("http://", "https://", "//cdn", "import "):
@@ -872,11 +901,9 @@ def test_a_console_that_cannot_start_does_not_walk_away_holding_the_instrument(c
     source driving and the GPIB session held — and the next console to start
     would blame the cable.
     """
-    from bace.consoles.keithley import __main__ as entry
+    import keithley_console as entry
 
-    sim = make_bench(seed=1)
-    sim.bench.relay = "sourcemeter"
-    smu = sim.smu
+    smu = SimulatedSourceMeter(seed=1)
     smu.enable_output(True)                      # left driving by whoever had it
     closed: list[bool] = []
     smu.close = lambda: closed.append(True)
@@ -979,7 +1006,7 @@ def test_switching_the_output_off_is_not_swallowed_by_a_busy_page():
     Verified in a browser as well — the click makes `POST /api/output` now,
     where before it made no request at all.
     """
-    from bace.consoles.keithley.server import PAGE
+    from server import PAGE
     page = open(PAGE, encoding="utf-8").read()
 
     off = [line for line in page.splitlines() if '"/api/output", { on: false }' in line]
@@ -1064,7 +1091,7 @@ def test_the_page_says_when_it_cannot_reach_the_console():
     console", locks the output row, and prints the note; restarting it
     restores all three.
     """
-    from bace.consoles.keithley.server import PAGE
+    from server import PAGE
     page = open(PAGE, encoding="utf-8").read()
 
     assert "let linkDown = null;" in page

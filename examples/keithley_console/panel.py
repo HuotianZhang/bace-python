@@ -38,9 +38,8 @@ import threading
 import time
 from typing import Any, Callable
 
-from ...drivers.keithley2400 import (PANEL_STATIC, PanelSetup, SourceMeterConfig,
-                                     SourceMeterError, PANEL_BUDGET_MAX_S,
-                                     panel_budget_for)
+from smu import (PANEL_BUDGET_MAX_S, PANEL_STATIC, PanelSetup, SourceMeterConfig,
+                 SourceMeterError, panel_budget_for)
 
 JOB_TIMEOUT_S = 30.0
 """The **floor** on how long a request waits for the worker: enough for any
