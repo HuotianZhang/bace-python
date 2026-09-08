@@ -28,8 +28,9 @@ import pytest
 
 from bace.consoles.keithley.__main__ import build_parser, is_loopback, main
 from bace.consoles.keithley import panel as panel_module
-from bace.consoles.keithley.panel import (JOB_TIMEOUT_S, KeithleyPanel, PanelPending,
-                                          PanelRefused, PanelUnavailable, source_args)
+from bace.consoles.keithley.panel import (JOB_TIMEOUT_S, OUTPUT_WATCH_S, KeithleyPanel,
+                                          PanelPending, PanelRefused, PanelUnavailable,
+                                          source_args)
 from bace.consoles.keithley.server import make_server, serve_forever
 from bace.drivers.keithley2400 import PanelSetup, SourceMeterConfig, panel_budget_for
 from bace.drivers.simulated import make_bench
@@ -899,3 +900,96 @@ def tmp_rig_with_a_nan_ceiling() -> str:
     path.write_text("[sourcemeter]\naddress = 'GPIB0::24::INSTR'\n"
                     "max_current_compliance_a = nan\nmax_voltage_compliance_v = 5.0\n")
     return str(path)
+
+
+# -- round seven --------------------------------------------------------------
+def test_the_state_route_asks_the_instrument_when_the_display_is_off(panel):
+    """`state` touches no instrument by design — it is answered on an HTTP
+    thread and must never block behind an 80 s read. But that left the passive
+    path stale: with the display off, nothing asked at all, so the page went on
+    drawing a source as off for as long as it was left open while somebody had
+    switched it on at the 2400's own keys. The ask is queued now, so the next
+    refresh a second later carries it.
+    """
+    truth = {"on": False}
+    panel.smu.read_output = lambda: truth["on"]
+    panel.set_source({"function": "V", "level": 1.0})
+    panel.set_poll(None)                                 # the operator turns it off
+
+    server = make_server(panel, host="127.0.0.1", port=0)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_port}"
+
+    def get_state():
+        with urllib.request.urlopen(base + "/api/state", timeout=5) as answer:
+            return json.load(answer)
+
+    try:
+        assert get_state()["output"] is False
+        truth["on"] = True                               # LOCAL, then OUTPUT, by hand
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            time.sleep(panel_module.OUTPUT_WATCH_S / 4)
+            if get_state()["output"] is True:
+                break
+        assert get_state()["output"] is True, (
+            "a refresh of the page must notice a hand on OUTPUT")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_the_state_route_does_not_ask_more_often_than_it_has_to(panel):
+    """The page refreshes on a timer, so one query per refresh would be the
+    display poll wearing a different name — and while the display *is*
+    running, every tick already asks. Counted at the bus rather than at the
+    instrument, because the tick's own queries are indistinguishable there.
+    """
+    submitted: list[str] = []
+    real_submit = panel._bus.submit
+    panel._bus.submit = lambda fn, **kw: (submitted.append("job"),
+                                          real_submit(fn, **kw))[1]
+
+    panel.set_source({"function": "V", "level": 0.5})
+    panel.set_poll(None)
+    submitted.clear()
+
+    panel.refresh_output_soon()
+    assert len(submitted) == 1, "the first ask goes"
+    panel.refresh_output_soon()
+    panel.refresh_output_soon()
+    assert len(submitted) == 1, f"and is throttled to one per {OUTPUT_WATCH_S:g} s"
+
+    panel.set_poll(1.0)
+    submitted.clear()
+    panel.refresh_output_soon()
+    assert submitted == [], "the display owns the refresh while it is running"
+
+
+def test_switching_the_output_off_is_not_swallowed_by_a_busy_page():
+    """The console guarantees on its own side that an output-off is never
+    dropped — and the page could throw the click away before it was ever sent.
+    `call` returns early while another request is in flight, and a source
+    change can legally take 175 s, so an operator clicking `off` on a live
+    source got no request, no message, and enabled controls.
+
+    Asserted on the page's source because this file has no test harness: it is
+    one HTML file with its script inline, so there is no module to import.
+    Verified in a browser as well — the click makes `POST /api/output` now,
+    where before it made no request at all.
+    """
+    from bace.consoles.keithley.server import PAGE
+    page = open(PAGE, encoding="utf-8").read()
+
+    off = [line for line in page.splitlines() if '"/api/output", { on: false }' in line]
+    assert len(off) == 1, "one place switches the output off"
+    assert "always: true" in off[0], (
+        "the off must send even while another request is in flight")
+
+    on = [line for line in page.splitlines() if '"/api/output", { on: true }' in line]
+    assert len(on) == 1 and "always" not in on[0], (
+        "the on stays guarded: dropping an ON leaves the output off, the safe end")
+
+    # And the guard has to honour it, rather than the option being decorative.
+    assert "const guarded = !(options && options.always);" in page
+    assert "if (inflight && guarded) return null;" in page

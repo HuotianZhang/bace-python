@@ -254,9 +254,23 @@ let inflight = false;
 // not at. The refusal says why; the box goes back to what the 2400 holds.
 let formRev = 0;
 
-async function call(path, body) {
-  if (inflight) return null;
-  inflight = true;
+// `options.always` sends even while another request is in flight. **Switching
+// the output off is the only caller that uses it**, and it is the same rule
+// the console keeps on its own side: every other job is abandoned when the
+// caller stops waiting, that one is not. Guarded, a click on `off` during a
+// source change -- which can legally take 175 s, so the window is not small --
+// returned here without sending anything and without saying anything, leaving
+// the operator looking at enabled controls and a source that was still
+// driving. A timeout is not a reason to leave a source on; neither is a
+// button being busy.
+//
+// `on` stays guarded, deliberately: dropping an ON leaves the output off,
+// which is the safe end, exactly as the console's own `cancel_on_timeout`
+// decides it.
+async function call(path, body, options) {
+  const guarded = !(options && options.always);
+  if (inflight && guarded) return null;
+  if (guarded) inflight = true;
   try {
     const r = await fetch(path, {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -280,12 +294,21 @@ async function call(path, body) {
     say(String(error && error.message || error), "crit");
     return null;
   } finally {
-    inflight = false;
+    if (guarded) inflight = false;
     draw();
   }
 }
 function say(text, level) { said = { text, level: level || "warn" }; }
-function apply(next) { state = next; }
+// Two answers can now be in flight at once (an output-off sent past the guard
+// above), and they can land out of order: a slow source change finishing after
+// the off carries the state from before it, which would redraw a source that
+// is off as on. `at` is the console's own clock on one process, so the older
+// answer is simply dropped.
+function apply(next) {
+  if (state && next && typeof next.at === "number" && typeof state.at === "number"
+      && next.at < state.at) return;
+  state = next;
+}
 
 async function refresh() {
   if (inflight) return;
@@ -378,7 +401,8 @@ function draw() {
           { label: "4-wire", on: setup.four_wire === true, go: () => source({ four_wire: true }) },
         ], { lock: locked }),
         sw("output", [
-          { label: "off", on: state.output === false, go: () => call("/api/output", { on: false }) },
+          { label: "off", on: state.output === false,
+            go: () => call("/api/output", { on: false }, { always: true }) },
           { label: "on", on: live, alert: true, go: () => call("/api/output", { on: true }) },
         ], { loud: live }),
         el("div.boxes", FIELDS.map((f) => {

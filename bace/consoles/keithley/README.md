@@ -74,6 +74,17 @@ because a typo that silently ran the defaults would be a bench nobody chose.
   runs out — a VISA call that never returns, which cannot be interrupted
   without writing to the bus from a second thread — the console says so on
   stderr instead of exiting quietly.
+* **A tightened compliance is written before the level it limits.** One click
+  can do both — 0 V on a 50 mA limit to 5 V on 1 mA is an ordinary thing to
+  type — and under a live output those are two separate writes on the bus.
+  Level first, the device sees the new level under the old, looser limit until
+  the next command lands. So whichever change narrows what the device may see
+  goes first: a tightened compliance before the level, a loosened one after it.
+* **The output-off is never swallowed, on either side.** The console keeps it
+  queued rather than cancelling it; the page sends it even while another
+  request is in flight. A source change can legally take 175 s, and a click on
+  `off` that is quietly discarded because the page is busy leaves exactly the
+  same live source as one the console drops.
 * **Every wait is the driver's own budget, not a round number.** NPLC 10 and a
   100-deep filter are both legal on a 2400 and both accepted here, and that
   pair is `100 x 4 x 10 / 50 Hz` = 80 s of integration (four apertures per

@@ -60,6 +60,17 @@ SHUTDOWN_MARGIN_S = 10.0
 """Added to a read's budget when `close` waits for the worker: time for the
 in-flight read to end *and* for the queued output-off behind it to run."""
 
+OUTPUT_WATCH_S = 2.0
+"""How often `/api/state` may spend a bare `:OUTP?` while the display is off.
+
+The display, when it is running, refreshes the output flag every tick. With it
+off nothing did, and the flag went stale the moment somebody pressed LOCAL and
+then OUTPUT on the 2400 itself -- so the page reported the source off, for as
+long as it was left open, while it drove. Bounding that at a couple of seconds
+costs one short query and only while a page is actually open, which is also
+what makes closing the tab the way to hand the instrument back to its own keys.
+"""
+
 POLL_MIN_S, POLL_MAX_S = 0.1, 60.0
 POLL_DEFAULT_S = 1.0
 """What the display refreshes at. Slower than the 2400's own display and
@@ -367,6 +378,8 @@ class KeithleyPanel:
         at answer time because a driver's cached flag is only as fresh as the
         last thing this process did to it (`_fresh_output`)."""
         self._poll_s: float | None = None
+        self._output_asked_at = 0.0
+        self._output_pending = False
         self._readings = 0
         self._failures = 0
         self._last_error: str | None = None
@@ -494,6 +507,66 @@ class KeithleyPanel:
             "poll": poll,
             "at": time.time(),
         }
+
+    def refresh_output_soon(self) -> None:
+        """Queue a bare `:OUTP?` and do **not** wait for it.
+
+        `state` deliberately touches no instrument: it is answered on an HTTP
+        thread, and a status page that could block behind an 80 s read is not
+        a status page. But that left the passive path -- every refresh of the
+        open page -- reporting the flag as of the last thing the operator
+        clicked. With the display off and a hand on the 2400's own keys, that
+        is a live source drawn as off for as long as nobody clicks anything,
+        which on this console is the failure that matters most.
+
+        So the ask is queued and this answer still carries the previous
+        value; the refresh a couple of seconds later carries the new one.
+        Bounded staleness rather than a blocking GET, and the page notices a
+        hand on OUTPUT within about as long as the display would have taken.
+
+        Skipped while the display is running -- every tick already asks -- and
+        throttled otherwise, because the page refreshes on a timer and one
+        query per refresh is the display poll wearing a different name. Also
+        skipped while one is still queued: the worker can be inside an 80 s
+        read, and a page refreshing behind it would pile up forty of these to
+        run back to back for no answer that the last of them would not give.
+
+        A watch that fails leaves the flag as of the last one that did not.
+        That is the display's problem and not an interlock's: every path that
+        *acts* on the output -- a read, a source change, switching it on --
+        refreshes synchronously and raises, so a `:OUTP?` the instrument has
+        stopped answering surfaces there, at the point where it matters.
+        """
+        if not self.available:
+            return
+        with self._lock:
+            if self._poll_s is not None or self._output_pending:
+                return
+            now = time.monotonic()
+            if now - self._output_asked_at < OUTPUT_WATCH_S:
+                return
+            self._output_asked_at = now
+            self._output_pending = True
+
+        def job() -> None:
+            # Never raises: the worker calls a submitted job bare, so an
+            # exception here would take the one thread that can reach the
+            # instrument down with it -- including its way of switching the
+            # output off.
+            try:
+                self._fresh_output(self.smu)
+            except Exception:                                # noqa: BLE001
+                pass
+            finally:
+                with self._lock:
+                    self._output_pending = False
+
+        try:
+            self._bus.submit(job)
+        except PanelUnavailable:
+            # Shutting down. The output is on its way off; nothing to watch.
+            with self._lock:
+                self._output_pending = False
 
     # -- the three things a panel does --------------------------------------
     def set_source(self, body: dict) -> dict:
@@ -824,5 +897,6 @@ def as_bool(name: str, raw: Any) -> bool:
 __all__ = ["KeithleyPanel", "PanelPending", "PanelRefused", "PanelUnavailable",
            "PanelSetup",
            "SOURCE_FIELDS", "POLL_DEFAULT_S", "POLL_MIN_S", "POLL_MAX_S",
+           "OUTPUT_WATCH_S",
            "panel_wire", "source_args", "as_bool", "PANEL_STATIC",
            "JOB_TIMEOUT_S", "SHUTDOWN_MARGIN_S"]

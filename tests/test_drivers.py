@@ -1359,3 +1359,54 @@ def test_a_slow_point_raises_the_visa_timeout_for_its_read_and_puts_it_back():
     Keithley2400(io_, config=SourceMeterConfig(averaging=1, nplc=1.0)).sweep(
         0.0, 0.5, 2, settle_s=0.0)
     assert io_.timeout_at_read == 20000
+
+
+def test_a_tightened_compliance_is_written_before_the_level_it_limits():
+    """One click can raise a level and tighten its compliance at once — 0 V on
+    a 50 mA limit to 5 V on 1 mA is an ordinary thing to type. With the output
+    live those are two writes on the bus, and level-first means the device sees
+    the new level under the *old*, looser limit until the next command lands.
+    That is real charge through a cell somebody is measuring.
+
+    The rule is that whichever change narrows what the device may see goes
+    first: a tightened compliance before the level, a loosened one after it,
+    so a widened limit never applies to a level that has not come down yet.
+    """
+    io = PanelIO()
+    k = Keithley2400(io)
+    k.apply_panel(PanelSetup(function="voltage", level=0.0,
+                             current_compliance_a=0.05, voltage_compliance_v=5.0))
+    k.enable_output(True)
+
+    io.log.clear()
+    k.apply_panel(PanelSetup(function="voltage", level=5.0,
+                             current_compliance_a=0.001, voltage_compliance_v=5.0))
+    assert (io.log.index(":SENS:CURR:PROT:LEV 0.001;")
+            < io.log.index(":SOUR:VOLT:LEV 5;")), (
+        "5 V must not be sourced under the 50 mA limit it is replacing")
+
+    # And the other way: coming down to 0 V while the limit is *loosened* back
+    # to 50 mA. The level goes first, so the wider limit never applies to 5 V.
+    io.log.clear()
+    k.apply_panel(PanelSetup(function="voltage", level=0.0,
+                             current_compliance_a=0.05, voltage_compliance_v=5.0))
+    assert (io.log.index(":SOUR:VOLT:LEV 0;")
+            < io.log.index(":SENS:CURR:PROT:LEV 0.05;")), (
+        "50 mA must not be allowed while the source is still at 5 V")
+
+
+def test_a_current_source_orders_its_voltage_compliance_the_same_way():
+    """The same rule on the other function: sourcing current, the voltage
+    compliance is what limits the device."""
+    io = PanelIO()
+    k = Keithley2400(io)
+    k.apply_panel(PanelSetup(function="current", level=0.0,
+                             current_compliance_a=0.05, voltage_compliance_v=20.0))
+    k.enable_output(True)
+
+    io.log.clear()
+    k.apply_panel(PanelSetup(function="current", level=0.01,
+                             current_compliance_a=0.05, voltage_compliance_v=2.0))
+    assert (io.log.index(":SENS:VOLT:PROT:LEV 2;")
+            < io.log.index(":SOUR:CURR:LEV 0.01;")), (
+        "10 mA must not be driven while the compliance is still 20 V")

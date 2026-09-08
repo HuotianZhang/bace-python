@@ -402,6 +402,33 @@ class Keithley2400:
             return was is None or any(getattr(was, n) != getattr(setup, n) for n in names)
 
         mode = "VOLT" if setup.function == "voltage" else "CURR"
+
+        # A compliance that is being **tightened** is written before the level,
+        # a loosened one after it. One request can do both -- 0 V on a 50 mA
+        # limit to 5 V on a 1 mA limit is a plausible click -- and with the
+        # output live the two commands are separate writes on the bus. Level
+        # first, the device sees 5 V at up to the old 50 mA for as long as the
+        # next write takes; that is a real amount of charge through a cell
+        # somebody is measuring. Tightening first cannot hurt: the instrument
+        # clamps at the new limit while it is still at the old level.
+        #
+        # The rule is "whichever change narrows what the device may see goes
+        # first", which is also why a *loosened* compliance waits: it must not
+        # widen the limit while the level is still the old, higher one.
+        tighter: list[str] = []
+        looser: list[str] = []
+        for name, command in (
+                ("current_compliance_a",
+                 f":SENS:CURR:PROT:LEV {setup.current_compliance_a:g};"),
+                ("voltage_compliance_v",
+                 f":SENS:VOLT:PROT:LEV {setup.voltage_compliance_v:g};")):
+            if not moved(name):
+                continue
+            # `was is None` is the cold path, where the output is off and the
+            # order cannot matter -- before the level is the safe default.
+            widening = was is not None and getattr(setup, name) > getattr(was, name)
+            (looser if widening else tighter).append(command)
+
         if moved("function"):
             self._io.write(f":SOUR:FUNC:MODE {mode};")
         if moved("function", "source_range"):
@@ -410,12 +437,12 @@ class Keithley2400:
             else:
                 self._io.write(f":SOUR:{mode}:RANG:AUTO OFF;"
                                f":SOUR:{mode}:RANG {float(setup.source_range):g};")
+        for command in tighter:
+            self._io.write(command)
         if moved("function", "level", "source_range"):
             self._io.write(f":SOUR:{mode}:LEV {float(setup.level):g};")
-        if moved("current_compliance_a"):
-            self._io.write(f":SENS:CURR:PROT:LEV {setup.current_compliance_a:g};")
-        if moved("voltage_compliance_v"):
-            self._io.write(f":SENS:VOLT:PROT:LEV {setup.voltage_compliance_v:g};")
+        for command in looser:
+            self._io.write(command)
         if moved("nplc"):
             self._io.write(f":SENS:CURR:NPLC {setup.nplc:g};"
                            f":SENS:VOLT:NPLC {setup.nplc:g};")

@@ -99,6 +99,11 @@ def make_server(panel: KeithleyPanel, *, host: str, port: int) -> ThreadingHTTPS
             if path in ("/", "/index.html"):
                 return self._page()
             if path == "/api/state":
+                # Queued, not waited for: this GET answers with the flag as of
+                # the last ask and the next one carries the new value. Without
+                # it, a display switched off left the page drawing a source
+                # that somebody had switched on at the instrument as off.
+                panel.refresh_output_soon()
                 return self._json(200, panel.state())
             return self._json(404, {"error": f"no such route: {path}"})
 
