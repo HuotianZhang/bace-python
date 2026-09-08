@@ -36,7 +36,8 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from .panel import KeithleyPanel, PanelRefused, PanelUnavailable, as_bool
+from .panel import (KeithleyPanel, PanelPending, PanelRefused, PanelUnavailable,
+                    as_bool)
 
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "page.html")
 
@@ -86,6 +87,14 @@ def make_server(panel: KeithleyPanel, *, host: str, port: int) -> ThreadingHTTPS
                     return self._json(200, {"errors": panel.errors(),
                                             **panel.state()})
                 return self._json(404, {"error": f"no such route: {path}"})
+            except PanelPending as exc:
+                # 202, not 409: the job is queued and will run. The only
+                # operation that gets here is switching the output off behind
+                # a read that has not finished, and calling that a failure
+                # would be exactly backwards -- the state comes with it, so
+                # the caller can see the source is still on for now.
+                return self._json(202, {"error": str(exc), "level": "warn",
+                                        "pending": True, **panel.state()})
             except PanelRefused as exc:
                 # What the bench will not do *now*, with the reason and the
                 # remedy in the sentence -- never a bare status code.
@@ -97,7 +106,17 @@ def make_server(panel: KeithleyPanel, *, host: str, port: int) -> ThreadingHTTPS
             except ValueError as exc:
                 return self._json(422, {"error": str(exc), **panel.state()})
             except Exception as exc:                         # noqa: BLE001
-                return self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
+                # The state goes with every answer, this one included: a
+                # failure that left the caller unable to see whether the
+                # source is live is worse than the failure. `state()` touches
+                # no instrument, but if even that is broken the error is still
+                # reported rather than swallowed by a second one.
+                body: dict[str, Any] = {"error": f"{type(exc).__name__}: {exc}"}
+                try:
+                    body.update(panel.state())
+                except Exception:                            # noqa: BLE001
+                    body["state_unavailable"] = True
+                return self._json(500, body)
 
         # -- plumbing -------------------------------------------------------
         def _body(self) -> dict:

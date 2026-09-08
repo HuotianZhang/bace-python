@@ -94,8 +94,24 @@ class PanelRefused(RuntimeError):
         self.level = level
 
 
+class PanelPending(RuntimeError):
+    """The job is queued and **will** run, but the caller stopped waiting.
+
+    The one operation that gets this rather than a refusal is switching the
+    output *off*. A refusal would be a lie -- the off is in the queue, behind
+    a read that has not finished -- and, worse, an off that was dropped
+    because the caller gave up is a source left driving. So the off is never
+    cancelled, and a caller that waited long enough is told it is coming.
+
+    `bace/service/session.py` answers a slow `park` the same way, for the same
+    reason: "a park that vanished because the operator's click timed out would
+    leave the bench where the aborted run's own unwind put it".
+    """
+
+
 class PanelUnavailable(RuntimeError):
-    """There is no instrument to drive. Carries why."""
+    """There is no instrument to drive, or the console is shutting down.
+    Carries why."""
 
 
 # -- the worker -------------------------------------------------------------
@@ -121,6 +137,7 @@ class _Bus:
         self._stop = threading.Event()
         self._idle: tuple[Callable[[], None], float] | None = None
         self._next_idle = 0.0
+        self._sealed = False
         self._lock = threading.Lock()
 
     def start(self) -> None:
@@ -149,13 +166,50 @@ class _Bus:
             self._next_idle = time.monotonic()
         self._q.put(_WAKE)
 
-    def submit(self, fn: Callable[[], Any]) -> None:
+    def submit(self, fn: Callable[[], Any], *, force: bool = False) -> None:
         """Queue `fn` and do not wait. `KeithleyPanel.close` uses it for the
         output-off, which has to run *after* whatever the worker is in the
-        middle of and must not be waited for from inside the shutdown path."""
-        self._q.put(fn)
+        middle of and must not be waited for from inside the shutdown path.
 
-    def do(self, fn: Callable[[], Any], *, timeout_s: float = JOB_TIMEOUT_S) -> Any:
+        `force` is that one job's exemption from the seal below.
+        """
+        with self._lock:
+            if self._sealed and not force:
+                raise PanelUnavailable(
+                    "the console is shutting down; no further instrument work is "
+                    "accepted")
+            self._q.put(fn)
+
+    def seal(self) -> int:
+        """Accept no more work, and drop what has not started. Returns how
+        many queued jobs were dropped.
+
+        Shutdown's first act, and it has to be atomic with respect to
+        `submit`: `ThreadingHTTPServer` runs each request on a daemon thread
+        and `server_close()` does not wait for the ones already accepted, so a
+        straggler handler can be inside `set_output(True)` while the console is
+        closing. Sealed, that handler is told the console is shutting down;
+        unsealed, its ON landed *after* the shutdown OFF and the process
+        exited with the source driving -- while `close` reported the off
+        confirmed, because it had been.
+
+        Dropping the rest is deliberate too. At shutdown the only instrument
+        operation that matters is the output going off; running a queued
+        source change on the way out is work nobody is waiting for any more.
+        """
+        with self._lock:
+            self._sealed = True
+            dropped = 0
+            while True:
+                try:
+                    self._q.get_nowait()
+                except queue.Empty:
+                    break
+                dropped += 1
+            return dropped
+
+    def do(self, fn: Callable[[], Any], *, timeout_s: float = JOB_TIMEOUT_S,
+           cancel_on_timeout: bool = True) -> Any:
         """Run `fn` on the worker and return what it returned, or raise what it
         raised -- on the *caller's* thread, so a handler sees a `PanelRefused`
         as an exception and not as a status code somebody remembered to check.
@@ -167,6 +221,11 @@ class _Bus:
         There is one window left, between the check and `fn`: a job that has
         already started cannot be recalled, and this does not pretend to. What
         it removes is every job still waiting its turn.
+
+        **`cancel_on_timeout=False` opts out**, and switching the output off
+        is what opts out. Dropping that one because the caller stopped waiting
+        is a source left driving; it stays queued and the caller gets
+        `PanelPending`.
         """
         if not self._thread.is_alive():
             raise PanelUnavailable("the console's instrument thread is not running")
@@ -184,8 +243,12 @@ class _Bus:
             finally:
                 done.set()
 
-        self._q.put(job)
+        self.submit(job)
         if not done.wait(timeout_s):
+            if not cancel_on_timeout:
+                raise PanelPending(
+                    f"queued: the instrument has not answered within {timeout_s:g} s, "
+                    "so this is waiting behind whatever it is doing. It will run.")
             gave_up.set()
             raise PanelRefused(
                 f"the instrument did not answer within {timeout_s:g} s; the bus is "
@@ -318,13 +381,20 @@ class KeithleyPanel:
     def close_with_budget(self, timeout_s: float) -> bool:
         """`close`, with the wait named. Its own method so a test can prove
         the honest answer on the case that cannot be waited out."""
+        # Seal before anything else: no handler may queue instrument work
+        # from here on, and whatever had not started is dropped. Without it a
+        # request thread still running past `server_close()` could put an ON
+        # into the queue behind the shutdown OFF, and the drain would run
+        # both -- ending with the source driving and `close` reporting the off
+        # confirmed, which it had been, a moment earlier.
+        self._bus.seal()
         self._bus.set_idle(None)
         confirmed = threading.Event()
         if self.available:
             def switch_off() -> None:
                 self.smu.disable_output()
                 confirmed.set()
-            self._bus.submit(switch_off)
+            self._bus.submit(switch_off, force=True)
         self._bus.stop(timeout_s)
         return confirmed.is_set() if self.available else True
 
@@ -423,17 +493,31 @@ class KeithleyPanel:
                     "nothing has told the SourceMeter what to source: set the source "
                     "first, then switch the output on")
             smu.enable_output(bool(on))
-        # `set_output(True)` takes a reading of its own below, so this wait
-        # covers the write and the read behind it.
-        self._bus.do(job)
+        # The wait is a read's budget, not the 30 s floor: the display may be
+        # mid-tick, and a legal tick is 80 s. **Off is never cancelled** --
+        # dropping it because the caller stopped waiting is a source left
+        # driving, which is the whole thing this console is careful about, so
+        # a slow one raises `PanelPending` and still runs.
+        self._bus.do(job, timeout_s=self.read_budget_s() + SHUTDOWN_MARGIN_S,
+                     cancel_on_timeout=not on)
         if not on:
             with self._lock:
                 # The display goes blank with the output, rather than keeping
                 # the last numbers on screen: they were a measurement of a
                 # moment that has passed, and nothing would say so.
                 self._reading = None
-        else:
-            self.read()
+            return self.state()
+        # The output is on **now**, whatever happens next. So the first
+        # reading is taken defensively: it is a nicety, and letting it throw
+        # would answer an energised bench with a bare 500 carrying no state,
+        # leaving the page showing the source off while it is driving. The
+        # failure is recorded where the panel already reports a bad read.
+        try:
+            self._bus.do(self._tick, timeout_s=self.read_budget_s())
+        except Exception as exc:                             # noqa: BLE001
+            with self._lock:
+                self._failures += 1
+                self._last_error = f"{type(exc).__name__}: {exc}"
         return self.state()
 
     def read(self) -> dict:
@@ -603,7 +687,8 @@ def as_bool(name: str, raw: Any) -> bool:
     raise ValueError(f"{name}: {raw!r} is neither true nor false")
 
 
-__all__ = ["KeithleyPanel", "PanelRefused", "PanelUnavailable", "PanelSetup",
+__all__ = ["KeithleyPanel", "PanelPending", "PanelRefused", "PanelUnavailable",
+           "PanelSetup",
            "SOURCE_FIELDS", "POLL_DEFAULT_S", "POLL_MIN_S", "POLL_MAX_S",
            "panel_wire", "source_args", "as_bool", "PANEL_STATIC",
            "JOB_TIMEOUT_S", "SHUTDOWN_MARGIN_S"]

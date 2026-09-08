@@ -70,7 +70,20 @@ because a typo that silently ran the defaults would be a bench nobody chose.
   running and whatever was queued behind it landed afterwards.
 * **A request the caller gave up on does not reach the instrument later.** A
   job still waiting its turn is dropped when its `do()` times out; one already
-  started cannot be recalled, and nothing here pretends otherwise.
+  started cannot be recalled, and nothing here pretends otherwise. **Switching
+  the output off is the exception** — dropping that one because the caller
+  stopped waiting is a source left driving, so it is never cancelled: a slow
+  one answers 202 `pending` and still runs.
+* **Shutdown accepts no new instrument work.** `ThreadingHTTPServer` runs each
+  request on a daemon thread and `server_close()` does not wait for the ones
+  already accepted, so a straggler could otherwise queue an output-*on* behind
+  the shutdown's off. Closing seals the bus first, drops what had not started,
+  and makes the off the last thing that runs.
+* **Every answer carries the panel, including the failures.** A 500 that left
+  the caller unable to see whether the source is live is worse than the error
+  it is reporting — and an output-on whose first reading fails is a 200 with
+  `output: true` and the read error recorded, because the ON has landed and
+  the reading was only a nicety.
 * **The display is dashes unless there is something to display**, and it always
   says which of the three reasons it is. With the output off a `:READ?` still
   answers, from a source disconnected inside the instrument, and the near-zero
@@ -106,8 +119,10 @@ would be four chances to draw a bench that never existed.
 
 A refusal is a **409 with a sentence**: `{"error": …, "level": "warn"|"crit"}`
 — what happened and what to do, never a bare status code. A value the console
-cannot read is a 422 naming the field; no instrument at all is a 503 carrying
-why.
+cannot read is a 422 naming the field; no instrument at all (or a console
+shutting down) is a 503 carrying why; an output-off queued behind a read that
+has not finished is a **202** saying so, because it is coming. Every one of
+them carries the panel state alongside the error.
 
 ```bash
 curl -s localhost:8924/api/state | python -m json.tool

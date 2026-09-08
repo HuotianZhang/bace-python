@@ -26,8 +26,8 @@ import urllib.request
 import pytest
 
 from bace.consoles.keithley.__main__ import build_parser, is_loopback, main
-from bace.consoles.keithley.panel import (JOB_TIMEOUT_S, KeithleyPanel, PanelRefused,
-                                          source_args)
+from bace.consoles.keithley.panel import (JOB_TIMEOUT_S, KeithleyPanel, PanelPending,
+                                          PanelRefused, PanelUnavailable, source_args)
 from bace.consoles.keithley.server import make_server
 from bace.drivers.keithley2400 import PanelSetup, SourceMeterConfig
 from bace.drivers.simulated import make_bench
@@ -371,6 +371,115 @@ def test_shutdown_says_so_when_it_cannot_confirm_the_output_off():
     assert p.close_with_budget(0.3) is False
     assert p.smu.output_enabled is True, "and it is honest about why"
     stuck.set()
+
+
+def test_switching_the_output_off_is_never_dropped_behind_a_slow_read(panel):
+    """The display may be mid-tick, and a legal tick is 80 s (NPLC 10, a
+    100-deep filter). The off used to wait the 30 s floor, time out, and be
+    *discarded* by the cancellation added for the previous round — so pressing
+    OFF left the source driving. It is never cancelled now: a slow one raises
+    `PanelPending` and still runs."""
+    panel.set_source({"function": "I", "level": 0.0})
+    panel.set_output(True)
+    assert panel.smu.output_enabled is True
+    assert panel.read_budget_s() >= JOB_TIMEOUT_S
+
+    released = threading.Event()
+    panel._bus.submit(lambda: released.wait(3))          # a tick in flight
+    time.sleep(0.1)
+    with pytest.raises(PanelPending, match="It will run"):
+        panel._bus.do(lambda: panel.smu.disable_output(), timeout_s=0.2,
+                      cancel_on_timeout=False)
+    released.set()
+    deadline = time.monotonic() + 3
+    while panel.smu.output_enabled and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert panel.smu.output_enabled is False, "queued, and it ran"
+
+
+def test_shutdown_refuses_new_work_so_a_late_request_cannot_re_energise():
+    """`ThreadingHTTPServer` runs each request on a daemon thread and
+    `server_close()` does not wait for the ones already accepted. A straggler
+    inside `set_output(True)` could put an ON into the queue *behind* the
+    shutdown OFF; the drain ran both, the process exited with the source
+    driving, and `close` reported the off confirmed — because it had been, a
+    moment earlier."""
+    p = make_panel()
+    p.start()
+    p.set_source({"function": "I", "level": 0.0})
+    p.set_output(True)
+
+    released = threading.Event()
+    p._bus.submit(lambda: released.wait(2))              # a read in flight
+    time.sleep(0.05)
+    late: list[str] = []
+
+    def straggler() -> None:
+        time.sleep(0.15)                                  # lands during close
+        try:
+            p._bus.submit(lambda: late.append("energised after the off"))
+        except PanelUnavailable as exc:
+            late.append(f"refused: {exc}")
+
+    thread = threading.Thread(target=straggler, daemon=True)
+    thread.start()
+    assert p.close() is True
+    thread.join(3)
+    released.set()
+    time.sleep(0.2)
+    assert p.smu.output_enabled is False
+    assert late and late[0].startswith("refused: "), late
+    assert "shutting down" in late[0]
+
+
+def test_shutdown_drops_work_that_had_not_started():
+    """At shutdown the only instrument operation that matters is the output
+    going off. A queued source change is work nobody is waiting for any more,
+    and running it on the way out is a bench left somewhere nobody chose."""
+    p = make_panel()
+    p.start()
+    p.set_source({"function": "I", "level": 0.0})
+    ran: list[str] = []
+    released = threading.Event()
+    p._bus.submit(lambda: released.wait(2))
+    time.sleep(0.05)
+    p._bus.submit(lambda: ran.append("should never run"))
+    assert p.close() is True
+    released.set()
+    time.sleep(0.2)
+    assert ran == []
+    assert p.smu.output_enabled is False
+
+
+def test_an_output_on_whose_first_read_fails_still_answers_with_the_state(panel):
+    """The ON has already landed, so a bare 500 carrying no state would leave
+    the page showing a source that is off while it is driving. The reading is
+    a nicety; the output change is the operation."""
+    def broken():
+        raise RuntimeError("the 2400 did not answer")
+
+    panel.set_source({"function": "I", "level": 0.0})
+    panel.smu.read_panel = broken
+    state = panel.set_output(True)
+    assert state["output"] is True, "the caller is told the source is live"
+    assert state["reading"] is None
+    assert "did not answer" in state["poll"]["last_error"]
+    assert panel.smu.output_enabled is True
+
+
+def test_every_answer_carries_the_panel_even_when_something_broke(console, panel):
+    """Including the generic 500. A failure that left the caller unable to see
+    whether the source is live is worse than the failure."""
+    console("POST", "/api/source", {"function": "I", "level": 0.0})
+    panel.smu.read_panel = lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+    status, out = console("POST", "/api/output", {"on": True})
+    assert status == 200 and out["output"] is True
+    assert "boom" in out["poll"]["last_error"]
+
+    status, out = console("POST", "/api/read")
+    assert status == 500 and "boom" in out["error"]
+    assert out["output"] is True, "the 500 says the source is on"
+    assert "panel" in out
 
 
 def test_closing_the_console_switches_the_output_off():
