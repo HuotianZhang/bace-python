@@ -285,20 +285,22 @@ reproduced the observed lag to 0.01 ns at every temperature from 220 to
 light−dark difference, and re-integrating after such a shift moves Q by
 ~1 %. The lag-only rule had called 177 of 492 good shots void. A `warn` now
 needs the lag **and** one of two things a superimposed signal cannot produce.
-**The difference is a shift**: slide the dark trace by the lag and see how
-much of the light−dark difference goes away (`core.diagnostics.shift_cancels`,
-on the verdict as `shift_cancels`). A genuine offset between the two
-acquisitions — a fixed timing difference, or too few averages to smooth one
-out — cancels 97 %, and it must warn however sharp the spikes are, because
-the engine subtracts sample for sample. A charge-induced lag cancels 3.5–4.6 %
-on the rig and 0.1 % on the synthetic; `SHIFT_CANCELS = 0.5` sits between
-them with two orders of magnitude to spare. **Or the edge is smeared**:
-slower than `SPIKE_EDGE_NS = 8` ns, where good shots are 6.0–6.5. The edge is
-tested first, because a jittered pair is differently *shaped* and sliding it
-back cancels little (13 %), so the shift test would otherwise name the wrong
-fault. Over the 480 shots of the three temperature sweeps — 144 of them past
-the lag threshold — the new rule warns on none, with `shift_cancels` never
-above 0.044 and no edge past 6.5 ns.
+**The edge is smeared**: slower than `SPIKE_EDGE_NS = 8` ns, where good shots
+are 6.0–6.5. That is the fault the incident was, and a lag beside it warns.
+
+Separately, and **not gated behind the lag**, `sync_lag_ns` — the lag between
+the two acquisitions' own *sync* traces, on the verdict and in the HDF5
+diagnostics. Nothing computed from the light and dark traces alone can stand
+in for it: the light trace is the spike plus the extracted charge, and with a
+large photocurrent a real offset hides inside the charge's own contribution —
+worse, the two push the spike correlation in opposite directions, so half a
+nanosecond of offset can read as a 0.08 ns spike lag. The sync carries the
+trigger edge and nothing else. `SYNC_LAG_NS = 0.1` against a measured
+±0.004 ns across 600 real shots, where the spike lag ran 0.135–0.479 ns and
+grew with temperature — which is itself the proof that nothing in the trigger
+chain moved. With no sync fetched the `ok` line says "no sync to check the
+timing" rather than claiming the lag was explained. Over those 600 shots the
+rule warns on none.
 The incident lowered the spikes by 4–14 % as well, but a height difference
 between the two traces is not the acquisition's alone to explain — under
 `dark_reference = "translated"` they repeat one swing over different

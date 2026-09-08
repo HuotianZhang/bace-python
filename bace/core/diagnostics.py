@@ -82,47 +82,61 @@ def spike_lag_ns(light: np.ndarray, dark: np.ndarray, dt: float) -> float | None
     return float(-(shift - (x.size - 1)) * dt * 1e9)
 
 
-def shift_cancels(light: np.ndarray, dark: np.ndarray, dt: float,
-                  lag_ns: float) -> float | None:
-    """How much of the spike-region difference a time shift explains: 0 to 1.
+def sync_lag_ns(sync_light: np.ndarray, sync_dark: np.ndarray,
+                dt: float) -> float | None:
+    """Lag of the dark acquisition's trigger edge behind the light one, in ns.
 
-    Slide `dark` by `lag_ns` so its spike lands on the light one, and compare
-    the largest remaining `light - dark` excursion around the spike with the
-    one before the slide. **This separates the two things a lag can mean**,
-    and they need opposite verdicts:
+    **The one measurement that separates a real timing offset from the charge
+    coming out of the device**, and the reason the sync traces are fetched
+    beside every acquisition at all.
 
-    * a real inter-acquisition offset -- a fixed timing difference between the
-      light and dark acquisitions, or too few averages to smooth one out --
-      leaves the traces identical apart from the shift, so sliding one back
-      cancels nearly all of the difference. Measured on synthetic pairs:
-      **97 %** for a pure 0.5 ns offset, 93 % with a photocurrent on top. The
-      engine subtracts sample for sample, so an offset like that puts the
-      50 mA spike straight into the photocurrent and Q is not a charge.
-    * the extracted charge riding on the spike moves the correlation peak
-      while the spike itself stands still, so sliding removes almost nothing:
-      **3.5-4.6 %** across the rig's 220-295 K sweep (2026-09-06/07).
+    `spike_lag_ns` cannot do it. The light trace is the displacement spike
+    *plus* the extracted charge, and that charge moves the correlation peak on
+    its own; subtracting one trace from the other, sliding one onto the other,
+    fitting the flank against the spike's derivative -- each of those mixes
+    the two, and with a large photocurrent a genuine offset hides inside the
+    charge's own contribution. The sync is the trigger edge itself. It carries
+    no photocurrent and no device at all, so if the two acquisitions really
+    were offset in time, it is offset by exactly that and by nothing else.
 
-    Two orders of magnitude apart, which is why `service.wire` can use it as a
-    verdict. None when there is no spike, no lag, or the window does not fit.
+    Measured over the 240 shots of the 2026-09-06 220-295 K sweep: the spike
+    lag runs 0.135 to 0.479 ns and grows with temperature, while this stays
+    inside **0.004 ns** at every point -- proof that nothing in the trigger
+    chain moved and the spike lag is the device's.
+
+    Same sign convention as `spike_lag_ns`: positive means the dark edge came
+    later. None when either trace has no edge, or the window does not fit.
     """
-    a = np.asarray(light, dtype=float)
-    b = np.asarray(dark, dtype=float)
+    a = np.asarray(sync_light, dtype=float)
+    b = np.asarray(sync_dark, dtype=float)
     if a.size == 0 or a.size != b.size or not dt or not np.isfinite(dt):
         return None
-    if lag_ns is None or not np.isfinite(lag_ns):
+    if np.ptp(a) <= 0 or np.ptp(b) <= 0:
         return None
-    i = int(np.argmax(np.abs(a)))
-    lo = max(0, i - int(round(SPIKE_WINDOW_BEFORE_S / dt)))
-    hi = min(a.size, i + int(round(SPIKE_WINDOW_AFTER_S / dt)))
+    # The edge, by its steepest step -- the same way `sync_edge_ns` finds it,
+    # and for the same reason: a sync may be a narrow pulse or a step, and
+    # "furthest from the median" picks noise out of a step's long high level
+    # (it read 18 ns of lag off the simulator's, which is a clean step).
+    i = int(np.argmax(np.abs(np.diff(a))))
+    half = int(round(3e-8 / dt))
+    lo, hi = max(0, i - half), min(a.size, i + half)
     if hi - lo < 8:
         return None
-    t = np.arange(a.size) * dt
-    slid = np.interp(t, t - float(lag_ns) * 1e-9, b)
-    before = float(np.abs((a - b)[lo:hi]).max())
-    after = float(np.abs((a - slid)[lo:hi]).max())
-    if before <= 0.0:
+    x = a[lo:hi] - a[lo:hi].mean()
+    y = b[lo:hi] - b[lo:hi].mean()
+    if not (np.abs(x).max() > 0 and np.abs(y).max() > 0):
         return None
-    return float(max(0.0, 1.0 - after / before))
+    c = np.correlate(x, y, "full")
+    k = int(np.argmax(c))
+    if c[k] <= 0:
+        return None
+    shift = float(k)
+    if 0 < k < c.size - 1:
+        y0, y1, y2 = c[k - 1], c[k], c[k + 1]
+        denom = y0 - 2.0 * y1 + y2
+        if denom != 0:
+            shift += 0.5 * (y0 - y2) / denom
+    return float(-(shift - (x.size - 1)) * dt * 1e9)
 
 
 def edge_10_90_ns(trace: np.ndarray, dt: float) -> float | None:

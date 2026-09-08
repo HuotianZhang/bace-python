@@ -154,11 +154,13 @@ class RunRecorder:
             if int(np.asarray(tr.y).size) == avg.traces.shape[1]:
                 avg.update(ev.step, ev.loop, np.asarray(tr.y, dtype=float))
 
-    DIAG_KEYS = ("averages_light", "averages_dark", "spike_lag_ns", "edge_light_ns",
+    DIAG_KEYS = ("averages_light", "averages_dark", "spike_lag_ns", "sync_lag_ns",
+                 "edge_light_ns",
                  "edge_dark_ns", "sync_edge_light_ns", "sync_edge_dark_ns")
 
     def _diagnose(self, ev: E.StepDone, loop_i: int, step_i: int) -> None:
-        from ..core.diagnostics import edge_10_90_ns, spike_lag_ns, sync_edge_ns
+        from ..core.diagnostics import (edge_10_90_ns, spike_lag_ns, sync_edge_ns,
+                                        sync_lag_ns)
         if self._diag is None:
             self._diag = {k: np.full((self._n_loops, self._n_steps), np.nan)
                           for k in self.DIAG_KEYS}
@@ -166,6 +168,11 @@ class RunRecorder:
         values = {
             "averages_light": ev.light.count, "averages_dark": ev.dark.count,
             "spike_lag_ns": spike_lag_ns(ev.light.y, ev.dark.y, dt),
+            # The verdict turns on this one when a lag has sharp edges, and the
+            # stored traces are averaged over loops while this is per shot, so
+            # it cannot be recomputed from the file afterwards (2026-09-08).
+            "sync_lag_ns": None if (ev.sync_light is None or ev.sync_dark is None)
+            else sync_lag_ns(ev.sync_light.y, ev.sync_dark.y, float(ev.sync_light.dt)),
             "edge_light_ns": edge_10_90_ns(ev.light.y, dt),
             "edge_dark_ns": edge_10_90_ns(ev.dark.y, dt),
             "sync_edge_light_ns": None if ev.sync_light is None else sync_edge_ns(

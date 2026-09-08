@@ -56,6 +56,14 @@ def extraction(amp: float = 1.4e-2, tau: float = 150.0, t0: float = 322.0,
     return -amp * (1 - np.exp(-(t - t0).clip(0) / rise)) * np.exp(-(t - t0).clip(0) / tau) * (t > t0)
 
 
+def sync(shift_ns: float = 0.0) -> np.ndarray:
+    """The trigger edge as this rig gives it: a 5.5 ns pulse at the trigger,
+    1.19 V. It carries no photocurrent and no device, so it is offset only
+    when the two acquisitions really are."""
+    t = np.arange(N) * DT * 1e9 + T0 * 1e9 - shift_ns
+    return 1.19 * np.exp(-(t / 2.8) ** 2)
+
+
 def test_a_dark_spike_half_a_nanosecond_late_is_measured_as_such():
     lag = spike_lag_ns(spike(0.0, photo=3e-4), spike(0.5), DT)
     assert lag is not None and lag == pytest.approx(0.5, abs=0.06)
@@ -103,14 +111,28 @@ def test_a_lag_with_sharp_edges_is_the_extracted_charge_and_not_a_warning():
     """
     light = Trace(spike(0.0) + extraction(), DT, T0, count=200)
     dark = Trace(spike(0.0), DT, T0, count=200)   # not shifted by anything
+    aligned = Trace(sync(0.0), DT, T0)
     v = W.shot_verdict(light.y, dark.y, {"autorange_passes": 1}, dt=DT,
-                       light=light, dark=dark)
+                       light=light, dark=dark, sync_light=aligned, sync_dark=aligned)
     assert abs(v["spike_lag_ns"]) > W.SPIKE_LAG_NS, "the lag is there"
     assert v["edge_light_ns"] == pytest.approx(6.0, abs=0.6)
-    assert v["shift_cancels"] < 0.05, "sliding explains none of it, because nothing slid"
-    assert v["level"] == "ok", "a lag no slide explains, with a sharp edge, is not jitter"
+    assert abs(v["sync_lag_ns"]) < W.SYNC_LAG_NS, "the trigger did not move"
+    assert v["level"] == "ok", "a lag the sync says is not timing, with a sharp edge"
     assert "charge, not jitter" in v["text"], "and the line says so, with the number"
     assert "ns apart" in v["text"]
+
+
+def test_a_lag_with_no_sync_to_check_it_against_is_not_called_charge():
+    """Without sync traces nothing can say whether the acquisitions were
+    offset, so the line reports the lag and says what it could not check --
+    it must not claim the lag was explained."""
+    light = Trace(spike(0.0) + extraction(), DT, T0, count=200)
+    dark = Trace(spike(0.0), DT, T0, count=200)
+    v = W.shot_verdict(light.y, dark.y, {"autorange_passes": 1}, dt=DT,
+                       light=light, dark=dark)
+    assert v["sync_lag_ns"] is None and v["level"] == "ok"
+    assert "no sync to check the timing" in v["text"]
+    assert "charge, not jitter" not in v["text"]
 
 
 def test_spikes_of_different_height_are_not_by_themselves_jitter():
@@ -143,13 +165,51 @@ def test_a_real_offset_between_the_two_acquisitions_is_a_warning_however_sharp()
     light = Trace(spike(0.0), DT, T0, count=200)
     dark = Trace(spike(0.5), DT, T0, count=200)
     v = W.shot_verdict(light.y, dark.y, {"autorange_passes": 1}, dt=DT,
-                       light=light, dark=dark)
+                       light=light, dark=dark,
+                       sync_light=Trace(sync(0.0), DT, T0),
+                       sync_dark=Trace(sync(0.5), DT, T0))
     assert abs(v["spike_lag_ns"]) > W.SPIKE_LAG_NS
     assert v["edge_light_ns"] == pytest.approx(6.0, abs=0.6), "nothing is smeared"
     assert v["edge_dark_ns"] == pytest.approx(6.0, abs=0.6)
-    assert v["shift_cancels"] > W.SHIFT_CANCELS
+    assert abs(v["sync_lag_ns"]) == pytest.approx(0.5, abs=0.1)
     assert v["level"] == "warn", "sharp edges, but the traces really are offset"
     assert "offset in time" in v["text"] and "not a charge" in v["text"]
+
+
+def test_an_offset_the_charge_hides_from_the_spike_lag_is_still_caught():
+    """Worse than masking the residual: the charge's lag and a real offset move
+    the spike correlation in *opposite* directions, so half a nanosecond of
+    offset reads as a 0.08 ns spike lag -- under the threshold, with the two
+    acquisitions genuinely a sample apart. The sync test cannot be gated
+    behind the spike lag or this walks through."""
+    light = Trace(spike(0.0) + extraction(), DT, T0, count=200)
+    dark = Trace(spike(0.5), DT, T0, count=200)
+    v = W.shot_verdict(light.y, dark.y, {"autorange_passes": 1}, dt=DT,
+                       light=light, dark=dark,
+                       sync_light=Trace(sync(0.0), DT, T0),
+                       sync_dark=Trace(sync(0.5), DT, T0))
+    assert abs(v["spike_lag_ns"]) < W.SPIKE_LAG_NS, "the spike lag hides it"
+    assert abs(v["sync_lag_ns"]) == pytest.approx(0.5, abs=0.1), "the sync does not"
+    assert v["level"] == "warn" and "offset in time" in v["text"]
+
+
+def test_a_photocurrent_cannot_hide_a_real_offset_from_the_sync():
+    """The case that defeats every measure taken from the light and dark
+    traces alone: a 14 mA extraction current on top of a genuine 1 ns offset.
+    Its own contribution to the difference swamps the shift's, so residual
+    ratios and derivative fits both read "no shift" -- and the charge even
+    drags the spike lag back under half its true value. The sync is untouched
+    by any of that and reports the nanosecond."""
+    light = Trace(spike(0.0) + extraction(), DT, T0, count=200)
+    dark = Trace(spike(1.0), DT, T0, count=200)
+    v = W.shot_verdict(light.y, dark.y, {"autorange_passes": 1}, dt=DT,
+                       light=light, dark=dark,
+                       sync_light=Trace(sync(0.0), DT, T0),
+                       sync_dark=Trace(sync(1.0), DT, T0))
+    assert v["edge_light_ns"] == pytest.approx(6.0, abs=0.6), "nothing is smeared"
+    assert abs(v["sync_lag_ns"]) == pytest.approx(1.0, abs=0.15)
+    assert v["level"] == "warn"
+    assert "sync traces are" in v["text"] and "not a charge" in v["text"]
 
 
 def test_the_sync_edge_is_read_off_a_narrow_pulse_too():
