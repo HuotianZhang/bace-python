@@ -76,9 +76,11 @@ bace/           the package
                 one port, no service and no ui/. keithley/ is the first
 ui/             the console — plain ES modules, no build step, served by the
                 service at /ui. ui/README.md; docs/ui-plan.md is the plan
-tools/          standalone rig scripts — scan, bare, lightpower, relay, identify_dio;
-                and the console's fixture recorders
+tools/          standalone rig scripts — scan, bare, lightpower, shutter, relay,
+                identify_dio; and the console's fixture recorders
 scripts/        the double-click .bat entry points; each cd's to the repo root first
+examples/       standalone folders that share nothing with the package but the
+                hardware — shutter_console/ is the shutter as one page in a browser
 recipes/        the named recipe variants, passed with --run
 tests/          the suite
 docs/           the figure pages; docs/README.md indexes them
