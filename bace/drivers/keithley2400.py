@@ -412,11 +412,26 @@ class Keithley2400:
             raise SourceMeterError("the panel is not applied to this instrument")
         if not self._output:
             raise SourceMeterError("the output is OFF: there is nothing to read")
-        raw = self._io.query(":READ?").strip().split(",")
-        # Which limit can bite is decided by what is being sourced, so only
-        # that one is asked for: the other's TRIP is meaningless here.
-        node = "CURR" if panel.function == "voltage" else "VOLT"
-        tripped = on_off(ask(self._io, f":SENS:{node}:PROT:TRIP?"))
+        # The session's own timeout is sized for a bench's ordinary traffic
+        # and this one read can legally take 80 s (`panel_budget_s`), so it
+        # is raised for the query and put back -- exactly what `sweep_points`
+        # does with `sweep_budget_s`, and for the same reason: a read cut off
+        # at the VISA layer is indistinguishable from an instrument that has
+        # stopped answering.
+        budget_ms = int(self.panel_budget_s() * 1000)
+        old_timeout = getattr(self._io, "timeout", None)
+        raise_it = old_timeout is not None and budget_ms > old_timeout
+        if raise_it:
+            self._io.timeout = budget_ms
+        try:
+            raw = self._io.query(":READ?").strip().split(",")
+            # Which limit can bite is decided by what is being sourced, so
+            # only that one is asked for: the other's TRIP is meaningless.
+            node = "CURR" if panel.function == "voltage" else "VOLT"
+            tripped = on_off(ask(self._io, f":SENS:{node}:PROT:TRIP?"))
+        finally:
+            if raise_it:
+                self._io.timeout = old_timeout
         return PanelReading(volts=float(raw[0]), amps=float(raw[1]),
                             compliance=tripped, function=panel.function,
                             level=panel.level)
@@ -633,6 +648,26 @@ class Keithley2400:
         per_point_s = (settle_s
                        + max(1, int(self.config.averaging)) * 4.0 * self.config.nplc / 50.0)
         return 15.0 + 2.0 * points * per_point_s
+
+    def panel_budget_s(self) -> float:
+        """How long one `read_panel` can take, with room.
+
+        `sweep_budget_s`'s model for a single point with no settle, and for
+        the same measured reason: an averaged reading is **four** apertures,
+        because `:FUNC:CONC ON` measures voltage and current and the 2400
+        auto-zeroes each.
+
+        It matters here because the panel accepts what a panel should --
+        NPLC 10 and a 100-deep filter are both legal on this instrument --
+        and that pair is `100 x 4 x 10 / 50 Hz` = **80 s** of integration.
+        A caller waiting a flat 30 s on it is telling the operator that a
+        perfectly healthy read failed, and a VISA session left at 20 s cuts
+        the read off before the instrument has finished it.
+        """
+        panel = self._panel
+        nplc = float(panel.nplc if panel is not None else self.config.nplc)
+        averaging = int(panel.averaging if panel is not None else self.config.averaging)
+        return 15.0 + 2.0 * max(1, averaging) * 4.0 * nplc / 50.0
 
     def abort(self) -> None:
         self._io.write("ABOR;:TRIG:CLE;")

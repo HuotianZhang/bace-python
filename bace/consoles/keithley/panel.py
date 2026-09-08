@@ -42,12 +42,23 @@ from ...drivers.keithley2400 import (PANEL_STATIC, PanelSetup, SourceMeterConfig
                                      SourceMeterError)
 
 JOB_TIMEOUT_S = 30.0
-"""How long a request waits for the worker. Longer than any single panel
-operation: the slowest is a reading at NPLC 10 with a 100-deep filter, which
-is four apertures x 10 x 100 / 50 Hz = 80 s -- and that one is refused by
-`PanelSetup` long before it gets here (the filter caps at 100 and NPLC at 10,
-but the console's own defaults are nowhere near). Thirty seconds is a bus that
-has stopped answering, not a slow measurement."""
+"""The **floor** on how long a request waits for the worker: enough for any
+panel operation that is a handful of SCPI writes.
+
+It is not enough for a reading, and an earlier version of this file claimed it
+was. NPLC 10 and a 100-deep filter are both legal on a 2400 and both accepted
+here -- a panel should accept what the instrument accepts -- and that pair is
+`100 x 4 x 10 / 50 Hz` = 80 s of integration (four apertures per averaged
+reading, because `:FUNC:CONC ON` measures both and auto-zeroes each). A read
+job therefore waits `Keithley2400.panel_budget_s` instead, which is that model
+with the driver's own margin. Waiting a flat 30 s on it would answer a healthy
+read with a 409 saying the instrument had stopped -- while the read went on
+running, and whatever was queued behind it ran afterwards, on a bench whose
+operator had been told the request failed."""
+
+SHUTDOWN_MARGIN_S = 10.0
+"""Added to a read's budget when `close` waits for the worker: time for the
+in-flight read to end *and* for the queued output-off behind it to run."""
 
 POLL_MIN_S, POLL_MAX_S = 0.1, 60.0
 POLL_DEFAULT_S = 1.0
@@ -115,11 +126,14 @@ class _Bus:
     def start(self) -> None:
         self._thread.start()
 
-    def stop(self, timeout_s: float = 5.0) -> None:
+    def stop(self, timeout_s: float = 5.0) -> bool:
+        """Ask the thread to finish what it is doing, run what is still
+        queued, and end. Returns whether it ended inside `timeout_s`."""
         self._stop.set()
         self._q.put(_WAKE)
         if self._thread.is_alive():
             self._thread.join(timeout_s)
+        return not self._thread.is_alive()
 
     def set_idle(self, fn: Callable[[], None] | None, every: float = 1.0) -> None:
         """What to do between jobs, and how often. None switches it off.
@@ -135,16 +149,34 @@ class _Bus:
             self._next_idle = time.monotonic()
         self._q.put(_WAKE)
 
+    def submit(self, fn: Callable[[], Any]) -> None:
+        """Queue `fn` and do not wait. `KeithleyPanel.close` uses it for the
+        output-off, which has to run *after* whatever the worker is in the
+        middle of and must not be waited for from inside the shutdown path."""
+        self._q.put(fn)
+
     def do(self, fn: Callable[[], Any], *, timeout_s: float = JOB_TIMEOUT_S) -> Any:
         """Run `fn` on the worker and return what it returned, or raise what it
         raised -- on the *caller's* thread, so a handler sees a `PanelRefused`
-        as an exception and not as a status code somebody remembered to check."""
+        as an exception and not as a status code somebody remembered to check.
+
+        **A job the caller gave up on does not run.** Without that, a request
+        answered with "the instrument did not answer" would still reach the
+        instrument, later, after whatever was ahead of it -- so a source could
+        be applied minutes after the operator was told the attempt failed.
+        There is one window left, between the check and `fn`: a job that has
+        already started cannot be recalled, and this does not pretend to. What
+        it removes is every job still waiting its turn.
+        """
         if not self._thread.is_alive():
             raise PanelUnavailable("the console's instrument thread is not running")
         done = threading.Event()
+        gave_up = threading.Event()
         box: dict[str, Any] = {}
 
         def job() -> None:
+            if gave_up.is_set():
+                return
             try:
                 box["value"] = fn()
             except BaseException as exc:                     # noqa: BLE001
@@ -154,6 +186,7 @@ class _Bus:
 
         self._q.put(job)
         if not done.wait(timeout_s):
+            gave_up.set()
             raise PanelRefused(
                 f"the instrument did not answer within {timeout_s:g} s; the bus is "
                 "busy or the 2400 has stopped responding", "crit")
@@ -162,6 +195,28 @@ class _Bus:
         return box.get("value")
 
     def _loop(self) -> None:
+        try:
+            self._run()
+        finally:
+            # On **every** way out, including a stop noticed at the top of the
+            # loop while a job sits in the queue. `close` puts the output-off
+            # there, and a worker that ended without running it would leave the
+            # source driving -- the one thing this program must not do.
+            self._drain()
+
+    def _drain(self) -> None:
+        while True:
+            try:
+                job = self._q.get_nowait()
+            except queue.Empty:
+                return
+            if callable(job):
+                try:
+                    job()
+                except Exception:                            # noqa: BLE001
+                    pass    # one bad job must not strand the ones behind it
+
+    def _run(self) -> None:
         while not self._stop.is_set():
             with self._lock:
                 idle = self._idle
@@ -234,20 +289,57 @@ class KeithleyPanel:
     def start(self) -> None:
         self._bus.start()
 
-    def close(self) -> None:
-        """Output off, then stop the thread.
+    def close(self) -> bool:
+        """Output off, then stop the thread. **True when the output is
+        confirmed off**, so a caller can say something when it is not.
 
-        The output first and on the worker, because it is the only part of
-        this that matters: a console that exited leaving the 2400 driving a
-        cell is the failure this whole program exists to make less likely, and
-        a browser tab closing is not something to rely on for it.
+        The output is the only part of this that matters: a console that
+        exited leaving the 2400 driving a cell is the failure this whole
+        program exists to make less likely, and a browser tab closing is not
+        something to rely on for it.
+
+        Which is why the off is *queued* rather than waited for here. Ctrl-C
+        can arrive while the worker is inside a read that legally takes 80 s
+        (`panel_budget_s`); an earlier version waited five seconds for the
+        off, gave up, and stopped the thread -- which then finished its read,
+        saw the stop flag, and exited without ever running the off, leaving a
+        daemon thread's process to end with the source still driving. Now the
+        off goes into the queue, the worker drains the queue on its way out
+        whatever ended it, and the wait here is long enough for the read in
+        front of it plus the off itself.
+
+        A worker still inside a VISA call when even that runs out cannot be
+        interrupted from here without writing to the bus from a second thread,
+        which is the one thing this design forbids. That case returns False,
+        and the caller says so out loud rather than exiting quietly.
         """
+        return self.close_with_budget(self.shutdown_budget_s())
+
+    def close_with_budget(self, timeout_s: float) -> bool:
+        """`close`, with the wait named. Its own method so a test can prove
+        the honest answer on the case that cannot be waited out."""
+        self._bus.set_idle(None)
+        confirmed = threading.Event()
         if self.available:
-            try:
-                self._bus.do(lambda: self.smu.disable_output(), timeout_s=5.0)
-            except Exception:                                # noqa: BLE001
-                pass
-        self._bus.stop()
+            def switch_off() -> None:
+                self.smu.disable_output()
+                confirmed.set()
+            self._bus.submit(switch_off)
+        self._bus.stop(timeout_s)
+        return confirmed.is_set() if self.available else True
+
+    def shutdown_budget_s(self) -> float:
+        """How long `close` waits: the longest a read in flight can take, plus
+        room for the queued output-off behind it."""
+        budget = getattr(self.smu, "panel_budget_s", None)
+        return (float(budget()) if callable(budget) else JOB_TIMEOUT_S) + SHUTDOWN_MARGIN_S
+
+    def read_budget_s(self) -> float:
+        """How long a read job may take before the caller gives up on it. The
+        driver's own model, so the console and the instrument agree about what
+        counts as slow."""
+        budget = getattr(self.smu, "panel_budget_s", None)
+        return max(JOB_TIMEOUT_S, float(budget()) if callable(budget) else 0.0)
 
     @property
     def available(self) -> bool:
@@ -331,6 +423,8 @@ class KeithleyPanel:
                     "nothing has told the SourceMeter what to source: set the source "
                     "first, then switch the output on")
             smu.enable_output(bool(on))
+        # `set_output(True)` takes a reading of its own below, so this wait
+        # covers the write and the read behind it.
         self._bus.do(job)
         if not on:
             with self._lock:
@@ -344,7 +438,7 @@ class KeithleyPanel:
 
     def read(self) -> dict:
         """One reading now, whatever the display is doing."""
-        self._bus.do(self._tick)
+        self._bus.do(self._tick, timeout_s=self.read_budget_s())
         return self.state()
 
     def errors(self) -> list[str]:
@@ -461,7 +555,7 @@ def source_args(body: dict) -> dict:
                 raise ValueError(f"terminals: {raw!r} is neither FRON nor REAR")
             out[name] = word
         elif name == "four_wire":
-            out[name] = _as_bool(name, raw)
+            out[name] = as_bool(name, raw)
         elif name == "averaging":
             out[name] = _as_int(name, raw)
         elif name == "source_range":
@@ -490,7 +584,15 @@ def _as_int(name: str, raw: Any) -> int:
     return int(value)
 
 
-def _as_bool(name: str, raw: Any) -> bool:
+def as_bool(name: str, raw: Any) -> bool:
+    """A JSON boolean, or a word that plainly is one. Never `bool()`.
+
+    Python's truthiness makes every non-empty string true, so `bool("false")`
+    is `True` -- and on the output route that turns a request meaning *off*
+    into a live source. Anything this does not recognise raises, which the
+    server answers with a 422: a control that energises a device does not
+    guess.
+    """
     if isinstance(raw, bool):
         return raw
     word = str(raw).strip().lower()
@@ -503,4 +605,5 @@ def _as_bool(name: str, raw: Any) -> bool:
 
 __all__ = ["KeithleyPanel", "PanelRefused", "PanelUnavailable", "PanelSetup",
            "SOURCE_FIELDS", "POLL_DEFAULT_S", "POLL_MIN_S", "POLL_MAX_S",
-           "panel_wire", "source_args", "PANEL_STATIC"]
+           "panel_wire", "source_args", "as_bool", "PANEL_STATIC",
+           "JOB_TIMEOUT_S", "SHUTDOWN_MARGIN_S"]

@@ -26,7 +26,8 @@ import urllib.request
 import pytest
 
 from bace.consoles.keithley.__main__ import build_parser, is_loopback, main
-from bace.consoles.keithley.panel import (KeithleyPanel, PanelRefused, source_args)
+from bace.consoles.keithley.panel import (JOB_TIMEOUT_S, KeithleyPanel, PanelRefused,
+                                          source_args)
 from bace.consoles.keithley.server import make_server
 from bace.drivers.keithley2400 import PanelSetup, SourceMeterConfig
 from bace.drivers.simulated import make_bench
@@ -280,6 +281,96 @@ def test_an_out_of_range_display_interval_is_refused(panel):
         panel.set_poll(0.0)
     with pytest.raises(ValueError, match="between"):
         panel.set_poll(3600.0)
+
+
+# -- what the review of #86 turned up ----------------------------------------
+def test_the_output_route_never_coerces_a_value_into_a_live_source(console):
+    """`bool("false")` is `True` in Python, so `{"on": "false"}` -- a request
+    that plainly means off -- switched the source **on**. This is the one
+    route on this console that puts current into somebody's device, so a value
+    it does not recognise is a 422 and never a guess."""
+    console("POST", "/api/source", {"function": "I", "level": 0.0})
+    for body in ({"on": "false"}, {"on": "no"}, {"on": "off"}, {"on": 0}):
+        status, out = console("POST", "/api/output", body)
+        assert status == 200, body
+        assert out["output"] is False, f"{body} must not energise the source"
+    for body in ({"on": "maybe"}, {"on": "onn"}, {"on": []}, {"on": None},
+                 {"on": "2"}, {"on": {}}):
+        status, out = console("POST", "/api/output", body)
+        assert status == 422, f"{body} -> {status}"
+        assert "on:" in out["error"]
+        assert out["output"] is False, "and nothing reached the instrument"
+    for body in ({"on": True}, {"on": "true"}, {"on": "on"}, {"on": 1}):
+        assert console("POST", "/api/output", body)[1]["output"] is True, body
+        console("POST", "/api/output", {"on": False})
+
+
+def test_a_read_may_take_as_long_as_the_settings_it_was_taken_under(panel):
+    """NPLC 10 and a 100-deep filter are both legal on a 2400 and both
+    accepted here, and that pair is 80 s of integration (four apertures per
+    averaged reading). A flat 30 s wait answers a healthy read with "the
+    instrument did not answer" — so the wait is the driver's own budget."""
+    panel.set_source({"function": "I", "level": 0.0})
+    assert panel.read_budget_s() == pytest.approx(JOB_TIMEOUT_S), "the defaults are quick"
+    panel.set_source({"nplc": 10.0, "averaging": 100})
+    integration_s = 100 * 4 * 10.0 / 50.0
+    assert integration_s == 80.0, "the pair the panel accepts"
+    assert panel.read_budget_s() > integration_s, "and the wait clears it"
+    assert panel.shutdown_budget_s() > panel.read_budget_s(), "with room for the off"
+
+
+def test_a_job_the_caller_gave_up_on_does_not_reach_the_instrument_later(panel):
+    """Otherwise a request answered with "the instrument did not answer" still
+    lands, minutes afterwards, on a bench whose operator was told it failed."""
+    started, release = threading.Event(), threading.Event()
+
+    def block() -> None:
+        started.set()
+        release.wait(10)
+
+    late = []
+    panel._bus.submit(block)
+    assert started.wait(2), "the worker took the blocker"
+    with pytest.raises(PanelRefused, match="did not answer"):
+        panel._bus.do(lambda: late.append("ran"), timeout_s=0.2)
+    release.set()
+    time.sleep(0.3)
+    assert late == [], "the job the caller gave up on was dropped, not deferred"
+
+
+def test_shutdown_waits_for_a_read_in_flight_and_still_switches_the_output_off():
+    """Ctrl-C during a read that legally takes tens of seconds: the queued
+    output-off used to be abandoned — the worker finished its read, saw the
+    stop flag, and exited without running it, leaving a daemon thread's
+    process to end with the source driving."""
+    p = make_panel()
+    p.start()
+    p.set_source({"function": "I", "level": 0.0})
+    p.set_output(True)
+    assert p.smu.output_enabled is True
+
+    slow = threading.Event()
+    p._bus.submit(lambda: slow.wait(1.5))       # a read still in flight
+    time.sleep(0.1)
+    assert p.close() is True, "close waited for it, then ran the output-off"
+    assert p.smu.output_enabled is False
+
+
+def test_shutdown_says_so_when_it_cannot_confirm_the_output_off():
+    """The one case that cannot be fixed from here: a worker inside a VISA
+    call that never returns. Interrupting it would mean writing to the bus
+    from a second thread, which is what this design forbids — so `close`
+    answers False and the caller says it out loud."""
+    p = make_panel()
+    p.start()
+    p.set_source({"function": "I", "level": 0.0})
+    p.set_output(True)
+    stuck = threading.Event()
+    p._bus.submit(lambda: stuck.wait(30))
+    time.sleep(0.1)
+    assert p.close_with_budget(0.3) is False
+    assert p.smu.output_enabled is True, "and it is honest about why"
+    stuck.set()
 
 
 def test_closing_the_console_switches_the_output_off():

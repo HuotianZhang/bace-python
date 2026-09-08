@@ -693,6 +693,15 @@ class SimulatedSourceMeter:
         self._panel = setup
         return setup
 
+    def panel_budget_s(self) -> float:
+        """The real driver's, so a console can ask either the same question.
+        Nothing here integrates, but the number a caller plans around must not
+        depend on which bench it is talking to."""
+        panel = self._panel
+        nplc = float(panel.nplc) if panel is not None else 1.0
+        averaging = int(panel.averaging) if panel is not None else 1
+        return 15.0 + 2.0 * max(1, averaging) * 4.0 * nplc / 50.0
+
     def read_panel(self) -> PanelReading:
         panel = self._panel
         if panel is None:

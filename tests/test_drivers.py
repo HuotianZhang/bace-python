@@ -372,6 +372,40 @@ def test_the_reading_is_both_senses_and_the_compliance_light():
     assert dataclasses.replace(reading, amps=0.0).ohms is None, "V/0 is not a resistance"
 
 
+def test_a_panel_read_gets_the_time_its_own_settings_ask_for():
+    """NPLC 10 with a 100-deep filter is legal on a 2400 and accepted by
+    `PanelSetup`, and it is 80 s of integration — four apertures per averaged
+    reading, because `:FUNC:CONC ON` measures both and auto-zeroes each. A
+    session left at its ordinary timeout cuts that read off at the VISA layer,
+    where it is indistinguishable from an instrument that has stopped
+    answering. So `read_panel` raises the timeout for its query and puts it
+    back, exactly as `sweep_points` does with `sweep_budget_s`."""
+    class Watch(PanelIO):
+        def query(self, cmd):
+            if cmd.startswith(":READ?"):
+                self.timeout_during_read = self.timeout
+            return super().query(cmd)
+
+    io = Watch(reads=["0.9,1e-6"])
+    io.timeout = 20000
+    k = Keithley2400(io)
+    k.apply_panel(PanelSetup(nplc=10.0, averaging=100))
+    assert k.panel_budget_s() > 100 * 4 * 10.0 / 50.0, "clears the integration"
+    k.enable_output(True)
+    k.read_panel()
+    assert io.timeout_during_read == int(k.panel_budget_s() * 1000)
+    assert io.timeout == 20000, "and the session is left as it was found"
+
+    # The ordinary settings need nothing raised.
+    quick = Watch(reads=["0.9,1e-6"])
+    quick.timeout = 20000
+    q = Keithley2400(quick)
+    q.apply_panel(PanelSetup())
+    q.enable_output(True)
+    q.read_panel()
+    assert quick.timeout_during_read == 20000
+
+
 def test_a_fixed_source_range_turns_the_autorange_off_with_it():
     io = PanelIO()
     Keithley2400(io).apply_panel(PanelSetup(function="current", level=1e-4,

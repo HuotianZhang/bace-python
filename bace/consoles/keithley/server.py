@@ -31,11 +31,12 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from .panel import KeithleyPanel, PanelRefused, PanelUnavailable
+from .panel import KeithleyPanel, PanelRefused, PanelUnavailable, as_bool
 
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "page.html")
 
@@ -70,7 +71,13 @@ def make_server(panel: KeithleyPanel, *, host: str, port: int) -> ThreadingHTTPS
                 if path == "/api/output":
                     if "on" not in body:
                         raise ValueError("on: the body needs {\"on\": true} or false")
-                    return self._json(200, panel.set_output(bool(body["on"])))
+                    # `as_bool`, never `bool()`. Python's truthiness makes the
+                    # string "false" true, so `{"on": "false"}` -- a request
+                    # that plainly means off -- would have **energised the
+                    # source**. This is the one route on this console that
+                    # puts current into somebody's device, so a value it does
+                    # not recognise is a 422 and never a guess.
+                    return self._json(200, panel.set_output(as_bool("on", body["on"])))
                 if path == "/api/read":
                     return self._json(200, panel.read())
                 if path == "/api/poll":
@@ -164,7 +171,10 @@ def serve_forever(panel: KeithleyPanel, *, host: str, port: int,
     finally:
         server.shutdown()
         server.server_close()
-        panel.close()
+        if not panel.close():
+            print("\nWARNING: the SourceMeter output could not be confirmed off — the "
+                  "instrument did not answer in time. Check it, and switch the output "
+                  "off at the 2400's own OUTPUT key if it is still on.", file=sys.stderr)
 
 
 __all__ = ["make_server", "serve_forever", "PAGE", "MAX_BODY"]

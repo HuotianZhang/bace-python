@@ -54,7 +54,23 @@ because a typo that silently ran the defaults would be a bench nobody chose.
   so no third key was invented to hold the same number twice.
 * **The output goes off when the console stops.** Ctrl-C, a closed terminal, an
   exception out of the server — the source is switched off on the way out. A
-  browser tab closing is not something to rely on for that.
+  browser tab closing is not something to rely on for that. The off is
+  *queued*, not waited for in the shutdown path, and the worker drains its
+  queue on every way out: Ctrl-C can arrive while a read is in flight, and a
+  read here can legally take 80 s. When even that runs out — a VISA call that
+  never returns, which cannot be interrupted without writing to the bus from a
+  second thread — the console says so on stderr instead of exiting quietly.
+* **Every wait is the driver's own budget, not a round number.** NPLC 10 and a
+  100-deep filter are both legal on a 2400 and both accepted here, and that
+  pair is `100 x 4 x 10 / 50 Hz` = 80 s of integration (four apertures per
+  averaged reading, because `:FUNC:CONC ON` measures both and auto-zeroes
+  each). So a read job waits `Keithley2400.panel_budget_s` and `read_panel`
+  raises the VISA timeout for its own query — a flat 30 s would answer a
+  healthy read with "the instrument did not answer", while the read went on
+  running and whatever was queued behind it landed afterwards.
+* **A request the caller gave up on does not reach the instrument later.** A
+  job still waiting its turn is dropped when its `do()` times out; one already
+  started cannot be recalled, and nothing here pretends otherwise.
 * **The display is dashes unless there is something to display**, and it always
   says which of the three reasons it is. With the output off a `:READ?` still
   answers, from a source disconnected inside the instrument, and the near-zero
