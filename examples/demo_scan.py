@@ -5,10 +5,10 @@ No hardware, no VISA. Shows the whole chain: axis -> pulse levels -> light and
 dark acquisition -> subtraction -> charge -> running statistics, driven by the
 same event stream the service and the UI will consume.
 
-    python examples/demo_scan.py                 # prebias sweep
-    python examples/demo_scan.py voc             # Q at V_oc, repeated (zero-width axis)
-    python examples/demo_scan.py delay           # TDCF: charge vs delay
-    python examples/demo_scan.py field           # charge vs collection field
+    python -m examples.demo_scan                 # prebias sweep
+    python -m examples.demo_scan voc             # Q at V_oc, repeated (zero-width axis)
+    python -m examples.demo_scan delay           # TDCF: charge vs delay
+    python -m examples.demo_scan field           # charge vs collection field
 """
 from __future__ import annotations
 

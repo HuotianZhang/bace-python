@@ -5,7 +5,7 @@ The wrapper: for each LED level, measure V_oc / J_sc / J_sat on the SourceMeter,
 switch to pulsed illumination at the same level, and run a transient scan whose
 prebias axis is centred on the V_oc just measured.
 
-    python examples/demo_series.py
+    python -m examples.demo_series
 """
 from __future__ import annotations
 

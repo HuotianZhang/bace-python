@@ -7,20 +7,25 @@ nothing here touches an instrument unless you ask it to.
 
 No hardware, no VISA, no service. Each builds its bench from
 `bace.drivers.simulated` and prints what came out. **Run them from the repo
-root**: like everything else, they find `rig.toml` and `run.toml` by name in
-the working directory.
+root, with `-m`**: like everything else they find `rig.toml` and `run.toml` by
+name in the working directory, and `-m` is what puts the repo root on the
+import path, so they work in a checkout where `bace` has not been installed.
 
 ```
-python examples/demo_pipeline.py    the measurement core end to end: axis -> pulse
+python -m examples.demo_pipeline    the measurement core end to end: axis -> pulse
                                     levels -> synthetic traces -> dark subtraction,
                                     baseline, running average, charge
-python examples/demo_scan.py        a transient scan over the prebias axis, driven by
+python -m examples.demo_scan        a transient scan over the prebias axis, driven by
                                     the same event stream the service and the console
                                     consume. Also: voc, delay, field
-python examples/demo_jv.py          a J-V scan — dark, light, and hysteresis
-python examples/demo_series.py      an intensity series: V_oc / J_sc / J_sat per LED
+python -m examples.demo_jv          a J-V scan — dark, light, and hysteresis
+python -m examples.demo_series      an intensity series: V_oc / J_sc / J_sat per LED
                                     level, each with a transient centred on its V_oc
 ```
+
+`python examples/demo_scan.py` is not the same command: running a script by path
+puts `examples/` on `sys.path` instead of the repo root, so `import bace` then
+depends on the package having been installed.
 
 They are the fastest way to see the shape of the event stream without starting
 anything. For the API and the console instead, `python -m bace.service --sim

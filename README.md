@@ -94,7 +94,7 @@ Everything runs end to end on the simulated rig, with no instruments present:
 
 ```
 python -m pytest -q                    # 796 passed, 7 skipped
-python examples/demo_scan.py           # a simulated transient scan
+python -m examples.demo_scan           # a simulated transient scan
 python -m bace.bench                   # the offline stages of the bench harness
 python -m bace.service --sim --fast    # the service on the simulated rig, http://127.0.0.1:8900/
 ```
