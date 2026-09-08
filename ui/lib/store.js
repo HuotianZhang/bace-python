@@ -710,18 +710,6 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         log(frame, 'info', `sample · ${(data.changed || []).join(', ') || 'named'}`);
         break;
 
-      case 'SmuReading':
-        // The SMU panel's display. One value, not a trace: the Keithley's own
-        // front panel shows the reading it is taking and nothing before it,
-        // and this is that panel. `ts` is the frame's, so a replayed reading
-        // older than the one held does not walk the display backwards.
-        if (!state.smu || !Number.isFinite(state.smu.ts) || frame.ts >= state.smu.ts) {
-          state.smu = { volts: data.volts, amps: data.amps, ohms: data.ohms ?? null,
-                        compliance: data.compliance ?? null, function: data.function,
-                        level: data.level, ts: frame.ts };
-        }
-        break;
-
       case 'TemperatureRead':
         state.temperature = { kelvin: data.kelvin, setpoint_k: data.setpoint_k, in_band: data.in_band,
                               source: data.source, ts: frame.ts };
@@ -950,7 +938,6 @@ export function emptyState() {
     actions: [],
     power: null,
     powerLog: [],
-    smu: null,
     monitors: [],
     temperature: null,
     notices: [],

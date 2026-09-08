@@ -1,0 +1,506 @@
+"""The Keithley 2400 panel: the instrument, and the one thread allowed to
+touch it.
+
+No HTTP here and nothing from `bace.service`. What this owns is the rule the
+whole repository is built on -- **one thread on the bus** -- and the small
+amount of policy a front panel needs on top of `drivers.keithley2400`:
+
+* every instrument call runs on one worker thread, and an HTTP handler (which
+  gets a thread of its own from `ThreadingHTTPServer`) submits a job and waits.
+  VISA blocks and its sessions are not thread-safe, so this is not a
+  performance choice: two handlers writing SCPI at once is two commands
+  interleaved on one bus;
+* **the display polls between jobs, on that same thread.** A front panel
+  free-runs its display, and the way to do that without a second thread on the
+  bus is to make the reading what the worker does when it has nothing else to
+  do -- so a click never waits behind a reading, and a reading never lands in
+  the middle of a click;
+* the bench ceilings from `rig.toml` hold **a typed level**, not only a
+  compliance. Nowhere else in this project can a level be typed straight onto
+  the device: a sweep's ends come from a module's parameters and V_oc/J_sc
+  source zero. `max_voltage_compliance_v` bounds a sourced voltage and
+  `max_current_compliance_a` a sourced current -- they are the bench's
+  statement of what the device may see, whichever end of the instrument it
+  arrives from, so no third key is invented to hold the same number twice;
+* the output goes **off** when the console stops. A panel that left a source
+  driving because somebody closed the window would be the worst thing on this
+  bench, and it is the one thing a browser cannot be relied on to do.
+
+Nothing here writes a file, and nothing here measures anything: this is the
+instrument's own front panel with a socket in front of it.
+"""
+from __future__ import annotations
+
+import dataclasses
+import math
+import queue
+import threading
+import time
+from typing import Any, Callable
+
+from ...drivers.keithley2400 import (PANEL_STATIC, PanelSetup, SourceMeterConfig,
+                                     SourceMeterError)
+
+JOB_TIMEOUT_S = 30.0
+"""How long a request waits for the worker. Longer than any single panel
+operation: the slowest is a reading at NPLC 10 with a 100-deep filter, which
+is four apertures x 10 x 100 / 50 Hz = 80 s -- and that one is refused by
+`PanelSetup` long before it gets here (the filter caps at 100 and NPLC at 10,
+but the console's own defaults are nowhere near). Thirty seconds is a bus that
+has stopped answering, not a slow measurement."""
+
+POLL_MIN_S, POLL_MAX_S = 0.1, 60.0
+POLL_DEFAULT_S = 1.0
+"""What the display refreshes at. Slower than the 2400's own display and
+faster than anyone watching a number settle needs: a reading at NPLC 1 is four
+apertures, 80 ms on 50 Hz mains, so a tick costs eight percent of the worker
+and leaves the rest of it to whoever clicks something."""
+
+SOURCE_FIELDS: tuple[str, ...] = (
+    "function", "level", "current_compliance_a", "voltage_compliance_v",
+    "nplc", "averaging", "terminals", "four_wire", "source_range")
+"""What `POST /api/source` accepts: every `PanelSetup` field, all optional.
+What is not sent keeps the value the panel already holds, so moving a level is
+a body of one key -- the panel is a state the operator edits, not a form they
+resubmit."""
+
+FUNCTION_WORDS: dict[str, str] = {
+    "voltage": "voltage", "volt": "voltage", "volts": "voltage", "v": "voltage",
+    "current": "current", "amp": "current", "amps": "current", "a": "current",
+    "i": "current",
+}
+"""`V` and `I` because that is what is written on the instrument and on every
+axis label in this project; `voltage`/`current` stays the canonical pair."""
+
+
+class PanelRefused(RuntimeError):
+    """Something the panel will not do *now*. `level` is `warn` or `crit`,
+    and the text is written for the screen: what happened, and what to do."""
+
+    def __init__(self, text: str, level: str = "warn"):
+        super().__init__(text)
+        self.text = text
+        self.level = level
+
+
+class PanelUnavailable(RuntimeError):
+    """There is no instrument to drive. Carries why."""
+
+
+# -- the worker -------------------------------------------------------------
+_WAKE = object()
+"""Put in the queue to make the worker re-read its idle setting rather than
+sleep out a timeout computed from the old one."""
+
+
+class _Bus:
+    """One thread, and everything that touches the instrument runs on it.
+
+    `do(fn)` submits and waits; `idle(fn, every)` is what the thread does when
+    nothing has been submitted. Deliberately not a thread pool and not a lock
+    around a shared session: a lock would let two handlers take turns *inside*
+    one logical operation -- a write, then somebody else's write, then the read
+    that belonged to the first -- which is the failure a bus lock is supposed
+    to prevent and the one that is hardest to see afterwards.
+    """
+
+    def __init__(self, name: str = "keithley-console"):
+        self._q: queue.Queue = queue.Queue()
+        self._thread = threading.Thread(target=self._loop, name=name, daemon=True)
+        self._stop = threading.Event()
+        self._idle: tuple[Callable[[], None], float] | None = None
+        self._next_idle = 0.0
+        self._lock = threading.Lock()
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self, timeout_s: float = 5.0) -> None:
+        self._stop.set()
+        self._q.put(_WAKE)
+        if self._thread.is_alive():
+            self._thread.join(timeout_s)
+
+    def set_idle(self, fn: Callable[[], None] | None, every: float = 1.0) -> None:
+        """What to do between jobs, and how often. None switches it off.
+
+        The wake is not decoration. The thread is asleep in `queue.get` on a
+        timeout computed from the *old* setting -- with no idle at all that
+        timeout is `None`, i.e. forever -- so without something in the queue,
+        switching the display on would not start it until the next click, and
+        switching it off would leave one more tick already decided.
+        """
+        with self._lock:
+            self._idle = None if fn is None else (fn, float(every))
+            self._next_idle = time.monotonic()
+        self._q.put(_WAKE)
+
+    def do(self, fn: Callable[[], Any], *, timeout_s: float = JOB_TIMEOUT_S) -> Any:
+        """Run `fn` on the worker and return what it returned, or raise what it
+        raised -- on the *caller's* thread, so a handler sees a `PanelRefused`
+        as an exception and not as a status code somebody remembered to check."""
+        if not self._thread.is_alive():
+            raise PanelUnavailable("the console's instrument thread is not running")
+        done = threading.Event()
+        box: dict[str, Any] = {}
+
+        def job() -> None:
+            try:
+                box["value"] = fn()
+            except BaseException as exc:                     # noqa: BLE001
+                box["error"] = exc
+            finally:
+                done.set()
+
+        self._q.put(job)
+        if not done.wait(timeout_s):
+            raise PanelRefused(
+                f"the instrument did not answer within {timeout_s:g} s; the bus is "
+                "busy or the 2400 has stopped responding", "crit")
+        if "error" in box:
+            raise box["error"]
+        return box.get("value")
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            with self._lock:
+                idle = self._idle
+                due = self._next_idle
+            wait = None if idle is None else max(0.0, due - time.monotonic())
+            try:
+                job = self._q.get(timeout=wait)
+            except queue.Empty:
+                job = None
+            if callable(job):
+                job()
+                continue
+            if self._stop.is_set():
+                return
+            # Whether to tick is decided *here*, under the lock, and not from
+            # what was read before the wait: the display may have been switched
+            # off while this thread was asleep, and a tick already decided on
+            # is a reading after the operator turned the display off.
+            with self._lock:
+                if self._idle is None or time.monotonic() < self._next_idle:
+                    continue
+                idle, every = self._idle
+                self._next_idle = time.monotonic() + every
+            # A job that arrived while the tick was being decided still wins:
+            # a click must not wait behind a reading.
+            if not self._q.empty():
+                continue
+            try:
+                idle()
+            except Exception:                                # noqa: BLE001
+                pass    # the reader records its own failures; see `_tick`
+
+
+# -- the panel --------------------------------------------------------------
+class KeithleyPanel:
+    """One SourceMeter, driven by hand.
+
+    `smu` is anything with the driver's panel interface -- `Keithley2400`, or
+    `drivers.simulated.SimulatedSourceMeter` under `--sim`. `ceiling` is
+    `rig.toml`'s two limits and `defaults` the `SourceMeterConfig` the panel
+    opens on.
+    """
+
+    def __init__(self, smu: Any, *, ceiling: dict, defaults: SourceMeterConfig,
+                 identity: str = "", address: str = "", mode: str = "rig",
+                 unavailable: str = ""):
+        self.smu = smu
+        self.ceiling = {"current_a": float(ceiling["current_a"]),
+                        "voltage_v": float(ceiling["voltage_v"])}
+        self.defaults = PanelSetup.from_config(dataclasses.replace(
+            defaults,
+            current_compliance_a=min(defaults.current_compliance_a, self.ceiling["current_a"]),
+            voltage_compliance_v=min(defaults.voltage_compliance_v, self.ceiling["voltage_v"])))
+        """The panel a cold instrument opens on: the configuration in force,
+        sourcing 0 V, with either compliance brought under the bench ceiling --
+        never above `rig.toml` even when `run.toml` is."""
+        self.identity = identity
+        self.address = address
+        self.mode = mode
+        self.unavailable = unavailable
+        self._bus = _Bus()
+        self._lock = threading.Lock()
+        self._reading: dict | None = None
+        self._poll_s: float | None = None
+        self._readings = 0
+        self._failures = 0
+        self._last_error: str | None = None
+
+    # -- lifecycle ----------------------------------------------------------
+    def start(self) -> None:
+        self._bus.start()
+
+    def close(self) -> None:
+        """Output off, then stop the thread.
+
+        The output first and on the worker, because it is the only part of
+        this that matters: a console that exited leaving the 2400 driving a
+        cell is the failure this whole program exists to make less likely, and
+        a browser tab closing is not something to rely on for it.
+        """
+        if self.available:
+            try:
+                self._bus.do(lambda: self.smu.disable_output(), timeout_s=5.0)
+            except Exception:                                # noqa: BLE001
+                pass
+        self._bus.stop()
+
+    @property
+    def available(self) -> bool:
+        return self.smu is not None
+
+    def _need(self) -> Any:
+        if self.smu is None:
+            raise PanelUnavailable(self.unavailable or "no SourceMeter on this console")
+        return self.smu
+
+    # -- what the page draws ------------------------------------------------
+    def state(self) -> dict:
+        """The whole panel as one JSON object. Touches no instrument: the
+        panel and the last reading are held here, and `panel` is the driver's
+        own record of what it configured, which `*RST` clears there."""
+        with self._lock:
+            reading = dict(self._reading) if self._reading else None
+            poll = {"running": self._poll_s is not None, "interval_s": self._poll_s,
+                    "readings": self._readings, "failures": self._failures,
+                    "last_error": self._last_error}
+        panel = getattr(self.smu, "panel", None) if self.available else None
+        output = bool(getattr(self.smu, "output_enabled", False)) if self.available else None
+        return {
+            "instrument": {"identity": self.identity, "address": self.address,
+                           "mode": self.mode, "available": self.available,
+                           "unavailable": self.unavailable or None},
+            "ceiling": dict(self.ceiling),
+            "defaults": panel_wire(self.defaults),
+            "panel": panel_wire(panel),
+            "output": output,
+            "reading": reading,
+            "poll": poll,
+            "at": time.time(),
+        }
+
+    # -- the three things a panel does --------------------------------------
+    def set_source(self, body: dict) -> dict:
+        """Set the source. Every field optional and merged onto the panel the
+        instrument already holds, so moving a level is a body of one key.
+
+        **Changing the function resets the level and the range**, unless the
+        same body sets them. `level` is volts or amps depending on `function`,
+        so carrying a number across the change is carrying it into a different
+        unit: a panel at 1.5 V, asked for current, would ask the instrument to
+        source 1.5 *amps* -- which on this bench is refused by the ceiling, so
+        what the operator sees is a click on `A` failing with a sentence about
+        a number they did not type. The instrument's own keys keep a level per
+        function; 0 is the value this opens on and the safe end of both ranges
+        (0 V is J_sc and 0 A is V_oc), so it is what a change lands on.
+        `source_range` follows for the same reason -- a range in volts means
+        nothing in amps -- and `None` is the autorange a panel wants anyway.
+        """
+        values = source_args(body)
+        def job() -> None:
+            smu = self._need()
+            base = getattr(smu, "panel", None) or self.defaults
+            if values.get("function", base.function) != base.function:
+                values.setdefault("level", 0.0)
+                values.setdefault("source_range", None)
+            setup = dataclasses.replace(base, **values)      # ValueError -> 422
+            self._check_ceiling(setup)
+            try:
+                smu.apply_panel(setup)
+            except SourceMeterError as exc:
+                raise PanelRefused(str(exc)) from None
+        self._bus.do(job)
+        return self.state()
+
+    def set_output(self, on: bool) -> dict:
+        """Output on or off.
+
+        On is refused until something has set a source: after a `*RST` -- which
+        every measurement routine in this project opens with -- the 2400 sits
+        at 0 V on a 100 uA compliance, and an output switched on there is not
+        the source the panel is drawing.
+        """
+        def job() -> None:
+            smu = self._need()
+            if on and getattr(smu, "panel", None) is None:
+                raise PanelRefused(
+                    "nothing has told the SourceMeter what to source: set the source "
+                    "first, then switch the output on")
+            smu.enable_output(bool(on))
+        self._bus.do(job)
+        if not on:
+            with self._lock:
+                # The display goes blank with the output, rather than keeping
+                # the last numbers on screen: they were a measurement of a
+                # moment that has passed, and nothing would say so.
+                self._reading = None
+        else:
+            self.read()
+        return self.state()
+
+    def read(self) -> dict:
+        """One reading now, whatever the display is doing."""
+        self._bus.do(self._tick)
+        return self.state()
+
+    def errors(self) -> list[str]:
+        """Drain `:SYST:ERR?`. The one query here that is not a measurement --
+        a panel that refuses something the *instrument* rejected has to be able
+        to show what it said."""
+        def job() -> list[str]:
+            smu = self._need()
+            reader = getattr(smu, "errors", None)
+            return list(reader()) if callable(reader) else []
+        return self._bus.do(job)
+
+    def set_poll(self, interval_s: float | None) -> dict:
+        """Start, restart or stop the free-running display."""
+        if interval_s is not None:
+            interval_s = float(interval_s)
+            if not POLL_MIN_S <= interval_s <= POLL_MAX_S:
+                raise ValueError(f"interval_s is between {POLL_MIN_S:g} and "
+                                 f"{POLL_MAX_S:g} s, not {interval_s:g}")
+        with self._lock:
+            self._poll_s = interval_s
+        self._bus.set_idle(None if interval_s is None else self._tick_quietly,
+                           interval_s or 1.0)
+        return self.state()
+
+    # -- the reading --------------------------------------------------------
+    def _tick(self) -> None:
+        """One reading, on the worker. Raises what the driver raises."""
+        smu = self._need()
+        reading = smu.read_panel()
+        with self._lock:
+            self._readings += 1
+            self._last_error = None
+            self._reading = {"volts": reading.volts, "amps": reading.amps,
+                             "ohms": reading.ohms, "compliance": reading.compliance,
+                             "function": reading.function, "level": reading.level,
+                             "at": time.time()}
+
+    def _tick_quietly(self) -> None:
+        """The display's own tick. **Nothing to read is not a failure**: with
+        the output off, or before a source has been set, the 2400 shows dashes
+        and `read_panel` raises -- so this skips instead of counting a fault
+        and telling the operator an instrument that is answering has stopped.
+        """
+        if not self.available or getattr(self.smu, "panel", None) is None:
+            return
+        if not getattr(self.smu, "output_enabled", False):
+            return
+        try:
+            self._tick()
+        except Exception as exc:                             # noqa: BLE001
+            with self._lock:
+                self._failures += 1
+                self._last_error = f"{type(exc).__name__}: {exc}"
+
+    # -- the ceilings -------------------------------------------------------
+    def _check_ceiling(self, setup: PanelSetup) -> None:
+        if setup.current_compliance_a > self.ceiling["current_a"]:
+            raise PanelRefused(
+                f"current compliance {setup.current_compliance_a:g} A is above this "
+                f"bench's ceiling of {self.ceiling['current_a']:g} A "
+                "(rig.toml [sourcemeter] max_current_compliance_a)", "crit")
+        if setup.voltage_compliance_v > self.ceiling["voltage_v"]:
+            raise PanelRefused(
+                f"voltage compliance {setup.voltage_compliance_v:g} V is above this "
+                f"bench's ceiling of {self.ceiling['voltage_v']:g} V "
+                "(rig.toml [sourcemeter] max_voltage_compliance_v)", "crit")
+        limit, unit, key = ((self.ceiling["voltage_v"], "V", "max_voltage_compliance_v")
+                            if setup.function == "voltage"
+                            else (self.ceiling["current_a"], "A", "max_current_compliance_a"))
+        if abs(setup.level) > limit:
+            raise PanelRefused(
+                f"sourcing {setup.level:g} {unit} is past this bench's ceiling of "
+                f"{limit:g} {unit} (rig.toml [sourcemeter] {key})", "crit")
+
+
+# -- the wire ---------------------------------------------------------------
+def panel_wire(setup: PanelSetup | None) -> dict | None:
+    """A `PanelSetup` as the page reads it, with the two things a screen would
+    otherwise re-derive from `function`: which unit the level is in, and which
+    of the two compliances is the one that bites."""
+    if setup is None:
+        return None
+    out = dataclasses.asdict(setup)
+    out["unit"] = setup.unit
+    out["limit"] = setup.limit
+    return out
+
+
+def source_args(body: dict) -> dict:
+    """`POST /api/source`'s body as `PanelSetup` fields.
+
+    JSON has no integers and no enums, and the page's fields are typed by
+    hand, so `4` and `"4"` both arrive for `averaging` and both mean four. A
+    value that is not the shape of its field raises `ValueError`, which the
+    server answers with a 422 carrying this sentence -- and the sentence is
+    what the operator reads, so it names the field and quotes what they typed.
+    """
+    unknown = sorted(set(body) - set(SOURCE_FIELDS))
+    if unknown:
+        raise ValueError(f"unknown field(s): {', '.join(unknown)}; accepted: "
+                         + ", ".join(SOURCE_FIELDS))
+    out: dict[str, Any] = {}
+    for name, raw in body.items():
+        if name == "function":
+            word = str(raw).strip().lower()
+            if word not in FUNCTION_WORDS:
+                raise ValueError(f"function: {raw!r} is neither -- a 2400 sources "
+                                 "voltage or current")
+            out[name] = FUNCTION_WORDS[word]
+        elif name == "terminals":
+            word = str(raw).strip().upper()[:4]
+            if word not in ("FRON", "REAR"):
+                raise ValueError(f"terminals: {raw!r} is neither FRON nor REAR")
+            out[name] = word
+        elif name == "four_wire":
+            out[name] = _as_bool(name, raw)
+        elif name == "averaging":
+            out[name] = _as_int(name, raw)
+        elif name == "source_range":
+            # An empty box is the instrument's autorange, not a zero range.
+            out[name] = (None if raw is None or (isinstance(raw, str) and not raw.strip())
+                         else _as_float(name, raw))
+        else:
+            out[name] = _as_float(name, raw)
+    return out
+
+
+def _as_float(name: str, raw: Any) -> float:
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name}: {raw!r} is not a number") from None
+    if not math.isfinite(value):
+        raise ValueError(f"{name}: {raw!r} is not a finite number")
+    return value
+
+
+def _as_int(name: str, raw: Any) -> int:
+    value = _as_float(name, raw)
+    if value != int(value):
+        raise ValueError(f"{name}: {raw!r} is not a whole number")
+    return int(value)
+
+
+def _as_bool(name: str, raw: Any) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    word = str(raw).strip().lower()
+    if word in ("true", "1", "on", "yes"):
+        return True
+    if word in ("false", "0", "off", "no"):
+        return False
+    raise ValueError(f"{name}: {raw!r} is neither true nor false")
+
+
+__all__ = ["KeithleyPanel", "PanelRefused", "PanelUnavailable", "PanelSetup",
+           "SOURCE_FIELDS", "POLL_DEFAULT_S", "POLL_MIN_S", "POLL_MAX_S",
+           "panel_wire", "source_args", "PANEL_STATIC"]

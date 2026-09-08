@@ -381,34 +381,6 @@ class PowerReading(Event):
 
 
 @dataclass(frozen=True)
-class SmuReading(Event):
-    """One reading off the Keithley's front panel -- the SMU driven by hand,
-    with no module around it and nothing written to disk.
-
-    Both senses, because the panel senses both (`:FUNC:CONC ON`): sourcing
-    volts the current is the measurement and the voltage is the evidence the
-    source is holding, and sourcing amps the other way round. `compliance` is
-    the instrument's own `Cmpl` annunciator, so a reading taken at the limit
-    says that it is the source's limit and not the device's answer, and
-    `level` is what was asked for beside what came back.
-
-    A session-level event, like `PowerReading`: `run_id` is None and
-    `node_path` is "". Only the SMU monitor emits it -- a by-hand `smu-read`
-    carries its reading in the `BenchAction` result, as `read-power` does.
-    """
-
-    volts: float
-    amps: float
-    compliance: bool | None
-    function: str
-    level: float
-    ohms: float | None = None
-    """V/I, or None at exactly zero current. The division the front panel's
-    MATH does, not `:SENS:FUNC 'RES'` -- which would put the instrument into
-    its own resistance mode and stop it sourcing what the panel says."""
-
-
-@dataclass(frozen=True)
 class TemperatureRead(Event):
     """One temperature, from the 331 console or typed by an operator
     (`source = "operator"`). `in_band` is None when there is no setpoint to

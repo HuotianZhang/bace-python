@@ -19,5 +19,10 @@ dev = ["pytest>=7"]
 [tool.setuptools.packages.find]
 include = ["bace*"]
 
+# The standalone consoles serve their own page, so it travels with the package
+# rather than being found relative to a checkout.
+[tool.setuptools.package-data]
+"bace.consoles.keithley" = ["page.html", "README.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

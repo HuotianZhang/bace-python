@@ -16,6 +16,7 @@ extended, and focused on **measurement** — analysis stays downstream.
 | `scripts/` | the double-click `.bat` entry points, one per bench stage; `setup.sh` for a Linux checkout |
 | `docs/ui-kickoff.md` | where the console work starts, with `docs/ui-rules.md` and `docs/design/` |
 | `ui/README.md` | the console itself — how to run it, the fixtures it develops against, and what each milestone owes. `docs/ui-plan.md` is the plan it follows |
+| `bace/consoles/keithley/README.md` | the standalone Keithley 2400 panel: one instrument, one process, one port, and the smallest complete example of that shape |
 
 ## Developing away from the bench (Linux, a container, a cloud session)
 
@@ -63,6 +64,8 @@ bace/           the package
   bench/        the staged hardware harness
   service/      FastAPI + WebSocket around the engine — the bench, the modules,
                 the runs, the pipeline tree. bace/service/README.md
+  consoles/     standalone per-instrument panels: one instrument, one process,
+                one port, no service and no ui/. keithley/ is the first
 ui/             the console — plain ES modules, no build step, served by the
                 service at /ui. ui/README.md; docs/ui-plan.md is the plan
 tools/          standalone rig scripts — scan, bare, lightpower, relay, identify_dio;
@@ -86,10 +89,11 @@ before doing anything, so every relative path below still resolves.
 Everything runs end to end on the simulated rig, with no instruments present:
 
 ```
-python -m pytest -q                    # 672 passed, 7 skipped
+python -m pytest -q                    # 795 passed, 7 skipped
 python demo_scan.py                    # a simulated transient scan
 python -m bace.bench                   # the offline stages of the bench harness
 python -m bace.service --sim --fast    # the service on the simulated rig, http://127.0.0.1:8900/
+python -m bace.consoles.keithley --sim # just the Keithley's front panel, http://127.0.0.1:8924/
 ```
 
 ## Status
@@ -112,17 +116,22 @@ jv_dark → jv_bace → bace end to end on the lab PC, the bace matching a LabVI
 run fifteen minutes apart within the single-shot scatter. `bace/service/README.md`
 says how to run and drive it; `docs/service-contract.md` is what it was built to.
 
+`bace/consoles/` is the other half of that: one instrument, one process, one
+port, importing neither the service nor `ui/`. The service owns the *bench* —
+every instrument on it, one worker, runs and files — and there are times when
+what you want is one instrument by hand and nothing else. `consoles/keithley/`
+(2026-09-08) is the first: the 2400's own front panel served from the standard
+library, on `:8924` the way the 1918-C's console is on `:8918` and the 331's on
+`:8331`. One process owns an instrument, so it is what you run *instead of* the
+service, not beside it. Its README is also the worked example for writing the
+next one.
+
 `ui/` is under way, milestone by milestone (`docs/ui-plan.md`, and `ui/README.md`
 for what each one owes). **M0–M3 are built**: the event layer and the fixtures it
 develops against, the pinned rail and the chain strip, the six generated bench
 cards — a dark J–V can be run from the screen — and the charts, each in the card
 that owns it: the J–V, the transient with its shaded integration window and
 running integral, and the timing diagram that draws the shot the form describes
-before it is run. **M4–M6 are built too**: the live run monitor, the pipeline
-tab and the results grid. Beside them, since 2026-09-07, is a fifth tab and a
-page of its own — **the Keithley's front panel** (`#/smu`, or
-`/ui/keithley.html` in its own window): the SourceMeter driven by hand, source
-and read, with no module, no run, no file and no other instrument on the
-surface. `HANDOFF.md` §3 carries the user's explicit instruction about the UI's
+before it is run. **M4 is next**: the live monitor. `HANDOFF.md` §3 carries the user's explicit instruction about the UI's
 shape, and `docs/bace-console-round3.html` is the design the service contract
 was derived from.

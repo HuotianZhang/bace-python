@@ -90,9 +90,8 @@ from .journal import (Journal, add_curve, axis_result, count_shot, finished_resu
                       loop_result, node_record)
 from .live import LiveState
 from .modules import Catalogue, RunContext, VocSource, coerce_sample, jsonable
-from .monitors import (MAX_INTERVAL_S, MIN_INTERVAL_S, SMU_MONITOR_S,
-                       TEMPERATURE_MONITOR_S, PowerMonitor, SmuMonitor,
-                       TemperatureMonitor)
+from .monitors import (MAX_INTERVAL_S, MIN_INTERVAL_S, TEMPERATURE_MONITOR_S,
+                       PowerMonitor, TemperatureMonitor)
 from .pipeline import VOC_PARAM, Module, Schedule, Step, Validation
 from .rigs import ACTIONS, Bench, BenchActionRefused, Unavailable, action_before
 from .wire import STEPDONE_ARRAYS, ephemeral_frame, is_ephemeral, make_envelope, payloads
@@ -564,10 +563,6 @@ class Session:
         self.session_voc: VocSource | None = None
         self._monitor: PowerMonitor | None = None
         self._temperature_monitor: TemperatureMonitor | None = None
-        self._smu_monitor: SmuMonitor | None = None
-        """The SMU panel's display. Never started from boot -- the panel is a
-        by-hand surface and the monitor is what it switches on, so a service
-        nobody has opened the panel on does not poll the Keithley."""
         self._power_history: collections.deque[tuple] = collections.deque(maxlen=POWER_HISTORY_MAX)
         """`(ts, watts, trustworthy, wavelength_nm, source, averaged)` per
         monitor reading, newest last; `ts` is the frame's own `ts`, so a
@@ -646,7 +641,6 @@ class Session:
         self._closed = True
         self.stop_power_monitor()
         self.stop_temperature_monitor()
-        self.stop_smu_monitor()
         ended = self.worker.shutdown(timeout_s)
         if not ended:
             self._error(f"shutdown: the worker is still inside a job after {timeout_s:g} s; "
@@ -1318,16 +1312,6 @@ class Session:
             instruments["voc"] = _voc_wire(voc)
             instruments["power"] = {**(instruments.get("power") or {}),
                                     "monitor": self.monitor_running}
-            # The SMU panel is not a read-back and does not go stale with one:
-            # it is the driver's own record of what this process configured,
-            # and `*RST` clears it there. Laid on last, over the run's overlay
-            # too -- while a step is driving the SourceMeter the driver knows
-            # whether the panel is still applied and the overlay could only
-            # guess. See `Bench.smu_panel_block`; without it a panel a run had
-            # already reset was drawn as applied until somebody re-read, since
-            # a run reads back at its Start and not at its end.
-            instruments["smu"] = {**(instruments.get("smu") or {}),
-                                  **self.bench.smu_panel_block()}
             instruments["temperature"] = self._temperature_block(
                 instruments.get("temperature") or {},
                 None if snapshot is None else snapshot.get("read_at"))
@@ -1892,55 +1876,9 @@ class Session:
         monitor.stop()
         return True
 
-    # -- the SMU panel's display ------------------------------------------------------
-    @property
-    def smu_monitor_running(self) -> bool:
-        return self._smu_monitor is not None and self._smu_monitor.running
-
-    def start_smu_monitor(self, interval_s: float = SMU_MONITOR_S) -> dict:
-        """`POST /monitors/smu`: the Keithley read every `interval_s` beside
-        whatever the worker is doing, so the panel's display free-runs the way
-        the instrument's own does.
-
-        The 2400 is on GPIB and this process holds the session, so the monitor
-        reads only while holding the worker's bus lock and skips a tick it
-        cannot take -- the rule the temperature monitor already follows. It
-        also skips while the output is off or the panel is not applied, which
-        is what `SmuMonitor.ready` is for: neither is a failure and neither is
-        a number.
-
-        One at most (409); `ValueError` when there is no SourceMeter on this
-        bench or the interval is out of range.
-        """
-        interval_s = float(interval_s)
-        if not MIN_INTERVAL_S <= interval_s <= MAX_INTERVAL_S:
-            raise ValueError(f"interval_s must be between {MIN_INTERVAL_S:g} and "
-                             f"{MAX_INTERVAL_S:g} s, not {interval_s:g}")
-        if self.smu_monitor_running:
-            raise Conflict("the SMU monitor is already running")
-        smu = self.bench.rig.smu
-        if smu is None or isinstance(smu, Unavailable):
-            raise ValueError("no SourceMeter on this bench: "
-                             + self.bench.unavailable.get("smu", "nothing answered at "
-                                                                 "[sourcemeter] address"))
-        monitor = SmuMonitor(smu, emit=lambda ev: self._dispatch(None, ev, node_path=""),
-                             interval_s=interval_s, bus=self.worker.bus)
-        self._smu_monitor = monitor
-        monitor.start()
-        return monitor.info()
-
-    def stop_smu_monitor(self) -> bool:
-        """`DELETE /monitors/smu`. False when none was running."""
-        monitor = self._smu_monitor
-        if monitor is None or not monitor.running:
-            return False
-        monitor.stop()
-        return True
-
     def monitors(self) -> list[dict]:
         """`GET /monitors`."""
-        return [m.info() for m in (self._monitor, self._temperature_monitor,
-                                   self._smu_monitor)
+        return [m.info() for m in (self._monitor, self._temperature_monitor)
                 if m is not None and m.running]
 
 

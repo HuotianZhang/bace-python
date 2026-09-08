@@ -5,9 +5,7 @@ is written, tested and proven on the rig; the service over it is built and
 proven on the simulator. The UI is under way — `docs/ui-plan.md` M0 to M6 are
 done (the event layer and its fixtures, the pinned rail and the chain strip,
 the generated module cards, the charts, the run monitor, the pipeline tab, and
-the results tab — R2·3 as it stands, drawn from the record), and a fifth tab
-beside them since 2026-09-07: the Keithley's own front panel, the SourceMeter
-driven by hand with no module and no file (§3); the design
+the results tab — R2·3 as it stands, drawn from the record); the design
 iteration on results with the user is still to be had, on the built tab.
 
 Read `docs/bace-status.html` first — it is the full narrative with the evidence.
@@ -229,46 +227,48 @@ the new route turned "editable in `run.toml`" into "typeable in a text box".
 as it will be spelled. The plan's directory allocator (its collision section)
 is still open.
 
-**2026-09-07, the SMU panel** (`ui/lib/smu.js`, the `keithley` tab, and
-`ui/keithley.html` — the same panel in a window of its own). The Keithley 2400
-driven by hand: source a voltage or a current, hold a compliance, switch the
-output on, watch what comes back. No module, no run, no folder and no other
-instrument. It is not one of `docs/ui-plan.md`'s milestones; it is what the
-console could not do at all — every route to the SourceMeter went through a
-module, so reading a V_oc without filing a run meant leaving the console for
-the instrument's own keys.
+**2026-09-08, the Keithley console** (`bace/consoles/keithley/`, and its own
+README). The 2400 driven by hand: source a voltage or a current, hold a
+compliance, switch the output on, watch what comes back. No module, no run, no
+folder, no other instrument — and **not part of the service or of `ui/`**. One
+instrument, one process, one port:
 
-Three layers, and each earned its own change:
+```
+python -m bace.consoles.keithley --sim     # no hardware, no VISA, no extras
+python -m bace.consoles.keithley           # GPIB0::24, from rig.toml -> :8924
+```
 
-* **the driver** grew a *panel mode* (`keithley2400.PanelSetup`,
-  `apply_panel`, `read_panel`): configure once and read many, with `*RST` only
-  on the way in and only what moved written after that. The three DC routines
-  could not be reused for it — each opens with `*RST`, which would drop the
-  output between every reading. `_prepare` clears the panel, so the first
-  measurement after a panel session leaves the instrument in none of the state
-  the panel put there **and the panel knows**. The simulated SourceMeter does
-  the same, and models the relay on this path (it does not on `measure_dc` or
-  `sweep_points`, which are only reached from inside `router.dc()`).
-* **the service** gained three bench actions (`smu-source`, `smu-on`,
-  `smu-read` — `smu-off` already existed), `instruments.smu.panel` /
-  `panel_defaults` in the read-back, an `SmuReading` event, and a third
-  observer on the bus lock for the free-running display (`POST /monitors/smu`,
-  contract §8). `instruments.smu.panel` is laid on **live** rather than served
-  from the cached read-back, which is the one defect this work turned up in
-  the layer underneath it: `GET /bench` serves the snapshot *Start* took and a
-  run does not read back at its end, so a panel the run's first `*RST` had
-  already cleared went on being drawn as applied until somebody pressed
-  re-read. The fix is not another read-back — the panel is not a read-back at
-  all, it is the driver's own record and no instrument is touched to read it
-  (`Bench.smu_panel_block`).
+It exists because every route to the SourceMeter went through a module, so
+reading a V_oc without filing a run meant leaving this program for the
+instrument's own keys. It is deliberately *not* a tab: **one process owns an
+instrument**, so a console and the service cannot both hold `GPIB0::24` — this
+is what you run instead of the service, the same reason the 1918-C has a
+console on `:8918` and the 331 one on `:8331` (`docs/service-plan.md`). The
+port follows that convention: the last two digits are the GPIB address.
+
+Two changes underneath it, and one thing to know:
+
+* **the driver grew a panel mode** (`keithley2400.PanelSetup`, `apply_panel`,
+  `read_panel`): configure once and read many, with `*RST` only on the way in
+  and only what moved written after that. The three DC routines could not be
+  reused — each opens with `*RST`, which would drop the output between every
+  reading. The separation runs both ways: `_prepare` clears the panel, so the
+  first measurement after a panel session leaves the instrument in none of the
+  state the panel put there and the panel knows. The panel senses **both**
+  quantities (`:FUNC:CONC ON`), which is the one place in that driver where the
+  V element of a `:READ?` is a measurement rather than the setpoint
+  `sweep_points` files. The simulated SourceMeter mirrors all of it and models
+  the relay on this path (`measure_dc` and `sweep_points` are only reached from
+  inside `router.dc()`, so the position cannot be wrong for them);
 * **`rig.toml`'s two ceilings now hold a typed level**, not only a compliance.
-  Until this panel nothing could type a source level at all — a sweep's ends
-  come from a module's parameters and V_oc/J_sc source zero — so the one
-  number an operator can now put straight onto the device had nothing over it.
-  `max_voltage_compliance_v` bounds a sourced voltage and
-  `max_current_compliance_a` a sourced current: they are the bench's statement
-  of what the device may see, whichever end of the instrument it arrives from,
-  so no third key was invented to hold the same number twice.
+  Until this console nothing could type a source level at all, so the one
+  number an operator can put straight onto the device had nothing over it. No
+  third key was invented: those two are the bench's statement of what the
+  device may see, whichever end of the instrument it arrives from;
+* the console is `http.server`, not FastAPI, so it needs no `service` extra —
+  and under `--sim` no VISA either. Its README is the worked example for
+  writing the next one (`panel.py` is what changes; `server.py` and the page
+  follow the panel's state object rather than the instrument).
 
 **Temperature** — wired since this handover was written (superseded here by
 `docs/service-contract.md` section 7). The Lake Shore 331 is at

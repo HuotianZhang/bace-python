@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keithley 2400 · bace console</title>
+<link rel="icon" href="data:,">
+<style>
+/* One file, no build step, no network: the lab PC has no bundler and this
+   console has to come up on a machine with nothing installed but Python.
+   System font stacks for the same reason -- a webfont is a request that fails
+   on a bench with no route out. */
+:root {
+  --ink: #201e1d; --grey: #7d7979; --rule: #d7d3d3; --fill: #eae7e7;
+  --paper: #fff; --alert: #ec3013; --warn: #b06a00; --ok: #3f7d53;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", "DejaVu Sans Mono", Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 13px/1.45 var(--sans);
+}
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+.bar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 0 14px; height: 38px; background: var(--ink); color: #fff;
+}
+.wordmark { font-weight: 800; letter-spacing: .02em; text-transform: uppercase; }
+.bar .who { font-family: var(--mono); font-size: 11px; color: rgba(255,255,255,.6); }
+.bar .sp { flex: 1 1 auto; }
+.chip {
+  font-family: var(--mono); font-size: 11px; padding: 1px 7px;
+  border: 1px solid rgba(255,255,255,.35); color: rgba(255,255,255,.9);
+}
+.chip.bad { border-color: #ff9783; color: #ffc4b8; }
+.chip.sim { background: var(--warn); border-color: var(--warn); color: #fff; }
+
+main { padding: 14px; max-width: 860px; }
+
+.card { border: 1px solid var(--rule); background: var(--paper); }
+.ch {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  padding: 7px 10px; border-bottom: 1px solid var(--rule); background: var(--fill);
+}
+.cn { font-weight: 700; }
+.cs { color: var(--grey); font-size: 11px; }
+.cb { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 9px; }
+
+/* -- the display -------------------------------------------------------- */
+.display { padding: 10px 12px 8px; background: var(--ink); color: #fff; }
+.cells { display: flex; gap: 26px; align-items: baseline; flex-wrap: wrap; }
+.cell { display: flex; align-items: baseline; gap: 8px; }
+.q { font-weight: 700; font-size: 11px; color: rgba(255,255,255,.5); width: 1.1em; }
+/* The accent marks the quantity the source is holding. Both numbers are
+   measurements -- the panel senses V and I together -- so neither is labelled
+   `sourced`, which would read as the setpoint. */
+.q.driven { color: #ff9783; }
+.v { font-size: 26px; line-height: 1.15; font-weight: 500; white-space: nowrap; }
+.role {
+  font-size: 9px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase;
+  color: rgba(255,255,255,.45);
+}
+.ann-row {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  font-family: var(--mono); font-size: 11px; color: rgba(255,255,255,.85);
+}
+.ann-row .muted { color: rgba(255,255,255,.5); }
+.ann {
+  font-family: var(--mono); font-size: 9px; font-weight: 600; letter-spacing: .08em;
+  padding: 0 4px; border: 1px solid rgba(255,255,255,.35); color: rgba(255,255,255,.8);
+}
+.ann.crit { border-color: #ff9783; background: var(--alert); color: #fff; }
+
+/* -- the controls ------------------------------------------------------- */
+.rows { display: flex; flex-direction: column; gap: 9px; }
+.row { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.n {
+  font-weight: 700; font-size: 9px; text-transform: uppercase; letter-spacing: .09em;
+  color: var(--grey); white-space: nowrap;
+}
+/* A click here acts on the instrument now, so it is a switch and not a
+   setting: ink border, a real hit target, the lit position filled. */
+.sw { display: inline-flex; border: 1px solid var(--ink); }
+.sw button {
+  padding: 4px 12px; font: 400 12px/1.4 var(--mono); color: var(--grey);
+  background: var(--paper); border: 0; border-right: 1px solid var(--rule);
+  cursor: pointer; box-shadow: inset 0 -3px 0 transparent;
+}
+.sw button:last-child { border-right: 0; }
+.sw button:hover:not(:disabled) { color: var(--ink); }
+.sw button.on { background: var(--fill); color: var(--ink); font-weight: 600;
+                box-shadow: inset 0 -3px 0 var(--alert); }
+.sw button.on.live { background: var(--alert); color: #fff; box-shadow: none; }
+.sw button:disabled { cursor: not-allowed; opacity: .45; }
+.row.live .n { color: var(--alert); }
+
+.boxes { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; }
+.field { display: inline-flex; align-items: baseline; gap: 5px; }
+.field input {
+  font: 12px var(--mono); font-variant-numeric: tabular-nums; width: 6.4em;
+  text-align: right; padding: 1px 3px; color: inherit; background: transparent;
+  border: 1px solid transparent; border-bottom-color: var(--rule);
+}
+.field input:hover { border-color: var(--rule); }
+.field input:focus { border-color: var(--alert); outline: none; background: var(--paper); }
+.field i { font-style: normal; font-size: 10px; color: var(--grey); }
+
+button.plain {
+  padding: 4px 12px; font: 400 12px var(--mono); cursor: pointer;
+  border: 1px solid var(--ink); background: var(--paper); color: var(--ink);
+}
+button.plain:disabled { cursor: not-allowed; opacity: .45; }
+
+.notes { display: flex; flex-direction: column; gap: 4px; }
+.note { margin: 0; font-size: 11.5px; line-height: 1.4; max-width: 76ch; }
+.note.info { color: var(--grey); }
+.note.warn { color: var(--warn); }
+.note.crit { color: var(--alert); }
+.say {
+  margin: 10px 0 0; padding: 7px 10px; border: 1px solid var(--rule);
+  background: var(--fill); display: flex; gap: 10px; align-items: baseline;
+}
+.say[hidden] { display: none; }
+pre.errs {
+  margin: 0; font: 11px var(--mono); color: var(--warn); white-space: pre-wrap;
+}
+</style>
+</head>
+<body>
+<div class="bar">
+  <span class="wordmark">bace</span>
+  <span class="who" id="who">keithley 2400</span>
+  <span class="sp"></span>
+  <span id="chips"></span>
+</div>
+<main>
+  <div class="card">
+    <div class="ch">
+      <span class="cn">Keithley 2400</span>
+      <span class="cs">SourceMeter · this console touches no other instrument</span>
+    </div>
+    <div id="display"></div>
+    <div class="cb">
+      <div id="controls"></div>
+      <div class="notes" id="notes"></div>
+    </div>
+  </div>
+  <p class="say" id="say" hidden></p>
+</main>
+
+<script>
+"use strict";
+// The whole client. It talks to six routes and draws one object
+// (`GET /api/state`), so there is no state here to disagree with the console's.
+
+const REFRESH_MS = 500;          // how often this page asks for the state
+const POLL_STEPS = [0.2, 0.5, 1, 2, 5];
+
+const $ = (id) => document.getElementById(id);
+const el = (spec, attrs, ...kids) => {
+  const [tag, ...rest] = String(spec).split(/(?=[.#])/);
+  const node = document.createElement(tag || "div");
+  for (const t of rest) { if (t[0] === ".") node.classList.add(t.slice(1)); else node.id = t.slice(1); }
+  if (attrs && attrs.constructor === Object) {
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v === null || v === undefined || v === false) continue;
+      if (k.startsWith("on") && typeof v === "function") node.addEventListener(k.slice(2), v);
+      else if (k === "text") node.textContent = String(v);
+      else node.setAttribute(k, v === true ? "" : String(v));
+    }
+  } else if (attrs !== null && attrs !== undefined) kids.unshift(attrs);
+  for (const kid of kids.flat(Infinity)) {
+    if (kid === null || kid === undefined || kid === false) continue;
+    node.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  }
+  return node;
+};
+// Rebuild a region only when its own key moves. The display moves every tick
+// and the controls hold a caret: one key over both would take the field out
+// from under whoever is typing in it twice a second.
+const keyed = (node, key, build) => {
+  if (node.dataset.key === key) return;
+  node.dataset.key = key;
+  node.replaceChildren(...[build()].flat(Infinity).filter(Boolean));
+};
+
+// -- numbers ---------------------------------------------------------------
+const ABSENT = "—";
+const PREFIX = [[1e-12, "p"], [1e-9, "n"], [1e-6, "µ"], [1e-3, "m"], [1, ""], [1e3, "k"]];
+const OHMS = [[1, ""], [1e3, "k"], [1e6, "M"], [1e9, "G"]];
+
+function sig(value, figures) {
+  if (value === null || value === undefined || Number.isNaN(value)) return ABSENT;
+  if (value === 0) return "0";
+  const e = Math.floor(Math.log10(Math.abs(value)));
+  if (e < -4 || e >= 6) return value.toExponential(Math.max(0, figures - 1)).replace(/e([+-])(\d)$/, "e$1$2");
+  return value.toFixed(Math.min(Math.max(0, figures - 1 - e), 20));
+}
+function scaled(value, table) {
+  const m = Math.abs(value);
+  let pick = table[0];
+  for (const step of table) if (m >= step[0]) pick = step;
+  return [value / pick[0], pick[1]];
+}
+const volts = (v, f = 6) => (v === null || v === undefined ? ABSENT : sig(v, f) + " V");
+function amps(a, f = 6) {
+  if (a === null || a === undefined) return ABSENT;
+  if (a === 0) return "0 A";
+  const [x, p] = scaled(a, PREFIX);
+  return sig(x, f) + " " + p + "A";
+}
+function ohms(r, f = 4) {
+  if (r === null || r === undefined || !Number.isFinite(r)) return ABSENT;
+  if (r === 0) return "0 Ω";
+  const [x, p] = scaled(r, OHMS);
+  return sig(x, f) + " " + p + "Ω";
+}
+// A value typed back into its own box: never rounded away (a 20 nA compliance
+// is not 0) and never padded with zeros nobody typed (0.05, not 0.0500000).
+function boxText(value, figures) {
+  if (value === null || value === undefined) return "";
+  if (figures === 0) return String(Math.round(value));
+  const text = sig(value, figures + 3);
+  const [m, e] = text.split("e");
+  const cut = m.includes(".") ? m.replace(/0+$/, "").replace(/\.$/, "") : m;
+  return e === undefined ? cut : cut + "e" + e;
+}
+
+// -- the fields ------------------------------------------------------------
+const FIELDS = [
+  { name: "level", label: "level", figures: 6, unit: "panel",
+    doc: "What the source is held at. Volts sourcing voltage, amps sourcing current." },
+  { name: "current_compliance_a", label: "I limit", unit: "A", figures: 3, ceiling: "current_a",
+    doc: "The most current the 2400 will pass while it sources voltage; it clamps there." },
+  { name: "voltage_compliance_v", label: "V limit", unit: "V", figures: 4, ceiling: "voltage_v",
+    doc: "The most voltage the 2400 will put across the device while it sources current." },
+  { name: "nplc", label: "NPLC", unit: "", figures: 3,
+    doc: "Integration time in power-line cycles. 1 NPLC is 20 ms on 50 Hz mains and rejects its hum; below 1 is faster and noisier." },
+  { name: "averaging", label: "filter", unit: "readings", figures: 0,
+    doc: "How many readings the 2400 averages into each one it reports. 1 is the filter off." },
+  { name: "source_range", label: "range", unit: "panel", figures: 3, placeholder: "auto",
+    doc: "The source range to hold, or empty for the instrument's autorange — which is what a panel wants when the level is about to move by decades." },
+];
+
+// -- talking to the console ------------------------------------------------
+let state = null;
+let said = null;
+let inflight = false;
+// Bumped whenever the instrument refuses a field. There is no "edited" layer
+// on this console -- a box *is* the instrument -- so a refused value left in
+// its box would be a number sitting beside a live source that the source is
+// not at. The refusal says why; the box goes back to what the 2400 holds.
+let formRev = 0;
+
+async function call(path, body) {
+  if (inflight) return null;
+  inflight = true;
+  try {
+    const r = await fetch(path, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+    const answer = await r.json();
+    if (!r.ok) {
+      say(answer.error || (path + " → " + r.status), answer.level || "warn");
+      formRev += 1;
+    } else said = null;
+    if (answer && answer.panel !== undefined) apply(answer);
+    return r.ok ? answer : null;
+  } catch (error) {
+    say(String(error && error.message || error), "crit");
+    return null;
+  } finally {
+    inflight = false;
+    draw();
+  }
+}
+function say(text, level) { said = { text, level: level || "warn" }; }
+function apply(next) { state = next; }
+
+async function refresh() {
+  if (inflight) return;
+  try {
+    const r = await fetch("/api/state", { cache: "no-store" });
+    if (r.ok) { apply(await r.json()); draw(); }
+  } catch { /* the console is down; the chip says so on the next draw */ }
+}
+
+// -- drawing ---------------------------------------------------------------
+function draw() {
+  if (!state) return;
+  const inst = state.instrument || {};
+  const setup = state.panel || state.defaults || null;
+  const applied = Boolean(state.panel);
+  const live = state.output === true;
+  const reading = applied && live ? state.reading : null;
+
+  $("who").textContent = (inst.identity || "no instrument") + (inst.address ? "  ·  " + inst.address : "");
+
+  keyed($("chips"), JSON.stringify([inst.mode, inst.available, state.poll.running, state.poll.interval_s]), () => [
+    inst.mode === "sim" ? el("span.chip.sim", { title: "every number here is a model, not a measurement", text: "simulated" }) : null,
+    el("span", { class: "chip" + (inst.available ? "" : " bad"), text: inst.available ? "connected" : "no instrument" }),
+    el("span.chip", { text: state.poll.running ? "display " + state.poll.interval_s + " s" : "display off" }),
+  ]);
+
+  // The display: dashes unless there is something to display, and it always
+  // says which of the three reasons it is. With the output off a `:READ?`
+  // still answers, from a source disconnected inside the instrument, and the
+  // near-zero it returns looks exactly like a measurement of a dead device.
+  const why = !inst.available ? "no instrument" : !applied ? "not on the panel"
+            : !live ? "output off" : "nothing read yet";
+  const sourcesVolts = Boolean(setup && setup.unit === "V");
+  keyed($("display"), JSON.stringify([why, sourcesVolts, setup && setup.level, setup && setup.four_wire,
+                                      setup && setup.terminals, reading]), () => {
+    const cell = (name, text, driven) => el("div.cell",
+      el("span", { class: "q num" + (driven ? " driven" : ""), text: name,
+                   title: driven ? "the quantity the source is holding" : "" }),
+      el("span.v.num", { text }),
+      el("span.role", { text: name === "R" ? "V / I" : "measured" }));
+    return el("div.display",
+      el("div.cells",
+        cell("V", volts(reading ? reading.volts : null), sourcesVolts),
+        cell("I", amps(reading ? reading.amps : null), !sourcesVolts),
+        cell("R", ohms(reading ? reading.ohms : null), false)),
+      el("div.ann-row",
+        el("span", { text: setup ? "sourcing " + (setup.unit === "V" ? volts(setup.level) : amps(setup.level)) : ABSENT }),
+        reading && reading.compliance ? el("span.ann.crit", { text: "Cmpl",
+          title: "the source is at its limit, so the reading is the limit and not the device's answer" }) : null,
+        setup && setup.four_wire ? el("span.ann", { text: "4W" }) : null,
+        setup && setup.terminals === "REAR" ? el("span.ann", { text: "REAR" }) : null,
+        reading ? null : el("span.muted", { text: why })));
+  });
+
+  // The controls. Their key holds no counter that moves with a reading, or a
+  // field could not be typed into.
+  keyed($("controls"), JSON.stringify([inst.available, setup, state.output,
+                                       state.poll.running, state.poll.interval_s,
+                                       formRev]), () => {
+    if (!inst.available) return el("p.note.crit", { text: inst.unavailable || "no SourceMeter" });
+    const locked = live ? "the output is ON: switch it off to change this, then switch it back on" : null;
+    // `alert` is a property of the *position*, not of the row: a live source is
+    // the loudest thing on this screen, and `off` is the safe state — painting
+    // whichever position happens to be lit in the alert colour would make the
+    // safe one shout as loudly as the dangerous one.
+    const sw = (label, positions, { lock = null, loud = false } = {}) => el("div.row",
+      { class: loud ? "live" : "" },
+      el("span.n", { text: label }),
+      el("span.sw", { role: "group", "aria-label": label }, positions.map((p) => el("button", {
+        type: "button", class: (p.on ? "on" : "") + (p.on && p.alert ? " live" : ""),
+        "aria-pressed": p.on ? "true" : "false", disabled: Boolean(lock),
+        title: lock || (label + " → " + p.label), onclick: () => { if (!p.on) p.go(); },
+      }, p.label))));
+
+    const source = (patch) => call("/api/source", patch);
+    return [
+      el("div.rows",
+        sw("source", [
+          { label: "V", on: setup.function === "voltage", go: () => source({ function: "voltage" }) },
+          { label: "A", on: setup.function === "current", go: () => source({ function: "current" }) },
+        ], { lock: locked }),
+        sw("terminals", [
+          { label: "front", on: setup.terminals === "FRON", go: () => source({ terminals: "FRON" }) },
+          { label: "rear", on: setup.terminals === "REAR", go: () => source({ terminals: "REAR" }) },
+        ], { lock: locked }),
+        // A boolean whose two positions have names on the instrument: the
+        // 2400 says `4W` on its display, so it is a pair and not a tick.
+        sw("sensing", [
+          { label: "2-wire", on: setup.four_wire === false, go: () => source({ four_wire: false }) },
+          { label: "4-wire", on: setup.four_wire === true, go: () => source({ four_wire: true }) },
+        ], { lock: locked }),
+        sw("output", [
+          { label: "off", on: state.output === false, go: () => call("/api/output", { on: false }) },
+          { label: "on", on: live, alert: true, go: () => call("/api/output", { on: true }) },
+        ], { loud: live }),
+        el("div.boxes", FIELDS.map((f) => {
+          const ceiling = f.ceiling ? state.ceiling[f.ceiling] : null;
+          const unit = f.unit === "panel" ? setup.unit : f.unit;
+          return el("label.field",
+            el("span.n", { text: f.label }),
+            el("input", {
+              type: "text", inputmode: "decimal", "aria-label": f.label,
+              value: boxText(setup[f.name], f.figures),
+              placeholder: f.placeholder || "",
+              title: f.doc + (ceiling === null ? "" :
+                "\n\nThis bench's ceiling is " + ceiling + " " + unit + " (rig.toml)."),
+              // On commit, not on every keystroke: each one is a GPIB write.
+              onchange: (e) => source({ [f.name]: e.target.value.trim() }),
+            }),
+            el("i", { text: unit }));
+        })),
+        el("div.row",
+          el("span.n", { text: "display" }),
+          el("span.sw", { role: "group", "aria-label": "display refresh" },
+            [{ id: null, label: "off" }, ...POLL_STEPS.map((s) => ({ id: s, label: s + " s" }))]
+              .map((o) => {
+                const on = o.id === null ? !state.poll.running
+                                         : state.poll.running && state.poll.interval_s === o.id;
+                return el("button", {
+                  type: "button", class: on ? "on" : "", "aria-pressed": on ? "true" : "false",
+                  title: o.id === null
+                    ? "stop the console reading the instrument. The output is left where it is — a display is not a source."
+                    : "the console reads the 2400 every " + o.id + " s, whether or not this page is open",
+                  onclick: () => { if (!on) call("/api/poll", { interval_s: o.id }); },
+                }, o.label);
+              })),
+          el("button.plain", {
+            type: "button", disabled: !live,
+            title: live ? "one reading now" : "the output is off: there is nothing to read",
+            onclick: () => call("/api/read"),
+          }, "read once"),
+          el("button.plain", { type: "button", title: "drain the 2400's own error queue (:SYST:ERR?)",
+            onclick: showErrors }, "errors"))),
+    ];
+  });
+
+  const notes = [];
+  if (!applied && inst.available) notes.push({ level: "info", key: "unapplied",
+    text: "the SourceMeter is not on the panel: nothing has told it what to source. Set the source to put it there — the output will not switch on until it is." });
+  if (state.poll.last_error) notes.push({ level: "warn", key: "pollerr",
+    text: "the last display reading failed: " + state.poll.last_error });
+  if (inst.mode === "sim") notes.push({ level: "warn", key: "sim",
+    text: "simulated: there is no instrument behind this panel. The numbers come from a model of a solar cell and must never be read as a measurement." });
+  keyed($("notes"), JSON.stringify(notes.map((n) => [n.key, n.level])), () =>
+    notes.map((n) => el("p", { class: "note " + n.level, text: n.text })));
+
+  const say_ = $("say");
+  say_.hidden = !said;
+  if (said) keyed(say_, said.level + said.text, () => [
+    el("span", { class: "note " + said.level, text: said.text }),
+    el("button.plain", { type: "button", onclick: () => { said = null; draw(); } }, "dismiss"),
+  ]);
+}
+
+async function showErrors() {
+  const answer = await call("/api/errors");
+  if (!answer) return;
+  const errors = answer.errors || [];
+  say(errors.length ? "instrument errors: " + errors.join(" · ") : "the instrument's error queue is empty",
+      errors.length ? "warn" : "info");
+  draw();
+}
+
+refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>

@@ -115,8 +115,6 @@ def realistic_events() -> dict[type, E.Event]:
                   data={"polarity": "NORM"}),
         E.PowerReading(watts=2.07e-5, trustworthy=True, wavelength_nm=530.0,
                        source="http://127.0.0.1:8918"),
-        E.SmuReading(volts=0.9051, amps=-1.98e-4, compliance=False,
-                     function="voltage", level=0.0, ohms=-4570.2),
         E.TemperatureRead(kelvin=250.1, setpoint_k=250.0, in_band=True,
                           source="operator"),
         E.SampleNamed(before={"sample": "", "material": ""},
