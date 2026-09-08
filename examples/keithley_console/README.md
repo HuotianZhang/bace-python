@@ -54,9 +54,18 @@ container.
 | `rig.toml` `[sourcemeter]` | the VISA address, and the two **bench ceilings** |
 | `run.toml` `[sourcemeter]` | the compliance, NPLC, filter and terminals the panel opens on |
 
-Both are looked for by name in the folder you start from and then beside
-`keithley_console.py`, so on a bare machine a copy of either can simply sit in
-this folder. A missing file is a printed warning and the built-in
+Both are looked for by name in the folder you start from, then beside
+`keithley_console.py`, then in every directory above it — so double-clicking
+the `.bat` inside a checkout finds the repository's files two levels up, and on
+a bare machine a copy of either can simply sit in this folder or the one
+holding it. **Whichever file is used is printed at start-up**, so "which
+ceilings am I on" is answered on the screen.
+
+An unrecognised key in `[sourcemeter]` is an **error**, not a silent default:
+`current_complaince_a = 0.001` would otherwise be dropped and the panel would
+open on the built-in 0.05 A, fifty times the current written down. The three
+settle times a measurement needs and a panel does not (`settle_jsc_ms` and
+friends) are accepted and ignored, because a real `run.toml` carries them. A missing file is a printed warning and the built-in
 defaults; a file that is *named* (`--rig`, `--run`) and missing is an error,
 because a typo that silently ran the defaults would be a bench nobody chose.
 

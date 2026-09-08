@@ -1103,3 +1103,80 @@ def test_the_page_says_when_it_cannot_reach_the_console():
         "the controls' render key — without it they stayed enabled over a "
         "console that was no longer there")
     assert "OUTPUT key" in page, "and it names the way out that still works"
+
+
+# -- the move into examples/ ---------------------------------------------------
+def test_the_double_click_launcher_still_finds_the_bench_configuration(monkeypatch, capsys):
+    """`Run Keithley Console.bat` does `cd /d "%~dp0"`, so in a checkout the
+    working directory *is* this folder and `rig.toml` is two levels above it.
+    Looking only at the working directory and beside the script found neither,
+    and the console started on its built-in ceilings — which on this bench
+    happen to equal the file's, so nothing would have looked wrong until a
+    bench lowered one and had it quietly raised again.
+    """
+    import keithley_console as entry
+
+    repo = FOLDER.parents[1]
+    monkeypatch.chdir(FOLDER)                        # what the .bat does
+
+    assert entry._find("rig.toml") == str(repo / "rig.toml")
+    rig, config = entry._load_config(entry.build_parser().parse_args([]))
+    out = capsys.readouterr().out
+    assert str(repo / "rig.toml") in out and str(repo / "run.toml") in out, \
+        "and it says which files it used"
+    # `nplc` discriminates: the file says 5.0 and the built-in default is 1.0,
+    # so this fails if the search silently fell back.
+    assert config.nplc == 5.0, "the panel opens on run.toml, not on the defaults"
+    assert rig.address == "GPIB0::24::INSTR"
+
+
+def test_a_misspelt_key_is_refused_and_never_a_default(tmp_path):
+    """`current_complaince_a = 0.001` was silently dropped and the panel opened
+    on the built-in 0.05 A — **fifty times** the current written down, on the
+    one surface in this project where a level goes straight onto the device.
+
+    The package's loader has refused unknown keys since long before this
+    console existed (`bace/config.py`, `_check`); the move out of the package
+    lost that, because this folder does not import it. It carries the rule
+    itself now.
+    """
+    import keithley_console as entry
+
+    rig = tmp_path / "rig.toml"
+    rig.write_text("[sourcemeter]\naddress = 'GPIB0::24::INSTR'\n"
+                   "max_current_compliance_a = 0.05\nmax_voltage_compliance_v = 5.0\n")
+    run = tmp_path / "run.toml"
+
+    def load():
+        return entry._load_config(entry.build_parser().parse_args(
+            ["--rig", str(rig), "--run", str(run)]))
+
+    run.write_text("[sourcemeter]\ncurrent_complaince_a = 0.001\n")
+    with pytest.raises(entry.ConfigError, match="current_complaince_a"):
+        load()
+
+    # A ceiling is the more consequential of the two, and gets the same rule.
+    rig.write_text("[sourcemeter]\nmax_current_complaince_a = 0.001\n")
+    run.write_text("[sourcemeter]\n")
+    with pytest.raises(entry.ConfigError, match="max_current_complaince_a"):
+        load()
+
+    # But the three settle times a measurement needs and a panel does not are
+    # accepted and dropped: a real run.toml has them, and refusing it would be
+    # refusing the bench's own file.
+    rig.write_text("[sourcemeter]\nmax_current_compliance_a = 0.05\n")
+    run.write_text("[sourcemeter]\ncurrent_compliance_a = 0.001\nnplc = 5.0\n"
+                   "settle_jsc_ms = 1000\nsettle_voc_ms = 1000\nsettle_jsat_ms = 1000\n")
+    _, config = load()
+    assert (config.current_compliance_a, config.nplc) == (0.001, 5.0)
+
+
+def test_the_repository_own_files_load_under_that_check():
+    """The rule above is worth nothing if it refuses the bench's own files."""
+    import keithley_console as entry
+
+    repo = FOLDER.parents[1]
+    rig, config = entry._load_config(entry.build_parser().parse_args(
+        ["--rig", str(repo / "rig.toml"), "--run", str(repo / "run.toml")]))
+    assert rig.max_current_compliance_a == 0.05
+    assert config.current_compliance_a == 0.01, "run.toml's working value, not the ceiling"

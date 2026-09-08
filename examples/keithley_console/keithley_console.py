@@ -37,10 +37,16 @@ address.
 
 `rig.toml` supplies the address and the two bench ceilings; `run.toml`, if it
 is there, supplies the compliance, integration time and terminals the panel
-opens on. Both are looked for by name in the working directory and beside this
-file. A missing file is a printed warning and the built-in defaults — **a file
-that is named and missing is an error**, because a typo in `--rig` that
-silently ran the defaults would be a bench nobody chose.
+opens on. Both are looked for by name in the working directory, then beside
+this file, then in every directory above it — so the double-click launcher
+finds a checkout's files two levels up, and a copy of this folder on a bench PC
+finds whatever sits next to it. Whichever file is used is printed.
+
+A missing file is a printed warning and the built-in defaults; **a file that is
+named and missing is an error**, because a typo in `--rig` that silently ran the
+defaults would be a bench nobody chose. So is an unrecognised key inside one:
+`current_complaince_a` dropped quietly would open the panel on the built-in
+0.05 A instead of the 0.001 written down.
 
 `--host` is refused unless it is a loopback address. There is no
 authentication and this program drives a source into somebody's device, which
@@ -54,7 +60,7 @@ import ipaddress
 import os
 import sys
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Any
 
 from panel import POLL_DEFAULT_S, POLL_MAX_S, POLL_MIN_S, KeithleyPanel
@@ -142,26 +148,70 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _find(name: str) -> str | None:
-    """The working directory first, then beside this file.
+    """The working directory first, then this folder and every folder above it.
 
-    The same order the package uses, and the reason is the same: a bench has
-    one `rig.toml` at the root of its checkout, and somebody who has copied
-    this folder onto a bare machine can drop one in next to the script.
+    Walking up is what makes the double-click launcher work: `Run Keithley
+    Console.bat` does `cd /d "%~dp0"`, so in a checkout the working directory
+    *is* this folder and the repository's `rig.toml` is two levels above it.
+    Looking only here and in the working directory found neither, and the
+    console started on its built-in ceilings -- which on this bench happen to
+    equal the file's, but that is a coincidence and not a guarantee, and a
+    bench that had lowered its ceiling would have had it quietly raised again.
+
+    It works the same way on a machine that has only this folder: drop a
+    `rig.toml` beside the script, or in the directory holding it, and it is
+    found. Whichever file is used is printed, every time, so the answer to
+    "which ceilings am I on" is on the screen and not in this docstring.
     """
-    for base in (os.getcwd(), HERE):
+    seen = []
+    here = HERE
+    while True:
+        seen.append(here)
+        parent = os.path.dirname(here)
+        if parent == here:                     # the filesystem root
+            break
+        here = parent
+    for base in [os.getcwd(), *seen]:
         path = os.path.join(base, name)
         if os.path.isfile(path):
             return path
     return None
 
 
-def _table(path: str, section: str) -> dict:
-    """One table out of a TOML file, or `{}` when it has no such section."""
+IGNORED_RUN_KEYS = frozenset({"settle_jsc_ms", "settle_voc_ms", "settle_jsat_ms"})
+"""`run.toml [sourcemeter]` keys this console reads and does nothing with.
+
+They are the three settle times the package's measurement routines wait out
+between sourcing and reading. A panel has no such step -- the operator is the
+one who decides when the number has settled -- so they are accepted and
+dropped. Named rather than ignored wholesale, because the check below has to be
+able to tell "a field this program does not use" from "a field somebody
+misspelled"."""
+
+
+def _table(path: str, section: str, allowed: frozenset[str]) -> dict:
+    """One table out of a TOML file, with every key checked.
+
+    **An unrecognised key is an error, never a silent default.** A typo like
+    `current_complaince_a = 0.001` would otherwise be dropped and the panel
+    would open on the built-in 0.05 A -- fifty times the current the operator
+    wrote down, on the one surface in this project where a level goes straight
+    onto the device. The package's loader has refused unknown keys since long
+    before this console existed (`bace/config.py`, `_check`); this folder does
+    not import that, so it carries the same rule itself.
+    """
     try:
         with open(path, "rb") as handle:
-            return dict(tomllib.load(handle).get(section, {}))
+            table = dict(tomllib.load(handle).get(section, {}))
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise ConfigError(f"{path}: {exc}") from None
+    unknown = set(table) - allowed
+    if unknown:
+        raise ConfigError(
+            f"{path}: unknown key(s) in [{section}]: {', '.join(sorted(unknown))}. "
+            "Refusing to fall back to defaults -- a misspelt compliance here is "
+            "a silently raised limit, and a misspelt ceiling is no limit at all.")
+    return table
 
 
 def _load_config(a: argparse.Namespace) -> tuple[Rig, SourceMeterConfig]:
@@ -179,7 +229,7 @@ def _load_config(a: argparse.Namespace) -> tuple[Rig, SourceMeterConfig]:
         raise ConfigError(f"--rig {a.rig!r}: no such file")
     path = a.rig or _find("rig.toml")
     if path:
-        t = _table(path, "sourcemeter")
+        t = _table(path, "sourcemeter", frozenset(f.name for f in fields(Rig)))
         rig = Rig(address=str(t.get("address", rig.address)),
                   max_current_compliance_a=float(
                       t.get("max_current_compliance_a", rig.max_current_compliance_a)),
@@ -194,12 +244,10 @@ def _load_config(a: argparse.Namespace) -> tuple[Rig, SourceMeterConfig]:
         raise ConfigError(f"--run {a.run!r}: no such file")
     path = a.run or _find("run.toml")
     if path:
-        t = _table(path, "sourcemeter")
-        fields = {f: t[f] for f in
-                  ("current_compliance_a", "voltage_compliance_v", "nplc",
-                   "averaging", "terminals", "four_wire") if f in t}
+        used = frozenset(f.name for f in fields(SourceMeterConfig))
+        t = _table(path, "sourcemeter", used | IGNORED_RUN_KEYS)
         try:
-            config = SourceMeterConfig(**fields)
+            config = SourceMeterConfig(**{k: v for k, v in t.items() if k in used})
         except (TypeError, ValueError) as exc:
             raise ConfigError(f"{path} [sourcemeter]: {exc}") from None
         print(f"run.toml   {path}")

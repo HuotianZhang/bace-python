@@ -29,8 +29,12 @@ REM
 REM CONFIGURATION
 REM     rig.toml gives the GPIB address and the two bench ceilings; run.toml
 REM     gives the compliance, integration time and terminals the panel opens
-REM     on. Both are looked for in the folder you start from and then beside
-REM     this file, so a copy of either can simply sit here.
+REM     on. This file cd's to its own folder, so the search goes: here, then
+REM     every folder above - which finds a checkout's rig.toml two levels up,
+REM     and finds a copy sitting beside this file on a bench PC. The console
+REM     prints which files it used; if it says "not found", it is running on
+REM     built-in ceilings and you should say so out loud before sourcing
+REM     anything.
 REM
 REM NEEDS PYVISA
 REM     For the real instrument only. pip install pyvisa, plus a VISA runtime
