@@ -93,7 +93,7 @@ before doing anything, so every relative path below still resolves.
 Everything runs end to end on the simulated rig, with no instruments present:
 
 ```
-python -m pytest -q                    # 796 passed, 7 skipped
+python -m pytest -q                    # 806 passed, 7 skipped
 python -m examples.demo_scan           # a simulated transient scan
 python -m bace.bench                   # the offline stages of the bench harness
 python -m bace.service --sim --fast    # the service on the simulated rig, http://127.0.0.1:8900/
@@ -101,10 +101,12 @@ python -m bace.service --sim --fast    # the service on the simulated rig, http:
 
 ## Status
 
-The measurement half is written, tested, and proven on the rig: scope
+The measurement half is written, tested, and exercised on the rig: scope
 acquisition, auto-range, DIO identity, shutter, and first light on a real device
-all confirmed; against a LabVIEW run eight minutes away the port agrees to 4 %
-on charge (`docs/history/HANDOVER-2026-09-02.md`).
+have all been run. A LabVIEW run and a port run eight minutes apart are set side
+by side in `docs/history/HANDOVER-2026-09-02.md`, and a second pair in
+`acceptance/20260902_service-vs-labview/`; both carry the numbers, and what to
+make of them is the reader's.
 
 `service/` is built (2026-09-02): one process owning the instruments, wrapping
 the engine's event generators in HTTP + WebSocket — the bench read-back and its

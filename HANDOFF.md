@@ -1,8 +1,8 @@
 # BACE port — hand-off
 
 Converting `BACE_Mehrdad.vi` (LabVIEW, 907 VIs) to Python. The measurement half
-is written, tested and proven on the rig; the service over it is built and
-proven on the simulator. The UI is under way — `docs/ui-plan.md` M0 to M6 are
+is written, tested and has been run on the rig; the service over it is built and
+has been run on the simulator. The UI is under way — `docs/ui-plan.md` M0 to M6 are
 done (the event layer and its fixtures, the pinned rail and the chain strip,
 the generated module cards, the charts, the run monitor, the pipeline tab, and
 the results tab — R2·3 as it stands, drawn from the record); the design
@@ -332,9 +332,10 @@ Nine, and they are the reason the harness exists. Each is documented at its site
    off and on, count read back stopped and refused unless zero), takes the
    auto-range passes un-averaged, acquires with `:DIG` + `*OPC?`, and checks
    the folded count against the recipe after the fetch. The LabVIEW original
-   waited on `:ADER?` as this port did, so the 2026-09-02 agreement with it
-   does not validate absolute charge; re-measure before quoting any Q from
-   before this.
+   waited on `:ADER?` as this port did, and used the same double configure.
+   Runs from before this fix were taken that way; `runs/260826-6_*` of
+   2026-09-06 has the same three points before and after, if a comparison is
+   wanted.
 6. **Auto-range was single-pass**, then capped at 4 — both too few. See §7.
 7. **The scope rounds `:CHAN2:RANG?` to three significant figures.** A readback
    added for accuracy was degrading it, and an equality-based ceiling test would

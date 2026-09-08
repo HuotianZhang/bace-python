@@ -39,8 +39,8 @@ not obvious and are reproduced deliberately:
     new channel range. So each dark trace was half light, and a step whose
     range sat inside the deadband inherited the *previous step's dark* into its
     light trace: `Q ~ 25 / count`, a third of the value on the third point of
-    every scan, and half of it everywhere else. The original was waiting the
-    same way, so its charges carry the same dilution.
+    every scan, and half of it everywhere else. The LabVIEW original waits on
+    `:ADER?` and uses the same double configure.
 
     `tools/probe_averager.py` then asked the scope directly (2026-09-06,
     `runs/probe_averager_20260906_030246.txt`): `:CDIS` empties the averager
