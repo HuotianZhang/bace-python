@@ -19,13 +19,30 @@ fixed. Either re-copy before each run, or say which path to write to.
 
 ## Setup, once
 
+Double-click **`scripts\Setup.bat`**. It installs into `py -3` -- the
+interpreter every other `.bat` here calls -- checks that `bace.service`
+imports, and says what came in.
+
+By hand it is one line, from the repo root:
+
 ```
 cd D:\BACE\bace-python
-py -3 -m pip install numpy scipy h5py pyvisa
+py -3 -m pip install -e .[lab,dev]
 ```
 
-`h5py` is optional but worth having: without it the `.dat` files are still
-written and the run is not lost, but there is no HDF5 alongside them.
+In PowerShell quote it, `pip install -e '.[lab,dev]'`, or the brackets are
+read as an index.
+
+`lab` is the rig and the service together, which is what a bench PC needs:
+numpy, scipy and h5py for the measurement; fastapi, uvicorn and websockets
+for the service the console talks to; pyvisa for the instruments. `dev` adds
+pytest and httpx2, so the suite runs here too. The `-e` is what makes this
+folder the code that runs -- edit a file and the next run has it -- which
+matters on a bench that keeps more than one copy of the tree.
+
+On a machine with no instruments, `scripts\Setup (sim).bat` installs the same
+thing without pyvisa: `--sim` never imports it, so the console and the whole
+API work with no VISA backend at all.
 
 `pyvisa` uses the NI-VISA already installed for LabVIEW, so GPIB works. Nothing
 is installed system-wide by the harness and nothing is written outside

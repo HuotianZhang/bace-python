@@ -13,10 +13,18 @@ extended, and focused on **measurement** — analysis stays downstream.
 | `bace/service/README.md` | how to run the service and drive it by hand; `docs/service-contract.md` has every shape |
 | `docs/history/bace-status.html` | the full narrative with evidence and figures, through 31 August 2026 |
 | `rig.toml` / `run.toml` | the bench and the recipe, kept separate |
-| `scripts/` | the double-click `.bat` entry points, one per bench stage; `setup.sh` for a Linux checkout |
+| `scripts/` | the double-click `.bat` entry points — `Setup.bat` first on Windows, then one per bench stage; `setup.sh` for a Linux checkout |
 | `docs/ui-kickoff.md` | where the console work starts, with `docs/ui-rules.md` and `docs/design/` |
 | `ui/README.md` | the console itself — how to run it, the fixtures it develops against, and what each milestone owes. `docs/ui-plan.md` is the plan it follows |
 | `bace/consoles/keithley/README.md` | the standalone Keithley 2400 panel: one instrument, one process, one port, and the smallest complete example of that shape |
+
+## Installing on Windows
+
+Double-click `scripts\Setup.bat` on the lab PC, or `scripts\Setup (sim).bat` on
+a machine with no instruments. Either installs into `py -3`, which is the
+interpreter every other `.bat` in that folder calls. By hand it is
+`py -3 -m pip install -e .[lab,dev]` (or `.[service,dev]` without the rig),
+quoted in PowerShell as `'.[lab,dev]'`. `BENCH.md` has the detail.
 
 ## Developing away from the bench (Linux, a container, a cloud session)
 
