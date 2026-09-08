@@ -24,18 +24,18 @@ anything (2026-09-08):
 | file | what it is |
 |---|---|
 | `history/HANDOVER-2026-09-02.md` | **Start here.** The closing summary: what was proved, what was fixed, what is still open, and how to run it. |
-| `figures/bace-wrapup.html` | 《BACE 移植收官》 — the same summary as a figure page, with the four runs charted. |
-| `figures/bace-drift.html` | 《参考本身在漂》 — the evidence that the port reproduces the LabVIEW engine, and that the earlier 4× gap was the sample drifting. |
+| `figures/bace-wrapup.html` | *The BACE port, closing out* — the same summary as a figure page, with the four runs charted. |
+| `figures/bace-drift.html` | *The reference itself was drifting* — the evidence that the port reproduces the LabVIEW engine, and that the earlier 4× gap was the sample drifting. |
 
 ## The rest, by subject
 
 | file | what it is |
 |---|---|
-| `figures/bace-timing.html` | 《BACE 触发链时序》 — the trigger chain in time: five edges, the 502 ns optical path, and where the delay axis' zero really is. |
-| `figures/bace-polarity.html` | 《四种极性组合的瞬态》 — the four combinations of `output_polarity` × `invert_polarity`, and why only ④ is valid. |
-| `figures/bace-polarity-raw.html` | 《四种组合的原始亮暗电流》 — the same four, as raw light and dark traces rather than differences. |
-| `figures/bace-delay-scan-1.html` | 《第一次 delay 扫描》 — the first attempt to calibrate the zero of the delay axis. |
-| `figures/bace-delay-scan-2.html` | 《第二次 delay 扫描》 — the second, and the baseline-correction trap it exposed. |
+| `figures/bace-timing.html` | *The BACE trigger chain in time* — the trigger chain in time: five edges, the 502 ns optical path, and where the delay axis' zero really is. |
+| `figures/bace-polarity.html` | *The transients of the four polarity combinations* — the four combinations of `output_polarity` × `invert_polarity`, and why only ④ is valid. |
+| `figures/bace-polarity-raw.html` | *The four combinations as raw light and dark currents* — the same four, as raw light and dark traces rather than differences. |
+| `figures/bace-delay-scan-1.html` | *The first delay scan* — the first attempt to calibrate the zero of the delay axis. |
+| `figures/bace-delay-scan-2.html` | *The second delay scan* — the second, and the baseline-correction trap it exposed. |
 | `figures/bace-chain.html` | The instrument chain — what is wired to what, and which command reaches which box. |
 | `figures/bace-anatomy.html` | What one BACE run actually does, step by step. |
 | `figures/bace-architecture.html` | The module layout and why the dependencies point the way they do. |
@@ -52,9 +52,9 @@ anything (2026-09-08):
 | file | what it is |
 |---|---|
 | `ui-rules.md` | What a mockup cannot show and a contract has no place for: significant figures and the two zeros that mean *not recorded* and *not calibrated*, colour with a job, the three time scales and why “step 412 of 8400” is useless, provenance and inheritance on screen, the ten segments of one shot, the failures that look like results, and the questions the design has already answered. Distilled from the design pack, which is now historical. |
-| `ux-screening.md` | 《筛查：测试流程中不够人性化的设计》 — the measurement flow walked end to end and screened for what it asks of the *person* driving it, 2026-09-05. The rule it turned up: everything that costs the sample something arms and confirms, and nothing that cost the operator something did. Five findings fixed (the window title, so a run that has stopped and is waiting can reach somebody who is not looking; an undo for the pipeline tree; an arming Save that would overwrite a recipe; a dismissable strip; and `PUT /session/sample` with the identity panel behind the bar's `no sample named` chip, the one whose cost was permanent because the folder name is the record), two left with what they would take. |
+| `ux-screening.md` | *A screening: where the measurement flow is unkind to the person driving it* — the measurement flow walked end to end and screened for what it asks of the *person* driving it, 2026-09-05. The rule it turned up: everything that costs the sample something arms and confirms, and nothing that cost the operator something did. Five findings fixed (the window title, so a run that has stopped and is waiting can reach somebody who is not looking; an undo for the pipeline tree; an arming Save that would overwrite a recipe; a dismissable strip; and `PUT /session/sample` with the identity panel behind the bar's `no sample named` chip, the one whose cost was permanent because the folder name is the record), two left with what they would take. |
 | `ui-plan.md` | How `ui/` gets built and in what order: the four structural decisions (generated forms, the screen as a projection of the event stream, six chart components on one scale module, four fixtures), then M0–M6 cut vertically. `../ui/README.md` says what is built. |
-| `bace-console-round3.html` | 《BACE console — Round 3 · B》 — the console mockup: home is the five modules as cards, each card parameters + Run + result; the bench rail across the top; the pipeline composed from the cards as they stand; the rig diagram on its own tab. Three turns — cold bench, the same bench mid-check, and the rig tab. **Self-contained**: all 33 assets it needs (React, the stylesheet, the web font) are inlined, so it opens from disk with no network and no account. This is the current version — its chain-timing lane carries the corrected light path, 502 ns with delay zero at 0, and (2026-09-02) its 81150A `:OUTP1:POL` reads **NORM** in all four artboards, where the mockup had it INV from the overturned ④ below. The bace card's second polarity row is now `output_polarity` → NORM: NORM/INV is `output_polarity`'s pair, while `inverted_output` is a boolean. |
+| `bace-console-round3.html` | *BACE console — Round 3 · B* — the console mockup: home is the five modules as cards, each card parameters + Run + result; the bench rail across the top; the pipeline composed from the cards as they stand; the rig diagram on its own tab. Three turns — cold bench, the same bench mid-check, and the rig tab. **Self-contained**: all 33 assets it needs (React, the stylesheet, the web font) are inlined, so it opens from disk with no network and no account. This is the current version — its chain-timing lane carries the corrected light path, 502 ns with delay zero at 0, and (2026-09-02) its 81150A `:OUTP1:POL` reads **NORM** in all four artboards, where the mockup had it INV from the overturned ④ below. The bace card's second polarity row is now `output_polarity` → NORM: NORM/INV is `output_polarity`'s pair, while `inverted_output` is a boolean. |
 | `design/` | The Claude Design project the mockups were made in, exported whole and openable from a local server: the three rounds’ canvas sources, `BenchRail.dc.html`, the icon set, the design system — and `bace-charts*.js`, which is where the chart decisions actually live, as framework-free custom elements with the measured numbers baked in. **Round 2’s R2·3 is the only results design that exists**; Round 1 is archived uncorrected. `design/README.md` says what each file is and what was corrected. |
 
 ## The service layer
@@ -63,7 +63,7 @@ Markdown, not figure pages. Read in this order.
 
 | file | what it is |
 |---|---|
-| `service-plan.md` | 《BACE 服务层规划》 — why the service is a thin shell around the engine: one process, one worker thread as the bench lock, the API by tab, the three pipeline bindings, `NeedsOperator` for a cryostat that is not wired, the verdict rule, and the P0 core cleanups to make first. Chinese. |
+| `service-plan.md` | *The BACE service layer — a plan* — why the service is a thin shell around the engine: one process, one worker thread as the bench lock, the API by tab, the three pipeline bindings, `NeedsOperator` for a cryostat that is not wired, the verdict rule, and the P0 core cleanups to make first. |
 | `service-contract.md` | The contract `bace/service/` was built to, derived from the plan and the Round 3 canvas: package layout, the concurrency and stop semantics, every endpoint's shape, the wire and journal payload policy, the tree schema, the check catalogue and the cost model. Where it and the plan disagree the plan wins; where it and the code disagree, fix one and say so there. |
 | `../bace/service/README.md` | How to run the service and drive it by hand with `curl`, `httpx` and a WebSocket client. |
 | `ui-kickoff.md` | The brief for the session that builds `ui/`: the design inputs, the dev backend (`--sim --fast`), what the service guarantees the UI, and the known gaps. Start there — then `ui-rules.md` and `design/`. |

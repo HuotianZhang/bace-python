@@ -269,7 +269,7 @@ def test_folder_name_matches_the_archive_convention():
     ("pixel", "px" + chr(92) + "a", "pxa"),
     ("sample", "///", ""),                          # reduced to nothing: the field leaves the name
     ("material", "PTQ10IT4F-batch-2026-08-A", "PTQ10IT4F-batch-2026-08"),   # NAME_MAX = 24
-    ("sample", "样品四号", "样品四号"),                # not-ASCII is not the same as not-safe
+    ("sample", "образец4", "образец4"),               # not-ASCII is not the same as not-safe
 ])
 def test_an_identity_field_is_one_path_segment(field, typed, filed):
     """Until 2026-09-05 these three went into the name as typed, which
@@ -315,7 +315,7 @@ def test_temperature_provenance_stays_out_of_the_name():
     ("up" + chr(92) + "down|<x>", "updownx"),         # the backslash above all: a path separator
     ("tab\there", "tab-here"),                        # control codes go, they do not become dashes
     ("  spaced  out  ", "spaced-out"),                # no spaces in a directory name
-    ("对照 LabVIEW 的那一轮", "对照-LabVIEW-的那一轮"),  # not-ASCII is not the same as not-safe
+    ("сравнение LabVIEW", "сравнение-LabVIEW"),       # not-ASCII is not the same as not-safe
     ("   ", ""),                                      # nothing to say
     ("x" * 90, "x" * 64),                             # one long token: truncated as it stands
     ("a-" * 60, "a-" * 31 + "a"),                     # many words: cut on a word boundary

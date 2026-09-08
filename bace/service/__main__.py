@@ -42,7 +42,7 @@ from .session import Session
 
 DEFAULT_HOST = "127.0.0.1"
 """Fixed unless overridden -- and overridable only with another loopback
-address: there is no auth (the plan's 不做鉴权, decided *because* the binding
+address: there is no auth (the plan's "no auth", decided *because* the binding
 is 127.0.0.1), so a `--host` that reaches the LAN would hand every instrument
 on the bench to anyone on it."""
 

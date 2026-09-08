@@ -299,7 +299,8 @@ export function monitorModel(state) {
 
 /**
  * The ETA, counting down. The executor re-derives it at every loop boundary
- * (`executor.py`: "ETA 随实测重算"), which for the outermost loop of a
+ * (`executor.py`: "the ETA is recomputed as it measures"), which for the
+ * outermost loop of a
  * temperature sweep is once every half hour — so between boundaries the
  * finish time is what stands, and the seconds left are measured from the
  * newest frame's clock rather than repeated as the number the frame carried.

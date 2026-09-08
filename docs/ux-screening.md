@@ -1,4 +1,4 @@
-# 筛查：测试流程中不够人性化的设计
+# A screening: where the measurement flow is unkind to the person driving it
 
 The measurement flow, walked end to end and screened for what it asks of the
 person driving it — 2026-09-05, against `b8975ab`.
