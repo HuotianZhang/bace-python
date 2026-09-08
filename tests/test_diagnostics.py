@@ -123,6 +123,18 @@ def test_the_sync_edge_is_read_off_a_narrow_pulse_too():
     assert sync_edge_ns(-pulse, DT, T0) == pytest.approx(3.5, abs=1.0)
     assert sync_edge_ns(np.full(N, 0.01), DT, T0) is None, "still no edge on a flat sync"
 
+    # A single stray sample satisfies everything a pulse does -- it supplies
+    # both the excursion and most of the trace's range -- and the 10/90
+    # crossings then land on it together, so the edge came back 0.0 ns: a sync
+    # sharper than any real one, reported as if it had been measured. It has to
+    # last more than one sample, and the two crossings have to be distinct.
+    glitch = np.full(N, 0.01)
+    glitch[int(round(-T0 / DT))] = 1.2
+    assert sync_edge_ns(glitch, DT, T0) is None, "one stray sample is not an edge"
+    square = np.full(N, 0.01)
+    square[int(round(-T0 / DT)):int(round(-T0 / DT)) + 2] = 1.2
+    assert sync_edge_ns(square, DT, T0) is None, "an edge the sampler cannot resolve is not one"
+
 
 def test_a_sync_that_was_fetched_but_could_not_be_read_says_which():
     """Two different states, and the operator acts on them differently: no

@@ -138,9 +138,28 @@ def sync_edge_ns(sync: np.ndarray, dt: float, t0: float) -> float | None:
         # `edge_10_90_ns` makes over the displacement spike.
         base = float(np.median(w))
         k = int(np.argmax(np.abs(w - base)))
-        if abs(float(w[k]) - base) < 0.25 * np.ptp(a):
+        level = float(w[k])
+        if abs(level - base) < 0.25 * np.ptp(a):
             return None
-        return _crossing_time(w, k, base, float(w[k]), dt)
+        # A pulse is several samples wide -- this rig's is 11. One sample off
+        # the baseline is an acquisition glitch, and it satisfies everything
+        # above: it supplies both the excursion and most of the trace's range.
+        # `_crossing_time` would then find the 10 % and 90 % crossings on the
+        # same sample and return 0.0, and the verdict would report a sync edge
+        # sharper than any real one as if it had been measured. So the
+        # excursion must last more than one sample, and the two crossings must
+        # be distinct: an edge the sampler cannot resolve is not a measurement.
+        toward = np.sign(level - base)
+        above = (w - (base + 0.1 * (level - base))) * toward > 0
+        first, last = k, k
+        while first > 0 and above[first - 1]:
+            first -= 1
+        while last < w.size - 1 and above[last + 1]:
+            last += 1
+        if last - first < 1:
+            return None
+        edge = _crossing_time(w, k, base, level, dt)
+        return edge if edge > 0.0 else None
     # the edge: the largest single-step change inside the window says which
     # way it goes; the 10/90 levels are then crossed on either side of it
     d = np.diff(w)
