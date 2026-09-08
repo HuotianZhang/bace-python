@@ -29,8 +29,9 @@
 # reporting "ready" over a silent hole.
 #
 # Knobs: PYTHON=... chooses the interpreter, EXTRAS=rig adds an extra on top of
-# service,dev, NO_TEST=1 skips the suite, NO_SMOKE=1 skips the start-up check,
-# BACE_VENV=... names the venv and BACE_NO_VENV=1 does without one.
+# service,dev, NO_TEST=1 skips every test (pytest and the console's live suite,
+# leaving the start-up check's probes), NO_SMOKE=1 skips the start-up check
+# whole, BACE_VENV=... names the venv and BACE_NO_VENV=1 does without one.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -247,7 +248,14 @@ try:
     # console's own stream.js and store.js against it: a run reaching `parked`,
     # and a client dropped at 1008 replaying from `since` without a hole.
     live = os.path.join("ui", "tests", "live.test.mjs")
-    if not os.path.exists(live):
+    if os.environ.get("NO_TEST") == "1":
+        # NO_TEST=1 means no tests. These are tests -- six of them, half a
+        # minute -- and running them under a line that just said the suite was
+        # skipped would make the knob a lie. The probes above are not tests:
+        # they are what says the service came up, which is the point of this
+        # section, so NO_TEST keeps them and NO_SMOKE=1 is what drops them.
+        print("   live suite   skipped (NO_TEST=1)")
+    elif not os.path.exists(live):
         print("   live suite   not in this checkout")
     elif shutil.which("node") is None:
         print("   live suite   NOT RUN -- no node, so nothing has driven this service")

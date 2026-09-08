@@ -43,7 +43,11 @@ thing that proves the command above. While that service is up it also runs
 `ui/tests/live.test.mjs`, the one console suite `tests/test_ui.py` excludes
 because it needs a running service: a run reaching `parked`, and a client
 dropped at 1008 replaying from `since` without a hole. Nothing else runs it, CI
-included. `NO_TEST=1` skips the suite, `NO_SMOKE=1` skips the start-up check.
+included.
+
+`NO_TEST=1` skips every test — pytest and that live suite both — while leaving
+the start-up check's probes, which are what say the service came up rather than
+tests of it. `NO_SMOKE=1` skips the start-up check whole.
 
 The console's own suite is Node's (`node --test ui/tests/`) and its lint is
 eslint's, and neither is installed by pip. They *skip* when absent — right for
