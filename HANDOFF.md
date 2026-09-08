@@ -266,15 +266,16 @@ their own right:
   set the variable. `python -m pytest -q` is now **814 passed, nothing
   skipped**.
 
-**2026-09-08, the Keithley console** (`bace/consoles/keithley/`, and its own
+**2026-09-08, the Keithley console** (`examples/keithley_console/`, and its own
 README). The 2400 driven by hand: source a voltage or a current, hold a
 compliance, switch the output on, watch what comes back. No module, no run, no
 folder, no other instrument — and **not part of the service or of `ui/`**. One
 instrument, one process, one port:
 
 ```
-python -m bace.consoles.keithley --sim     # no hardware, no VISA, no extras
-python -m bace.consoles.keithley           # GPIB0::24, from rig.toml -> :8924
+cd examples/keithley_console
+py -3 keithley_console.py --sim            # no hardware, no VISA, no extras
+py -3 keithley_console.py                  # GPIB0::24, from rig.toml -> :8924
 ```
 
 It exists because every route to the SourceMeter went through a module, so
@@ -306,8 +307,25 @@ Two changes underneath it, and one thing to know:
   device may see, whichever end of the instrument it arrives from;
 * the console is `http.server`, not FastAPI, so it needs no `service` extra —
   and under `--sim` no VISA either. Its README is the worked example for
-  writing the next one (`panel.py` is what changes; `server.py` and the page
-  follow the panel's state object rather than the instrument).
+  writing the next one (`smu.py` and `simulated.py` are what an instrument
+  changes; `server.py` and the page follow the panel's state object rather
+  than the instrument).
+
+**It moved to `examples/` the same day it landed** (2026-09-08, second change).
+It was first written as `bace/consoles/keithley/`, importing the package's
+driver and config; the author asked for a standalone example instead, so the
+folder now imports **nothing** from `bace/` — `smu.py` and `simulated.py` are a
+deliberate second copy, the way `examples/shutter_console` carries its own
+`ctypes` block, and `tests/test_keithley_console.py` asserts the property in a
+subprocess. Copy the folder to a bench PC and it runs; there is nothing to
+install but `pyvisa`, and `--sim` does not need that.
+
+**One loose end from the move:** the driver's panel mode
+(`keithley2400.PanelSetup`, `apply_panel`, `read_panel`, and the simulated
+mirror) now has **no caller inside `bace/`** — the console that motivated it
+carries its own copy. It is kept, tested by 14 driver tests, and usable from a
+script or a notebook; but if nothing takes it up, it is a fair candidate for
+deletion.
 
 **Temperature** — wired since this handover was written (superseded here by
 `docs/service-contract.md` section 7). The Lake Shore 331 is at

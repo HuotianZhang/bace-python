@@ -34,11 +34,20 @@ anything. For the API and the console instead, `python -m bace.service --sim
 ## Standalone folders — the hardware, and nothing else
 
 Self-contained: they share nothing with `bace/` but the instrument, so they
-keep working when the package does not, and they open exactly one line.
+keep working when the package does not, and each opens exactly one thing — one
+DIO line, one GPIB session. **One process owns an instrument**, so each is what
+you run *instead of* the service, never beside it.
 
 | | |
 |---|---|
 | `shutter_console/` | the shutter as one switch in a browser. Imports nothing from `bace/`, needs nothing installed, and the service knows nothing about it. `tests/test_shutter_console.py` holds that down |
+| `keithley_console/` | the 2400's own front panel in a browser — source a level, hold a compliance, switch the output on, watch what comes back. Same rule: nothing from `bace/`, and under `--sim` not even a VISA backend. `tests/test_keithley_console.py` holds that down |
+
+Both are run from inside their own folder (`py -3 keithley_console.py --sim`),
+or double-clicked on Windows through the `.bat` beside the script — not with
+`-m` from the repo root, which is the opposite of what the demos above need.
+That is the difference the two halves of this file are about: the demos are the
+package demonstrating itself, and these are programs that happen to live here.
 
 `tools/` is the other half of this: standalone rig scripts for the bench —
 `scan`, `bare`, `lightpower`, `shutter`, `relay`, `identify_dio` — driven from a
