@@ -284,10 +284,16 @@ reproduced the observed lag to 0.01 ns at every temperature from 220 to
 290 K; shifting the dark trace by the lag cancels only 4 % of the
 light−dark difference, and re-integrating after such a shift moves Q by
 ~1 %. The lag-only rule had called 177 of 492 good shots void. A `warn` now
-needs the lag **and** one of the incident's other two symptoms, which a
-superimposed signal cannot produce: an edge slower than `SPIKE_EDGE_NS = 8`
-ns (good shots are 6.0–6.5) or spike heights differing by more than
-`SPIKE_PEAK_MISMATCH = 2 %` (good shots agree to 1 %). A lag above
+needs the lag **and** the one symptom a superimposed signal cannot produce:
+an edge slower than `SPIKE_EDGE_NS = 8` ns, where good shots are 6.0–6.5.
+The incident lowered the spikes by 4–14 % as well, but a height difference
+between the two traces is not the acquisition's alone to explain — under
+`dark_reference = "translated"` they repeat one swing over different
+absolute ranges, so their capacitive terms agree only where `C(V)` is flat,
+and on this device they drift from 0.4 % apart at 220 K to 1.1 % at 295 K
+and are still climbing. The edge is not exposed to that: it is the
+generator's rise, and it held 6.0–6.5 ns across the whole sweep while the
+spikes' decay moved by 11 ns. A lag above
 `SPIKE_LAG_NS = 0.25` with neither of those stays `ok` and is reported in
 the line as "spikes 0.46 ns apart · charge, not jitter".
 

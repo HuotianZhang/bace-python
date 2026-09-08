@@ -100,16 +100,22 @@ def test_a_lag_with_sharp_edges_is_the_extracted_charge_and_not_a_warning():
     assert "ns apart" in v["text"]
 
 
-def test_a_lag_beside_spikes_of_different_height_is_still_a_warning():
-    """The incident's other symptom: jitter lowered the spikes by 4-14 %.
-    One pulse into one network gives one height, so a mismatch is the
-    acquisition's, not the device's."""
+def test_spikes_of_different_height_are_not_by_themselves_jitter():
+    """The incident lowered the spikes by 4-14 % as well as smearing them, but
+    a height difference is not the acquisition's alone to explain: under the
+    default `dark_reference = "translated"` the two traces repeat one swing
+    over different absolute voltage ranges, so their capacitive terms agree
+    only where C(V) is flat. On the rig the two spikes drift from 0.4 % apart
+    at 220 K to 1.1 % at 295 K and are still climbing -- and they do it in the
+    shots that also carry the charge-induced lag, which is exactly the pair
+    this rule must not call void."""
     light = Trace(spike(0.0), DT, T0, count=200)
     dark = Trace(spike(0.5) * 0.90, DT, T0, count=200)
     v = W.shot_verdict(light.y, dark.y, {"autorange_passes": 1}, dt=DT,
                        light=light, dark=dark)
-    assert v["level"] == "warn"
-    assert "differ in height" in v["text"] and "not a charge" in v["text"]
+    assert abs(v["spike_lag_ns"]) > W.SPIKE_LAG_NS and v["edge_light_ns"] < W.SPIKE_EDGE_NS
+    assert v["level"] == "ok", "10 % apart in height, but nothing was smeared"
+    assert v["peak_light_a"] != v["peak_dark_a"], "the heights are still on the verdict"
 
 
 def test_the_sync_edge_is_read_off_a_narrow_pulse_too():
@@ -141,7 +147,7 @@ def test_a_sync_that_was_fetched_but_could_not_be_read_says_which():
     trace at all is a wiring or driver question, an unreadable one is a
     diagnostics question."""
     light = Trace(spike(0.0), DT, T0, count=200)
-    dark = Trace(spike(0.5, smear_ns=2.0) * 0.90, DT, T0, count=200)
+    dark = Trace(spike(0.5, smear_ns=2.0), DT, T0, count=200)
     flat = Trace(np.full(N, 0.01), DT, T0)
     none = W.shot_verdict(light.y, dark.y, {}, dt=DT, light=light, dark=dark)
     assert "No sync trace was fetched" in none["text"]

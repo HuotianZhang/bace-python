@@ -116,19 +116,26 @@ they carry different amounts of extracted charge. Re-integrating after such
 a shift moves Q by ~1 %.
 
 So this threshold alone is not a verdict. Jitter smears what a shift cannot:
-`SPIKE_EDGE_NS` and `SPIKE_PEAK_MISMATCH` are the other two symptoms the
-2026-09-05 incident had (edges 8-13 ns instead of 6, spikes 4-14 % apart),
-and a `warn` needs the lag *and* one of them."""
+a jittered average is the true spike convolved with the trigger's own
+scatter, which widens the leading edge. `SPIKE_EDGE_NS` is that, and a
+`warn` needs the lag *and* it."""
 
 SPIKE_EDGE_NS = 8.0
 """A displacement spike whose 10-90 % edge is slower than this was smeared.
-The rig's good shots are 6.0-6.5 ns; the jittered ones were 8-13 ns."""
+The rig's good shots are 6.0-6.5 ns; the jittered ones were 8-13 ns.
 
-SPIKE_PEAK_MISMATCH = 0.02
-"""How far the two spikes' heights may differ before the pair is judged to
-have been taken under different conditions. Good shots agree to 1 %; the
-jittered ones were 4-14 % apart. The height is the same pulse into the same
-network, so a mismatch is the acquisition's, not the device's."""
+The **leading edge** and not the spike's height, though the 2026-09-05
+incident lowered both (by 4-14 %). A height difference between the light and
+dark spikes is not the acquisition's alone to explain: under the default
+`dark_reference = "translated"` the two traces repeat one voltage *swing*
+over different absolute ranges, so their capacitive terms agree only where
+`C(V)` is flat (`experiment.transient.RunConfig.dark_reference`). On this
+device the two spikes drift from 0.4 % apart at 220 K to 1.1 % at 295 K and
+are still climbing -- a device with more `C(V)` curvature would pass 2 %
+honestly, and it would do it in exactly the shots that also carry the
+charge-induced lag this rule exists to accept. The edge is not exposed to
+that: it is the generator's rise, and it measured 6.0-6.5 ns across the
+whole 220-295 K sweep while the spikes' *decay* moved by 11 ns."""
 
 VERDICT_KEYS: tuple[str, ...] = ("rail_light", "rail_dark", "rail_run_light", "rail_run_dark",
                                  "shared_extreme", "peak_light_a", "peak_dark_a",
@@ -282,14 +289,23 @@ def shot_verdict(light_y, dark_y,
     averages_light, averages_dark, sync_edge_light_ns, sync_edge_dark_ns,
     level, text, ...diagnostics}`.
 
-        lag = align.get("spike_lag_ns")
-        if lag is not None:
-            # Above the threshold and still `ok` means the two corroborating
-            # symptoms of jitter are absent, so the lag is the extracted
-            # charge riding on the spike (see `_smeared`). Say which, or the
-            # operator reads a number they were once told meant a void shot.
-            parts.append(f"spikes {abs(lag):.2f} ns apart"
-                         + (" · charge, not jitter" if abs(lag) > SPIKE_LAG_NS else ""))
+    Three rules. The third is the shot's *alignment* (2026-09-05,
+    `core.diagnostics`; corrected 2026-09-07): the light and dark displacement
+    spikes must sit on top of each other, because `light - dark` is what the
+    photocurrent is. On six shots of the first hardware day they were
+    0.3-1.2 ns apart -- the trigger had jittered for the length of the shot --
+    and the 50 mA spike's residual was reported as a photocurrent ten times the
+    real one, with the charge's sign flipped, while every rail check passed.
+
+    **But a lag is not by itself jitter.** The light trace carries the charge
+    being extracted on top of the spike, and that alone moves the correlation
+    peak: see `_smeared`, and `SPIKE_LAG_NS`. So `warn` needs the lag *and* a
+    smeared edge; a lag on its own is reported in the `ok` line as "charge,
+    not jitter". The edge times and the sync edges are reported beside it so
+    the two sides of the trigger chain can be told apart; the average counts
+    say whether the digitiser folded what was asked. All need `dt` (and the
+    `Trace`s for the counts and the syncs); called with bare arrays they are
+    None and the judgement is the two rail rules alone.
 
     The two rail rules, both about a single trace (03-states section C, corrected):
 
@@ -322,7 +338,7 @@ def shot_verdict(light_y, dark_y,
                     "is nothing to judge and nothing to integrate"}
     else:
         light, dark = light_arr, dark_arr
-        smeared = _smeared(align, _peak(light), _peak(dark))
+        smeared = _smeared(align)
         rail_light, rail_dark = _rail_samples(light), _rail_samples(dark)
         run_light, run_dark = _rail_run(light), _rail_run(dark)
         shared = bool(light.min() == dark.min() or light.max() == dark.max())
@@ -404,8 +420,7 @@ def _alignment(light: np.ndarray, dark: np.ndarray, dt: float | None,
             for k, v in out.items()}
 
 
-def _smeared(align: Mapping[str, Any], peak_light: float | None,
-             peak_dark: float | None) -> str:
+def _smeared(align: Mapping[str, Any]) -> str:
     """Why this shot looks jittered rather than merely lagged -- or `""`.
 
     **The lag alone does not say jitter.** The light trace is the
@@ -418,11 +433,13 @@ def _smeared(align: Mapping[str, Any], peak_light: float | None,
     177 of 492 good shots void, and told the operator to distrust a charge
     that was within ~1 % of right.
 
-    Jitter does something a superimposed signal cannot: it smears the edge
-    the scope triggered on and lowers the spike, differently in the two
-    traces. So a warning needs the lag **and** one of those -- both were
-    present in the 2026-09-05 incident, neither is present in a shot whose
-    only oddity is that the device extracted charge.
+    Jitter does something a superimposed signal cannot: the average is the
+    true spike convolved with the trigger's own scatter, so the leading edge
+    comes out slower. That is the one corroborating symptom used here. The
+    incident lowered the spikes as well, but a height difference between the
+    two traces is not the acquisition's alone to explain -- see
+    `SPIKE_EDGE_NS` -- and it grows with temperature on a healthy device, in
+    the very shots this rule exists to stop calling void.
     """
     lag = align.get("spike_lag_ns")
     if lag is None or abs(lag) <= SPIKE_LAG_NS:
@@ -430,11 +447,6 @@ def _smeared(align: Mapping[str, Any], peak_light: float | None,
     edges = [e for e in (align.get("edge_light_ns"), align.get("edge_dark_ns")) if e is not None]
     if edges and max(edges) > SPIKE_EDGE_NS:
         return f"the spike edge is {max(edges):.1f} ns where a settled shot is 6 ns"
-    if peak_light and peak_dark:
-        worst = max(abs(peak_light), abs(peak_dark))
-        if worst and abs(abs(peak_light) - abs(peak_dark)) / worst > SPIKE_PEAK_MISMATCH:
-            return (f"the two spikes differ in height by "
-                    f"{100 * abs(abs(peak_light) - abs(peak_dark)) / worst:.0f} %")
     return ""
 
 
