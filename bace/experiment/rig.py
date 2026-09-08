@@ -80,7 +80,7 @@ class RigConfig:
 
     light_path_delay_ns: float = 0.0
     """From the 33220A's drive edge to the light actually going off at the
-    sample: measured 502 ns on this bench (2026-09-01, `docs/bace-timing.html`),
+    sample: measured 502 ns on this bench (2026-09-01, `docs/figures/bace-timing.html`),
     419 ns of it the 85 m fibre. Informational -- it does not enter the delay
     axis or the window -- and shown on the rig tab beside `trigger_offset_s` so
     the two constants of the chain's timing are on record together. 0 means

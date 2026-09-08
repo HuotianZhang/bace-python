@@ -13,6 +13,7 @@ so the requests below are the ones the page makes, against no hardware.
 """
 from __future__ import annotations
 
+import errno
 import importlib.util
 import json
 import pathlib
@@ -140,7 +141,11 @@ def test_the_page_is_served_from_the_folder(api) -> None:
     status, body, headers = api(Line(0))("/")
     assert status == 200
     assert headers["Content-Type"].startswith("text/html")
-    assert body == (FOLDER / "page.html").read_text(encoding="utf-8")
+    # `read_bytes`, not `read_text`: the console sends the file's bytes and
+    # text mode translates newlines, so on a Windows checkout (CRLF in the
+    # working tree, nothing in `.gitattributes` pinning `.html`) this compared
+    # every line against itself minus a `\r`.
+    assert body == (FOLDER / "page.html").read_bytes().decode("utf-8")
     assert "/api/open" in body and "does not move the shutter" in body
 
 
@@ -236,4 +241,28 @@ def test_a_port_already_in_use_is_named_and_frees_the_module(capsys) -> None:
     finally:
         held.close()
     assert line.released and line._handle is None
+    # The hint, not just the socket error. It was `EADDRINUSE`-only, which
+    # Windows never raises for a busy port (`WINDOWS_PORT_TAKEN`), so the one
+    # platform this console is double-clicked on got the raw socket message
+    # that this code exists to translate.
     assert "already running" in capsys.readouterr().out
+
+
+def test_a_busy_port_is_recognised_on_windows_too() -> None:
+    """Windows answers a second bind with `WSAEACCES` (10013), not
+    `EADDRINUSE` — and Python maps that to `EACCES`, which on POSIX means a
+    privileged port and not a busy one. So the match is on `winerror`."""
+    posix = OSError(errno.EADDRINUSE, "Address already in use")
+    assert sc._port_is_taken(posix)
+
+    windows = OSError(errno.EACCES, "forbidden by its access permissions")
+    windows.winerror = 10013
+    assert sc._port_is_taken(windows)
+    windows.winerror = 10048
+    assert sc._port_is_taken(windows)
+
+    # A privileged port on POSIX is `EACCES` with no `winerror`, and is not
+    # a console that is already running.
+    privileged = OSError(errno.EACCES, "Permission denied")
+    assert not sc._port_is_taken(privileged)
+    assert not sc._port_is_taken(OSError(errno.ENOENT, "nope"))

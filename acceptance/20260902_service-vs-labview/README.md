@@ -22,7 +22,7 @@ Same sign, same order, the spike in the same place, both tails at zero — which
 is *the* criterion (`docs/README.md`, "The criterion, since it was got wrong
 repeatedly"). Q differs by 23 %, on two runs half an hour apart with n = 2:
 this device moved by a factor 2.8 in three hours on 2026-09-01
-(`HANDOVER-2026-09-02.md`), so the comparison is a sign-and-shape one, not a
+(`docs/history/HANDOVER-2026-09-02.md`), so the comparison is a sign-and-shape one, not a
 tight numerical one. The tight numerical regression is `bench-archive/`, which
 asserts that the same traces in give the same numbers out to 1.6e−06.
 

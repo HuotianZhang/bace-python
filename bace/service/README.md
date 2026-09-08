@@ -330,7 +330,7 @@ source exactly as `centre_on_voc` does.
 a POSIX shell (Git Bash); in `cmd.exe` escape the quotes,
 `-d "{\"module\": \"jv\"}"`, or put the body in a file and pass
 `-d @body.json`. In PowerShell call `curl.exe`, since `curl` there is an alias.
-The `httpx` forms need `pip install httpx` (the tests already do).
+The `httpx` forms need `pip install httpx`. The tests do **not** bring it: what they need is `httpx2`, Starlette's `TestClient` transport, and that is in the `dev` extra (2026-09-08 -- until then nothing declared it and `tests/test_service_api.py` could not be collected on a clean install).
 
 Watch the stream in a second window while you do any of this. The
 `websockets` package ships an interactive client:

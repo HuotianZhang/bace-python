@@ -1,36 +1,45 @@
-# 组合 ③：invert_polarity = true + :OUTP1:POL = NORM —— 表里唯一没跑过的那一格。
+# Combination 3: invert_polarity = true + :OUTP1:POL = NORM -- the one cell of
+# the table that had never been run.
 #
-# 2026-09-02 晚：③ 就是验证过的组合。02:08 的 bare.py --invert（发生器 NORM）
-# 与 LabVIEW 差 4%；15:37 服务层同一组合复现（Q −1.7e−10，尾部归零）。④=INV
-# 反而是错的——器件经反相放大器歇在 v_coll，抽取不停。run.toml 已按 ③ 固定。
+# Evening of 2026-09-02: 3 is the validated combination. bare.py --invert at
+# 02:08 (generator at NORM) agreed with LabVIEW to 4 %, and the service
+# reproduced the same combination at 15:37 (Q -1.7e-10, tail at zero). 4=INV is
+# the wrong one -- through the inverting amplifier the device rests at v_coll
+# and extraction never stops. run.toml is fixed at 3.
 #
-# 目的：直接测出"发生器的正 = 器件的正吗"这个符号，不再从 JV 推。
-# ③ 和 ②（false + INV，也就是 17:59 / 18:09 / 18:11 跑的那个）在器件上互为负号，
-# 是同一个实验的两个符号版本：
+# The point: measure the sign -- is the generator's positive the device's
+# positive? -- directly, instead of inferring it from the J-V.
+# 3 and 2 (false + INV, which is what 17:59 / 18:09 / 18:11 ran) are each
+# other's negation at the device: two sign versions of one experiment:
 #
-#   ②  放大器输出  基线 +0.80 V  →  脉冲 −2.00 V
-#   ③  放大器输出  基线 −0.80 V  →  脉冲 +2.00 V
+#   2  amplifier output  baseline +0.80 V  ->  pulse -2.00 V
+#   3  amplifier output  baseline -0.80 V  ->  pulse +2.00 V
 #
-# 判读（用原始 light − dark，不是存进文件的 photo）：
-#   脉冲前 ≈ 0、台阶后进入稳定抽取  →  这一格的基线才是 V_oc，这个符号是对的
-#   脉冲前有大电流、台阶后归零      →  基线是抽取电平，符号反了，另一格才对
-# ② 已经给出了前一种形状（0.06 → +4.45 mA）。如果 ③ 也给前一种，那说明有别的东西
-# 在起作用，两格都要重新审。
+# How to read it (use the raw light - dark, not the photo stored in the file):
+#   ~0 before the pulse, steady extraction after the step -> this cell's
+#       baseline is V_oc, and this sign is the right one
+#   a large current before the pulse, zero after the step -> the baseline is
+#       the extracting level, the sign is backwards, and the other cell is right
+# 2 already gave the first shape (0.06 -> +4.45 mA). If 3 gives it too, then
+# something else is at work and both cells need looking at again.
 #
-# 安全性：③ 是四格里最安全的一格。亮暗两支的**基线**（占 2 ms 里的 99.75%）分别是
-# −0.80 V 和 0 V，不管器件哪个朝向都不会长时间正偏；只有 5 µs 的脉冲会碰到 ±2.0/2.8 V。
-# 对比 ①（暗态基线 −1.92 V 长期挂着）和 ④（暗态基线 +2.80 V 长期挂着）。
+# Safety: 3 is the safest of the four cells. The **baselines** of the light and
+# dark branches (99.75 % of every 2 ms) are -0.80 V and 0 V, which cannot hold
+# the device in forward bias for long whichever way round it is wired; only the
+# 5 us pulse reaches +/-2.0/2.8 V. Compare 1 (a dark baseline of -1.92 V held
+# indefinitely) and 4 (a dark baseline of +2.80 V held indefinitely).
 #
 #   py -3 tools\scan.py --run recipes\run-sign.toml --dry
 #   py -3 tools\scan.py --run recipes\run-sign.toml
 #
-# 跑完之后和 18:11 那一轮对比：两者的电压、LED、时基完全一样，只差这一个符号。
+# Compare the result against the 18:11 round: identical voltages, LED and
+# timebase, differing only in this one sign.
 
 [axis]
 name = "delay_ns"
-start = 0.0                     # delay_ns 就是 :PULS:DEL1，不能为负
+start = 0.0                     # delay_ns is :PULS:DEL1, and cannot be negative
 stop = 240.0
-step = 120.0                    # 3 点：0 / 120 / 240（之前 −40/80/200 加 47 ns 命令偏移 = 7/127/247）
+step = 120.0                    # 3 points: 0 / 120 / 240 (previously -40/80/200 plus a 47 ns command offset = 7/127/247)
 centre_on_voc = false
 
 [pinned]
@@ -39,27 +48,30 @@ vcoll = -2.00
 delay_ns = 80.0
 
 [acquisition]
-n_loops = 1                     # 3 shots，约 10 秒。这是一次判读，不是测量
+n_loops = 1                     # 3 shots, about 10 seconds. This is a reading, not a measurement
 n_averages = 20
 timebase_ns_per_div = 500.0
 record_length = 5000
 
-t0_int_s = -2e-9                # 从场到达（trigger + :PULS:DEL1 + trigger_offset_s）前 2 ns 起
-t_int_width_s = 1.5e-6          # 判符号够用；窗口起止都跟着 delay 走
+t0_int_s = -2e-9                # from 2 ns before the field arrives (trigger + :PULS:DEL1 + trigger_offset_s)
+t_int_width_s = 1.5e-6          # enough to judge the sign; both ends of the window follow delay
 
-# 关掉基线校正：光没关的时候，尾部 10 % 是稳态信号而不是基线，校正会把信号减掉、
-# 把波形变成自己的镜像（18:15 那一轮就是这样，Q 还是个像样的 −3.0e−10 C）。
-# 这一轮要看的正是"台阶后有没有稳态电流"，所以必须看原始差值。
+# Baseline correction off: when the light does not go out, the last 10 % is
+# steady-state signal rather than baseline, and the correction subtracts the
+# signal away, turning the waveform into its own mirror image (which is what
+# happened in the 18:15 round, where Q still came out a presentable
+# -3.0e-10 C). What this round is looking for is precisely whether there is a
+# steady current after the step, so the raw difference is what must be read.
 offset_correct = false
 
 pulse_width_ns = 5000.0
 pulse_frequency_hz = 500.0
 duty_percent = 50.0
 
-# --- 这一轮的全部意义就在这两行 ---------------------------------------------
-invert_polarity = true          # 软件层：把两个电压取负（大小排序也跟着翻）
-output_polarity = "NORM"        # 仪器层：基线 = LOW 电平
-inverted_output = false         # output_polarity 不是 "auto" 时被忽略
+# --- the whole point of this round is these two lines -----------------------
+invert_polarity = true          # software layer: negate both voltages (their ordering flips too)
+output_polarity = "NORM"        # instrument layer: the baseline is the LOW level
+inverted_output = false         # ignored unless output_polarity is "auto"
 
 settle_s = 0.2
 dark_settle_s = 0.2

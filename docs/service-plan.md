@@ -1,120 +1,160 @@
-# BACE 服务层规划 — v1
+# The BACE service layer — a plan, v1
 
-> **状态（2026-09-02 晚）**：P0、P1、P2 全部完成并在真机上验证（HANDOVER 的
-> 晚间小节）；温度的 331 控制台接线提前于 P3 做完（契约 §7），temperature loop
-> 在 rig.toml 指到控制台时自动稳定、否则按本文的 NeedsOperator 暂停。P3 剩
-> results tab（未设计）与失败恢复。实现契约 `service-contract.md`，UI 开工看
-> `ui-kickoff.md`。
+> **Status (evening of 2026-09-02)**: P0, P1 and P2 are all done and proven on
+> the real rig (the evening section of `history/HANDOVER-2026-09-02.md`); the
+> 331 console wiring for temperature was done ahead of P3 (contract §7), and
+> the temperature loop settles by itself when `rig.toml` points at a console
+> and otherwise pauses on the `NeedsOperator` of this document. P3 still owes
+> the results tab (undesigned) and failure recovery. `service-contract.md` is
+> the implementation contract; `ui-kickoff.md` is where the console work
+> starts.
 
-2026-09-02。输入：Round 3 UI（`docs/BACE Console - Round 3.dc.html`）、
-项目文档 `bace-ui-flow-model.md`、`bace-ui-round2-brief.md`（三层判决、来源标记）、
-`bace-open-defects.md`（第四批 = 写 service/ 之前定）。
+2026-09-02. Inputs: the Round 3 UI (`design/BACE Console - Round 3.dc.html`),
+and the project documents `bace-ui-flow-model.md`, `bace-ui-round2-brief.md`
+(the three-tier verdict, source marking) and `bace-open-defects.md` (batch four
+= settle before writing `service/`).
 
-## 一句话
+## In one sentence
 
-服务层是**引擎外面的一层薄壳**：一个进程跑在 sternwarte 上，独占 rig，把
-`run_transient_scan` / `run_jv` 这些**事件生成器**包成 HTTP + WebSocket，
-浏览器里的 console 是它唯一的客户端。它不重写任何测量逻辑——逻辑仍在
-`bace/experiment/`，服务层只做：排队、广播事件、记 journal、执行 pipeline 树。
+The service layer is **a thin shell around the engine**: one process on
+sternwarte, owning the rig, wrapping the **event generators** —
+`run_transient_scan`, `run_jv` and the rest — in HTTP + WebSocket, with the
+console in a browser as its only client. It rewrites no measurement logic: the
+logic stays in `bace/experiment/`, and the service does four things only —
+queue, broadcast events, write the journal, execute the pipeline tree.
 
-## 进程与并发模型
+## Process and concurrency
 
-- **一个 service 进程**（lab PC，`py -3`，绑定 127.0.0.1），FastAPI + uvicorn，
-  顺带 serve 前端静态文件。VISA 仪器（2400 / 33220A / 81150A / 示波器 / relay /
-  shutter）只有这个进程碰。
-- **既有的独立 console 保持独立**：1918-C 在 :8918（单进程约束），331 在 :8331
-  （未接线）。服务层像现在的代码一样走 HTTP 找它们。
-- **同一时刻至多一个 RunWorker**（bench 锁）。生成器在 worker 线程里跑（阻塞
-  VISA I/O）；RunRecorder / JVRecorder 套在生成器链里面，跟 tools/scan.py 一样
-  （`storage.recorder.record`）；事件进 asyncio 队列 → 扇出给 WebSocket 订阅者 +
-  journal。（2026-09-02 订正：recorder 不在 asyncio 扇出里，见 contract §2。）
-- **手动跑一张卡 = 单节点 pipeline**，同一条代码路径——这就是 flow-model 里
-  "manual run 和 pipeline step 共享 monitor 和 history"的实现方式。
-- **并发只允许不碰 VISA 总线的观察者**：power monitor 走 :8918 的 HTTP，可以
-  在 bace 扫描期间旁路运行（R3·2 画的就是这个）；GPIB 上的任何操作都必须经过
-  唯一的 worker。这条规则同时回答了「power 是模块还是监视器」——两者都是：
-  `power read` 是模块（占 worker），`power monitor` 是观察者（不占）。
+- **One service process** (the lab PC, `py -3`, bound to 127.0.0.1), FastAPI +
+  uvicorn, serving the front-end static files alongside. The VISA instruments
+  (2400 / 33220A / 81150A / scope / relay / shutter) are touched by this
+  process and nothing else.
+- **The existing standalone consoles stay standalone**: the 1918-C on :8918
+  (a single-process constraint), the 331 on :8331 (not yet wired). The service
+  reaches them over HTTP, exactly as the current code does.
+- **At most one RunWorker at a time** (the bench lock). The generator runs on a
+  worker thread (VISA I/O blocks); RunRecorder / JVRecorder wrap the generator
+  chain the way `tools/scan.py` does it (`storage.recorder.record`); events go
+  into an asyncio queue, then fan out to the WebSocket subscribers and the
+  journal. (Corrected 2026-09-02: the recorder is not inside the asyncio
+  fan-out — see contract §2.)
+- **A manual run of one card = a single-node pipeline**, down the same code
+  path. This is how the flow model's "manual run and pipeline step share the
+  monitor and the history" is actually built.
+- **The only concurrency allowed is an observer that never touches the VISA
+  bus**: the power monitor goes over HTTP to :8918 and can run alongside a bace
+  scan (this is what R3·2 draws); anything on GPIB must go through the one
+  worker. That rule also answers "is power a module or a monitor" — it is both:
+  `power read` is a module (it takes the worker), `power monitor` is an
+  observer (it does not).
 
-## API 草图（资源随 UI 的四个 tab）
+## The API, sketched (resources follow the UI's four tabs)
 
 ```
-GET  /bench                     仪器状态 + 触发链读回 + 生效的 rig.toml 数值
-POST /bench/read                重读链条/仪器状态（strip 的 re-read）
-POST /bench/actions/{name}      显式单击动作：set-33220a-pol-inv · park · relay …
-                                → 每个动作进 journal（"by hand"条目，R3·2 已画）
-GET  /modules                   模块目录 + 每个参数 {value, source, editable}
-PUT  /modules/{m}/params        编辑（source 变 edited；reset 回 default）
-POST /runs                      起一个模块 run {module, params} → run_id
-POST /runs/{id}/stop            {mode: after_shot | abort}   两个诚实的动词
-GET  /runs · /runs/{id}         journal（session log 和 this session 卡）
-GET  /runs/{id}/data            光暗轨 / Q(loop) / J-V 曲线，喂卡片内嵌图
-POST /pipelines/validate        树进 → 解析后的执行序列 + 16 checks + 成本估计
-POST /pipelines                 Start（内部先 validate；crit 挡回）
-WS   /events                    全部事件流
+GET  /bench                     instrument state + trigger-chain read-back + the
+                                rig.toml values in force
+POST /bench/read                re-read the chain and the instrument state (the
+                                strip's re-read)
+POST /bench/actions/{name}      explicit one-click actions: set-33220a-pol-inv ·
+                                park · relay …
+                                → every action lands in the journal (a "by hand"
+                                entry; R3·2 already draws it)
+GET  /modules                   the module catalogue + every parameter as
+                                {value, source, editable}
+PUT  /modules/{m}/params        edit (source becomes edited; reset returns to
+                                default)
+POST /runs                      start one module run {module, params} → run_id
+POST /runs/{id}/stop            {mode: after_shot | abort} — two honest verbs
+GET  /runs · /runs/{id}         the journal (the session log and the this-session
+                                card)
+GET  /runs/{id}/data            light and dark traces / Q(loop) / the J–V curve,
+                                feeding the charts inside the cards
+POST /pipelines/validate        a tree in → the resolved execution sequence + 16
+                                checks + a cost estimate
+POST /pipelines                 Start (validates internally first; a crit is
+                                refused)
+WS   /events                    the whole event stream
 ```
 
-Dry run = `validate` + 返回完整 schedule，不碰任何输出——UI 的 Dry run 按钮
-就是它。
+Dry run = `validate` plus the full schedule returned, touching no output. That
+is exactly what the UI's Dry run button is.
 
-## 事件与 journal
+## Events and the journal
 
-- **线上格式 = 现有 dataclass 事件的 JSON**（RunStarted / DCMeasured /
-  AxisResolved / InstrumentState / StepStarted / StepDone / LoopDone / Progress /
-  RunFinished / RunAborted / RunFailed / Notice），服务层加信封
-  `{seq, ts, run_id, node_path}`。`node_path` 是 pipeline 树里的位置
-  （如 `T=250K/led=1.020V/bace`），三个计数器三个时间尺度直接从它渲染。
-- **journal = 每 session 一个 append-only jsonl** + 现有 RunRecorder
-  （HDF5 `bace-run/2` + legacy `.dat`）原样不动。append-only 是为将来的
-  失败恢复留的地基（本轮不做恢复，但格式先立对）。
-- 判决遵守三层（round2-brief）：crit 只有硬件安全；warn 只陈述证据；
-  服务层不自动修任何东西——修正 = `/bench/actions/*` 的显式调用。
+- **The wire format is the existing dataclass events as JSON** (RunStarted /
+  DCMeasured / AxisResolved / InstrumentState / StepStarted / StepDone /
+  LoopDone / Progress / RunFinished / RunAborted / RunFailed / Notice), with
+  the service adding the envelope `{seq, ts, run_id, node_path}`. `node_path`
+  is the position in the pipeline tree (say `T=250K/led=1.020V/bace`), and the
+  three counters at their three time scales render straight off it.
+- **The journal is one append-only jsonl per session**, with the existing
+  RunRecorder (HDF5 `bace-run/2` plus the legacy `.dat`) untouched.
+  Append-only is the foundation laid for failure recovery later — recovery is
+  not in this round, but the format is settled correctly now.
+- Verdicts obey the three tiers (round-2 brief): crit is hardware safety only;
+  warn states the evidence and nothing more; the service fixes nothing by
+  itself — a correction is an explicit call to `/bench/actions/*`.
 
-## Pipeline 执行器（唯一的新逻辑）
+## The pipeline executor — the only new logic
 
-`service/pipeline.py`：树 = `loop(temperature | illumination | repeat)` +
-`module` 叶子。执行器负责且只负责三条绑定（flow-model 原文）：
+`service/pipeline.py`: the tree is `loop(temperature | illumination | repeat)`
+with `module` leaves. The executor is responsible for three bindings and
+nothing else (the flow model's own words):
 
-1. illumination loop 持有 `led_v`，注入每个子模块——模块自己不带；
-2. `jv_bace` → V_oc → 同一 led_v 下的 `bace`（`centre_on_voc`）；无 V_oc 源的
-   `bace` 在 validate 就拒绝；
-3. 每个 `jv_* ↔ bace` 边界插入 relay 过渡（disable → switch → enable）。
+1. the illumination loop holds `led_v` and injects it into every child module —
+   a module does not carry it;
+2. `jv_bace` → V_oc → the `bace` at that same led_v (`centre_on_voc`); a `bace`
+   with no V_oc source is refused at validate;
+3. a relay transition (disable → switch → enable) is inserted at every
+   `jv_* ↔ bace` boundary.
 
-**temperature 未接线的语义**（R3·3 那条 warn）：不是禁止——执行器在每个 T 节点
-发 `NeedsOperator` 事件并暂停，等 `POST /runs/{id}/resume`。手动设温也能跑
-完整棵树，接上 331 之后这个节点自动化，API 不变。
+**What an unwired temperature means** (the warn of R3·3): not a prohibition —
+the executor emits a `NeedsOperator` event at each T node and pauses, waiting
+for `POST /runs/{id}/resume`. The whole tree runs with the temperature set by
+hand; once the 331 is wired that node automates itself, and the API does not
+change.
 
-成本估计从 journal 的历史 settle 时间来（R3·3 的逐温度表），ETA 随实测重算。
+The cost estimate comes from the settle times in the journal's history (the
+per-temperature table of R3·3), and the ETA is recomputed as it measures.
 
-## 动手之前先在 core 里清掉（顺序即优先级）
+## To clear out of core before starting (the order is the priority)
 
-1. **`current_sign = -1` 进 rig.toml**，乘在 `Infiniium._fetch`，同时进协议和
-   模拟器——handover 的「下一程第一件事」，也是符号问题的正解。
-2. **第四批 14**：事件信封/层级标签（`Progress` 加 `node_path`）在 core 定，
-   不在服务层拼。
-3. **第二批 8**：`configure_trigger` 进 run 路径——服务层不能依赖
-   `tools/scan.py` 的预检副作用。
-4. **第三批 10–11**：参数来源（default / run.toml / last-used / edited /
-   inherited）——`/modules` 的 provenance 直接消费它。
-5. 第四批 15–17（`LedSource` 协议、删 `core/sequence.py`、拆 `checks.py`）
-   顺路做，不挡路。
-6. （2026-09-02 补记，实际做了、计划里没列的）`run_jv` 光曲线开快门、暗曲线
-   关快门并 yield `InstrumentState({"shutter"})`；`run_intensity_series` 在
-   `measure_dc` 周围开快门；`storage/jv.py` 因此升到 `bace-jv/2`。都是
-   设计包 01-modules §4（见 docs/ui-rules.md）记过的时序缺口，不是重写测量逻辑；`bace-run/2` 不变。
-   审阅轮又加了 `run_transient_scan` 每段 yield `StepPhase`（同样的仪器调用、
-   同样的顺序，只是多了 yield）。
+1. **`current_sign = -1` into rig.toml**, multiplied in `Infiniium._fetch` and
+   carried into the protocol and the simulator alike — the handover's "first
+   thing next time round", and the real answer to the sign problem.
+2. **Batch four, item 14**: the event envelope and the level labels (`Progress`
+   gains `node_path`) are settled in core, not assembled in the service.
+3. **Batch two, item 8**: `configure_trigger` moves into the run path — the
+   service cannot depend on a side effect of `tools/scan.py`'s pre-check.
+4. **Batch three, items 10–11**: parameter provenance (default / run.toml /
+   last-used / edited / inherited) — `/modules` consumes it directly.
+5. Batch four, items 15–17 (the `LedSource` protocol, deleting
+   `core/sequence.py`, splitting `checks.py`) come along for the ride and block
+   nothing.
+6. (Added 2026-09-02: done in fact, and not listed in the plan.) `run_jv` opens
+   the shutter for the light curve, shuts it for the dark one, and yields
+   `InstrumentState({"shutter"})`; `run_intensity_series` opens the shutter
+   around `measure_dc`; `storage/jv.py` therefore rose to `bace-jv/2`. All of
+   them are sequencing gaps the design pack had already recorded (01-modules
+   §4, see `ui-rules.md`), not a rewrite of the measurement logic; `bace-run/2`
+   is unchanged. The review round then added a `StepPhase` yielded by
+   `run_transient_scan` for each segment (the same instrument calls in the same
+   order — only the yield is new).
 
-## 分期
+## Phases
 
-- **P0** 上面的 core 清理。
-- **P1** bench tab 能用：单模块 run + 事件流 + journal + `/bench` 读与动作 +
-  参数 provenance。用 `--sim`（现有 simulated 驱动）可以离台开发。
-- **P2** pipeline tab：validate / dry run / 执行器（三条绑定 + NeedsOperator）+
-  成本模型。
-- **P3** results tab（尚未设计）、失败恢复、331 接线后的 temperature 自动化。
+- **P0** the core clean-up above.
+- **P1** the bench tab works: one-module runs + the event stream + the journal +
+  `/bench` reads and actions + parameter provenance. `--sim` (the existing
+  simulated drivers) makes this developable away from the bench.
+- **P2** the pipeline tab: validate / dry run / the executor (the three bindings
+  and `NeedsOperator`) + the cost model.
+- **P3** the results tab (not yet designed), failure recovery, and automating
+  temperature once the 331 is wired.
 
-## 明确不做
+## Explicitly not doing
 
-不重写测量逻辑；不做任何自动修正与解读；不做多客户端写（单操作者，锁在
-bench）；不做鉴权（127.0.0.1）；分析（intensity-dependent 结果）等 results tab
-设计定了再说。
+No rewriting the measurement logic; no automatic correction or interpretation
+of anything; no multi-client writes (one operator, the lock is at the bench);
+no auth (127.0.0.1); analysis (intensity-dependent results and the like) waits
+until the results tab is designed.

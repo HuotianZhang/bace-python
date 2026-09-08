@@ -13,7 +13,7 @@ REM     Those are the 23:16 panel numbers and they are NOT a baseline.
 REM     LabVIEW ran again at 02:16 with not one parameter changed and gave
 REM     -3.3e-10 C, tau 71 ns against 190 ns: the device drifted 2.8x in three
 REM     hours. Compare only against a LabVIEW run taken minutes away, never
-REM     against these. (HANDOVER-2026-09-02.md)
+REM     against these. (docs/history/HANDOVER-2026-09-02.md)
 REM
 REM PANEL VALUES COPIED  (full list and reasoning in recipes\run-labview.toml)
 REM     Vpre 1.00354 -> 1.02354 step 0.01     Vcoll -1 V      Delay 90 ns

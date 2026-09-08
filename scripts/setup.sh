@@ -78,13 +78,37 @@ echo "== installing into $("$PY" -c 'import sys; print(sys.prefix)')  [.[$EXTRAS
 echo "== what came in"
 "$PY" - <<'EOF'
 import importlib.metadata as md
-for name in ("numpy", "scipy", "h5py", "fastapi", "uvicorn", "websockets", "pytest", "httpx"):
+import warnings
+
+for name in ("numpy", "scipy", "h5py", "fastapi", "uvicorn", "websockets", "pytest"):
     try:
         print(f"   {name:<12} {md.version(name)}")
     except md.PackageNotFoundError:
         raise SystemExit(f"   {name:<12} MISSING -- the install did not take")
+
 import bace.service            # noqa: F401  -- imports fastapi, so it fails loudly here
 print("   bace.service  imports")
+
+# What the suite needs here is not a package of a given name: it is a working
+# `fastapi.testclient`, and Starlette has already renamed its transport once
+# (httpx -> httpx2, both still accepted). Naming either would go stale at the
+# next rename, so ask the question the suite asks. Missing, this is not one
+# failing test: test_service_api.py raises at *collection* and takes the whole
+# run with it.
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")     # the httpx-is-deprecated notice, if it applies
+    try:
+        import fastapi.testclient       # noqa: F401
+    except Exception as exc:            # RuntimeError when no transport is installed
+        raise SystemExit(f"   TestClient   UNUSABLE -- {exc}")
+transport = "an unnamed transport"
+for name in ("httpx2", "httpx"):
+    try:
+        transport = f"{name} {md.version(name)}"
+        break
+    except md.PackageNotFoundError:
+        pass
+print(f"   TestClient   imports, over {transport}")
 EOF
 
 # ui/ has no build step, so pip installs none of it and the block above checks

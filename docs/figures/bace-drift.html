@@ -1,4 +1,4 @@
-<title>参考本身在漂</title>
+<title>The reference itself was drifting</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@500;600&display=swap">
@@ -98,25 +98,25 @@ td.mono{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
 
 <div class="page">
   <header>
-    <p class="eyebrow">2026-09-02 · LabVIEW 02:16 vs 端口 02:08 · 相隔八分钟</p>
-    <h1>参考本身在漂</h1>
-    <p class="standfirst">把端口和<strong>八分钟前</strong>的 LabVIEW 放在一起，峰值差 6%、衰减时间差 3%、电荷差 4%。之前那个 4 倍的差距不是程序错了——是器件在 23:16 到 02:16 这三小时里自己变了：<strong>LabVIEW 自己的 τ 从 190 ns 掉到 71 ns，自己的 Q 从 −9.2×10⁻¹⁰ 掉到 −3.3×10⁻¹⁰ C。</strong></p>
+    <p class="eyebrow">2026-09-02 &middot; LabVIEW 02:16 against the port at 02:08 &middot; eight minutes apart</p>
+    <h1>The reference itself was drifting</h1>
+    <p class="standfirst">Put the port beside a LabVIEW run from <strong>eight minutes earlier</strong> and they differ by 6% on the peak, 3% on the decay time and 4% on the charge. That earlier 4&times; gap was not the program being wrong &mdash; it was the device changing over the three hours from 23:16 to 02:16: <strong>LabVIEW&rsquo;s own &tau; fell from 190 ns to 71 ns, and its own Q from &minus;9.2&times;10⁻¹⁰ to &minus;3.3&times;10⁻¹⁰ C.</strong></p>
     <dl class="facts">
       <div class="fact"><dt>LabVIEW 02:16</dt><dd>−3.340e−10 C</dd></div>
-      <div class="fact"><dt>端口 02:08</dt><dd>+3.474e−10 C</dd></div>
-      <div class="fact"><dt>相差</dt><dd>4.0 %</dd></div>
+      <div class="fact"><dt>port 02:08</dt><dd>+3.474e−10 C</dd></div>
+      <div class="fact"><dt>apart</dt><dd>4.0 %</dd></div>
       <div class="fact"><dt>τ</dt><dd>71 / 73 ns</dd></div>
-      <div class="fact"><dt>还剩的差别</dt><dd>全局符号</dd></div>
+      <div class="fact"><dt>what is left</dt><dd>a global sign</dd></div>
     </dl>
   </header>
 
   <section>
-    <p class="eyebrow">一 · 三条曲线</p>
-    <h2>不是程序差 4 倍，是器件三小时里掉了 3 倍</h2>
-    <p class="lede">同一个 v_pre 中间点。橙色是 23:16 的 LabVIEW——又高又慢；蓝色是 02:16 的 LabVIEW，红虚线是 02:08 的端口（已翻符号）。后两条基本压在一起。灰色那条是 02:20 那轮「完全沿用现场」，几乎是平的，原因在第三节。</p>
+    <p class="eyebrow">one &middot; three curves</p>
+    <h2>Not a program 4&times; out, but a device that fell 3&times; in three hours</h2>
+    <p class="lede">The same middle v_pre point. Orange is the 23:16 LabVIEW run &mdash; taller and slower; blue is LabVIEW at 02:16, and the red dashed line is the port at 02:08 (sign flipped). The latter two sit essentially on top of each other. The grey line is the 02:20 &ldquo;inherit the bench entirely&rdquo; round, nearly flat, for the reason in section three.</p>
     <figure class="wide">
       <div class="frame">
-        <svg viewBox="0 0 700 200" role="img" aria-label="三条光电流曲线：23 点 16 分的 LabVIEW 明显更慢更大，2 点 16 分的 LabVIEW 与 2 点 08 分的端口几乎重合，沿用现场那一条几乎是平的。">
+        <svg viewBox="0 0 700 200" role="img" aria-label="Three photocurrent curves: the 23:16 LabVIEW run is clearly slower and larger, the 02:16 LabVIEW and the 02:08 port runs almost coincide, and the as-found run is nearly flat.">
           <g transform="translate(56,14)">
             <line x1="-5" y1="14.3" x2="620" y2="14.3" stroke="currentColor" stroke-width="1.1" opacity="0.3"></line>
             <text x="-9" y="17.8" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">0</text>
@@ -130,36 +130,36 @@ td.mono{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
             <polyline fill="none" stroke="var(--a3)" stroke-width="1.7" points="0,14 6,16 12,13 19,8 25,-2 31,-18 37,-36 43,-53 50,-67 56,-75 62,-77 68,-78 74,-78 81,-74 87,-69 93,-64 99,-60 105,-56 112,-51 118,-49 124,-41 130,-39 136,-34 143,-32 149,-27 155,-23 161,-24 167,-20 174,-17 180,-16 186,-15 192,-11 198,-8 205,-6 211,-6 217,-5 223,-7 229,-2 236,-3 242,-3 248,-5 254,-4 260,-1 267,-1 273,-1 279,0 285,2 291,1 298,3 304,1 310,3 316,4 322,6 329,6 335,5 341,4 347,6 353,7 360,6 366,8 372,7 378,5 384,6 391,7 397,7 403,7 409,8 415,8 422,8 428,6 434,9 440,8 446,7 453,9 459,6 465,9 471,8 477,9 484,10 490,7 496,10 502,10 508,11 515,11 521,10 527,10 533,10 539,10 546,12 552,11 558,12 564,10 570,10 577,11 583,11 589,10 595,11 601,11 608,10 614,10 620,9"></polyline>
             <polyline fill="none" stroke="var(--a4)" stroke-width="1.7" stroke-dasharray="5 2.5" points="0,16 6,16 12,14 19,8 25,-6 31,-25 37,-45 43,-61 50,-74 56,-82 62,-84 68,-86 74,-82 81,-77 87,-73 93,-68 99,-62 105,-56 112,-52 118,-46 124,-41 130,-37 136,-33 143,-29 149,-25 155,-24 161,-20 167,-18 174,-15 180,-14 186,-13 192,-12 198,-10 205,-9 211,-9 217,-6 223,-5 229,-3 236,-3 242,-4 248,-1 254,-1 260,-1 267,0 273,0 279,1 285,1 291,1 298,3 304,3 310,4 316,4 322,4 329,6 335,4 341,4 347,5 353,6 360,6 366,6 372,5 378,6 384,6 391,6 397,7 403,6 409,7 415,8 422,8 428,8 434,7 440,9 446,7 453,7 459,8 465,9 471,9 477,8 484,8 490,9 496,8 502,9 508,10 515,9 521,9 527,9 533,11 539,10 546,10 552,10 558,10 564,9 570,10 577,10 583,10 589,10 595,11 601,10 608,11 614,11 620,11"></polyline>
             <polyline fill="none" stroke="var(--ink-3)" stroke-width="1.3" points="0,12 6,12 12,12 19,12 25,10 31,8 37,6 43,5 50,3 56,3 62,3 68,3 74,5 81,6 87,7 93,7 99,8 105,9 112,9 118,10 124,12 130,10 136,12 143,12 149,11 155,11 161,11 167,12 174,13 180,12 186,12 192,13 198,12 205,13 211,13 217,12 223,12 229,13 236,13 242,13 248,13 254,13 260,13 267,13 273,13 279,13 285,13 291,13 298,13 304,13 310,14 316,12 322,12 329,13 335,13 341,13 347,13 353,14 360,14 366,14 372,13 378,13 384,14 391,14 397,13 403,13 409,13 415,14 422,14 428,14 434,14 440,14 446,13 453,13 459,14 465,13 471,13 477,14 484,13 490,14 496,13 502,14 508,14 515,13 521,14 527,15 533,14 539,14 546,15 552,14 558,14 564,14 570,15 577,13 583,14 589,14 595,15 601,14 608,14 614,14 620,14"></polyline>
-            <text x="150" y="118" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--a1)">LabVIEW 23:16　−3.47 mA</text>
-            <text x="245" y="72" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--a3)">LabVIEW 02:16　−2.67 mA</text>
-            <text x="245" y="88" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--a4)">端口 02:08　−2.82 mA（已翻符号）</text>
-            <text x="360" y="30" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">沿用现场 02:20　−0.34 mA</text>
+            <text x="150" y="118" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--a1)">LabVIEW 23:16 &minus;3.47 mA</text>
+            <text x="245" y="72" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--a3)">LabVIEW 02:16 &minus;2.67 mA</text>
+            <text x="245" y="88" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--a4)">port 02:08 &minus;2.82 mA (sign flipped)</text>
+            <text x="360" y="30" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">as-found 02:20 &minus;0.34 mA</text>
             <text x="49.6" y="166" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">350</text>
             <text x="173.6" y="166" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">450</text>
             <text x="297.6" y="166" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">550</text>
             <text x="421.6" y="166" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">650</text>
             <text x="545.6" y="166" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">750</text>
-            <text x="310" y="184" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">记录时间 / ns　·　纵轴 光电流 / mA　·　v_pre 中间那一点</text>
+            <text x="310" y="184" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">record time / ns &middot; y: photocurrent / mA &middot; the middle v_pre point</text>
           </g>
         </svg>
       </div>
       <div class="legend">
         <span><i style="border-color:var(--a1)"></i>LabVIEW 23:16</span>
         <span><i style="border-color:var(--a3)"></i>LabVIEW 02:16</span>
-        <span><i style="border-color:var(--a4);border-top-style:dashed"></i>端口 02:08（翻符号后）</span>
-        <span><i style="border-color:var(--ink-3)"></i>沿用现场 02:20</span>
+        <span><i style="border-color:var(--a4);border-top-style:dashed"></i>port 02:08 (sign flipped)</span>
+        <span><i style="border-color:var(--ink-3)"></i>as-found 02:20</span>
       </div>
-      <figcaption>橙线比蓝线高 30%、慢 2.7 倍。这两条都是 LabVIEW 自己跑的，中间只隔了三小时，参数一字未动。</figcaption>
+      <figcaption>The orange line is 30% taller than the blue one and 2.7&times; slower. Both were run by LabVIEW itself, three hours apart, with not one parameter changed.</figcaption>
     </figure>
   </section>
 
   <section>
-    <p class="eyebrow">二 · 归一化</p>
-    <h2>形状对上了</h2>
-    <p class="lede">各自除以自己的峰值。蓝线和红虚线几乎完全重叠，说明抽取过程的动力学是同一个；橙线明显在下面，那是三小时前的器件。</p>
+    <p class="eyebrow">two &middot; normalised</p>
+    <h2>The shapes agree</h2>
+    <p class="lede">Each divided by its own peak. The blue line and the red dashed one overlap almost exactly, which says the extraction dynamics are the same; the orange line sits clearly below, and that is the device three hours earlier.</p>
     <figure class="wide">
       <div class="frame">
-        <svg viewBox="0 0 700 190" role="img" aria-label="各自按峰值归一后，2 点 16 分的 LabVIEW 与 2 点 08 分的端口几乎完全重叠，而 23 点 16 分那条衰减慢得多。">
+        <svg viewBox="0 0 700 190" role="img" aria-label="Normalised to their own peaks, the 02:16 LabVIEW and the 02:08 port runs overlap almost exactly, while the 23:16 run decays far more slowly.">
           <g transform="translate(56,14)">
             <line x1="-5" y1="6.4" x2="620" y2="6.4" stroke="currentColor" stroke-width="0.55" opacity="0.11"></line>
             <text x="-9" y="9.9" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">1.0</text>
@@ -170,7 +170,7 @@ td.mono{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
             <polyline fill="none" stroke="var(--a1)" stroke-width="1.7" points="0,6 6,7 12,10 19,12 25,17 31,20 37,23 43,26 50,32 56,32 62,37 68,41 74,43 81,47 87,49 93,52 99,52 105,57 112,58 118,59 124,62 130,65 136,66 143,68 149,67 155,68 161,76 167,74 174,74 180,77 186,77 192,79 198,78 205,78 211,80 217,79 223,83 229,85 236,87 242,86 248,86 254,86 260,89 267,90 273,92 279,91 285,93 291,95 298,95 304,96 310,94 316,96 322,97 329,99 335,99 341,99 347,101 353,99 360,100 366,101 372,102 378,101 384,104 391,104 397,104 403,104 409,103 415,104 422,104 428,106 434,108 440,109 446,106 453,110 459,111 465,109 471,109 477,111 484,110 490,109 496,112 502,111 508,112 515,111 521,113 527,115 533,113 539,111 546,115 552,113 558,114 564,112 570,116 577,115 583,116 589,116 595,116 601,116 608,116 614,117 620,115"></polyline>
             <polyline fill="none" stroke="var(--a3)" stroke-width="2.0" points="0,6 6,13 12,15 19,24 25,29 31,36 37,44 43,46 50,53 56,63 62,64 68,70 74,73 81,80 87,84 93,87 99,90 105,96 112,96 118,97 124,100 130,102 136,103 143,105 149,104 155,107 161,110 167,112 174,111 180,111 186,113 192,114 198,115 205,116 211,116 217,118 223,117 229,119 236,118 242,121 248,119 254,123 260,120 267,123 273,121 279,124 285,121 291,123 298,123 304,125 310,124 316,122 322,121 329,123 335,125 341,124 347,125 353,125 360,126 366,126 372,126 378,124 384,123 391,125 397,125 403,126 409,127 415,128 422,127 428,127 434,127 440,129 446,126 453,132 459,129 465,128 471,127 477,131 484,129 490,132 496,129 502,128 508,130 515,127 521,128 527,131 533,128 539,130 546,128 552,129 558,130 564,130 570,132 577,131 583,130 589,131 595,132 601,131 608,129 614,130"></polyline>
             <polyline fill="none" stroke="var(--a4)" stroke-width="1.7" stroke-dasharray="5 2.5" points="0,6 6,11 12,17 19,22 25,29 31,36 37,43 43,50 50,57 56,63 62,67 68,74 74,77 81,83 87,85 93,90 99,92 105,94 112,97 118,99 124,100 130,104 136,105 143,106 149,107 155,109 161,112 167,111 174,110 180,113 186,113 192,114 198,115 205,116 211,117 217,118 223,117 229,119 236,120 242,121 248,120 254,121 260,121 267,123 273,121 279,123 285,123 291,123 298,123 304,123 310,122 316,123 322,124 329,123 335,123 341,125 347,124 353,125 360,125 366,125 372,126 378,125 384,125 391,126 397,126 403,126 409,126 415,127 422,126 428,127 434,127 440,127 446,127 453,127 459,128 465,129 471,129 477,127 484,128 490,129 496,128 502,129 508,128 515,129 521,128 527,128 533,129 539,129 546,129 552,129 558,128 564,128 570,130 577,128 583,129 589,129 595,130 601,130 608,129 614,130"></polyline>
-            <text x="330" y="52" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--a1)">τ = 190 ns（23:16）</text>
+            <text x="330" y="52" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--a1)">&tau; = 190 ns (23:16)</text>
             <text x="180" y="128" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--a3)">τ = 71 / 73 ns</text>
             <text x="0.0" y="156" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">0</text>
             <text x="124.0" y="156" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">100</text>
@@ -178,42 +178,42 @@ td.mono{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
             <text x="372.0" y="156" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">300</text>
             <text x="496.0" y="156" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">400</text>
             <text x="620.0" y="156" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">500</text>
-            <text x="310" y="174" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">从各自峰值起算 / ns　·　纵轴 归一化到各自峰值</text>
+            <text x="310" y="174" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">from each curve&rsquo;s own peak / ns &middot; y: normalised to that peak</text>
           </g>
         </svg>
       </div>
-      <figcaption>1/e 衰减：190.5 ns（23:16）对 71.0 ns（LabVIEW 02:16）对 73.0 ns（端口 02:08）。后两者差 2.8%。</figcaption>
+      <figcaption>1/e decay: 190.5 ns (23:16) against 71.0 ns (LabVIEW 02:16) against 73.0 ns (port 02:08). The latter two are 2.8% apart.</figcaption>
     </figure>
     <div class="scroll">
       <table>
-        <thead><tr><th>运行</th><th>时刻</th><th>v_pre</th><th>峰值</th><th>τ (1/e)</th><th>Q（各自文件里的值）</th></tr></thead>
+        <thead><tr><th>run</th><th>time</th><th>v_pre</th><th>peak</th><th>&tau; (1/e)</th><th>Q (as each file has it)</th></tr></thead>
         <tbody>
           <tr><td>LabVIEW</td><td class="mono">23:16</td><td class="mono">1.01354</td><td class="mono">−3.474 mA</td><td class="mono">190.5 ns</td><td class="mono">−9.198e−10 C</td></tr>
           <tr><td>LabVIEW</td><td class="mono">02:16</td><td class="mono">1.01174</td><td class="mono">−2.665 mA</td><td class="mono">71.0 ns</td><td class="mono">−3.340e−10 C</td></tr>
-          <tr><td>端口 <code>bare.py</code></td><td class="mono">02:08</td><td class="mono">1.01354</td><td class="mono">+2.824 mA</td><td class="mono">73.0 ns</td><td class="mono ok2">+3.474e−10 C</td></tr>
-          <tr><td>端口 <code>--as-found</code></td><td class="mono">02:20</td><td class="mono">0（继承来的）</td><td class="mono">+0.342 mA</td><td class="mono">38.5 ns</td><td class="mono bad2">+4.463e−11 C</td></tr>
+          <tr><td>port <code>bare.py</code></td><td class="mono">02:08</td><td class="mono">1.01354</td><td class="mono">+2.824 mA</td><td class="mono">73.0 ns</td><td class="mono ok2">+3.474e−10 C</td></tr>
+          <tr><td>port <code>--as-found</code></td><td class="mono">02:20</td><td class="mono">0 (inherited)</td><td class="mono">+0.342 mA</td><td class="mono">38.5 ns</td><td class="mono bad2">+4.463e−11 C</td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
   <section>
-    <p class="eyebrow">三 · 那一轮为什么只剩 1/8</p>
-    <h2><code>--as-found</code> 继承到的是暗态电平</h2>
-    <p class="lede">02:20 那轮什么都没写，直接用 LabVIEW 留在发生器里的电平：<code>:VOLT1:HIGH 0.505434</code>、<code>:VOLT1:LOW 0</code>。这正是<strong>暗态</strong>那一对——摆幅 4 × 0.505434 = 2.0217 V 对得上，但基线是 0，也就是 v_pre = 0。器件在照光时被短路着，本来就存不下电荷，所以抽出来只有 4.5×10⁻¹¹ C。</p>
+    <p class="eyebrow">three &middot; why that round kept only an eighth</p>
+    <h2><code>--as-found</code> inherited the dark levels</h2>
+    <p class="lede">The 02:20 round wrote nothing and used the levels LabVIEW had left in the generator: <code>:VOLT1:HIGH 0.505434</code>, <code>:VOLT1:LOW 0</code>. That is exactly the <strong>dark</strong> pair &mdash; the span 4 &times; 0.505434 = 2.0217 V matches, but the baseline is 0, i.e. v_pre = 0. The device is held shorted while lit and stores no charge to begin with, so only 4.5&times;10⁻¹¹ C came out.</p>
     <figure class="wide">
       <div class="frame">
-        <svg viewBox="0 0 700 210" role="img" aria-label="放大器把发生器的电平反相放大四倍；亮态那一行发生器基线为负四分之一伏，暗态那一行基线为零。LabVIEW 收工时停在暗态那一行。">
+        <svg viewBox="0 0 700 210" role="img" aria-label="The amplifier inverts and multiplies the generator levels by four; on the light row the generator baseline is minus a quarter volt, on the dark row it is zero. LabVIEW finishes on the dark row.">
           <defs>
             <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
               <path d="M 0 1 L 9 5 L 0 9 z" fill="currentColor"></path>
             </marker>
           </defs>
-          <text x="132" y="22" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">81150A 输出</text>
-          <text x="414" y="22" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">器件两端</text>
+          <text x="132" y="22" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">81150A output</text>
+          <text x="414" y="22" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">across the device</text>
 
-          <text x="50" y="66" text-anchor="end" font-family="IBM Plex Sans SC, sans-serif" font-size="12" fill="var(--ink-2)">亮态</text>
-          <text x="50" y="156" text-anchor="end" font-family="IBM Plex Sans SC, sans-serif" font-size="12" fill="var(--bad)">暗态</text>
+          <text x="50" y="66" text-anchor="end" font-family="IBM Plex Sans SC, sans-serif" font-size="12" fill="var(--ink-2)">light</text>
+          <text x="50" y="156" text-anchor="end" font-family="IBM Plex Sans SC, sans-serif" font-size="12" fill="var(--bad)">dark</text>
 
           <line x1="56" y1="62" x2="209" y2="62" stroke="currentColor" stroke-width="0.6" stroke-dasharray="3 3" opacity="0.3"></line>
           <line x1="338" y1="62" x2="491" y2="62" stroke="currentColor" stroke-width="0.6" stroke-dasharray="3 3" opacity="0.3"></line>
@@ -234,36 +234,36 @@ td.mono{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
           <line x1="211" y1="152" x2="234" y2="152" stroke="currentColor" stroke-width="1.1" marker-end="url(#ar)" opacity="0.55"></line>
           <rect x="238" y="34" width="68" height="146" rx="4" fill="none" stroke="currentColor" stroke-width="1.1" opacity="0.45"></rect>
           <text x="272" y="100" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" fill="currentColor">×(−4)</text>
-          <text x="272" y="118" text-anchor="middle" font-family="IBM Plex Sans SC, sans-serif" font-size="10" fill="var(--ink-3)">反相放大器</text>
+          <text x="272" y="118" text-anchor="middle" font-family="IBM Plex Sans SC, sans-serif" font-size="10" fill="var(--ink-3)">inverting amplifier</text>
           <line x1="310" y1="62" x2="334" y2="62" stroke="currentColor" stroke-width="1.1" marker-end="url(#ar)" opacity="0.55"></line>
           <line x1="310" y1="152" x2="334" y2="152" stroke="currentColor" stroke-width="1.1" marker-end="url(#ar)" opacity="0.55"></line>
 
-          <text x="497" y="149" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--bad)">← LabVIEW 收工时停在这一行</text>
-          <text x="497" y="163" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--bad)">　 as-found 继承到的就是它</text>
+          <text x="497" y="149" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--bad)">&larr; LabVIEW finishes on this row</text>
+          <text x="497" y="163" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--bad)">&nbsp; and this is what as-found inherits</text>
         </svg>
       </div>
-      <figcaption>放大器是<strong>反相、增益 4、零偏置</strong>：发生器的 LOW 决定 v_pre，HIGH 决定 v_coll。两行的摆幅一样（2.0217 V），差别只在基线。VI 每一点都是先亮后暗，所以收工时停在下面那一行。</figcaption>
+      <figcaption>The amplifier is <strong>inverting, gain 4, zero offset</strong>: the generator&rsquo;s LOW sets v_pre and its HIGH sets v_coll. Both rows have the same span (2.0217 V) and differ only in baseline. The VI lights every point before darkening it, so it finishes on the lower row.</figcaption>
     </figure>
     <div class="callout">
-      <span class="tag">这条路走不通</span>
-      <p><code>--as-found</code> 的本意是「一个电平都不写、完全沿用现场」，但 VI 收工时留下的是暗态电平，所以它继承到的偏压是错的。想沿用现场，只能用不带 <code>--as-found</code> 的 <code>bare.py --vpre …</code>：时基、触发、延迟、平均、LED、继电器全都照旧继承，只有那一对电平按 v_pre 重算——02:08 那轮就是这么跑的，结果对上了。</p>
+      <span class="tag">this road is closed</span>
+      <p><code>--as-found</code> was meant to write not one level and inherit the bench entirely, but what the VI leaves behind is the dark levels, so the bias it inherits is wrong. To inherit the bench, the only way is <code>bare.py --vpre &hellip;</code> without <code>--as-found</code>: timebase, trigger, delay, averaging, LED and relay are all inherited as they stand, and only that one pair of levels is recomputed from v_pre &mdash; which is how the 02:08 round was run, and it agreed.</p>
     </div>
-    <p class="note">附带确认了一件一直没证据的事：极性的映射。<code>pulse_levels(invert=True)</code> 给暗态的形状是 <code>(span/4, 0)</code>，和读回来的 <code>(0.505434, 0)</code> 逐位吻合；亮态应该是 <code>(+0.2500, −0.2559)</code>。这就把「LOW → v_pre、HIGH → v_coll」钉死了，不再是从手册上推的。</p>
+    <p class="note">It also settled something that had never had evidence: the polarity mapping. The dark shape <code>pulse_levels(invert=True)</code> produces is <code>(span/4, 0)</code>, agreeing bit for bit with the <code>(0.505434, 0)</code> read back; light should be <code>(+0.2500, &minus;0.2559)</code>. That nails down &ldquo;LOW &rarr; v_pre, HIGH &rarr; v_coll&rdquo;, which is no longer inferred from a manual.</p>
   </section>
 
   <section>
-    <p class="eyebrow">四 · 还剩什么</p>
-    <h2>只有一个全局符号</h2>
-    <p class="lede">端口全是正的，LabVIEW 全是负的，形状和大小都一样。这不是物理上的差别，是取号约定。</p>
+    <p class="eyebrow">four &middot; what is left</p>
+    <h2>Only a global sign</h2>
+    <p class="lede">The port is all positive and LabVIEW all negative, with the same shape and the same size. This is not a difference in physics but a sign convention.</p>
     <ul class="plain">
-      <li>在 <code>rig.toml</code> 里加 <code>current_sign = -1</code>，在驱动取数那一层乘一次，别再靠调发生器的极性开关去凑——极性开关改的是器件真实看到的电压，符号改的只是画出来的方向，两件事不能混。</li>
-      <li>器件在漂。以后拿 LabVIEW 当参照，必须是<strong>紧挨着</strong>的一轮；隔了几小时的旧数据不能当基准，这次就是被它带偏了两个晚上。</li>
-      <li>每轮记下 <code>0_instrument_state</code>（02:20 那轮已经在记了）。这次能一眼看出继承到的是暗态电平，全靠它。</li>
+      <li>Add <code>current_sign = -1</code> to <code>rig.toml</code> and multiply once in the driver&rsquo;s fetch layer. Stop reaching for the generator&rsquo;s polarity switch to fix it &mdash; that switch changes the voltage the device actually sees, while the sign changes only which way the trace is drawn; the two must not be confused.</li>
+      <li>The device drifts. A LabVIEW run used as a reference has to be an <strong>adjacent</strong> one; data a few hours old cannot be a baseline, and that is exactly what cost two evenings here.</li>
+      <li>Record <code>0_instrument_state</code> every round (the 02:20 round already does). Seeing at a glance that the dark levels had been inherited is entirely down to it.</li>
     </ul>
   </section>
 
   <footer>
-    LabVIEW 23:16 = runs/20260901_231645　·　LabVIEW 02:16 = runs/20260902_021632　·　端口 02:08 = runs/bare_20260902_020827　·　沿用现场 02:20 = runs/bare_20260902_022050<br>
-    峰值与 τ 由本页重算（基线 = 末 200 点均值，1/e 判据）；Q 一栏直接取各自 <span class="mono">1_averagesQ</span> 文件里的值。
+    LabVIEW 23:16 = runs/20260901_231645 &middot; LabVIEW 02:16 = runs/20260902_021632 &middot; port 02:08 = runs/bare_20260902_020827 &middot; as-found 02:20 = runs/bare_20260902_022050<br>
+    Peak and &tau; are recomputed by this page (baseline = the mean of the last 200 points, 1/e criterion); the Q column is taken straight from each run&rsquo;s own <span class="mono">1_averagesQ</span> file.
   </footer>
 </div>

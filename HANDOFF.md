@@ -1,39 +1,47 @@
 # BACE port — hand-off
 
 Converting `BACE_Mehrdad.vi` (LabVIEW, 907 VIs) to Python. The measurement half
-is written, tested and proven on the rig; the service over it is built and
-proven on the simulator. The UI is under way — `docs/ui-plan.md` M0 to M6 are
+is written, tested and has been run on the rig; the service over it is built and
+has been run on the simulator. The UI is under way — `docs/ui-plan.md` M0 to M6 are
 done (the event layer and its fixtures, the pinned rail and the chain strip,
 the generated module cards, the charts, the run monitor, the pipeline tab, and
 the results tab — R2·3 as it stands, drawn from the record); the design
 iteration on results with the user is still to be had, on the built tab.
 
-Read `docs/bace-status.html` first — it is the full narrative with the evidence.
+Read `docs/history/bace-status.html` first — it is the full narrative with the evidence.
 This file is the operational summary.
 
 ---
 
-## 2026-09-02 — 端口复现了 LabVIEW 引擎
+## 2026-09-02 — the port reproduced the LabVIEW engine
 
-**当前状态见 `HANDOVER-2026-09-02.md`.** 相隔八分钟的两轮对照（LabVIEW 02:16
-vs 端口 02:08）：峰值差 6.0%、τ 差 2.8%、Q 差 4.0%，尖峰都在记录的 328 ns。
-测试 212 passed / 7 skipped。
+**For the current state read `docs/history/HANDOVER-2026-09-02.md`.** Two runs
+eight minutes apart (LabVIEW 02:16 against the port at 02:08): 6.0 % apart on
+the peak, 2.8 % on τ, 4.0 % on Q, and both spikes at 328 ns of record time.
+Tests: 212 passed / 7 skipped.
 
-下一程第一件事：`rig.toml` 加 `current_sign = -1`，乘在 `Infiniium._fetch`，
-同时进协议和模拟器。端口全正、LabVIEW 全负，是取号约定，不是物理。
+First thing next round: add `current_sign = -1` to `rig.toml`, multiplied in
+`Infiniium._fetch`, and carried into the protocol and the simulator alike. The
+port is all positive and LabVIEW all negative: a sign convention, not physics.
 
-**2026-09-02，稍后：** 上面这件事做了，`docs/service-plan.md` 里的 P0 清理
-全部完成——`current_sign = -1` 进了 `rig.toml`，只在 `Infiniium._fetch` 乘一次，
-协议和模拟器同步；事件信封（`Envelope`、`Progress.node_path`、服务层的事件词汇）
-定在 `experiment/events.py`；`configure_trigger` 进了 `BiasSource` 协议，
-`run_transient_scan` 自己设；`LedSource` 协议；`core/sequence.py` 删了；`run_jv`
-自己开关快门（亮曲线开、暗曲线关）。`bace/service/` 已建，在模拟器上跑通了
-整条路（bench 读回与动作、模块目录、单模块 run、pipeline 树的校验/试跑/执行、
-两个停法、journal），还没上过真台子：怎么跑见 `bace/service/README.md`，契约见
-`docs/service-contract.md`。测试 528 passed / 7 skipped。
+**2026-09-02, later:** that is done, and the P0 clean-up of
+`docs/service-plan.md` is complete — `current_sign = -1` is in `rig.toml`,
+multiplied once in `Infiniium._fetch`, with the protocol and the simulator in
+step; the event envelope (`Envelope`, `Progress.node_path`, the service's event
+vocabulary) is settled in `experiment/events.py`; `configure_trigger` is in the
+`BiasSource` protocol and `run_transient_scan` sets it itself; the `LedSource`
+protocol; `core/sequence.py` is deleted; `run_jv` works the shutter itself
+(open for the light curve, shut for the dark one). `bace/service/` is built and
+runs the whole path on the simulator (bench read-back and actions, the module
+catalogue, a single-module run, validate / dry run / execute of the pipeline
+tree, the two stop verbs, the journal), and has not been on a real bench yet:
+`bace/service/README.md` is how to run it, `docs/service-contract.md` is the
+contract. Tests: 528 passed / 7 skipped.
 
-以下内容写于 2026-09-01 之前，其中 `timebase 500`、`trigger_offset 47 ns`、
-「光根本没关」三条已被数据推翻，以 `HANDOVER-2026-09-02.md` 为准。
+Everything below was written before 2026-09-01, and three of its claims —
+`timebase 500`, `trigger_offset 47 ns`, and "the light never actually goes off"
+— have since been overturned by data. `docs/history/HANDOVER-2026-09-02.md` is
+what stands.
 
 ---
 
@@ -119,29 +127,35 @@ validates, dry-runs and executes the tree with the three bindings and a
 `abort`; every ending parks the bench. It rewrites no measurement logic and
 imports `pyvisa` only inside `rigs.py`, so `--sim --fast` runs on a machine
 with no VISA backend. `bace/service/README.md` is how to run and drive it.
-**2026-09-03:** `jv_dark` 拆成了 `jv`（只扫 J–V，不碰快门也不碰 LED，
-曲线标签来自读回：`as found dark` / `as found 1.020 V` / `as found unknown`）
-与 `light`（快门 + LED 的节点）。`jv_bace` 不变——它把光照当作被扫的轴，
-且是 V_oc 的来源。HDF5 升到 `bace-jv/3`。以下 2026-09-02 的记录里写的
-`jv_dark` 就是现在的 `jv` 加一次关快门。
-同日稍晚：J–V 的电流密度**全项目统一成 mA/cm²**——`JVCurveDone.density`、
-`.dat` 里的 `J/mA cm-2` 与 `Jsc/mA cm-2`、HDF5 的 `density` 数据集
-（`unit = "mA cm-2"`）、以及 console 的显示，都是同一个单位。换算只发生一次，
-就在除以像素面积的地方（`experiment.jv.current_density`）；此前它散落在两个
-demo 和 series 汇总里，而 console 的格式化函数还会按数量级自己挑前缀，同一条
-曲线一头是 `20.0 mA/cm²`、另一头是 `1.90 nA/cm²`。传统 series 汇总的
-`Jsc [mA/cm2]` 本来就是这个单位，现在走同一个函数。HDF5 因此升到
-`bace-jv/4`：数据集的名字和形状都没动、含义差了一千倍，这是读者唯一看不出来
-的那类改动，所以必须由版本号说出来。`pixel_area_cm2 = 0` 仍然是“没有面积、
-也就没有密度”：字段是 `null`，报的是安培。`metrics.jsc` 仍是 **A**——它是从
-电流数组插值出来的，不是密度。
+**2026-09-03:** `jv_dark` was split into `jv` (sweeps a J–V and nothing else:
+it touches neither the shutter nor the LED, and the curve's label comes from
+the read-back — `as found dark` / `as found 1.020 V` / `as found unknown`) and
+`light` (the node that owns the shutter and the LED). `jv_bace` is unchanged —
+it treats illumination as the axis being swept, and it is the source of V_oc.
+The HDF5 rose to `bace-jv/3`. Where the 2026-09-02 notes below say `jv_dark`,
+that is today's `jv` plus one shutter close.
+Later the same day: the J–V current density is now **one unit across the whole
+project, mA/cm²** — `JVCurveDone.density`, `J/mA cm-2` and `Jsc/mA cm-2` in the
+`.dat`, the HDF5 `density` dataset (`unit = "mA cm-2"`), and what the console
+displays are all the same unit. The conversion happens exactly once, where the
+pixel area is divided out (`experiment.jv.current_density`); before this it was
+scattered across two demos and the series summary, while the console's
+formatter picked its own prefix by magnitude, so one curve read `20.0 mA/cm²`
+at one end and `1.90 nA/cm²` at the other. The legacy series summary's
+`Jsc [mA/cm2]` was already this unit and now goes through the same function.
+The HDF5 therefore rose to `bace-jv/4`: no dataset changed name or shape and
+every meaning changed by a factor of a thousand — the one class of change a
+reader cannot see, which is exactly why the version number has to say it.
+`pixel_area_cm2 = 0` still means "no area, therefore no density": the field is
+`null` and amperes are reported. `metrics.jsc` is still **A** — it is
+interpolated from the current array, not from a density.
 
 **Proven on the rig 2026-09-02 (evening)**: jv_dark → jv_bace → bace end to
 end on the lab PC, the bace against LabVIEW fifteen minutes apart — Q −1.72e−10
 vs −2.24e−10 C at a vpre 2 mV apart, within the single-shot scatter
 (σ 5.2e−11 at n = 2), photo peak −0.76 vs −1.26 mA, both tails at zero. The
 six defects the rig day exposed are §6 items 10–11 and the
-HANDOVER-2026-09-02.md evening section.
+docs/history/HANDOVER-2026-09-02.md evening section.
 
 Design rules that are load-bearing:
 
@@ -226,6 +240,74 @@ the new route turned "editable in `run.toml`" into "typeable in a text box".
 `GET /session` answers with `sample_in_name` so the console previews the folder
 as it will be spelled. The plan's directory allocator (its collision section)
 is still open.
+
+**2026-09-08, CI** (`.github/workflows/tests.yml`). The suite on every push and
+pull request, on **ubuntu-latest and windows-latest**. Windows is the point:
+the lab PC runs WinPython, the `.dat` files are byte-exact with CRLF, and §3
+already records a defect that failed there and passed on Linux (a colon in
+`material` building a path segment). 3.11 on both — `requires-python`, and what
+the bench runs — plus 3.12 on Linux. Nothing touches an instrument, so the
+`rig` extra is not installed.
+
+Two things had to be fixed before it could be green, and both were defects in
+their own right:
+
+* **`pip install -e .[service,dev]` could not run the suite.** Starlette's
+  TestClient needs `httpx2` and nothing declared it, so
+  `tests/test_service_api.py` failed at *collection* with a message about a
+  package nothing here names. It is a test dependency, not a service one --
+  the service never makes an HTTP request -- so it went in `dev`.
+* **Seven tests skipped on every checkout, and the data was already here.**
+  `find_archive` looked at `$BACE_ARCHIVE`, a sandbox upload path and
+  `tests/data/`, but never at `bench-archive/`, which this repository carries.
+  So the numerical regression against the 2026-08-07 run (worst relative
+  difference 1.6e-06) and the byte-exact `.dat` round trip -- the two tests
+  that hold the port to the LabVIEW original -- ran only for whoever knew to
+  set the variable. `python -m pytest -q` is now **814 passed, nothing
+  skipped**.
+
+**2026-09-08, the Keithley console** (`bace/consoles/keithley/`, and its own
+README). The 2400 driven by hand: source a voltage or a current, hold a
+compliance, switch the output on, watch what comes back. No module, no run, no
+folder, no other instrument — and **not part of the service or of `ui/`**. One
+instrument, one process, one port:
+
+```
+python -m bace.consoles.keithley --sim     # no hardware, no VISA, no extras
+python -m bace.consoles.keithley           # GPIB0::24, from rig.toml -> :8924
+```
+
+It exists because every route to the SourceMeter went through a module, so
+reading a V_oc without filing a run meant leaving this program for the
+instrument's own keys. It is deliberately *not* a tab: **one process owns an
+instrument**, so a console and the service cannot both hold `GPIB0::24` — this
+is what you run instead of the service, the same reason the 1918-C has a
+console on `:8918` and the 331 one on `:8331` (`docs/service-plan.md`). The
+port follows that convention: the last two digits are the GPIB address.
+
+Two changes underneath it, and one thing to know:
+
+* **the driver grew a panel mode** (`keithley2400.PanelSetup`, `apply_panel`,
+  `read_panel`): configure once and read many, with `*RST` only on the way in
+  and only what moved written after that. The three DC routines could not be
+  reused — each opens with `*RST`, which would drop the output between every
+  reading. The separation runs both ways: `_prepare` clears the panel, so the
+  first measurement after a panel session leaves the instrument in none of the
+  state the panel put there and the panel knows. The panel senses **both**
+  quantities (`:FUNC:CONC ON`), which is the one place in that driver where the
+  V element of a `:READ?` is a measurement rather than the setpoint
+  `sweep_points` files. The simulated SourceMeter mirrors all of it and models
+  the relay on this path (`measure_dc` and `sweep_points` are only reached from
+  inside `router.dc()`, so the position cannot be wrong for them);
+* **`rig.toml`'s two ceilings now hold a typed level**, not only a compliance.
+  Until this console nothing could type a source level at all, so the one
+  number an operator can put straight onto the device had nothing over it. No
+  third key was invented: those two are the bench's statement of what the
+  device may see, whichever end of the instrument it arrives from;
+* the console is `http.server`, not FastAPI, so it needs no `service` extra —
+  and under `--sim` no VISA either. Its README is the worked example for
+  writing the next one (`panel.py` is what changes; `server.py` and the page
+  follow the panel's state object rather than the instrument).
 
 **Temperature** — wired since this handover was written (superseded here by
 `docs/service-contract.md` section 7). The Lake Shore 331 is at
@@ -318,9 +400,10 @@ Nine, and they are the reason the harness exists. Each is documented at its site
    off and on, count read back stopped and refused unless zero), takes the
    auto-range passes un-averaged, acquires with `:DIG` + `*OPC?`, and checks
    the folded count against the recipe after the fetch. The LabVIEW original
-   waited on `:ADER?` as this port did, so the 2026-09-02 agreement with it
-   does not validate absolute charge; re-measure before quoting any Q from
-   before this.
+   waited on `:ADER?` as this port did, and used the same double configure.
+   Runs from before this fix were taken that way; `runs/260826-6_*` of
+   2026-09-06 has the same three points before and after, if a comparison is
+   wanted.
 6. **Auto-range was single-pass**, then capped at 4 — both too few. See §7.
 7. **The scope rounds `:CHAN2:RANG?` to three significant figures.** A readback
    added for accuracy was degrading it, and an equality-based ceiling test would
@@ -462,7 +545,7 @@ to reach for the same shortcuts.
    serves the result.
 3. **Side-by-side** — done 2026-09-02 evening, through the service: LabVIEW
    15:06 vs service 15:37, same device, Q within the single-shot scatter,
-   both tails at zero (HANDOVER-2026-09-02.md, evening section). A longer
+   both tails at zero (docs/history/HANDOVER-2026-09-02.md, evening section). A longer
    confirmation against `Q:\Huotian\2026\BACE\20260831\220K` at proper
    n_loops remains worthwhile but is no longer the gate.
 4. **Temperature** — done since (contract section 7): the 331 is a

@@ -317,7 +317,7 @@ def main(argv=None) -> int:
         print(f"    {v:.5f}   photo peak {photo[i][j]*1e3:+8.3f} mA @ "
               f"{t[j]*1e9:6.1f} ns   raw gap before the step "
               f"{raw[t < 300e-9].mean()*1e3:+.4f} mA   Q {q[i]:+.4g} C")
-    print("\n  LabVIEW 参照: Q ≈ -9.2e-10 C, 光电流峰 ≈ -3.7 mA, 原始峰 ≈ -27 mA")
+    print("\n  LabVIEW reference: Q ~ -9.2e-10 C, photocurrent peak ~ -3.7 mA, raw peak ~ -27 mA")
 
     from bace.storage.legacy_dat import LegacyWriter
     w = LegacyWriter(folder, stamp)

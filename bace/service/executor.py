@@ -9,7 +9,7 @@ It never re-derives structure from the tree -- what runs, in which order, was
 decided once in `pipeline.py`, where it can be tested without a rig, and the
 Dry run the operator saw is the schedule this walks.
 
-**The three bindings** (the plan, "Pipeline 执行器 -- 唯一的新逻辑", docs/service-plan.md;
+**The three bindings** (the plan, "The pipeline executor -- the only new logic", docs/service-plan.md;
 contract section 7). The pipeline resolved them between *parameters*; this
 is where they meet the instruments:
 
@@ -80,8 +80,8 @@ module is reported as `NodeDone(outcome="failed")` for the node and every
 loop above it, then `RunFailed(where=<node path>)`, and re-raised so the job
 ends `failed` with the error recorded.
 
-**The ETA is re-derived from what this run has measured** (the plan's "ETA
-随实测重算"). Every loop `Progress` carries `eta_s`: the sum of what is left
+**The ETA is re-derived from what this run has measured** (the plan's "the ETA is
+recomputed as it measures"). Every loop `Progress` carries `eta_s`: the sum of what is left
 in the schedule, where a module's cost is the median duration of the same
 module in this run once one has completed (the schedule's estimate until
 then), and a temperature's settle is the median of the settles the operator

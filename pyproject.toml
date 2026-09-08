@@ -14,13 +14,21 @@ rig = ["pyvisa>=1.13", "pyvisa-py>=0.7"]
 service = ["fastapi>=0.110", "uvicorn>=0.29", "websockets>=12"]
 # The lab PC runs the service on the real rig, so it needs both: `pip install -e .[lab]`.
 lab = ["bace[rig,service]"]
-# httpx is not a nicety: `fastapi.testclient.TestClient` is an httpx client with
-# the app wired in as its transport, so tests/test_service_api.py does not even
-# collect without it, and a collection error takes the whole run down with it.
-dev = ["pytest>=7", "httpx>=0.27"]
+# `httpx2` is Starlette's TestClient transport, so `tests/test_service_api.py`
+# cannot even be collected without it -- a fresh `pip install -e .[service,dev]`
+# failed at import with a message about a package nothing here names. It is a
+# *test* dependency and not a service one: the service itself never makes an
+# HTTP request. (Starlette took `httpx` until it deprecated it in favour of
+# `httpx2`; both still work, and this is the one it asks for.)
+dev = ["pytest>=7", "httpx2>=2"]
 
 [tool.setuptools.packages.find]
 include = ["bace*"]
+
+# The standalone consoles serve their own page, so it travels with the package
+# rather than being found relative to a checkout.
+[tool.setuptools.package-data]
+"bace.consoles.keithley" = ["page.html", "README.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

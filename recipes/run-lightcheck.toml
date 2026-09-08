@@ -1,30 +1,39 @@
-# 看一整个 LED 周期 —— 这不是一次测量，是一张示波器照片。
+# Look at a whole LED period -- this is not a measurement but a scope photograph.
 #
-# 前两轮 delay 扫描（2026-09-01 17:27 NORM / 17:59 INV）都证明：5 µs 的记录里
-# 光从来没有关过。第一轮是「找不到关光台阶，上界只有平台的 1.3 %」；
-# 第二轮是「脉冲后的抽取电流 4 µs 内一点都不衰减」。两个方向指向同一件事。
+# Both earlier delay scans (2026-09-01 17:27 NORM / 17:59 INV) showed that the
+# light never goes out anywhere in the 5 us record. The first found no light-off
+# step, with an upper bound of 1.3 % of the plateau; the second found an
+# extraction current that does not decay at all within 4 us after the pulse.
+# Two directions, one conclusion.
 #
-# 而 BACE 的 delay 轴的定义就是「关光到抽取之间的时间」。光不关，这根轴没有意义。
-# 所以先别扫 delay，先把光看清楚。
+# And BACE's delay axis is defined as the time between the light going out and
+# extraction. If the light does not go out, the axis is meaningless.
+# So do not scan delay yet -- get a clear look at the light first.
 #
-# 做法：把时基拉到覆盖一整个 2 ms 周期，跑一个 axis 点。
-# configure_timebase 把 :TIM:POS 放在 timebase*4，触发落在记录的 1/10 处，
-# 所以窗口 = 触发前 250 µs + 触发后 2.25 ms，完整覆盖 500 Hz 的一个周期。
-# light − dark 画出来就是**器件看到的光波形**，以及 5 µs 的测量窗口落在它的哪一段。
+# How: stretch the timebase to cover a whole 2 ms period and run one axis point.
+# configure_timebase puts :TIM:POS at timebase*4, so the trigger falls a tenth
+# of the way into the record and the window is 250 us before the trigger plus
+# 2.25 ms after it -- a complete period at 500 Hz.
+# Plotting light - dark then draws **the light waveform the device sees**, and
+# shows where in it the 5 us measurement window falls.
 #
-#   py -3 tools\scan.py --run recipes\run-lightcheck.toml --dry     先看计划
-#   py -3 tools\scan.py --run recipes\run-lightcheck.toml           跑
+#   py -3 tools\scan.py --run recipes\run-lightcheck.toml --dry     see the plan first
+#   py -3 tools\scan.py --run recipes\run-lightcheck.toml           run it
 #
-# 看什么：
-#   1. light − dark 有没有一个 1 ms 高 / 1 ms 低的方波？有 = 光在调制
-#   2. 那个下降沿在触发后多少 ns？按时序链应该是 +122 ns
-#   3. 如果整条 2.25 ms 都是平的 = LED 的「关」电平 0.4 V 仍在发光。
-#      那就把 [illumination] 的 low_level_v 改成 0.0 再跑一次，对比稳态电平
+# What to look for:
+#   1. does light - dark show a square wave, 1 ms high and 1 ms low? If so the
+#      light is being modulated
+#   2. how many ns after the trigger is that falling edge? The timing chain
+#      says it should be +122 ns
+#   3. if the whole 2.25 ms is flat, the LED's "off" level of 0.4 V is still
+#      emitting. Set low_level_v under [illumination] to 0.0, run again, and
+#      compare the steady levels
 #
-# 电荷数字在这里没有意义（积分窗口横跨毫秒），波形才是目的。
+# The charge number is meaningless here (the integration window spans
+# milliseconds); the waveform is the point.
 
 [axis]
-name = "vpre"                   # 一个点就够；用 vpre 轴只是因为它最简单
+name = "vpre"                   # one point is enough; a vpre axis only because it is the simplest
 start = 0.92
 stop = 0.92
 step = 1.0
@@ -32,39 +41,47 @@ centre_on_voc = false
 
 [pinned]
 vpre = 0.92
-vcoll = -1.0                    # 和 delay 扫描同一个工作点，波形可以直接对比
-delay_ns = 80.0                 # 随便一个扫描里用过的值
+vcoll = -1.0                    # the same working point as the delay scans, so the waveforms compare directly
+delay_ns = 80.0                 # any value the scans have used
 
 [acquisition]
 n_loops = 1
-n_averages = 4                  # 每次采集要等 4 个 2 ms 周期，别贪多
+n_averages = 4                  # each acquisition waits 4 x 2 ms periods; do not ask for more
 
-# --- 关键：时基覆盖一整个 LED 周期 -------------------------------------------
-timebase_ns_per_div = 250000.0  # 十格 = 2.5 ms 满屏
-record_length = 500000          # 5 ns/样本。:ACQ:MODE RTIM 是**丢样本**式抽取，
-                                # 点数不够窄脉冲会整个消失（2026-09-01 CHAN3
-                                # 「看起来是平的」就是这么来的）
+# --- the crux: a timebase covering a whole LED period -----------------------
+timebase_ns_per_div = 250000.0  # ten divisions = 2.5 ms full screen
+record_length = 500000          # 5 ns/sample. :ACQ:MODE RTIM decimates by
+                                # **dropping samples**, and with too few points a
+                                # narrow pulse disappears entirely (which is how
+                                # CHAN3 "looked flat" on 2026-09-01)
 
-# 这一轮 Q 没有物理意义，窗口只是要盖住整条 2.5 ms 记录：触发落在记录 250 µs 处，
-# 场在触发后 delay + trigger_offset_s（<1 µs）到达，所以从场往前推 250 µs 就是记录开头。
+# Q has no physical meaning in this round; the window only has to cover the
+# whole 2.5 ms record. The trigger falls at 250 us into the record and the field
+# arrives delay + trigger_offset_s (<1 us) after it, so 250 us back from the
+# field is the start of the record.
 t0_int_s = -250e-6
 t_int_width_s = 2.5e-3
 
-# --- 基线校正必须关掉 ---------------------------------------------------------
-# offset_correct 减掉记录最后 10 % 的平均值。第二轮里那 10 % 不是基线而是稳态
-# 抽取电流，于是存进文件的 photo 变成了真实波形的镜像（脉冲前读成 −1.9 mA、
-# 脉冲后读成 0），Q 还是个像样的数字 −3.0e−10 C。
-# 这一轮尾巴几乎肯定也不是基线，所以关掉。
-# （run_transient_scan 现在会自己发一条 warning，但这里本来就不该开。）
+# --- the baseline correction must be off ------------------------------------
+# offset_correct subtracts the mean of the last 10 % of the record. In the
+# second round that 10 % was not baseline but the steady extraction current, so
+# the photo stored in the file became a mirror image of the real waveform
+# (reading -1.9 mA before the pulse and 0 after it), with Q still coming out a
+# presentable -3.0e-10 C.
+# The tail here is almost certainly not baseline either, so it is off.
+# (run_transient_scan now warns of its own accord, but this file should never
+# have had it on.)
 offset_correct = false
 
 pulse_width_ns = 5000.0
 pulse_frequency_hz = 500.0
 duty_percent = 50.0
 
-output_polarity = "NORM"        # 2026-09-02 晚更正：INV 已被推翻（见
-                                # run-bace.toml 文件头）。灯光检查本不看偏压，
-                                # 但配方不该带着一个已知错误的极性被照抄
+output_polarity = "NORM"        # corrected the evening of 2026-09-02: INV is
+                                # overturned (see the head of run-bace.toml). A
+                                # light check does not look at the bias, but a
+                                # recipe should not be copied around carrying a
+                                # polarity known to be wrong
 inverted_output = false
 invert_polarity = true
 
@@ -72,9 +89,9 @@ settle_s = 0.3
 dark_settle_s = 0.3
 read_intensity = true
 trigger_sweep = "AUTO"
-calibrate_trigger = false       # 阈值标定是给 5 µs 记录用的，这里没意义
+calibrate_trigger = false       # threshold calibration is for a 5 us record and means nothing here
 store_shots = false
-acquisition_timeout_s = 60.0    # 4 次平均 × 2 ms 周期 + 500k 点传输
+acquisition_timeout_s = 60.0    # 4 averages x a 2 ms period + transferring 500k points
 
 [sourcemeter]
 current_compliance_a = 0.01
@@ -89,7 +106,7 @@ four_wire = false
 
 [illumination]
 level_v = 1.020
-low_level_v = 0.4               # ← 怀疑对象。第二次跑时改成 0.0 对比
+low_level_v = 0.4               # <- the suspect. Set to 0.0 on a second run and compare
 v_sat = -1.0
 
 [sample]

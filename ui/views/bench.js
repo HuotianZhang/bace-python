@@ -261,7 +261,7 @@ export default {
     // leaves the operator holding the bench they were trying to replace with
     // no idea which value stopped it.
     //
-    // **Where it lives** (`bench-head.html`, option B, 2026-09-06). This was a
+    // **Where it lives** (`studies/bench-head.html`, option B, 2026-09-06). This was a
     // zone of its own between the switches and the cards: 65 px carrying a
     // name field and a Save button, permanently, for something touched once a
     // session. Worse, a Save sitting between two zones stated the scope of

@@ -1,4 +1,4 @@
-<title>BACE 触发链时序</title>
+<title>The BACE trigger chain in time</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@500;600&display=swap">
@@ -152,31 +152,31 @@ footer{margin-top:4rem;padding-top:1.1rem;border-top:1px solid var(--rule);
 <div class="page">
 
   <header>
-    <p class="eyebrow">2026-09-01 · 台上实测 · fingerprint 9d82c97d6427</p>
-    <h1>BACE 触发链时序</h1>
-    <p class="standfirst">光从 33220A 的驱动沿走到样品要 <strong>502 ns</strong>，其中 419 ns 是 85 m 光纤。代码里只有一个 47 ns 的常数代表这整条链——而它真正扮演的角色，是 delay 轴的零点标定。</p>
+    <p class="eyebrow">2026-09-01 &middot; measured on the bench &middot; fingerprint 9d82c97d6427</p>
+    <h1>The BACE trigger chain in time</h1>
+    <p class="standfirst">Light takes <strong>502 ns</strong> to travel from the 33220A&rsquo;s drive edge to the sample, 419 ns of it in 85 m of fibre. The code represents that whole chain with a single 47 ns constant &mdash; and the part that constant really plays is calibrating the zero of the delay axis.</p>
     <dl class="facts">
-      <div class="fact"><dt>零点</dt><dd>81150A Sync</dd></div>
-      <div class="fact"><dt>光路延迟</dt><dd>502 ns</dd></div>
-      <div class="fact"><dt>匹配的 :PULS:DEL1</dt><dd>60–75 ns</dd></div>
-      <div class="fact"><dt>代码当前值</dt><dd>135 ns</dd></div>
+      <div class="fact"><dt>zero</dt><dd>81150A Sync</dd></div>
+      <div class="fact"><dt>optical path</dt><dd>502 ns</dd></div>
+      <div class="fact"><dt>matching :PULS:DEL1</dt><dd>60&ndash;75 ns</dd></div>
+      <div class="fact"><dt>what the code sends</dt><dd>135 ns</dd></div>
     </dl>
   </header>
 
   <div class="callout">
-    <span class="tag">2026-09-02 后续</span>
-    <p><strong>第六节说的那个 delay 扫描做了，结论支持本页：<code>TRIGGER_OFFSET_S</code> 现在是 0。</strong>在同样的 <code>Delay(ns) = 90</code> 下，LabVIEW 和 Python 端口的位移尖峰都落在记录的 328 ns——扫描路径上 <code>:PULS:DEL1</code> 收到的就是 <code>delay_ns</code> 本身，没有任何偏移。原来那 47 ns 是从另一条路径量出来的。</p>
-    <p>所以本页第四节的判断成立（47 ns 既不是线缆延迟、数值也不对），只是最终答案不是 60–75 ns 而是 0。第五节的 <code>[timing]</code> 块仍未实现。完整对照见 <code>HANDOVER-2026-09-02.md</code>。</p>
+    <span class="tag">2026-09-02 follow-up</span>
+    <p><strong>The delay scan section six asks for was done, and its conclusion supports this page: <code>TRIGGER_OFFSET_S</code> is now 0.</strong> At the same <code>Delay(ns) = 90</code>, LabVIEW and the Python port both put the displacement spike at 328 ns of record time &mdash; on the scan path, <code>:PULS:DEL1</code> receives <code>delay_ns</code> itself with no offset at all. The earlier 47 ns was measured down a different path.</p>
+    <p>So section four&rsquo;s judgement stands (47 ns is neither a cable delay nor the right number), except that the final answer is not 60&ndash;75 ns but 0. The <code>[timing]</code> block of section five is still unimplemented. The full comparison is in <code>docs/history/HANDOVER-2026-09-02.md</code>.</p>
   </div>
 
   <section>
-    <p class="eyebrow">一 · 时间轴</p>
-    <h2>五个信号，一个零点</h2>
-    <p class="lede">全部以示波器看到的时间为准，零点取 81150A 的 Sync——也就是正式测量时示波器的触发源。<code>:PULS:DEL1</code> 只延迟输出，不延迟 Sync：把它调到 0，红蓝两条边沿重合。</p>
+    <p class="eyebrow">one &middot; the time axis</p>
+    <h2>Five signals, one zero</h2>
+    <p class="lede">Everything is in the time the scope sees, with the zero at the 81150A&rsquo;s Sync &mdash; which is the scope&rsquo;s trigger source during a real measurement. <code>:PULS:DEL1</code> delays the output only, never the Sync: set it to 0 and the red and blue edges coincide.</p>
 
     <figure class="wide">
       <div class="frame">
-        <svg viewBox="0 0 900 448" role="img" aria-label="以 81150A Sync 为零点的时间轴：33220A 驱动在 −380 ns 关闭，81150A 输出在 :PULS:DEL1 = +60 ns 上升，样品处的光在 +122 ns 才真正关闭，器件电流在输出之后 47 到 62 ns 响应。驱动沿到样品光关闭之间是 502 ns 的光路延迟。">
+        <svg viewBox="0 0 900 448" role="img" aria-label="A time axis with zero at the 81150A Sync: the 33220A drive switches off at -380 ns, the 81150A output rises at :PULS:DEL1 = +60 ns, the light at the sample only goes out at +122 ns, and the device current responds 47 to 62 ns after the output. Between the drive edge and the light going out lies 502 ns of optical path.">
           <defs>
             <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"
                     markerHeight="7" orient="auto-start-reverse">
@@ -190,7 +190,7 @@ footer{margin-top:4rem;padding-top:1.1rem;border-top:1px solid var(--rule);
           <text x="502" y="22" text-anchor="middle" font-family="IBM Plex Mono, monospace"
                 font-size="12.5" font-weight="600" fill="currentColor">t_led = 502 ns</text>
           <text x="502" y="45" text-anchor="middle" font-family="IBM Plex Sans SC, sans-serif"
-                font-size="11.5" fill="currentColor" opacity=".62">LED 驱动放大器 ≈ 83 ns  +  85 m 光纤 419 ns</text>
+                font-size="11.5" fill="currentColor" opacity=".62">LED drive amplifier ~ 83 ns  +  85 m fibre 419 ns</text>
 
           <!-- guides -->
           <g stroke="currentColor" stroke-width="1" stroke-dasharray="2 4" opacity=".28">
@@ -208,15 +208,15 @@ footer{margin-top:4rem;padding-top:1.1rem;border-top:1px solid var(--rule);
           <g font-family="IBM Plex Mono, monospace" font-size="11.5" text-anchor="end"
              fill="currentColor">
             <text x="152" y="66">CH1</text>
-            <text x="152" y="82" opacity=".6">33220A 驱动</text>
+            <text x="152" y="82" opacity=".6">33220A drive</text>
             <text x="152" y="130">CH3</text>
             <text x="152" y="146" opacity=".6">81150A Sync</text>
             <text x="152" y="190">CH4</text>
-            <text x="152" y="206" opacity=".6">81150A 输出</text>
-            <text x="152" y="256">样品处的光</text>
-            <text x="152" y="272" opacity=".6">Si 探测器实测</text>
+            <text x="152" y="206" opacity=".6">81150A output</text>
+            <text x="152" y="256">light at the sample</text>
+            <text x="152" y="272" opacity=".6">measured, Si detector</text>
             <text x="152" y="340">CH2</text>
-            <text x="152" y="356" opacity=".6">器件电流</text>
+            <text x="152" y="356" opacity=".6">device current</text>
           </g>
 
           <polyline points="165,62 211.5,62 211.5,92 885,92" fill="none"
@@ -236,7 +236,7 @@ footer{margin-top:4rem;padding-top:1.1rem;border-top:1px solid var(--rule);
             <text x="216" y="108" opacity=".8">−380</text>
             <text x="657" y="168" opacity=".8">0</text>
             <text x="727" y="176" fill="var(--ch4)">:PULS:DEL1 = 60</text>
-            <text x="799" y="256" fill="var(--light)">+122  光灭</text>
+            <text x="799" y="256" fill="var(--light)">+122  light out</text>
           </g>
 
           <!-- t_bias span -->
@@ -261,23 +261,23 @@ footer{margin-top:4rem;padding-top:1.1rem;border-top:1px solid var(--rule);
         </svg>
       </div>
       <div class="legend">
-        <span><i style="border-color:var(--ch1)"></i>CH1 驱动</span>
+        <span><i style="border-color:var(--ch1)"></i>CH1 drive</span>
         <span><i style="border-color:var(--ch3)"></i>CH3 Sync</span>
-        <span><i style="border-color:var(--ch4)"></i>CH4 输出</span>
-        <span><i style="border-color:var(--light)"></i>样品处的光</span>
-        <span><i style="border-color:var(--ch2)"></i>CH2 器件电流</span>
+        <span><i style="border-color:var(--ch4)"></i>CH4 output</span>
+        <span><i style="border-color:var(--light)"></i>light at the sample</span>
+        <span><i style="border-color:var(--ch2)"></i>CH2 device current</span>
       </div>
-      <figcaption>驱动沿在 −380 ns，而光要到 +122 ns 才在样品处熄灭——中间隔着 502 ns 的光路。绿色的响应落在紫色虚线上（带内），说明当前的 <code>:PULS:DEL1 = 60 ns</code> 已经把抽取对准了光灭。</figcaption>
+      <figcaption>The drive edge is at &minus;380 ns and the light does not go out at the sample until +122 ns &mdash; 502 ns of optical path in between. The green response lands on the purple dashed line (inside the band), which says the present <code>:PULS:DEL1 = 60 ns</code> already aligns extraction with the light going out.</figcaption>
     </figure>
   </section>
 
   <section>
-    <p class="eyebrow">二 · 为什么是这些数</p>
-    <h2>两条路从同一个沿出发，长度差 500 ns</h2>
+    <p class="eyebrow">two &middot; where the numbers come from</p>
+    <h2>Two paths leave the same edge, 500 ns apart in length</h2>
 
     <figure class="wide">
       <div class="frame">
-        <svg viewBox="0 0 900 262" role="img" aria-label="链条图：33220A 的输出沿同时走两条路，一条经 Sync 臂触发 81150A 再经 ×4 放大器到器件，另一条经 LED 驱动放大器和 85 m 光纤变成样品上的光。两条路在器件处汇合，长度相差约 500 纳秒。">
+        <svg viewBox="0 0 900 262" role="img" aria-label="The chain: the 33220A output edge takes two paths at once - one arms the 81150A through the Sync arm and reaches the device through the x4 amplifier, the other becomes light on the sample through the LED drive amplifier and 85 m of fibre. The two meet at the device, about 500 nanoseconds apart in length.">
           <defs>
             <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"
                     markerHeight="7" orient="auto">
@@ -296,13 +296,13 @@ footer{margin-top:4rem;padding-top:1.1rem;border-top:1px solid var(--rule);
              fill="currentColor">
             <text x="93" y="136">33220A</text>
             <text x="375" y="50" fill="var(--ch3)">81150A</text>
-            <text x="375" y="68" font-size="10.5" opacity=".65">臂触发 EXT / POS</text>
-            <text x="586" y="58">×4 放大器</text>
-            <text x="345" y="207">LED 驱动放大器</text>
+            <text x="375" y="68" font-size="10.5" opacity=".65">arm EXT / POS</text>
+            <text x="586" y="58">&times;4 amplifier</text>
+            <text x="345" y="207">LED drive amplifier</text>
             <text x="345" y="225" font-size="10.5" opacity=".65">≈ 83 ns</text>
-            <text x="569" y="207">85 m 光纤</text>
+            <text x="569" y="207">85 m fibre</text>
             <text x="569" y="225" font-size="10.5" opacity=".65">419 ns  (n ≈ 1.48)</text>
-            <text x="800" y="130">器件</text>
+            <text x="800" y="130">device</text>
             <text x="800" y="148" font-size="10.5" opacity=".65">5.192 Ω → CH2</text>
           </g>
           <g fill="none" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar2)">
@@ -317,95 +317,95 @@ footer{margin-top:4rem;padding-top:1.1rem;border-top:1px solid var(--rule);
             <text x="238" y="86" opacity=".75">Sync</text>
             <text x="238" y="100" opacity=".55">380 ns</text>
             <text x="440" y="44" fill="var(--ch4)">:PULS:DEL1</text>
-            <text x="646" y="44" opacity=".75">47–62 ns 到响应</text>
-            <text x="158" y="176" opacity=".75">输出</text>
+            <text x="646" y="44" opacity=".75">47&ndash;62 ns to response</text>
+            <text x="158" y="176" opacity=".75">output</text>
           </g>
           <line x1="272" y1="252" x2="734" y2="252" stroke="var(--light)" stroke-width="1.2"
                 marker-start="url(#ar2)" marker-end="url(#ar2)" opacity=".85"></line>
           <text x="503" y="248" text-anchor="middle" font-family="IBM Plex Mono, monospace"
-                font-size="11" fill="var(--light)">光路合计 502 ns</text>
+                font-size="11" fill="var(--light)">optical path, 502 ns total</text>
         </svg>
       </div>
-      <figcaption>同一个驱动沿分两路：上面一路几十纳秒就把场送到器件，下面一路要 502 ns 才把「光灭」送到。<code>:PULS:DEL1</code> 存在的意义就是补上这个差。</figcaption>
+      <figcaption>One drive edge, two paths: the upper one puts the field on the device in tens of nanoseconds, the lower one takes 502 ns to deliver &ldquo;light out&rdquo;. Making up that difference is the whole reason <code>:PULS:DEL1</code> exists.</figcaption>
     </figure>
   </section>
 
   <section>
-    <p class="eyebrow">三 · 数字</p>
-    <h2>每一个是怎么来的</h2>
+    <p class="eyebrow">three &middot; the numbers</p>
+    <h2>How each one was arrived at</h2>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>量</th><th>值</th><th>来源</th></tr></thead>
+        <thead><tr><th>quantity</th><th>value</th><th>source</th></tr></thead>
         <tbody>
-          <tr><td>驱动关闭 → 81150A Sync</td><td class="n">380 ns</td><td>示波器，黄 → 蓝</td></tr>
-          <tr><td><code>:PULS:DEL1</code> → 红色输出沿</td><td class="n">≈ 1 : 1</td><td>改 delay 观察；设 0 时红蓝重合</td></tr>
-          <tr><td>Sync → 样品处光关闭</td><td class="n">+122 ns</td><td><strong>快速 Si 探测器</strong>放在器件位置</td></tr>
-          <tr class="total"><td>驱动 → 样品处光关闭　<code>t_led</code></td><td class="n">502 ns</td><td>122 − (−380)</td></tr>
-          <tr><td>　其中 85 m 石英光纤</td><td class="n">419 ns</td><td>计算，n<sub>g</sub> ≈ 1.48 @ 530 nm</td></tr>
-          <tr><td>　其中 LED 驱动放大器 + 短线</td><td class="n">≈ 83 ns</td><td>502 − 419（残差）</td></tr>
-          <tr><td>81150A 输出 → 器件光电荷响应　<code>t_bias</code></td><td class="n">47–62 ns</td><td>亮暗相减后的特征，非硬边沿</td></tr>
-          <tr class="total"><td>匹配的 <code>:PULS:DEL1</code></td><td class="n">60–75 ns</td><td>122 − t_bias</td></tr>
+          <tr><td>drive off &rarr; 81150A Sync</td><td class="n">380 ns</td><td>the scope, yellow &rarr; blue</td></tr>
+          <tr><td><code>:PULS:DEL1</code> &rarr; the red output edge</td><td class="n">~ 1 : 1</td><td>watched while changing delay; at 0 the red and blue coincide</td></tr>
+          <tr><td>Sync &rarr; light out at the sample</td><td class="n">+122 ns</td><td>a <strong>fast Si detector</strong> in the device&rsquo;s place</td></tr>
+          <tr class="total"><td>drive &rarr; light out at the sample, <code>t_led</code></td><td class="n">502 ns</td><td>122 &minus; (&minus;380)</td></tr>
+          <tr><td>&nbsp; of which 85 m of silica fibre</td><td class="n">419 ns</td><td>computed, n<sub>g</sub> ~ 1.48 @ 530 nm</td></tr>
+          <tr><td>&nbsp; of which the LED drive amplifier + short cable</td><td class="n">~ 83 ns</td><td>502 &minus; 419 (the residual)</td></tr>
+          <tr><td>81150A output &rarr; the device&rsquo;s photocharge response, <code>t_bias</code></td><td class="n">47&ndash;62 ns</td><td>a feature of light minus dark, not a hard edge</td></tr>
+          <tr class="total"><td>the matching <code>:PULS:DEL1</code></td><td class="n">60&ndash;75 ns</td><td>122 &minus; t_bias</td></tr>
         </tbody>
       </table>
     </div>
-    <p class="note"><code>t_bias</code> 的 15 ns 展宽直接传进零点，因为「光电荷信号」是亮暗两条曲线相减推出来的特征，不是一个可以卡阈值的边沿。所以零点自带 ±15 ns 不确定度。</p>
+    <p class="note">The 15 ns spread on <code>t_bias</code> passes straight into the zero, because the photocharge signal is a feature inferred from subtracting two curves, not an edge a threshold can be put on. The zero therefore carries &plusmn;15 ns of its own.</p>
   </section>
 
   <section>
-    <p class="eyebrow">四 · 推导</p>
-    <h2>那个 47 ns 常数不是线缆延迟</h2>
+    <p class="eyebrow">four &middot; the derivation</p>
+    <h2>That 47 ns constant is not a cable delay</h2>
 
-    <p>真实的「光灭之后多久开始抽取」是</p>
+    <p>The real &ldquo;how long after the light goes out does extraction begin&rdquo; is</p>
 <pre>τ = (:PULS:DEL1 + t_bias) − 122
 
     :PULS:DEL1 = τ + <span class="ok">delay_zero</span>
     <span class="ok">delay_zero</span> = 122 − t_bias = <span class="ok">60…75 ns</span></pre>
 
-    <p><code>delay_zero</code> 就是代码里 <code>trigger_offset_s</code> 扮演的角色——但名字、定义和数值都不对。</p>
+    <p><code>delay_zero</code> is the part <code>trigger_offset_s</code> plays in the code &mdash; but its name, its definition and its value are all wrong.</p>
 
     <div class="callout">
-      <span class="tag">要改</span>
-      <h3><code>TRIGGER_OFFSET_S</code> 的含义是错的，值也是错的</h3>
-<pre><span class="dim">core/pulses.py — 现在</span>
+      <span class="tag">to change</span>
+      <h3><code>TRIGGER_OFFSET_S</code> means the wrong thing, and its value is wrong too</h3>
+<pre><span class="dim">core/pulses.py &mdash; as it stands</span>
 TRIGGER_OFFSET_S = <span class="bad">47e-9</span>
 """Fixed delay between the generator trigger and the field arriving at
 the device — <span class="bad">cable plus instrument latency</span>."""
 
 delay_s = delay_ns * 1e-9 + TRIGGER_OFFSET_S     <span class="dim"># → :PULS:DEL1</span></pre>
-      <p>它不是线缆延迟，而是 <strong>delay 轴的零点标定</strong>：让 <code>delay_ns = 0</code> 真的等于「场恰好在光灭时到达器件」。</p>
-      <p><strong>而且它是大数的残差。</strong>122 本身 = 502 − 380，两个四五百纳秒量的差。光纤长度、LED 放大器、偏压线缆任何一项改动，这个「小常数」的变化都可能是它自身的数倍。写成 <em>cable plus instrument latency</em> 会让后来的人以为它不会动。</p>
-      <p>当前 <code>run.toml</code> 的 <code>delay_ns = 88</code> 给出 <code>:PULS:DEL1 = 135</code>，比匹配值高 60–75 ns——标称的「88 ns」实际是光灭后约 <strong>150–160 ns</strong>。</p>
+      <p>It is not a cable delay but <strong>the calibration of the delay axis&rsquo; zero</strong>: it makes <code>delay_ns = 0</code> genuinely mean &ldquo;the field arrives at the device exactly as the light goes out&rdquo;.</p>
+      <p><strong>And it is the residual of large numbers.</strong> 122 itself = 502 &minus; 380, the difference of two quantities of four or five hundred nanoseconds. Change the fibre length, the LED amplifier or the bias cable and this &ldquo;small constant&rdquo; can move by several times its own size. Writing it as <em>cable plus instrument latency</em> leaves whoever comes next thinking it never moves.</p>
+      <p>The present <code>delay_ns = 88</code> in <code>run.toml</code> gives <code>:PULS:DEL1 = 135</code>, 60&ndash;75 ns above the matching value &mdash; so a nominal &ldquo;88 ns&rdquo; is really about <strong>150&ndash;160 ns</strong> after the light goes out.</p>
     </div>
   </section>
 
   <section>
-    <p class="eyebrow">五 · 落到代码</p>
-    <h2>接线属性进 rig.toml，不进配方</h2>
-    <p class="lede">跟 <code>current_sign</code> 同一类：会随台面改动而变的物理常数不能只活在注释里，而且每组数据必须自带它是在哪套时序下测的。</p>
+    <p class="eyebrow">five &middot; into the code</p>
+    <h2>Wiring properties go in rig.toml, not in a recipe</h2>
+    <p class="lede">The same class as <code>current_sign</code>: a physical constant that moves when the bench is rebuilt cannot live only in a comment, and every set of data has to carry which timing it was measured under.</p>
 <pre><span class="dim">rig.toml</span>
 [timing]
-led_path_delay_s     = 5.02e-7   <span class="dim"># 驱动放大器 + 85 m 光纤。实测</span>
-bias_response_s      = 5.5e-8    <span class="dim"># 81150A 输出 → 器件响应，47–62 ns</span>
-arm_latency_s        = 3.80e-7   <span class="dim"># 33220A 驱动沿 → 81150A Sync</span>
-delay_zero_offset_s  = 6.7e-8    <span class="dim"># 派生：光灭(+122) − bias_response</span></pre>
+led_path_delay_s     = 5.02e-7   <span class="dim"># drive amplifier + 85 m fibre. measured</span>
+bias_response_s      = 5.5e-8    <span class="dim"># 81150A output -> device response, 47-62 ns</span>
+arm_latency_s        = 3.80e-7   <span class="dim"># 33220A drive edge -> 81150A Sync</span>
+delay_zero_offset_s  = 6.7e-8    <span class="dim"># derived: light out (+122) - bias_response</span></pre>
     <ul class="plain">
-      <li><code>:PULS:DEL1 = delay_ns + delay_zero_offset_s</code>，把 <code>TRIGGER_OFFSET_S</code> 从 <code>core/pulses.py</code> 移走——它是台面属性，不是脉冲计算的一部分。</li>
-      <li>四个数和派生的零点全部写进输出元数据（HDF5 + <code>.dat</code> 表头），这样一组数据看得出它假设了什么时序。</li>
-      <li><code>--sync</code> 已经在报告 <code>:PULS:DEL1?</code>；再加一条：把实测的 Sync→输出、驱动→Sync 和配置里的值对照，不一致就 warn。</li>
+      <li><code>:PULS:DEL1 = delay_ns + delay_zero_offset_s</code>, moving <code>TRIGGER_OFFSET_S</code> out of <code>core/pulses.py</code> &mdash; it is a property of the bench, not part of the pulse arithmetic.</li>
+      <li>All four numbers and the derived zero go into the output metadata (HDF5 and the <code>.dat</code> header), so a set of data shows what timing it assumed.</li>
+      <li><code>--sync</code> already reports <code>:PULS:DEL1?</code>; add one thing more &mdash; compare the measured Sync&rarr;output and drive&rarr;Sync against the configured values, and warn where they disagree.</li>
     </ul>
   </section>
 
   <section>
-    <p class="eyebrow">六 · 复核</p>
-    <h2>delay 扫描是更强的标定</h2>
-    <p>上面的零点是 <code>122 − t_bias</code>，依赖对「光电荷响应在哪」的判读，带 ±15 ns。</p>
-    <p><strong>Q(delay) 扫描不需要知道 <code>t_bias</code>。</strong>曲线的拐点直接就是「场恰好在光灭时到达」的那个设定值——一次测量给出整个偏移，而且用的是最终要用的那个量（电荷），不是中间信号。</p>
-    <p class="note">扫之前必须先做削顶上报（待改清单第一批已完成）：信号最大的那几个 delay 点最容易削顶，压平的恰好是拐点区域，会给出一个看起来像物理饱和的平台。</p>
+    <p class="eyebrow">six &middot; the check</p>
+    <h2>A delay scan is the stronger calibration</h2>
+    <p>The zero above is <code>122 &minus; t_bias</code>, which depends on reading where the photocharge response is, and carries &plusmn;15 ns.</p>
+    <p><strong>A Q(delay) scan needs no knowledge of <code>t_bias</code>.</strong> The knee of the curve is directly the setting at which the field arrives exactly as the light goes out &mdash; one measurement gives the whole offset, and it does so in the quantity that is finally wanted (charge) rather than an intermediate signal.</p>
+    <p class="note">Clipping has to be reported before scanning (done, in the first batch of the fix list): the delay points with the largest signal clip most easily, and what gets flattened is exactly the knee region, giving a plateau that looks like physical saturation.</p>
   </section>
 
   <footer>
-    实测于 2026-09-01，示波器 DSO9054H。零点 = 81150A Sync = 正式测量时的示波器触发源。<br>
-    <code>t_led</code> 由放在器件位置的快速 Si 探测器测得；<code>t_bias</code> 由亮暗曲线相减判读，带 ±15 ns。<br>
-    更早的一份记录说「Sync 和输出一起被 <code>:PULS:DEL1</code> 延迟」，以及「Sync → 输出 = 47 ns 已被确认」——两条都不成立，已由本页取代。
+    Measured 2026-09-01 on a DSO9054H. Zero = the 81150A Sync = the scope&rsquo;s trigger source during a real measurement.<br>
+    <code>t_led</code> was measured with a fast Si detector in the device&rsquo;s place; <code>t_bias</code> is read from light minus dark and carries &plusmn;15 ns.<br>
+    An earlier record said that Sync and the output are delayed together by <code>:PULS:DEL1</code>, and that Sync &rarr; output = 47 ns had been confirmed. Neither holds; this page supersedes both.
   </footer>
 </div>

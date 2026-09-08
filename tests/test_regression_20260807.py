@@ -116,31 +116,25 @@ def main(folder: str) -> int:
 
 ARCHIVE_ENV = "BACE_ARCHIVE"
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 ARCHIVE_GLOBS = (
     os.environ.get(ARCHIVE_ENV, ""),
-    # The 2026-08-07 run is tracked, and BENCH.md says the numerical regression
-    # "runs with no argument" because of it. That was true of
-    # `python -m bace.bench`, which looks for the folder beside the package, and
-    # false of pytest, which looked at an upload path and tests/data and nowhere
-    # else -- so the check this repository calls its tightest skipped on every
-    # clean checkout, reporting the data as missing while it sat in the tree.
-    os.path.join(_REPO, "bench-archive", "*"),
     "/mnt/user-data/uploads/s4_PTQ10*",
-    os.path.join(_REPO, "tests", "data", "s4_PTQ10*"),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "s4_PTQ10*"),
+    # The copy the repository carries. It was there all along and nothing
+    # looked for it, so the numerical regression against the 2026-08-07 run and
+    # the byte-exact `.dat` round trip -- seven tests, and two of the most
+    # valuable in the suite -- skipped on every checkout that had not set
+    # `BACE_ARCHIVE` by hand. Last, so a folder somebody named still wins.
+    os.path.join(_REPO, "bench-archive", "s4_PTQ10*"),
 )
 
 
 def find_archive() -> str | None:
-    """The first measurement *folder* one of the globs reaches.
-
-    Folders only: `bench-archive/*` would otherwise hand back the README
-    somebody writes beside the run one day, and the failure would be a parse
-    error rather than a skip.
-    """
     for pattern in ARCHIVE_GLOBS:
         if not pattern:
             continue
-        hits = sorted(p for p in glob.glob(pattern) if os.path.isdir(p))
+        hits = sorted(glob.glob(pattern))
         if hits:
             return hits[0]
     return None
