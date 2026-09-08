@@ -26,8 +26,37 @@ only the `service` extra.
 
 ```bash
 bash scripts/setup.sh          # installs .[service,dev], then runs the suite
+source .venv/bin/activate      # only if setup.sh built one; it says so if it did
 python -m bace.service --sim --fast --port 8900 --ui ui/
 ```
+
+`setup.sh` builds `.venv` unless it is already running inside a virtualenv,
+because a distro interpreter is not ours to install into — Debian's pip cannot
+even upgrade itself in one. `BACE_NO_VENV=1` installs into `python3` as it
+stands, for a container whose interpreter is already its own; `EXTRAS=rig` adds
+pyvisa on top for a Linux box that does have the instruments.
+
+It finishes by starting the service on a free port with the real `ui/` mounted,
+asking it for `/bench` and `/ui/`, and stopping it again — the suite boots the
+CLI too, but every test that mounts a console mounts a stub, so this is the only
+thing that proves the command above. While that service is up it also runs
+`ui/tests/live.test.mjs`, the one console suite `tests/test_ui.py` excludes
+because it needs a running service: a run reaching `parked`, and a client
+dropped at 1008 replaying from `since` without a hole. Nothing else runs it, CI
+included. It needs Node 22 or newer, because `stream.js` takes
+`globalThis.WebSocket` and v20 has none (nor v21, unflagged); on an older Node
+the start-up check says so and skips it, rather than letting it hang against its
+own reconnect timers. The other 19 suites are fine there.
+
+`NO_TEST=1` skips every test — pytest and that live suite both — while leaving
+the start-up check's probes, which are what say the service came up rather than
+tests of it. `NO_SMOKE=1` skips the start-up check whole.
+
+The console's own suite is Node's (`node --test ui/tests/`) and its lint is
+eslint's, and neither is installed by pip. They *skip* when absent — right for
+the lab PC, which has no Node — so `setup.sh` reports which of the two cases the
+machine is in rather than printing "ready" over unrun suites. CI installs both,
+so a pull request always runs them; the machine in front of you may not.
 
 `--fast` makes every settle a no-op, so a 20-loop scan takes a second; it is
 refused on a real rig, where it would measure before the device had settled with
