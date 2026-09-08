@@ -26,6 +26,7 @@ import urllib.request
 import pytest
 
 from bace.consoles.keithley.__main__ import build_parser, is_loopback, main
+from bace.consoles.keithley import panel as panel_module
 from bace.consoles.keithley.panel import (JOB_TIMEOUT_S, KeithleyPanel, PanelPending,
                                           PanelRefused, PanelUnavailable, source_args)
 from bace.consoles.keithley.server import make_server
@@ -373,28 +374,58 @@ def test_shutdown_says_so_when_it_cannot_confirm_the_output_off():
     stuck.set()
 
 
-def test_switching_the_output_off_is_never_dropped_behind_a_slow_read(panel):
+def _hurry(monkeypatch, panel, seconds: float = 0.2) -> None:
+    """Make the panel's own waits short, so a test can reach a timeout without
+    sitting through a read budget. Everything else stays the real code path —
+    which is the point: the previous version of the test below drove
+    `_Bus.do` directly and so pinned the primitive while `set_output` passed
+    it the flag inverted."""
+    monkeypatch.setattr(panel_module, "SHUTDOWN_MARGIN_S", 0.0)
+    monkeypatch.setattr(panel, "read_budget_s", lambda: seconds)
+
+
+def test_switching_the_output_off_is_never_dropped_behind_a_slow_read(panel, monkeypatch):
     """The display may be mid-tick, and a legal tick is 80 s (NPLC 10, a
     100-deep filter). The off used to wait the 30 s floor, time out, and be
-    *discarded* by the cancellation added for the previous round — so pressing
-    OFF left the source driving. It is never cancelled now: a slow one raises
-    `PanelPending` and still runs."""
+    *discarded* by the cancellation added a round earlier — so pressing OFF
+    left the source driving.
+
+    Through `set_output`, not through the bus underneath it: the flag was
+    passed inverted for one commit and a test that went at `_Bus.do` could not
+    have seen it.
+    """
     panel.set_source({"function": "I", "level": 0.0})
     panel.set_output(True)
     assert panel.smu.output_enabled is True
-    assert panel.read_budget_s() >= JOB_TIMEOUT_S
 
+    _hurry(monkeypatch, panel)
     released = threading.Event()
     panel._bus.submit(lambda: released.wait(3))          # a tick in flight
-    time.sleep(0.1)
+    time.sleep(0.05)
     with pytest.raises(PanelPending, match="It will run"):
-        panel._bus.do(lambda: panel.smu.disable_output(), timeout_s=0.2,
-                      cancel_on_timeout=False)
+        panel.set_output(False)
     released.set()
     deadline = time.monotonic() + 3
     while panel.smu.output_enabled and time.monotonic() < deadline:
         time.sleep(0.02)
     assert panel.smu.output_enabled is False, "queued, and it ran"
+
+
+def test_an_output_on_the_caller_gave_up_on_is_cancelled(panel, monkeypatch):
+    """The other half of the same flag, and the reason it is not simply
+    "never cancel": dropping an ON leaves the source off, which is the safe
+    end. An ON that landed minutes after the operator was told it failed is a
+    device energised by a request nobody is watching."""
+    panel.set_source({"function": "I", "level": 0.0})
+    _hurry(monkeypatch, panel)
+    released = threading.Event()
+    panel._bus.submit(lambda: released.wait(3))
+    time.sleep(0.05)
+    with pytest.raises(PanelRefused, match="did not answer"):
+        panel.set_output(True)
+    released.set()
+    time.sleep(0.4)
+    assert panel.smu.output_enabled is False, "the ON was dropped, not deferred"
 
 
 def test_shutdown_refuses_new_work_so_a_late_request_cannot_re_energise():
@@ -449,6 +480,34 @@ def test_shutdown_drops_work_that_had_not_started():
     time.sleep(0.2)
     assert ran == []
     assert p.smu.output_enabled is False
+
+
+def test_a_source_change_does_not_leave_the_last_level_s_reading_on_screen(panel):
+    """With the display off and the output live, a level moved from 1.5 V to
+    0 V left the 1.5 V measurement — and its `Cmpl` annunciator — beside the
+    new setup, for ever. The reading belongs to a level the source has left."""
+    panel.set_source({"function": "V", "level": 1.5, "current_compliance_a": 0.01})
+    live = panel.set_output(True)
+    assert live["reading"]["compliance"] is True, "1.5 V into a lit cell clamps"
+
+    moved = panel.set_source({"level": 0.0})
+    assert moved["panel"]["level"] == 0.0
+    assert moved["reading"] is not None, "still on the worker, so it re-read"
+    assert moved["reading"]["level"] == 0.0
+    assert moved["reading"]["compliance"] is False, "the old annunciator is gone"
+    assert abs(moved["reading"]["volts"]) < 1e-6
+
+
+def test_a_source_change_with_the_output_off_leaves_the_display_blank(panel):
+    """Nothing to read, so nothing is invented — and the stale reading still
+    goes, rather than describing a setup that is no longer applied."""
+    panel.set_source({"function": "V", "level": 0.0})
+    panel.set_output(True)
+    assert panel.state()["reading"] is not None
+    panel.set_output(False)
+    state = panel.set_source({"level": 0.2})
+    assert state["reading"] is None
+    assert state["poll"]["last_error"] is None, "an output that is off is not a fault"
 
 
 def test_an_output_on_whose_first_read_fails_still_answers_with_the_state(panel):

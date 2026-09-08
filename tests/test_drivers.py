@@ -330,6 +330,39 @@ def test_an_output_somebody_else_left_on_is_not_dropped_silently():
     assert k.apply_panel(PanelSetup()).level == 0.0
 
 
+def test_a_partial_panel_write_leaves_the_panel_unknown_rather_than_stale():
+    """The level is written before the limits, so a compliance write that
+    fails leaves the instrument at the *new* level with `_panel` still holding
+    the old one — a driver reporting a live source lower than it is. Neither
+    setup is true afterwards, and `None` is what this driver already means by
+    "in a state I did not configure"."""
+    class Flaky(PanelIO):
+        fail_on = ""
+
+        def write(self, cmd):
+            super().write(cmd)
+            if self.fail_on and cmd.startswith(self.fail_on):
+                raise RuntimeError("VisaIOError: timeout")
+
+    io = Flaky()
+    k = Keithley2400(io)
+    k.apply_panel(PanelSetup(function="voltage", level=0.0, current_compliance_a=0.01))
+    io.fail_on = ":SENS:CURR:PROT"
+    with pytest.raises(RuntimeError, match="VisaIOError"):
+        k.apply_panel(dataclasses.replace(k.panel, level=1.5, current_compliance_a=0.02))
+    assert ":SOUR:VOLT:LEV 1.5;" in io.log, "the level did land"
+    assert k.panel is None, "so the old setup must not be reported as current"
+
+    # And a refusal that sent nothing leaves the panel exactly where it was:
+    # `PANEL_STATIC` is checked before any write.
+    io.fail_on = ""
+    setup = k.apply_panel(PanelSetup())
+    k.enable_output(True)
+    with pytest.raises(SourceMeterError, match="output is ON"):
+        k.apply_panel(dataclasses.replace(setup, terminals="REAR"))
+    assert k.panel == setup
+
+
 def test_a_measurement_takes_the_panel_away():
     """Every routine here opens with `*RST`, which undoes every panel command
     -- so after one the panel is not applied, and `read_panel` says so rather

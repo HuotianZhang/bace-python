@@ -326,10 +326,23 @@ class Keithley2400:
                 raise SourceMeterError(
                     f"the output is ON: {', '.join(changed)} cannot be changed under "
                     "it -- switch the output off, change it, switch it back on")
-        if was is None:
-            self._panel_cold(setup)
-        else:
-            self._panel_write(was, setup)
+        try:
+            if was is None:
+                self._panel_cold(setup)
+            else:
+                self._panel_write(was, setup)
+        except Exception:                                    # noqa: BLE001
+            # A partial write: the level may have landed and the compliance
+            # behind it failed, so the instrument is in neither `was` nor
+            # `setup` and this driver cannot say which. Leaving `_panel` on the
+            # old setup would have it report a source at a level it is no
+            # longer at -- under-reporting a live one, since the level is
+            # written before the limits. `None` is what "in a state this
+            # driver did not configure" already means everywhere else here:
+            # the panel reads unapplied, the output cannot be switched on, and
+            # applying again is a `*RST` back to a known instrument.
+            self._panel = None
+            raise
         self._panel = setup
         return setup
 

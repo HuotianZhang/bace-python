@@ -475,7 +475,24 @@ class KeithleyPanel:
                 smu.apply_panel(setup)
             except SourceMeterError as exc:
                 raise PanelRefused(str(exc)) from None
-        self._bus.do(job)
+            # The reading on screen was taken at the level the source has just
+            # left. Kept, it sits beside the new setup for as long as nobody
+            # reads again -- for ever, with the display switched off -- and it
+            # brings its compliance annunciator with it, so a panel moved from
+            # 1.5 V down to 0 V goes on showing `Cmpl` from the old level.
+            with self._lock:
+                self._reading = None
+            # Still on the worker, so a fresh one costs nothing extra. It is a
+            # nicety, as it is after an output-on: the source change is the
+            # operation and a read that fails must not undo it.
+            if getattr(smu, "output_enabled", False):
+                try:
+                    self._tick()
+                except Exception as exc:                     # noqa: BLE001
+                    with self._lock:
+                        self._failures += 1
+                        self._last_error = f"{type(exc).__name__}: {exc}"
+        self._bus.do(job, timeout_s=self.read_budget_s())
         return self.state()
 
     def set_output(self, on: bool) -> dict:
@@ -494,12 +511,21 @@ class KeithleyPanel:
                     "first, then switch the output on")
             smu.enable_output(bool(on))
         # The wait is a read's budget, not the 30 s floor: the display may be
-        # mid-tick, and a legal tick is 80 s. **Off is never cancelled** --
-        # dropping it because the caller stopped waiting is a source left
-        # driving, which is the whole thing this console is careful about, so
-        # a slow one raises `PanelPending` and still runs.
+        # mid-tick, and a legal tick is 80 s.
+        #
+        # `cancel_on_timeout=on`, and the direction is the whole point. **An
+        # ON that the caller gave up on is cancelled**: dropping it leaves the
+        # source off, which is the safe end. **An OFF is never cancelled**:
+        # dropping it leaves the source driving, which is the thing this
+        # console exists to prevent, so it stays queued and the caller gets
+        # `PanelPending`.
+        #
+        # This read `not on` for one commit -- the comment above it said
+        # exactly what the code was failing to do, which is how a review
+        # caught it and no test did: the test went at `_Bus.do` directly and
+        # so pinned the primitive rather than this call.
         self._bus.do(job, timeout_s=self.read_budget_s() + SHUTDOWN_MARGIN_S,
-                     cancel_on_timeout=not on)
+                     cancel_on_timeout=on)
         if not on:
             with self._lock:
                 # The display goes blank with the output, rather than keeping
