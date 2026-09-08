@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .keithley2400 import (PANEL_STATIC, PanelReading, PanelSetup,
-                          SourceMeterError)
+                          SourceMeterError, panel_budget_for)
 from .lakeshore331 import TemperatureError
 from .protocols import DCPoint, TemperatureReading, Trace
 
@@ -698,9 +698,8 @@ class SimulatedSourceMeter:
         Nothing here integrates, but the number a caller plans around must not
         depend on which bench it is talking to."""
         panel = self._panel
-        nplc = float(panel.nplc) if panel is not None else 1.0
-        averaging = int(panel.averaging) if panel is not None else 1
-        return 15.0 + 2.0 * max(1, averaging) * 4.0 * nplc / 50.0
+        return panel_budget_for(panel.nplc if panel is not None else 1.0,
+                                panel.averaging if panel is not None else 1)
 
     def read_panel(self) -> PanelReading:
         panel = self._panel

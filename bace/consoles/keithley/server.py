@@ -232,16 +232,24 @@ def make_server(panel: KeithleyPanel, *, host: str, port: int) -> ThreadingHTTPS
     return server
 
 
-STOP_SIGNALS = ("SIGTERM", "SIGHUP", "SIGBREAK")
-"""The ways this program is ended that are not Ctrl-C.
+STOP_SIGNALS = ("SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK")
+"""Every way of ending this program that software can catch.
 
-`KeyboardInterrupt` covers SIGINT and nothing else. `SIGTERM` is what a
-service manager, a container, `kill` and Task Manager's "End task" send, and
-`SIGHUP` is a closed terminal -- all three end Python through their *default*
-handlers, which do not unwind, so the `finally` below never runs and the
-SourceMeter is left driving. `SIGBREAK` is Ctrl-Break on Windows, where there
-is no SIGHUP. Each is installed only if this platform has it and this is the
-main thread.
+`SIGTERM` is what a service manager, a container, `kill` and Task Manager's
+"End task" send, and `SIGHUP` is a closed terminal -- both end Python through
+their *default* handlers, which do not unwind, so the `finally` below never
+runs and the SourceMeter is left driving. `SIGBREAK` is Ctrl-Break on Windows,
+where there is no SIGHUP. Each is installed only if this platform has it and
+this is the main thread.
+
+**`SIGINT` is in here for the second Ctrl-C.** Python's own handler raises
+`KeyboardInterrupt`, which the `try` below catches once -- but the output-off
+happens in the `finally`, and an interrupt arriving *there* escapes it. That
+is not a hypothetical keypress: the first Ctrl-C can land while the worker is
+inside a read that legally takes 80 s, so the operator sees nothing happen and
+presses again, and the program they are trying to stop dies with the source
+still driving. Caught here instead, a second one sets an event that is already
+set and is absorbed.
 
 `SIGKILL` and Windows' `TerminateProcess` cannot be caught by anything, so the
 output survives them. Nothing in software fixes that; the instrument's own
@@ -280,16 +288,26 @@ def serve_forever(panel: KeithleyPanel, *, host: str, port: int,
         while thread.is_alive() and not stop.wait(0.25):
             pass
     except KeyboardInterrupt:
+        # Only reachable when the handler above could not be installed -- not
+        # the main thread, which is how the tests run this.
         pass
     finally:
-        restore()
-        if server is not None:
-            server.shutdown()
-            server.server_close()
-        if not panel.close():
-            print("\nWARNING: the SourceMeter output could not be confirmed off — the "
-                  "instrument did not answer in time. Check it, and switch the output "
-                  "off at the 2400's own OUTPUT key if it is still on.", file=sys.stderr)
+        # `restore()` **after** the output is off, not before. Put back first,
+        # the default handlers were live for exactly the window that matters:
+        # a second Ctrl-C or `kill` during `panel.close()` -- the ordinary
+        # response to a shutdown that appears to be doing nothing -- killed
+        # the process outright, with the source still driving. Held until
+        # here, that second signal only re-sets an event nobody is waiting on.
+        try:
+            if server is not None:
+                server.shutdown()
+                server.server_close()
+            if not panel.close():
+                print("\nWARNING: the SourceMeter output could not be confirmed off — the "
+                      "instrument did not answer in time. Check it, and switch the output "
+                      "off at the 2400's own OUTPUT key if it is still on.", file=sys.stderr)
+        finally:
+            restore()
 
 
 def _catch_stop_signals(stop: threading.Event) -> Any:

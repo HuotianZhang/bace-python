@@ -117,6 +117,26 @@ filter, the source range -- is what the 2400's own knob and keys change with
 the output on, so the panel changes those live too."""
 
 
+def panel_budget_for(nplc: float, averaging: int) -> float:
+    """How long one `read_panel` under *these* settings can take, with room.
+
+    A free function because the number is wanted for a setup that is not
+    applied yet: the console sizes the wait for a source change on the
+    settings the change is *asking* for, and merging them onto the panel the
+    instrument holds is the job's own work, on the worker, afterwards.
+
+    `sweep_budget_s`'s model for a single point with no settle, and for the
+    same measured reason: an averaged reading is **four** apertures, because
+    `:FUNC:CONC ON` measures voltage and current and the 2400 auto-zeroes
+    each. NPLC 10 with a 100-deep filter -- both legal, both accepted -- is
+    `100 x 4 x 10 / 50 Hz` = 80 s of integration, and the 15 + 2x around it is
+    the margin `sweep_budget_s` explains: NI-488 rounds a GPIB timeout up to
+    the next of 10/30/100/300 s, and a budget that lands just under one of
+    those is a read cut off mid-integration.
+    """
+    return 15.0 + 2.0 * max(1, int(averaging)) * 4.0 * float(nplc) / 50.0
+
+
 @dataclass(frozen=True)
 class PanelSetup:
     """One state of the front panel: what is sourced, at what level, inside
@@ -678,9 +698,9 @@ class Keithley2400:
         the read off before the instrument has finished it.
         """
         panel = self._panel
-        nplc = float(panel.nplc if panel is not None else self.config.nplc)
-        averaging = int(panel.averaging if panel is not None else self.config.averaging)
-        return 15.0 + 2.0 * max(1, averaging) * 4.0 * nplc / 50.0
+        return panel_budget_for(
+            panel.nplc if panel is not None else self.config.nplc,
+            panel.averaging if panel is not None else self.config.averaging)
 
     def abort(self) -> None:
         self._io.write("ABOR;:TRIG:CLE;")

@@ -18,6 +18,7 @@ Content-Length hangs a browser and no unit test would see it).
 from __future__ import annotations
 
 import json
+import pathlib
 import threading
 import time
 import urllib.error
@@ -30,7 +31,7 @@ from bace.consoles.keithley import panel as panel_module
 from bace.consoles.keithley.panel import (JOB_TIMEOUT_S, KeithleyPanel, PanelPending,
                                           PanelRefused, PanelUnavailable, source_args)
 from bace.consoles.keithley.server import make_server, serve_forever
-from bace.drivers.keithley2400 import PanelSetup, SourceMeterConfig
+from bace.drivers.keithley2400 import PanelSetup, SourceMeterConfig, panel_budget_for
 from bace.drivers.simulated import make_bench
 
 CEILING = {"current_a": 0.05, "voltage_v": 5.0}
@@ -773,3 +774,128 @@ def test_a_named_file_that_is_missing_is_an_error_not_a_silent_default(capsys):
     bench nobody chose."""
     assert main(["--sim", "--rig", "no-such-rig.toml"]) == 2
     assert "no such file" in capsys.readouterr().err
+
+
+# -- round six ----------------------------------------------------------------
+def test_an_explicit_read_asks_the_instrument_before_it_believes_the_output(panel):
+    """`/api/read` was the last bus job deciding on the driver's cached flag.
+
+    The display refreshes it every tick and a source change refreshes it
+    before its interlock — but with the display off, an explicit read went
+    straight to `_tick`. So an output switched off at the 2400's own OUTPUT
+    key still passed `read_panel`'s interlock, and the near-zero a source
+    disconnected inside the instrument answers with was filed as a reading of
+    the device. That is the exact lie the interlock exists to prevent.
+    """
+    truth = {"on": True}
+    panel.smu.read_output = lambda: truth["on"]
+    panel.set_source({"function": "V", "level": 1.0})
+    panel.set_output(True)
+    assert panel.read()["reading"] is not None, "a live output reads"
+
+    truth["on"] = False                                  # a hand on OUTPUT
+    with pytest.raises(PanelRefused, match="output is OFF"):
+        panel.read()
+    assert panel.state()["output"] is False, "and the console says so"
+
+
+def test_a_source_change_is_waited_on_for_the_settings_it_asks_for(panel):
+    """The job applies the new setup and then reads *under it*. A request that
+    moves NPLC and the filter from quick settings to a legal slow pair — 10
+    and 100, which is 175 s — was waited on for the panel the instrument still
+    held, 30 s. The change had landed and the worker was reading; the operator
+    got a 409 saying the source change failed while the source was live.
+    """
+    waits: list[float] = []
+    real_do = panel._bus.do
+    panel._bus.do = lambda fn, timeout_s=None, **kw: (
+        waits.append(timeout_s), real_do(fn, timeout_s=timeout_s, **kw))[1]
+
+    panel.set_source({"function": "V", "level": 0.5})
+    quick = waits[-1]
+    panel.set_source({"nplc": 10.0, "averaging": 100})
+    slow = waits[-1]
+
+    assert quick == pytest.approx(JOB_TIMEOUT_S), "quick settings keep the floor"
+    assert slow >= panel.read_budget_s(), (
+        "the wait must cover the read the same job takes under the new setup")
+    assert slow == pytest.approx(panel_budget_for(10.0, 100))
+
+
+def test_the_stop_signals_stay_caught_until_the_output_is_off():
+    """`restore()` ran *before* `panel.close()`, so the default handlers were
+    live for exactly the window that matters. The first Ctrl-C can land while
+    the worker is inside a read that legally takes 80 s — the operator sees
+    nothing happen and presses again, and that second one killed the process
+    with the source still driving.
+
+    Asserted on the handlers rather than by raising a second signal: `os.kill`
+    with SIGTERM on Windows terminates outright, and this must hold there too.
+    """
+    import signal
+
+    p = make_panel()          # started by serve_forever, not here
+    during: dict = {}
+    real_close = p.close
+
+    def watched_close():
+        for name in ("SIGINT", "SIGTERM"):
+            number = getattr(signal, name, None)
+            if number is not None:
+                during[name] = signal.getsignal(number)
+        return real_close()
+
+    p.close = watched_close
+    before = {name: signal.getsignal(getattr(signal, name))
+              for name in ("SIGINT", "SIGTERM") if hasattr(signal, name)}
+
+    def stop_it(server):
+        threading.Thread(target=server.shutdown, daemon=True).start()
+
+    serve_forever(p, host="127.0.0.1", port=0, on_ready=stop_it)
+
+    assert during, "close() ran"
+    for name, handler in during.items():
+        assert handler is not signal.SIG_DFL, (
+            f"{name} was back to its default while the output was still on")
+    assert {n: signal.getsignal(getattr(signal, n)) for n in before} == before, (
+        "and they are put back afterwards")
+
+
+def test_a_console_that_cannot_start_does_not_walk_away_holding_the_instrument(capsys):
+    """The panel validates the bench ceilings and `run.toml`'s defaults, and by
+    then `_open_real` has opened the session and read an output that may be
+    live. That construction sits outside `serve_forever`, so it is outside the
+    `finally` that switches the output off: a `nan` ceiling exited with the
+    source driving and the GPIB session held — and the next console to start
+    would blame the cable.
+    """
+    from bace.consoles.keithley import __main__ as entry
+
+    sim = make_bench(seed=1)
+    sim.bench.relay = "sourcemeter"
+    smu = sim.smu
+    smu.enable_output(True)                      # left driving by whoever had it
+    closed: list[bool] = []
+    smu.close = lambda: closed.append(True)
+
+    rig = tmp_rig_with_a_nan_ceiling()
+    real_open = entry._open_real
+    entry._open_real = lambda address, config, timeout_ms: (smu, "KEITHLEY 2400", "")
+    try:
+        assert entry.main(["--rig", rig, "--port", "0"]) == 2
+    finally:
+        entry._open_real = real_open
+
+    assert smu.output_enabled is False, "the output went off on the way out"
+    assert closed, "and the session was released"
+    assert "finite positive number" in capsys.readouterr().err
+
+
+def tmp_rig_with_a_nan_ceiling() -> str:
+    import tempfile
+
+    path = pathlib.Path(tempfile.mkdtemp()) / "rig.toml"
+    path.write_text("[sourcemeter]\naddress = 'GPIB0::24::INSTR'\n"
+                    "max_current_compliance_a = nan\nmax_voltage_compliance_v = 5.0\n")
+    return str(path)

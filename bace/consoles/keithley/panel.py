@@ -39,7 +39,7 @@ import time
 from typing import Any, Callable
 
 from ...drivers.keithley2400 import (PANEL_STATIC, PanelSetup, SourceMeterConfig,
-                                     SourceMeterError)
+                                     SourceMeterError, panel_budget_for)
 
 JOB_TIMEOUT_S = 30.0
 """The **floor** on how long a request waits for the worker: enough for any
@@ -544,8 +544,33 @@ class KeithleyPanel:
                     with self._lock:
                         self._failures += 1
                         self._last_error = f"{type(exc).__name__}: {exc}"
-        self._bus.do(job, timeout_s=self.read_budget_s())
+        self._bus.do(job, timeout_s=self._source_budget_s(values))
         return self.state()
+
+    def _source_budget_s(self, values: dict) -> float:
+        """How long to wait for a source change: the read that ends it.
+
+        The job applies the new setup and *then* reads under it, so a request
+        that moves NPLC or the filter depth from quick settings to a legal
+        slow pair -- 10 and 100 is `panel_budget_for`'s 175 s -- was waited on
+        for the panel the instrument still held, 30 s. The change had landed
+        and the worker was reading; the operator got a 409. Reporting a source
+        change failed when the source is now live is the one answer this
+        console must not give.
+
+        The base is read here the way `state` reads it, off the worker: it
+        only sizes a wait. The merge that reaches the instrument is the job's
+        own, on the worker, and a stale base costs a mis-sized wait rather
+        than a wrong setup. A value the driver would refuse is left to the
+        job's 422 -- sizing a wait is not the place to validate.
+        """
+        base = (getattr(self.smu, "panel", None) if self.available else None) or self.defaults
+        try:
+            asked = panel_budget_for(values.get("nplc", getattr(base, "nplc", 1.0)),
+                                     values.get("averaging", getattr(base, "averaging", 1)))
+        except (TypeError, ValueError):
+            asked = 0.0
+        return max(self.read_budget_s(), asked)
 
     def set_output(self, on: bool) -> dict:
         """Output on or off.
@@ -608,6 +633,20 @@ class KeithleyPanel:
         cross-site check happened to ask for a reading with the output off.
         """
         def job() -> None:
+            smu = self._need()
+            # The same refresh the display does, and for the same reason: the
+            # operator has a hand on the 2400's own OUTPUT key. This path
+            # decided on the driver's *cached* flag, so an output switched off
+            # at the instrument still passed `read_panel`'s interlock -- and
+            # the near-zero a disconnected source answers with was filed as a
+            # reading, which is the lie that interlock exists to prevent. It
+            # was the one bus job left that did not ask.
+            fresh = self._fresh_output(smu)
+            # Only once a source is set: with nothing applied, "nothing has
+            # told the SourceMeter what to source" is the more useful of the
+            # two true sentences, and it is `read_panel`'s own first check.
+            if not fresh and getattr(smu, "panel", None) is not None:
+                raise PanelRefused("the output is OFF: there is nothing to read")
             try:
                 self._tick()
             except SourceMeterError as exc:

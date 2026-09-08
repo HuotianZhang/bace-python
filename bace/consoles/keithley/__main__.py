@@ -36,6 +36,7 @@ import errno
 import ipaddress
 import os
 import sys
+from typing import Any
 
 from ...bench.checks import _find
 from ...config import ConfigError, load_rig, load_run
@@ -126,6 +127,29 @@ def _load_config(a: argparse.Namespace) -> tuple[RigConfig, SourceMeterConfig]:
     return rig, smu
 
 
+def _release(smu: Any) -> None:
+    """Put down an instrument nothing is going to serve.
+
+    Between `_open_real` and `serve_forever` the SourceMeter is open -- and
+    possibly driving -- with none of the shutdown the server's `finally`
+    provides. Anything failing in that window has to do this much itself, and
+    in this order: the output first, because that is the part that matters,
+    and closing a session on a driving source would leave it driving with
+    nothing left in this process able to reach it.
+
+    Every step is best-effort. This runs on a path that is already failing,
+    and a second exception here would replace a sentence about the
+    configuration with a traceback about VISA.
+    """
+    for step in ("disable_output", "close"):
+        try:
+            method = getattr(smu, step, None)
+            if callable(method):
+                method()
+        except Exception:                                    # noqa: BLE001
+            pass
+
+
 def _open_simulated(dark: bool):
     """A simulated SourceMeter with a cell in front of it.
 
@@ -207,11 +231,28 @@ def main(argv: list[str] | None = None) -> int:
     if why:
         print(f"no SourceMeter: {why}", file=sys.stderr)
 
-    panel = KeithleyPanel(
-        smu, ceiling={"current_a": rig.max_current_compliance_a,
-                      "voltage_v": rig.max_voltage_compliance_v},
-        defaults=smu_config, identity=identity, address=address,
-        mode="sim" if a.sim else "rig", unavailable=why)
+    try:
+        panel = KeithleyPanel(
+            smu, ceiling={"current_a": rig.max_current_compliance_a,
+                          "voltage_v": rig.max_voltage_compliance_v},
+            defaults=smu_config, identity=identity, address=address,
+            mode="sim" if a.sim else "rig", unavailable=why)
+    except Exception as exc:                                 # noqa: BLE001
+        # The panel validates the bench ceilings and the defaults `run.toml`
+        # opens on, and by here the instrument is already open -- `_open_real`
+        # has identified it and read its output, which may be live, left that
+        # way by whoever had it before. This construction is outside
+        # `serve_forever` and therefore outside the `finally` that switches
+        # that output off, so a `nan` ceiling or an out-of-range NPLC exited
+        # with the source driving and the session held.
+        # Deliberately every exception, not just the `ValueError` the ceilings
+        # raise today: what must not depend on which exception a later edit
+        # introduces here is that the instrument is put down. `_load_config`
+        # already owns the "configuration:" prefix, so this says which step
+        # failed rather than guessing at a cause.
+        _release(smu)
+        print(f"the panel could not be built: {exc}", file=sys.stderr)
+        return 2
 
     print(f"instrument {identity or 'unavailable'}  ({address})")
     print(f"ceilings   {rig.max_current_compliance_a:g} A / "

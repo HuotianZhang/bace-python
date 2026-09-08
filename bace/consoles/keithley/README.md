@@ -54,20 +54,26 @@ because a typo that silently ran the defaults would be a bench nobody chose.
   so no third key was invented to hold the same number twice.
 * **The output goes off when the console stops.** Ctrl-C, `kill`/`SIGTERM`, a
   closed terminal (`SIGHUP`), Ctrl-Break on Windows, an exception out of the
-  server — and a port that turns out to be taken, which is how starting the
-  console twice ends, by which time the instrument is open and may already
-  have been driving. Each is caught and the source is switched off on the way
-  out; a taken port also gets a sentence rather than a traceback about a
-  socket.
+  server — and the two ways it can fail to start at all: a port that turns out
+  to be taken, which is how starting the console twice ends, and a `rig.toml`
+  ceiling or `run.toml` default the panel refuses. Both are found *after* the
+  instrument is open and possibly already driving, left that way by whoever
+  had it before. Each is caught and the source is switched off on the way out,
+  the GPIB session with it; a taken port also gets a sentence rather than a
+  traceback about a socket.
   `SIGKILL` and Windows' `TerminateProcess` cannot be caught by anything, so
   the output survives those; nothing in software fixes that, and the
   instrument's own OUTPUT key does. A
   browser tab closing is not something to rely on for that. The off is
   *queued*, not waited for in the shutdown path, and the worker drains its
   queue on every way out: Ctrl-C can arrive while a read is in flight, and a
-  read here can legally take 80 s. When even that runs out — a VISA call that
-  never returns, which cannot be interrupted without writing to the bus from a
-  second thread — the console says so on stderr instead of exiting quietly.
+  read here can legally take 80 s. **So the console can take a moment to
+  stop, and pressing Ctrl-C again will not hurry it**: the second one is
+  absorbed rather than killing the process, because the shutdown it would
+  interrupt is the part that switches the source off. When even the budget
+  runs out — a VISA call that never returns, which cannot be interrupted
+  without writing to the bus from a second thread — the console says so on
+  stderr instead of exiting quietly.
 * **Every wait is the driver's own budget, not a round number.** NPLC 10 and a
   100-deep filter are both legal on a 2400 and both accepted here, and that
   pair is `100 x 4 x 10 / 50 Hz` = 80 s of integration (four apertures per
