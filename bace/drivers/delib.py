@@ -132,11 +132,11 @@ def resolve(explicit: str | None = None) -> str | None:
 
 # ------------------------------------------------------------ [dio] in rig.toml
 # Reading the DIO half of rig.toml belongs here rather than in `bace.config`,
-# which is the whole bench and reaches `core.axis` -- and so imports numpy. The
-# two programs that drive a DIO line by hand (`tools/shutter.py` and
-# `drivers/shutter_console.py`) have to run under whichever interpreter can load
-# the DELIB build on the machine, and that one may have nothing installed at
-# all. So: `tomllib`, the five keys, and the two refusals, with no other import.
+# which is the whole bench and reaches `core.axis` -- and so imports numpy.
+# `tools/shutter.py`, which drives a DIO line by hand, has to run under
+# whichever interpreter can load the DELIB build on the machine, and that one
+# may have nothing installed at all. So: `tomllib`, the five keys, and the two
+# refusals, with no other import.
 
 DIO_DEFAULTS: dict[str, object] = {
     "module_id": 9,
@@ -214,10 +214,14 @@ def make_line(cfg: dict, *, module_nr: int | None = None, channel: int | None = 
               dll_path: str | None = None, settle_s: float = 0.4):
     """One DIO line from a `[dio]` dict -- built, not opened.
 
-    The by-hand programs (`tools/shutter.py`, `drivers/shutter_console.py`)
-    both want the same four arguments off the same block, and each keeps its
-    own error handling around `open()`. `Shutter` is imported here rather than
-    at module scope: it reaches back into this module for the library search.
+    Beside `dio_settings` because they are read together: the block says which
+    module, this turns it into a line, and the caller keeps its own error
+    handling around `open()`. `Shutter` is imported inside rather than at
+    module scope: it reaches back into this module for the library search.
+
+    The standalone console in `examples/shutter_console/` deliberately does
+    none of this -- it carries its own `ctypes`, so that folder can be copied
+    to a machine without the package.
     """
     from .shutter import DEFAULT_CHANNEL, Shutter
 

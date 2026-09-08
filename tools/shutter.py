@@ -22,9 +22,10 @@ interpreter can load the DELIB build on the machine, which may have nothing
 installed at all. Outside the standard library it imports two driver modules
 and nothing more.
 
-For a switch instead of a command line, `python -m bace.drivers.shutter_console`
-serves the same line as one page in a browser. Only one process can hold the
-module, so run one or the other.
+For a switch instead of a command line, `examples/shutter_console/` serves the
+same line as one page in a browser -- a standalone folder that shares nothing
+with this file but the hardware. Only one process can hold the module, so run
+one or the other.
 
 BITNESS
     `ctypes` loads only the DELIB build matching the interpreter. The copy on

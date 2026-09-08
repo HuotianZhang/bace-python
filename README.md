@@ -56,8 +56,7 @@ bace/           the package
                 last-used, edited, inherited, derived — so the console can say so
   core/         the physics — axis, pulses, process, illumination, simulate.
                 Imports nothing outward
-  drivers/      seven Protocol contracts; real and simulated instruments satisfy
-                both; shutter_console.py is the shutter as one page in a browser
+  drivers/      seven Protocol contracts; real and simulated instruments satisfy both
   experiment/   the run itself — a synchronous generator of typed events;
                 wire.py puts them on the wire
   storage/      byte-exact legacy .dat, plus HDF5
@@ -69,6 +68,8 @@ ui/             the console — plain ES modules, no build step, served by the
 tools/          standalone rig scripts — scan, bare, lightpower, shutter, relay,
                 identify_dio; and the console's fixture recorders
 scripts/        the double-click .bat entry points; each cd's to the repo root first
+examples/       standalone folders that share nothing with the package but the
+                hardware — shutter_console/ is the shutter as one page in a browser
 recipes/        the named recipe variants, passed with --run
 tests/          the suite
 docs/           the figure pages; docs/README.md indexes them
