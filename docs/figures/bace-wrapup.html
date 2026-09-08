@@ -1,0 +1,260 @@
+<title>The BACE port, closing out</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@500;600&display=swap">
+<style>
+:root{
+  --ground:#EFF2F1; --surface:#FAFBFA; --sunken:#E2E8E6;
+  --ink:#131A18; --ink-2:#4A5754; --ink-3:#6F7E7A;
+  --rule:#C6D0CD; --rule-soft:#DCE3E1;
+  --a1:#8C6410; --a2:#37702A; --a3:#2A57A0; --a4:#A6313F;
+  --bad:#A6313F;
+  --shadow:0 1px 2px rgba(19,26,24,.05), 0 8px 24px -16px rgba(19,26,24,.25);
+  --measure:38rem;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0C110F; --surface:#121917; --sunken:#090D0C;
+    --ink:#E2E8E6; --ink-2:#9EACA8; --ink-3:#7A8884;
+    --rule:#25322E; --rule-soft:#1B2523;
+    --a1:#DFB44A; --a2:#7FC96C; --a3:#7FA8E8; --a4:#E7808F;
+    --bad:#E7808F;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0C110F; --surface:#121917; --sunken:#090D0C;
+  --ink:#E2E8E6; --ink-2:#9EACA8; --ink-3:#7A8884;
+  --rule:#25322E; --rule-soft:#1B2523;
+  --a1:#DFB44A; --a2:#7FC96C; --a3:#7FA8E8; --a4:#E7808F;
+  --bad:#E7808F;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.7);
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);
+  font-family:"IBM Plex Sans SC","IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  font-size:16px;line-height:1.75;-webkit-font-smoothing:antialiased}
+.page{max-width:var(--measure);margin:0 auto;padding:3.5rem 1.5rem 5rem}
+.wide{max-width:min(60rem,100%);width:100%}
+@media (min-width:62rem){
+  .wide{width:min(60rem,calc(100vw - 3rem));
+    margin-left:calc((var(--measure) - min(60rem,calc(100vw - 3rem))) / 2)}
+}
+h1,h2{font-family:"Noto Serif SC","IBM Plex Serif",Georgia,serif;
+  text-wrap:balance;margin:0;font-weight:600}
+h1{font-size:2.4rem;line-height:1.18;letter-spacing:-.012em}
+h2{font-size:1.3rem;line-height:1.35}
+p{margin:0}
+strong{font-weight:600}
+code,.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+code{font-size:.84em;background:var(--sunken);padding:.1em .34em;border-radius:3px}
+a{color:inherit}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:.7rem;font-weight:500;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+header{display:flex;flex-direction:column;gap:1rem;margin-bottom:2.2rem}
+.standfirst{font-size:1.06rem;color:var(--ink-2);max-width:34rem}
+
+.verdict{background:var(--surface);border:1px solid var(--rule);border-radius:6px;
+  box-shadow:var(--shadow);padding:1.15rem 1.25rem;display:flex;flex-direction:column;gap:.9rem}
+.verdict .head{display:flex;align-items:baseline;gap:.7rem;flex-wrap:wrap}
+.verdict .head b{font-family:"Noto Serif SC",serif;font-size:1.05rem;font-weight:600}
+.nums{display:grid;grid-template-columns:repeat(auto-fit,minmax(8.5rem,1fr));gap:.55rem 1.4rem}
+.num{display:flex;flex-direction:column;border-top:1px solid var(--rule-soft);padding-top:.4rem}
+.num dt{font-family:"IBM Plex Mono",monospace;font-size:.62rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3)}
+.num dd{margin:0;font-family:"IBM Plex Mono",monospace;font-size:1.02rem;font-weight:500;
+  font-variant-numeric:tabular-nums}
+
+section{margin-top:2.8rem;display:flex;flex-direction:column;gap:1rem}
+section > .eyebrow{margin-bottom:-.5rem}
+.lede{color:var(--ink-2)}
+figure{margin:.4rem 0 0;display:flex;flex-direction:column;gap:.7rem}
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:5px;
+  padding:1rem .9rem;overflow-x:auto;box-shadow:var(--shadow)}
+.frame svg{display:block;width:100%;min-width:640px;height:auto;color:var(--ink)}
+figcaption{font-size:.86rem;color:var(--ink-3);line-height:1.6}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;font-size:.83rem;width:100%;min-width:34rem}
+th,td{border-bottom:1px solid var(--rule-soft);padding:.5rem .6rem;text-align:left}
+thead th{border-bottom:1px solid var(--rule);font-family:"IBM Plex Mono",monospace;
+  font-size:.65rem;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);font-weight:500}
+td.mono{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+tr.hi td{background:var(--sunken)}
+
+.ledger{display:flex;flex-direction:column;gap:0;border-top:1px solid var(--rule)}
+.row{display:grid;grid-template-columns:5.6rem 1fr;gap:.2rem .9rem;
+  padding:.7rem 0;border-bottom:1px solid var(--rule-soft);align-items:start}
+.chip{justify-self:start;font-family:"IBM Plex Mono",monospace;font-size:.62rem;
+  letter-spacing:.08em;padding:.12rem .45rem;border-radius:3px;border:1px solid;
+  white-space:nowrap;margin-top:.35rem}
+.chip.s{color:var(--a2);border-color:var(--a2)}
+.chip.f{color:var(--a3);border-color:var(--a3)}
+.chip.o{color:var(--a1);border-color:var(--a1)}
+.row .what{display:flex;flex-direction:column;gap:.15rem}
+.row .what b{font-weight:600}
+.row .what span{color:var(--ink-2);font-size:.93rem;line-height:1.6}
+
+ul.plain{margin:0;padding-left:1.15rem;display:flex;flex-direction:column;gap:.5rem;color:var(--ink-2)}
+ul.plain li::marker{color:var(--ink-3)}
+.note{border-left:2px solid var(--rule);padding-left:1rem;color:var(--ink-2);font-size:.95rem}
+pre{margin:0;background:var(--sunken);border:1px solid var(--rule-soft);border-radius:5px;
+  padding:.85rem .95rem;overflow-x:auto;font-family:"IBM Plex Mono",monospace;
+  font-size:.77rem;line-height:1.7}
+.legend{display:flex;flex-wrap:wrap;gap:.3rem 1.1rem;font-family:"IBM Plex Mono",monospace;
+  font-size:.7rem;color:var(--ink-2)}
+.legend i{display:inline-block;width:.75rem;height:.75rem;border-radius:2px;
+  vertical-align:-1px;margin-right:.35rem}
+footer{margin-top:3.5rem;padding-top:1.1rem;border-top:1px solid var(--rule);
+  font-family:"IBM Plex Mono",monospace;font-size:.71rem;color:var(--ink-3);line-height:1.85}
+</style>
+
+<div class="page">
+  <header>
+    <p class="eyebrow">2026-09-02 · BACE_Mehrdad.vi → Q:\Huotian\bace-python</p>
+    <h1>The BACE port, closing out</h1>
+    <p class="standfirst">The curve the Python port produced at 02:08, and the one LabVIEW produced on the same pixel eight minutes later, differ by 6% on the peak, 3% on the decay time and 4% on the charge. The engine is reproduced; what remains is a sign convention and a to-do list.</p>
+  </header>
+
+  <div class="verdict">
+    <div class="head">
+      <b>The port reproduces the LabVIEW engine.</b>
+      <span class="eyebrow">the comparison is two runs eight minutes apart</span>
+    </div>
+    <dl class="nums">
+      <div class="num"><dt>charge Q</dt><dd>4.0 % apart</dd></div>
+      <div class="num"><dt>decay τ</dt><dd>2.8 % apart</dd></div>
+      <div class="num"><dt>peak current</dt><dd>6.0 % apart</dd></div>
+      <div class="num"><dt>spike position</dt><dd>328 / 328 ns</dd></div>
+      <div class="num"><dt>tests</dt><dd>212 passed</dd></div>
+    </dl>
+  </div>
+
+  <section>
+    <p class="eyebrow">one &middot; the evidence</p>
+    <h2>That earlier 4&times; gap was the device drifting</h2>
+    <p class="lede">The &ldquo;the port is 3&times; low against LabVIEW&rdquo; that took two evenings started with taking the 23:16 LabVIEW data as the baseline. But LabVIEW <strong>itself</strong>, run at 23:16 and again at 02:16 with not one parameter changed, fell from &tau; 190 ns to 71 ns and from Q &minus;9.2&times;10⁻¹⁰ to &minus;3.3&times;10⁻¹⁰ C. The reference was moving.</p>
+    <figure class="wide">
+      <div class="frame">
+        <svg viewBox="0 0 700 200" role="img" aria-label="Charge and decay time compared across four runs: the 23:16 LabVIEW run has the largest charge and the slowest decay, the 02:16 LabVIEW and the 02:08 port runs are equal in size and opposite in sign, and the as-found run is near zero.">
+          <text x="275" y="18" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">charge Q / 10⁻¹⁰ C (signed)</text>
+          <text x="575" y="18" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">decay &tau; (1/e) / ns</text>
+
+          <line x1="130" y1="28" x2="130" y2="166" stroke="currentColor" stroke-width="0.5" opacity="0.12"></line>
+          <line x1="202.5" y1="28" x2="202.5" y2="166" stroke="currentColor" stroke-width="0.5" opacity="0.12"></line>
+          <line x1="347.5" y1="28" x2="347.5" y2="166" stroke="currentColor" stroke-width="0.5" opacity="0.12"></line>
+          <line x1="420" y1="28" x2="420" y2="166" stroke="currentColor" stroke-width="0.5" opacity="0.12"></line>
+          <line x1="275" y1="26" x2="275" y2="168" stroke="currentColor" stroke-width="1.1" opacity="0.4"></line>
+          <line x1="460" y1="26" x2="460" y2="168" stroke="currentColor" stroke-width="1.1" opacity="0.4"></line>
+          <line x1="517.5" y1="28" x2="517.5" y2="166" stroke="currentColor" stroke-width="0.5" opacity="0.12"></line>
+          <line x1="575" y1="28" x2="575" y2="166" stroke="currentColor" stroke-width="0.5" opacity="0.12"></line>
+          <line x1="632.5" y1="28" x2="632.5" y2="166" stroke="currentColor" stroke-width="0.5" opacity="0.12"></line>
+          <line x1="690" y1="28" x2="690" y2="166" stroke="currentColor" stroke-width="0.5" opacity="0.12"></line>
+
+          <text x="110" y="49" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--a1)">LabVIEW 23:16</text>
+          <rect x="141.6" y="38" width="133.4" height="14" fill="var(--a1)" opacity="0.85"></rect>
+          <rect x="460" y="38" width="219.1" height="14" fill="var(--a1)" opacity="0.85"></rect>
+
+          <text x="110" y="84" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--a3)">LabVIEW 02:16</text>
+          <rect x="226.6" y="73" width="48.4" height="14" fill="var(--a3)" opacity="0.85"></rect>
+          <rect x="460" y="73" width="81.7" height="14" fill="var(--a3)" opacity="0.85"></rect>
+
+          <text x="110" y="119" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--a4)">port 02:08</text>
+          <rect x="275" y="108" width="50.4" height="14" fill="var(--a4)" opacity="0.85"></rect>
+          <rect x="460" y="108" width="84" height="14" fill="var(--a4)" opacity="0.85"></rect>
+
+          <text x="110" y="154" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-3)">as-found 02:20</text>
+          <rect x="275" y="143" width="2" height="14" fill="var(--ink-3)" opacity="0.85"></rect>
+          <rect x="460" y="143" width="44.3" height="14" fill="var(--ink-3)" opacity="0.85"></rect>
+          <text x="284" y="154" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">+0.045 &mdash; bias inherited wrongly</text>
+
+          <text x="130" y="182" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">−10</text>
+          <text x="202.5" y="182" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">−5</text>
+          <text x="275" y="182" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">0</text>
+          <text x="347.5" y="182" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">+5</text>
+          <text x="420" y="182" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">+10</text>
+          <text x="460" y="182" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">0</text>
+          <text x="517.5" y="182" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">50</text>
+          <text x="575" y="182" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">100</text>
+          <text x="632.5" y="182" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">150</text>
+          <text x="690" y="182" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">200</text>
+        </svg>
+      </div>
+      <figcaption>The 02:16 and 02:08 bars are nearly the same length and point opposite ways &mdash; that is the unresolved global sign. The 23:16 bar is nearly three times longer, measured by the same LabVIEW three hours earlier.</figcaption>
+    </figure>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>run</th><th>time</th><th>v_pre</th><th>peak</th><th>&tau; (1/e)</th><th>Q</th></tr></thead>
+        <tbody>
+          <tr><td>LabVIEW</td><td class="mono">23:16</td><td class="mono">1.01354</td><td class="mono">−3.474 mA</td><td class="mono">190.5 ns</td><td class="mono">−9.198e−10 C</td></tr>
+          <tr class="hi"><td>LabVIEW</td><td class="mono">02:16</td><td class="mono">1.01174</td><td class="mono">−2.665 mA</td><td class="mono">71.0 ns</td><td class="mono">−3.340e−10 C</td></tr>
+          <tr class="hi"><td>port <code>bare.py</code></td><td class="mono">02:08</td><td class="mono">1.01354</td><td class="mono">+2.824 mA</td><td class="mono">73.0 ns</td><td class="mono">+3.474e−10 C</td></tr>
+          <tr><td>port <code>--as-found</code></td><td class="mono">02:20</td><td class="mono">0 (inherited)</td><td class="mono">+0.342 mA</td><td class="mono">38.5 ns</td><td class="mono">+4.463e−11 C</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">The last row is not a failure but a road that is closed: <code>--as-found</code> wanted to write not one level and inherit the bench exactly as it stands, but the VI lights every point before darkening it and finishes on the <strong>dark</strong> levels (<code>HIGH 0.505434 / LOW 0</code>, i.e. v_pre = 0). The device is held shorted while lit and stores no charge. To inherit the bench, use <code>bare.py --vpre &hellip;</code> without <code>--as-found</code>.</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">two &middot; settled</p>
+    <h2>These have evidence now, and are no longer inferred from a manual</h2>
+    <div class="ledger">
+      <div class="row"><span class="chip s">criterion</span><span class="what"><b>Light minus dark must return to zero in the steady state</b><span>Not &ldquo;where V_oc landed&rdquo;. Of the four polarity combinations only &#9315; (a pure negation) has normal dynamics; that &#9313; sits at 4.45 mA in the steady state is exactly what says it is wrong.</span></span></div>
+      <div class="row"><span class="chip s">polarity</span><span class="what"><b>The polarity algebra (verified numerically)</b><span><code>output_polarity</code>(<code>:OUTP1:POL</code>) = a pure swap of (baseline, pulse); <code>invert_polarity</code> = swap and negate; the two together = a pure negation. It does not depend on the NORM/INV label, which does not match.</span></span></div>
+      <div class="row"><span class="chip s">wiring</span><span class="what"><b>The amplifier is inverting, gain 4, zero offset</b><span>The generator&rsquo;s <code>:VOLT1:LOW</code> &rarr; v_pre, <code>:VOLT1:HIGH</code> &rarr; v_coll. The <code>(0.505434, 0)</code> read back at 02:20 agrees bit for bit with the dark shape <code>(span/4, 0)</code> that <code>pulse_levels(invert=True)</code> produces.</span></span></div>
+      <div class="row"><span class="chip s">timing</span><span class="what"><b><code>trigger_offset_s = 0</code></b><span>At the same <code>Delay(ns)=90</code>, LabVIEW and the port both put the displacement spike at 328 ns of record time. The earlier 47 ns was measured down a different path.</span></span></div>
+      <div class="row"><span class="chip s">sampling</span><span class="what"><b><code>timebase_ns_per_div = 200</code></b><span>On the panel, Timebase 200 ns and Pulse Width 5e3 ns are written side by side and are unrelated. 200 also puts t0 on the panel&rsquo;s 320 ns (trigger 200 + 120).</span></span></div>
+      <div class="row"><span class="chip s">light</span><span class="what"><b>The LED really is dark at 0.4 V</b><span>Measured with the power meter: the low level puts out 0.009 % of the conducting level. The &ldquo;the light never actually goes off&rdquo; suspicion is ruled out. The working intensity is 20.7 &micro;W.</span></span></div>
+      <div class="row"><span class="chip s">units</span><span class="what"><b>Current = voltage / 5.192, divided exactly once, in <code>Infiniium._fetch</code></b><span><code>_fetch_volts</code> deliberately does not divide (auto-range works in the voltage domain); probe attenuation is left to the instrument&rsquo;s <code>:CHAN:PROB:EXT:GAIN</code> and is not multiplied again in software.</span></span></div>
+      <div class="row"><span class="chip s">acquisition</span><span class="what"><b><code>:DIGitize</code> + <code>*OPC?</code> writes no setting</b><span>It returns one complete averaged record; <code>acquire()</code> on the other hand must restart the averager, or the light trace mixes in the dark one before it.</span></span></div>
+      <div class="row"><span class="chip s">principle</span><span class="what"><b>Dark is the same span, translated to start from 0</b><span><code>dark_reference = "translated"</code>: light &minus;1.01354 &rarr; +1.00000 V, dark 0 &rarr; +2.01354 V. The same span, a different absolute interval. This is what BACE ought to do, and it is the convention rebuilt from the VI.</span></span></div>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">three &middot; fixed</p>
+    <h2>What this round changed</h2>
+    <div class="ledger">
+      <div class="row"><span class="chip f">record</span><span class="what"><b>A file now records the convention actually run, not only the one asked for</b><span><code>events.py</code> gains <code>InstrumentState</code>; the HDF5 gains <code>/config/resolved</code> and the schema rises to <code>bace-run/2</code>. What prompted it: <code>output_polarity = "leave"</code> by design writes nothing, leaving the file unable to say whether it was measured under NORM or INV.</span></span></div>
+      <div class="row"><span class="chip f">trap</span><span class="what"><b><code>offset_correct</code> subtracts the signal away when the tail is not the baseline</b><span>Added <code>core.process.baseline_is_flat()</code>, which compares the head and the tail of the record and warns when it is not flat &mdash; <strong>changing no number</strong>. The round that prompted it gave Q = &minus;3.0e&minus;10, an entirely presentable and entirely wrong figure.</span></span></div>
+      <div class="row"><span class="chip f">timing</span><span class="what"><b>Dark had no settle time at all</b><span><code>dark_settle_s</code> used to sleep <strong>before the shutter shut</strong>, so acquisition began the moment it closed, while light had <code>settle_s</code>. Added <code>shutter_settle_s</code>, which applies after the shutter moves on both branches.</span></span></div>
+      <div class="row"><span class="chip f">power meter</span><span class="what"><b>Two bugs in the 1918-C, and it was never attached</b><span>The body key for <code>/api/units</code> was written as <code>units</code> (the console reads <code>code</code>); <code>HTTPError</code> was swallowed by the <code>URLError</code> branch, reporting &ldquo;cannot connect&rdquo; instead of &ldquo;refused, 400&rdquo;. And <code>rig.power</code> was always <code>None</code> in <code>tools/scan.py</code>, so <code>intensity</code> was never recorded.</span></span></div>
+    </div>
+    <p class="lede">New tools: <code>tools/bare.py</code> (reads about 60 instrument states back into <code>0_instrument_state</code> at the start of every round, writing not one of them, then moves only the levels and the shutter) and <code>tools/lightpower.py</code> (logs the optical power of the LED, lit and dark, continuously); recipes <code>run-labview.toml</code> / <code>run-labview-same.toml</code> / <code>run-bace.toml</code> / <code>run-lightcheck.toml</code>, each with a <code>.bat</code>.</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">four &middot; open</p>
+    <h2>Where the next round picks up</h2>
+    <div class="ledger">
+      <div class="row"><span class="chip o">first</span><span class="what"><b>Add <code>current_sign = -1</code> to <code>rig.toml</code></b><span>Multiplied in <code>Infiniium._fetch</code>, <strong>and carried into the protocol and the simulator alike</strong>. The port is all positive and LabVIEW all negative, with corr(&minus;bare, lv) = 0.9988 on the dark trace &mdash; a sign convention, not physics. Stop reaching for the generator&rsquo;s polarity switch to fix it.</span></span></div>
+      <div class="row"><span class="chip o">discipline</span><span class="what"><b>A LabVIEW run used as a reference has to be an adjacent one</b><span>A device can drift 2.8&times; in three hours. Data from the night before cannot be a baseline &mdash; that is exactly what cost two evenings here.</span></span></div>
+      <div class="row"><span class="chip o">hardcoded</span><span class="what"><b>The relay and shutter constants are still written into the code</b><span><code>routing.py</code>&rsquo;s <code>TO_AMPLIFIER/TO_SOURCEMETER</code> and <code>shutter.py</code>&rsquo;s <code>OPEN/CLOSED</code> &rarr; <code>rig.toml</code>. Wiring polarity is not fixed, and does not belong nailed into the foundations.</span></span></div>
+      <div class="row"><span class="chip o">trigger</span><span class="what"><b><code>configure_trigger</code> is not in the <code>BiasSource</code> protocol yet</b><span>As it stands: <code>tools/scan.py</code> sets it, the run path itself does not.</span></span></div>
+      <div class="row"><span class="chip o">sync</span><span class="what"><b><code>D:\BACE\bace-python</code> has never been synced</b><span>These sessions only ever attached <code>Q:</code>. Next time D: is attached, mirror the other way per <code>bace-paths.md</code>. Two pieces of litter are also left in the repository root, <code>_xfer.txt</code> and <code>_to_delete/</code>, which this end has no permission to delete.</span></span></div>
+    </div>
+    <p class="lede">Further out: parameter provenance made visible (hardcoded argparse defaults &rarr; read <code>run.toml</code>), a <code>max_bias_v</code> ceiling, one vocabulary for events, splitting <code>checks.py</code>. The full list is in <code>claude/bace-open-defects.md</code>.</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">five &middot; how to run it</p>
+    <h2>Next time you switch it on</h2>
+    <pre>cd Q:\Huotian\bace-python
+
+:: the LabVIEW panel copied item by item, three v_pre points
+py -3 tools\scan.py --run recipes\run-labview.toml --dry
+py -3 tools\scan.py --run recipes\run-labview.toml
+
+:: inherit the bench, move only the levels and the shutter (use this against LabVIEW)
+py -3 tools\bare.py --vpre 1.00354,1.01354,1.02354 --vcoll -1 --invert
+
+:: the tests (WinPython on this machine; with no VISA backend the offline set all passes)
+&amp; "C:\WPy64-31370\python\python.exe" -m pytest -q</pre>
+    <p class="note">Run LabVIEW first and the port <strong>immediately after</strong> &mdash; the longer the gap between the two, the more of the difference is the device drifting rather than the code being wrong. Every round leaves a <code>0_instrument_state&lt;stamp&gt;.txt</code>; when something strange happens, look there first.</p>
+  </section>
+
+  <footer>
+    212 passed / 7 skipped &middot; comparison data runs/20260901_231645 · runs/20260902_021632 · runs/bare_20260902_020827 · runs/bare_20260902_022050<br>
+    Project documents: bace-agreement-and-drift.md (this round&rsquo;s conclusions) &middot; bace-open-defects.md (the to-do list) &middot; bace-polarity-verdict.md · bace-delay-scan-01.md · bace-trigger-chain.md · bace-paths.md
+  </footer>
+</div>

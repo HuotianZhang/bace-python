@@ -21,7 +21,7 @@ Keithley is what you want by hand: a V_oc on a probe station, a compliance
 check on a new pixel, a look at a diode before it is worth queueing a run.
 
 That constraint is why the 1918-C has a console on `:8918` and the 331 one on
-`:8331` (`docs/service-plan.md`, 既有的独立 console 保持独立). This is the same
+`:8331` (`docs/service-plan.md`, "the existing standalone consoles stay standalone"). This is the same
 shape for the 2400, and `8924` continues the convention: the last two digits
 are the instrument's GPIB address, so the port says which instrument answers.
 

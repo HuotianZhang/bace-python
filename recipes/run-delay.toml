@@ -1,73 +1,87 @@
-# delay 扫描 — 用来标定 delay 轴的零点，不是一次正式测量。
+# A delay scan -- to calibrate the zero of the delay axis, not a real measurement.
 #
-# 目的：找到 Q(delay) 的拐点，也就是「抽取场恰好在样品处光灭时到达」的那个设定。
-# 拐点直接给出零点，不需要知道 t_bias（81150A 输出 -> 器件响应，实测 47-62 ns，
-# 带 15 ns 展宽）。见 claude/bace-trigger-chain.md。
+# The point: find the knee of Q(delay), which is the setting at which the
+# extraction field arrives exactly as the light goes out at the sample. The knee
+# gives the zero directly, with no need to know t_bias (81150A output ->
+# device response, measured at 47-62 ns with a 15 ns spread).
+# See claude/bace-trigger-chain.md.
 #
-#   py -3 tools\scan.py --run recipes\run-delay.toml --dry     先看计划
-#   py -3 tools\scan.py --run recipes\run-delay.toml           跑
+#   py -3 tools\scan.py --run recipes\run-delay.toml --dry     see the plan first
+#   py -3 tools\scan.py --run recipes\run-delay.toml           run it
 
 [axis]
 name = "delay_ns"
-start = 0.0                     # delay_ns 就是 :PULS:DEL1，不再加任何命令偏移
-stop = 240.0                    # （之前 -40…200 加 47 ns 偏移 = 7…247 ns，这里等价）
-step = 40.0                     # 7 点
-centre_on_voc = false           # delay 轴用不了，Axis 会直接拒绝
+start = 0.0                     # delay_ns is :PULS:DEL1; no command offset is added any more
+stop = 240.0                    # (previously -40...200 plus a 47 ns offset = 7...247 ns; equivalent)
+step = 40.0                     # 7 points
+centre_on_voc = false           # meaningless on a delay axis; Axis refuses it outright
 
 [pinned]
-vpre = 0.8                     # V at the device — 实测 V_oc 0.9187 / 0.9222
-                                # delay 轴不能 centre_on_voc，所以这是手填的。
-                                # 器件或光强变了就要重测。
-vcoll = -2.0                    # 安全值。先用它定拐点位置，确认无误再用 -4 复测
-delay_ns = 88.0                 # 被轴覆盖，留着只是为了让文件读得完整
+vpre = 0.8                     # V at the device -- V_oc measured at 0.9187 / 0.9222
+                                # a delay axis cannot centre_on_voc, so this is
+                                # typed by hand. Re-measure it whenever the
+                                # device or the intensity changes.
+vcoll = -2.0                    # the safe value. Locate the knee with it first, then repeat at -4 once confirmed
+delay_ns = 88.0                 # overridden by the axis; kept only so the file reads completely
 
 [acquisition]
-n_loops = 3                     # 49 x 3 = 147 shots，约 3 分钟
+n_loops = 3                     # 49 x 3 = 147 shots, about 3 minutes
 n_averages = 20
 timebase_ns_per_div = 500.0
 record_length = 5000
 
-# --- 找光照零点：积分必须在每个 delay 点都正确 --------------------------------
-# 找零点有两件不同的事：
-#   1. 找**积分**零点（瞬态从哪开始、t0_int 取多少）——是数据分析的事，采一次，
-#      事后在存好的轨迹上换 t0_int 重算 Q 即可：tools/reintegrate.py。
-#   2. 找**光照**零点（本文件）——改电脉冲相对 LED 关断的时间，看 Q(delay) 在哪拐。
-#      这一轮里积分必须"永远正确"：窗口相对瞬态的位置固定，随 delay 一起平移。
-# 示波器触发在 81150A 的 Sync 上，而 Sync **不**被 :PULS:DEL1 延迟——只有输出被
-# 延迟。所以窗口一律从场到达算起（trigger + :PULS:DEL1 + rig.toml 的
-# trigger_offset_s），起点和终点都跟着 delay 走：
+# --- finding the illumination zero: the integral must be right at every point
+# Finding a zero is two different jobs:
+#   1. the **integration** zero (where the transient starts, what t0_int should
+#      be) is a matter of data analysis: acquire once, then recompute Q on the
+#      stored traces with a different t0_int -- tools/reintegrate.py.
+#   2. the **illumination** zero (this file): move the electrical pulse relative
+#      to the LED switching off, and see where Q(delay) turns.
+#      Here the integral must be right *always*: the window keeps a fixed
+#      position relative to the transient and shifts with delay.
+# The scope triggers on the 81150A's Sync, and the Sync is **not** delayed by
+# :PULS:DEL1 -- only the output is. So the window is always measured from the
+# field's arrival (trigger + :PULS:DEL1 + rig.toml's trigger_offset_s), and both
+# ends follow delay:
 #
-#   记录里的积分起点 = t0_int_s + delay_ns + trigger_offset_s − t0
-#   其中 t0 = :WAV:XOR?，由 timebase 决定（500 ns/div 时 −500 ns）
+#   the integration start in the record = t0_int_s + delay_ns + trigger_offset_s - t0
+#   where t0 = :WAV:XOR?, set by the timebase (-500 ns at 500 ns/div)
 #
-# 之前这里用 trigger + 0"覆盖整条记录"来找零点，那是把 1 的办法用在 2 上：
-# 每个点被切掉的部分不一样，Q(delay) 一半是物理一半是窗口。
-t0_int_s = -2e-9                # 台阶前 2 ns 开始
-t_int_width_s = 1.5e-6          # 约 6 tau；5 µs 记录装得下
+# This file used to use trigger + 0 to "cover the whole record", which applies
+# job 1's method to job 2: each point loses a different piece, and half of
+# Q(delay) is then physics and half of it is the window.
+t0_int_s = -2e-9                # start 2 ns before the step
+t_int_width_s = 1.5e-6          # about 6 tau; it fits in a 5 us record
 
 pulse_width_ns = 5000.0
 pulse_frequency_hz = 500.0
 duty_percent = 50.0
 offset_correct = true
 
-# --- 输出极性：INV（2026-09-01 17:59 起）-------------------------------------
-# 81150A 的基线电平是器件在脉冲之间所处的电压。第一轮（17:27）用 "leave" 跑，
-# 读回来是 NORM，原始波形显示：脉冲**前**器件一直在抽取 1.9 mA、脉冲把抽取关掉。
-# 也就是基线是 vcoll、脉冲顶是 vpre，整个测量反着跑。
+# --- output polarity: INV (from 2026-09-01 17:59) ---------------------------
+# The 81150A's baseline level is the voltage the device sits at between pulses.
+# The first round (17:27) ran with "leave", read back NORM, and the raw waveform
+# showed the device extracting 1.9 mA **before** the pulse, with the pulse
+# switching extraction off. That is, the baseline was vcoll and the pulse top
+# vpre: the whole measurement running backwards.
 #
-# 判定不需要知道器件怎么接的，走的是 V_oc：photo ≈ 0 的那个电平按定义就是 V_oc，
-# 而独立测得 V_oc = 0.906–0.922 V ≈ vpre = +0.92 V。它出现在脉冲顶上，
-# 所以基线是抽取电平 —— 这正是 NORM 的行为。BACE 要的是「停在 vpre、脉冲到
-# vcoll」，即基线必须是 HIGH 电平，也就是 INV。
-# （如果器件正负极接反了，photo ≈ 0 会出现在基线上。它没有。接线是按预期的。）
+# The judgement needs no knowledge of the wiring; it goes through V_oc. The
+# level at which photo ~ 0 is by definition V_oc, and V_oc measured
+# independently is 0.906-0.922 V ~ vpre = +0.92 V. It appeared on the pulse top,
+# so the baseline was the extracting level -- which is exactly NORM's behaviour.
+# BACE wants "rest at vpre, pulse to vcoll", i.e. the baseline must be the HIGH
+# level, which is INV.
+# (Were the device terminals reversed, photo ~ 0 would appear on the baseline.
+# It did not. The wiring is as expected.)
 #
-# 第二轮（17:59，INV）确认：脉冲前原始 light − dark = 0.04 mA（停在 V_oc），
-# 脉冲后 1.91 mA（抽取）。形状对了。
-# 仍未解决的是**光根本没关**，见 claude/bace-delay-scan-01.md 第三节 —— 那个
-# INV 修不了。
-output_polarity = "NORM"        # 2026-09-02 晚更正：INV 已被推翻，见
-                                # run-bace.toml 文件头
-inverted_output = true         # output_polarity = "leave" 时被忽略
+# The second round (17:59, INV) confirmed it: raw light - dark reads 0.04 mA
+# before the pulse (resting at V_oc) and 1.91 mA after it (extracting). The
+# shape is right.
+# What is still unresolved is that **the light never goes out** -- see section
+# three of claude/bace-delay-scan-01.md; INV does not fix that.
+output_polarity = "NORM"        # corrected the evening of 2026-09-02: INV is
+                                # overturned, see the head of run-bace.toml
+inverted_output = true         # ignored when output_polarity = "leave"
 invert_polarity = true
 
 settle_s = 0.2

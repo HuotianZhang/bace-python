@@ -1,4 +1,4 @@
-<title>四种极性组合的瞬态</title>
+<title>The transients of the four polarity combinations</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@500;600&display=swap">
@@ -97,30 +97,30 @@ tr.missing td{color:var(--ink-3);background:var(--sunken)}
 
 <div class="page">
   <header>
-    <p class="eyebrow">2026-09-01 · delay = +80 ns · 原始 light − dark，未做基线校正</p>
-    <h1>四种极性组合的瞬态</h1>
-    <p class="standfirst">表里四格，跑过三格。同一张 y 轴放在一起看，形状差别一目了然：①②互为镜像（<code>:OUTP1:POL</code> 换基线），②在两组电压下等比放大，④几乎是一条平线。</p>
+    <p class="eyebrow">2026-09-01 &middot; delay = +80 ns &middot; raw light &minus; dark, no baseline correction</p>
+    <h1>The transients of the four polarity combinations</h1>
+    <p class="standfirst">Four cells in the table, three of them run. Put on one y axis together, the differences in shape are plain: &#9312; and &#9313; mirror each other (<code>:OUTP1:POL</code> swaps the baseline), &#9313; scales proportionally between the two voltages, and &#9315; is very nearly a flat line.</p>
     <dl class="facts">
-      <div class="fact"><dt>① 脉冲前</dt><dd>+2.04 mA</dd></div>
-      <div class="fact"><dt>② 脉冲后</dt><dd>+1.91 / +4.45 mA</dd></div>
-      <div class="fact"><dt>④ 全程</dt><dd>|I| &lt; 0.7 mA</dd></div>
-      <div class="fact"><dt>③ true+NORM</dt><dd>没跑过</dd></div>
+      <div class="fact"><dt>&#9312; before the pulse</dt><dd>+2.04 mA</dd></div>
+      <div class="fact"><dt>&#9313; after the pulse</dt><dd>+1.91 / +4.45 mA</dd></div>
+      <div class="fact"><dt>&#9315; throughout</dt><dd>|I| &lt; 0.7 mA</dd></div>
+      <div class="fact"><dt>&#9314; true+NORM</dt><dd>never run</dd></div>
     </dl>
   </header>
 
   <div class="callout">
-    <span class="tag">2026-09-02 更正</span>
-    <p>本页有两处收回：<strong>「器件可能损坏」</strong>——不成立，JV 给出 V_oc 1.02771 V、J_sc −126.127 A/m²、FF 0.5505，是好片子；<strong>「光不关」</strong>——也不成立，功率计实测低电平输出是导通电平的 0.009 %。</p>
-    <p>判据后来收窄为：<strong>亮态减暗态在稳态必须回到零</strong>（不是「V_oc 在哪」）。按这条，四个组合里只有 <strong>④（纯取负）</strong>是正常的；② 稳态停在 4.45 mA 恰恰说明它不对。另外「亮暗共享极值 = 削顶」也不成立——两者的电流极值本来就应该一样，真正的削顶证据是同一条平均轨里连续 7–8 个采样点落在同一个浮点数上。</p>
+    <span class="tag">2026-09-02 correction</span>
+    <p>Two claims on this page are withdrawn. <strong>&ldquo;The device may be damaged&rdquo;</strong> &mdash; it is not: the J&ndash;V gives V_oc 1.02771 V, J_sc &minus;126.127 A/m², FF 0.5505, a good pixel. <strong>&ldquo;The light does not go off&rdquo;</strong> &mdash; also untrue: measured with the power meter, the low level puts out 0.009 % of the conducting level.</p>
+    <p>The criterion was later narrowed to: <strong>light minus dark must return to zero in the steady state</strong> (not &ldquo;where V_oc landed&rdquo;). By that, only <strong>&#9315; (a pure negation)</strong> of the four is normal; that &#9313; sits at 4.45 mA in the steady state is exactly what says it is wrong. &ldquo;Light and dark sharing an extreme means clipping&rdquo; is also untrue &mdash; their current extremes should be the same. Real clipping shows as 7&ndash;8 consecutive samples at one float inside a single averaged trace.</p>
   </div>
 
   <section>
-    <p class="eyebrow">一 · 全记录</p>
-    <h2>同一张 y 轴上的四条曲线</h2>
-    <p class="lede">整条 5 µs 记录。① 的大信号在脉冲<strong>之前</strong>，② 在<strong>之后</strong>——这就是 <code>:OUTP1:POL</code> 把基线从一个电平换到另一个电平。② 的两条只差 vcoll（−1.00 → −2.00），台阶后的稳态跟着从 1.91 涨到 4.45 mA。④ 在这个尺度上基本贴着零。</p>
+    <p class="eyebrow">one &middot; the whole record</p>
+    <h2>Four curves on one y axis</h2>
+    <p class="lede">The whole 5 &micro;s record. &#9312;&rsquo;s large signal is <strong>before</strong> the pulse and &#9313;&rsquo;s is <strong>after</strong> &mdash; that is <code>:OUTP1:POL</code> swapping the baseline from one level to the other. The two &#9313; traces differ only in vcoll (&minus;1.00 &rarr; &minus;2.00), and the steady state after the step rises with it from 1.91 to 4.45 mA. At this scale &#9315; sits essentially on zero.</p>
     <figure class="wide">
       <div class="frame">
-        <svg viewBox="0 0 700 218" role="img" aria-label="四种极性组合的光暗差电流，整条五微秒记录，共用同一纵轴。组合一的大电流在脉冲之前，组合二在脉冲之后，组合四几乎是平线。">
+        <svg viewBox="0 0 700 218" role="img" aria-label="Light-minus-dark current for the four polarity combinations over the whole five-microsecond record, sharing one y axis. Combination one has its large current before the pulse, combination two after it, and combination four is nearly flat.">
           <g transform="translate(48,16)">
             <line x1="-4" y1="5.3" x2="640" y2="5.3" stroke="currentColor" stroke-width="0.6" opacity="0.12"></line>
             <text x="-8" y="8.8" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">5</text>
@@ -145,7 +145,7 @@ tr.missing td{color:var(--ink-3);background:var(--sunken)}
             <text x="367.7" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">3000</text>
             <text x="503.8" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">4000</text>
             <text x="640.0" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">5000</text>
-            <text x="320" y="210" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">记录时间 / ns　（触发在 500 ns，偏压沿在 ~675 ns）</text>
+            <text x="320" y="210" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">record time / ns (trigger at 500 ns, the bias edge at ~675 ns)</text>
             <text x="-42" y="-4" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">mA</text>
           </g>
         </svg>
@@ -156,17 +156,17 @@ tr.missing td{color:var(--ink-3);background:var(--sunken)}
         <span><i style="border-color:var(--a2)"></i>② false + INV · 18:11 · 0.80 / −2.00</span>
         <span><i style="border-color:var(--a4)"></i>④ true + INV · 18:15 · 0.80 / −2.00</span>
       </p>
-      <figcaption>四条都是 delay = +80 ns 那一点，20 次平均、3 圈。纵轴是<strong>原始</strong> <code>light − dark</code>；存进文件的 <code>photo</code> 做过尾部基线校正，在光不关的情况下会把稳态信号当基线减掉，所以这里不用它。</figcaption>
+      <figcaption>All four are the delay = +80 ns point, 20 averages over 3 loops. The y axis is the <strong>raw</strong> <code>light &minus; dark</code>; the <code>photo</code> stored in the file has had a tail baseline correction, which where the light does not go off subtracts the steady-state signal away as baseline, so it is not used here.</figcaption>
     </figure>
   </section>
 
   <section>
-    <p class="eyebrow">二 · 台阶附近</p>
-    <h2>放大到 550–1250 ns</h2>
-    <p class="lede">同样的纵轴，只把时间轴拉开。四条都在同一时刻转折——<code>:PULS:DEL1</code> 一样，转折点就一样，和电平无关。② 在台阶处先往下冲一下再升上去（位移电流的残差），① 反过来。</p>
+    <p class="eyebrow">two &middot; around the step</p>
+    <h2>Zoomed to 550&ndash;1250 ns</h2>
+    <p class="lede">The same y axis, with the time axis stretched. All four turn at the same instant &mdash; the same <code>:PULS:DEL1</code> gives the same turning point, independent of the levels. At the step, &#9313; overshoots downward before rising (the residual of the displacement current), and &#9312; does the reverse.</p>
     <figure class="wide">
       <div class="frame">
-        <svg viewBox="0 0 700 218" role="img" aria-label="同样四条曲线在偏压沿附近的放大图，四者转折点重合，转折方向相反。">
+        <svg viewBox="0 0 700 218" role="img" aria-label="The same four curves zoomed around the bias edge: the turning points coincide and the directions of the turn are opposite.">
           <g transform="translate(48,16)">
             <line x1="-4" y1="5.3" x2="640" y2="5.3" stroke="currentColor" stroke-width="0.6" opacity="0.12"></line>
             <text x="-8" y="8.8" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">5</text>
@@ -193,22 +193,22 @@ tr.missing td{color:var(--ink-3);background:var(--sunken)}
             <text x="411.4" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">1000</text>
             <text x="502.9" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">1100</text>
             <text x="594.3" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">1200</text>
-            <text x="320" y="210" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">记录时间 / ns</text>
+            <text x="320" y="210" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">record time / ns</text>
             <text x="-42" y="-4" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">mA</text>
           </g>
         </svg>
       </div>
-      <figcaption>② 的两条在台阶处的下冲被裁到画面外（&lt; −1.2 mA）。转折时刻一致说明轴本身没问题；差别全在转折的方向和终点。</figcaption>
+      <figcaption>The downward overshoot of the two &#9313; traces at the step is clipped off the frame (&lt; &minus;1.2 mA). That the turning instants agree says the axis itself is sound; the whole difference is in the direction of the turn and where it ends up.</figcaption>
     </figure>
   </section>
 
   <section>
-    <p class="eyebrow">三 · ④ 单独放大</p>
-    <h2>18:15 那条，纵轴放大六倍</h2>
-    <p class="lede">这就是你在示波器上觉得对的那条形状：脉冲前平，台阶处一个尖，然后衰减回零。形状确实是 BACE 该有的样子——但注意纵轴：峰值 0.69 mA，是 ② 在同样电压下（4.45 mA）的 <strong>1/6</strong>，而且它衰减到的是零，② 衰减到的是 4.45 mA 的平台。</p>
+    <p class="eyebrow">three &middot; &#9315; on its own</p>
+    <h2>The 18:15 trace, y axis magnified six times</h2>
+    <p class="lede">This is the shape that looked right on the scope: flat before the pulse, a spike at the step, then a decay back to zero. The shape really is what BACE should look like &mdash; but note the y axis: the peak is 0.69 mA, <strong>a sixth</strong> of &#9313; at the same voltage (4.45 mA), and it decays to zero where &#9313; decays to a 4.45 mA plateau.</p>
     <figure class="wide">
       <div class="frame">
-        <svg viewBox="0 0 700 178" role="img" aria-label="组合四单独放大：脉冲前平坦，台阶处一个负向尖峰约零点七毫安，随后在几微秒内衰减回零。">
+        <svg viewBox="0 0 700 178" role="img" aria-label="Combination four on its own: flat before the pulse, a negative spike of about 0.7 mA at the step, then a decay back to zero over a few microseconds.">
           <g transform="translate(48,16)">
             <line x1="-4" y1="11.3" x2="640" y2="11.3" stroke="currentColor" stroke-width="0.6" opacity="0.12"></line>
             <text x="-8" y="14.8" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">0.2</text>
@@ -229,42 +229,42 @@ tr.missing td{color:var(--ink-3);background:var(--sunken)}
             <text x="367.7" y="152" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">3000</text>
             <text x="503.8" y="152" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">4000</text>
             <text x="640.0" y="152" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">5000</text>
-            <text x="320" y="170" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">记录时间 / ns</text>
+            <text x="320" y="170" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">record time / ns</text>
             <text x="-42" y="-4" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">mA</text>
           </g>
         </svg>
       </div>
-      <figcaption>7 个 delay 点里有 3 个（−40 / +40 / +80）在峰顶撞了量程底——单条轨内部出现 7–8 个连续采样点取到同一个浮点数，宽约 11 ns 的平顶。这一点（+80）就是其中之一，所以峰高偏小。但"衰减回零"不是削顶造成的，另外 4 个没削顶的点形状一样。</figcaption>
+      <figcaption>Three of the seven delay points (&minus;40 / +40 / +80) hit the bottom of the range at the peak &mdash; 7&ndash;8 consecutive samples at one float inside a single trace, a flat top about 11 ns wide. This point (+80) is one of them, so its peak reads low. But the decay back to zero is not caused by clipping: the other four unclipped points have the same shape.</figcaption>
     </figure>
   </section>
 
   <section>
-    <p class="eyebrow">四 · 对照表</p>
-    <h2>哪一格是哪一轮</h2>
+    <p class="eyebrow">four &middot; the table</p>
+    <h2>Which cell is which run</h2>
     <table>
-      <tr><th>#</th><th>invert_polarity</th><th>:OUTP1:POL</th><th>运行</th><th>名义（放大器输出）基线 → 脉冲</th><th>实测 脉冲前 → 脉冲后</th></tr>
+      <tr><th>#</th><th>invert_polarity</th><th>:OUTP1:POL</th><th>run</th><th>nominal (amplifier output) baseline &rarr; pulse</th><th>measured, before &rarr; after the pulse</th></tr>
       <tr><td class="mono">①</td><td class="mono">false</td><td class="mono">NORM</td><td class="mono">17:27 / 18:05</td><td class="mono">−1.00 → +0.92</td><td class="mono">+2.04 → −0.05 mA</td></tr>
       <tr><td class="mono">②</td><td class="mono">false</td><td class="mono">INV</td><td class="mono">17:59</td><td class="mono">+0.92 → −1.00</td><td class="mono">+0.04 → +1.91 mA</td></tr>
       <tr><td class="mono">②</td><td class="mono">false</td><td class="mono">INV</td><td class="mono">18:09 / 18:11</td><td class="mono">+0.80 → −2.00</td><td class="mono">+0.06 → +4.45 mA</td></tr>
-      <tr class="missing"><td class="mono">③</td><td class="mono">true</td><td class="mono">NORM</td><td class="mono">——</td><td class="mono">−0.80 → +2.00</td><td class="mono">没跑过</td></tr>
+      <tr class="missing"><td class="mono">③</td><td class="mono">true</td><td class="mono">NORM</td><td class="mono">&mdash;</td><td class="mono">&minus;0.80 &rarr; +2.00</td><td class="mono">never run</td></tr>
       <tr><td class="mono">④</td><td class="mono">true</td><td class="mono">INV</td><td class="mono">18:15</td><td class="mono">+2.00 → −0.80</td><td class="mono">+0.05 → −0.04 mA</td></tr>
     </table>
-    <p class="note">③ 和 ② 在器件上互为负号，是同一个实验的两个符号版本。所以<strong>把 ③ 跑一遍，符号就直接测出来了</strong>——不用再从 JV 推。哪一个给出"脉冲前 ≈ 0、台阶后进入抽取"，哪一个就是对的。</p>
+    <p class="note">&#9314; and &#9313; are each other&rsquo;s negation at the device: two sign versions of one experiment. So <strong>running &#9314; measures the sign directly</strong> &mdash; no more inferring it from the J&ndash;V. Whichever gives &ldquo;about zero before the pulse, extraction after the step&rdquo; is the right one.</p>
   </section>
 
   <section>
-    <p class="eyebrow">五 · 曲线对符号说了什么</p>
-    <h2>两轮数据互相矛盾</h2>
-    <p>你说 Keithley 反接、放大器正常，所以器件电极是反的。曲线里有两条独立线索，指向相反：</p>
-    <p><strong>支持"器件正接"（放大器的正 = 代码假设的正）：</strong>17:59 那一轮基线在放大器输出 +0.92 V，实测 <code>light − dark</code> = +0.04 mA ≈ 0。而 0.92 正是当时 Keithley 量到的 |V_oc|（0.9187 / 0.9222）。同一轮台阶后到 −1.00 V 就给出 1.91 mA。器件若是反接的，+0.92 V 处应该是反偏、满抽取，不可能是零。这条只用了绝对值，跟电流的符号约定无关。</p>
-    <p><strong>支持"器件反接"：</strong>18:15 暗态基线在放大器输出 +2.80 V，实测只有 0.13 mA。若器件正接，那是 +2.80 V 正偏——JV 上 +1.5 V 就已经是 2034 A/m²（≈16 × Jsc），电流该是几十 mA。反接的话是 −2.80 V 反偏，小电流才说得通。同样的账在 18:05 上算出来却是反的：那一轮暗态基线 −1.92 V，实测 −2.6 mA，正接（反偏漏电）说得通，反接（+1.92 V 正偏）说不通。</p>
-    <p class="note">所以这几个文件定不了符号，两轮互相打架。可能的出口：放大器在某些电平上根本没输出到位（限流），"电流很小"这个证据就不可靠。<strong>最干净的办法还是跑 ③</strong>，或者直接把探头放在放大器输出上，给 81150A 一个已知的正电平，看那里是正是负——一个数字，全部歧义结束。</p>
-    <p class="note">另外，我之前说 18:15 那个组合"暗态把器件推到 +2.80 V 正偏、有损坏风险"——如果器件确实是反接的，那就是 −2.80 V 反偏，没有这个风险。那句警告我收回，等符号确定再说。JV 也证明器件好着。</p>
+    <p class="eyebrow">five &middot; what the curves say about the sign</p>
+    <h2>Two runs contradict each other</h2>
+    <p>The account given is that the Keithley is reversed and the amplifier is normal, so the device electrodes are the wrong way round. The curves hold two independent clues, and they point opposite ways:</p>
+    <p><strong>For &ldquo;the device is the right way round&rdquo; (the amplifier&rsquo;s positive = the code&rsquo;s assumed positive):</strong> the 17:59 run had its baseline at +0.92 V of amplifier output and measured <code>light &minus; dark</code> = +0.04 mA &asymp; 0. And 0.92 is exactly the |V_oc| the Keithley read at the time (0.9187 / 0.9222). The same run, stepping to &minus;1.00 V, gave 1.91 mA. Were the device reversed, +0.92 V would be reverse bias at full extraction and could not be zero. This clue uses magnitudes only, and is independent of the current&rsquo;s sign convention.</p>
+    <p><strong>For &ldquo;the device is reversed&rdquo;:</strong> the 18:15 dark baseline sat at +2.80 V of amplifier output and measured only 0.13 mA. Were the device the right way round that is +2.80 V of forward bias &mdash; and on the J&ndash;V, +1.5 V already gives 2034 A/m² (~16 &times; Jsc), so the current should be tens of mA. Reversed, it is &minus;2.80 V of reverse bias, and a small current makes sense. The same arithmetic on 18:05 comes out the other way: that run had a dark baseline of &minus;1.92 V and measured &minus;2.6 mA, which the right way round (reverse-bias leakage) explains and reversed (+1.92 V forward) does not.</p>
+    <p class="note">So these files cannot settle the sign; the two runs fight each other. One way out: if the amplifier does not actually reach its level at some settings (current limiting), then &ldquo;the current is small&rdquo; is not reliable evidence. <strong>The cleanest answer is still to run &#9314;</strong>, or to put a probe directly on the amplifier output, give the 81150A a known positive level and see whether it is positive or negative there &mdash; one number, and the whole ambiguity ends.</p>
+    <p class="note">Also: the earlier claim that the 18:15 combination &ldquo;pushes the device to +2.80 V of forward bias in the dark, with a risk of damage&rdquo; &mdash; if the device really is reversed then that is &minus;2.80 V of reverse bias and there is no such risk. That warning is withdrawn until the sign is settled. The J&ndash;V also shows the device is fine.</p>
   </section>
 
   <footer>
-    数据：<code>runs/…_20260901_{180546, 175932, 181143, 181536}</code>，delay = +80 ns，20 平均 × 3 圈。<br>
-    纵轴一律是原始 <code>light − dark</code>（<code>traces/light</code> − <code>traces/dark</code>），没有基线校正。<br>
-    ② 在两组电压下都跑过，图里两条都画了，正好显示 vcoll 从 −1.00 到 −2.00 时稳态抽取电流的变化。
+    Data: <code>runs/&hellip;_20260901_{180546, 175932, 181143, 181536}</code>, delay = +80 ns, 20 averages &times; 3 loops.<br>
+    The y axis is always the raw <code>light &minus; dark</code> (<code>traces/light</code> &minus; <code>traces/dark</code>), with no baseline correction.<br>
+    &#9313; was run at both voltages and both are drawn, which shows exactly how the steady-state extraction current moves as vcoll goes from &minus;1.00 to &minus;2.00.
   </footer>
 </div>

@@ -45,7 +45,7 @@ current_sign = -1               # multiplied once, in Infiniium._fetch, beside
 light_path_delay_ns = 502.0      # from the 33220A's drive edge to the light going
                                 # off at the sample: 502 ns measured 2026-09-01
                                 # (419 ns of it the 85 m fibre), see
-                                # docs/bace-timing.html. Informational: the delay
+                                # docs/figures/bace-timing.html. Informational: the delay
                                 # axis is zeroed by trigger_offset_s, not by this.
 
 [scope]

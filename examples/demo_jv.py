@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run a J-V scan on simulated instruments — dark, light, and hysteresis.
 
-    python demo_jv.py
+    python -m examples.demo_jv
 """
 from __future__ import annotations
 

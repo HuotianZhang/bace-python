@@ -1,4 +1,4 @@
-<title>四种组合的原始亮暗电流</title>
+<title>The four combinations as raw light and dark currents</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@500;600&display=swap">
@@ -96,19 +96,19 @@ td.mono{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
 
 <div class="page">
   <header>
-    <p class="eyebrow">2026-09-01 · delay = +80 ns · <code>traces/light</code> 和 <code>traces/dark</code>，未做任何处理</p>
-    <h1>四种组合的原始亮暗电流</h1>
-    <p class="standfirst">不是差值，是两条曲线本身。位移电流的尖峰在亮暗两支里几乎重合——这本来就该重合；真正区分四种组合的是尖峰的<strong>方向</strong>，以及台阶前后两条曲线各自停在哪里。</p>
-    <p class="legend"><span><i style="border-color:var(--a3)"></i>亮态 light</span><span><i style="border-color:var(--a1);border-top-style:dashed"></i>暗态 dark</span></p>
+    <p class="eyebrow">2026-09-01 · delay = +80 ns · <code>traces/light</code> and <code>traces/dark</code>, wholly unprocessed</p>
+    <h1>The four combinations as raw light and dark currents</h1>
+    <p class="standfirst">Not the difference but the two curves themselves. The displacement-current spike very nearly coincides between the light and dark branches &mdash; as it should. What actually distinguishes the four combinations is the <strong>direction</strong> of that spike, and where each curve comes to rest before and after the step.</p>
+    <p class="legend"><span><i style="border-color:var(--a3)"></i>light</span><span><i style="border-color:var(--a1);border-top-style:dashed"></i>dark</span></p>
   </header>
 
   <section>
-    <p class="eyebrow">一 · 台阶附近</p>
-    <h2>550–950 ns，每格自己的量程</h2>
-    <p class="lede">纵轴按每一格自己的极值定，所以能看清尖峰。① 的尖峰是<strong>正向</strong>（+20 mA），另外三格都是负向——这就是纯变号。④ 的两条在峰顶完全重合并压平：那是撞了量程底，11 ns 宽的平顶，7–8 个连续采样点同一个浮点数。</p>
+    <p class="eyebrow">one &middot; around the step</p>
+    <h2>550&ndash;950 ns, each panel on its own scale</h2>
+    <p class="lede">The y axis follows each panel&rsquo;s own extreme, so the spike is legible. &#9312;&rsquo;s spike points <strong>up</strong> (+20 mA) and the other three point down &mdash; which is exactly a change of sign. In &#9315; the two traces coincide at the peak and flatten: that is the bottom of the range, a flat top 11 ns wide, 7&ndash;8 consecutive samples at one float.</p>
     <figure class="wide">
       <div class="frame">
-        <svg viewBox="0 0 700 380" role="img" aria-label="四种组合在偏压沿附近的原始亮态与暗态电流，每格独立纵轴。组合一的尖峰向上，其余三格向下；组合四的两条曲线在峰顶重合并被削平。">
+        <svg viewBox="0 0 700 380" role="img" aria-label="Raw light and dark currents around the bias edge for the four combinations, each panel on its own y axis. Combination one spikes upward and the other three downward; in combination four the two curves coincide at the peak and are clipped flat.">
           <g transform="translate(56,26)">
             <rect x="0" y="0" width="292.0" height="120.0" fill="none" stroke="currentColor" stroke-width=".6" opacity=".18"></rect>
             <text x="-6" y="3.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">20</text>
@@ -177,20 +177,20 @@ td.mono{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
             <text x="182.5" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">800</text>
             <text x="255.5" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">900</text>
           </g>
-          <text x="350" y="372" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">记录时间 / ns　·　纵轴 mA</text>
+          <text x="350" y="372" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">record time / ns &middot; y: mA</text>
         </svg>
       </div>
-      <figcaption>亮暗两条在尖峰处贴在一起是<strong>正常</strong>的：那里是电压阶跃充放器件电容的位移电流，两支的摆幅相同，所以电流几乎相同，相减之后正好抵消。真正的信息在尖峰之外。</figcaption>
+      <figcaption>The light and dark traces sitting together at the spike is <strong>normal</strong>: that is the displacement current charging and discharging the device capacitance on the voltage step, and both branches have the same span, so the currents are nearly identical and cancel on subtraction. The real information is outside the spike.</figcaption>
     </figure>
   </section>
 
   <section>
-    <p class="eyebrow">二 · 整条记录</p>
-    <h2>300–5000 ns，纵轴压到平台量级</h2>
-    <p class="lede">同样四格，纵轴改成能看清平台的量级（尖峰因此跑出画面，这是故意的）。看两条曲线各自<strong>停在哪里</strong>：只有 ④ 的亮暗两条在台阶之后都回到零附近，其余三格都停在一个明显非零的电平上。</p>
+    <p class="eyebrow">two &middot; the whole record</p>
+    <h2>300&ndash;5000 ns, y axis squeezed to the plateau scale</h2>
+    <p class="lede">The same four panels, with the y axis set so the plateau is legible (the spike therefore runs off the frame, deliberately). Watch where each curve <strong>comes to rest</strong>: only in &#9315; do both the light and the dark trace return to near zero after the step; the other three settle at a clearly non-zero level.</p>
     <figure class="wide">
       <div class="frame">
-        <svg viewBox="0 0 700 380" role="img" aria-label="四种组合的整条五微秒记录，纵轴压到平台量级。只有组合四的亮态与暗态在台阶后都回到零附近，其余三组都停在非零电平。">
+        <svg viewBox="0 0 700 380" role="img" aria-label="The whole five-microsecond record for the four combinations with the y axis squeezed to the plateau scale. Only in combination four do light and dark both return near zero after the step; the other three settle at non-zero levels.">
           <g transform="translate(56,26)">
             <rect x="0" y="0" width="292.0" height="120.0" fill="none" stroke="currentColor" stroke-width=".6" opacity=".18"></rect>
             <text x="-6" y="3.5" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">4</text>
@@ -263,30 +263,30 @@ td.mono{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
             <text x="229.9" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">4000</text>
             <text x="292.0" y="134.0" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">5000</text>
           </g>
-          <text x="350" y="372" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">记录时间 / ns　·　纵轴 mA（注意每格量程不同）</text>
+          <text x="350" y="372" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-3)">record time / ns &middot; y: mA (note the scales differ per panel)</text>
         </svg>
       </div>
-      <figcaption>④ 的纵轴是 ±0.8 mA，其余是 ±4 / ±4 / ±15 mA。也就是说 ④ 那一格里"回到零"是在一个比别人细 5–19 倍的尺度上看的，仍然是零。</figcaption>
+      <figcaption>&#9315;&rsquo;s y axis is &plusmn;0.8 mA, the others &plusmn;4 / &plusmn;4 / &plusmn;15 mA. So the &ldquo;returns to zero&rdquo; in that panel is seen on a scale 5&ndash;19 times finer than the rest, and it is still zero.</figcaption>
     </figure>
   </section>
 
   <section>
-    <p class="eyebrow">三 · 数字</p>
-    <h2>台阶前后各自的电平</h2>
+    <p class="eyebrow">three &middot; the numbers</p>
+    <h2>The levels each side of the step</h2>
     <table>
-      <tr><th>组合</th><th>时间</th><th>台阶前 亮 / 暗 (mA)</th><th>台阶后 &gt;3 µs 亮 / 暗 (mA)</th><th>尖峰</th></tr>
-      <tr><td class="mono">① false + NORM</td><td class="mono">18:05</td><td class="mono">−0.703 / −2.556</td><td class="mono">−0.111 / −0.047</td><td class="mono">+20 (正向)</td></tr>
-      <tr><td class="mono">② false + INV</td><td class="mono">17:59</td><td class="mono">−0.115 / −0.158</td><td class="mono">−0.875 / −2.783</td><td class="mono">−20 (负向)</td></tr>
-      <tr><td class="mono">② false + INV</td><td class="mono">18:11</td><td class="mono">0.267 / 0.204</td><td class="mono">−5.089 / −9.552</td><td class="mono">−34 (负向)</td></tr>
-      <tr><td class="mono">④ true + INV</td><td class="mono">18:15</td><td class="mono">0.178 / 0.131</td><td class="mono">0.01 / 0.055</td><td class="mono">−20.27 (两条相同 → 撞底)</td></tr>
+      <tr><th>combination</th><th>time</th><th>before the step, light / dark (mA)</th><th>after the step, &gt;3 &micro;s, light / dark (mA)</th><th>spike</th></tr>
+      <tr><td class="mono">① false + NORM</td><td class="mono">18:05</td><td class="mono">−0.703 / −2.556</td><td class="mono">−0.111 / −0.047</td><td class="mono">+20 (upward)</td></tr>
+      <tr><td class="mono">② false + INV</td><td class="mono">17:59</td><td class="mono">−0.115 / −0.158</td><td class="mono">−0.875 / −2.783</td><td class="mono">&minus;20 (downward)</td></tr>
+      <tr><td class="mono">② false + INV</td><td class="mono">18:11</td><td class="mono">0.267 / 0.204</td><td class="mono">−5.089 / −9.552</td><td class="mono">&minus;34 (downward)</td></tr>
+      <tr><td class="mono">④ true + INV</td><td class="mono">18:15</td><td class="mono">0.178 / 0.131</td><td class="mono">0.01 / 0.055</td><td class="mono">&minus;20.27 (identical in both &rarr; range floor)</td></tr>
     </table>
-    <p class="note">① 台阶<strong>前</strong>亮暗差 1.85 mA、台阶后都归零；② 反过来，台阶后亮暗差 1.9 / 4.5 mA 且不衰减；④ 台阶前差 0.047 mA、台阶后亮 0.010 暗 0.055 mA——<strong>两条各自都回零，差值自然也回零</strong>。这是四格里唯一一个"抽取结束后什么都不剩"的。</p>
-    <p class="note">另外注意 ④ 的亮暗最小值精确相同（−20.27 mA）。这不是巧合也不是物理：两条独立平均的采集不会在浮点数上完全一致，是两条都压在同一条量程底线上。所以 ④ 的<strong>峰高不可用</strong>，但被削掉的只有 11 ns，7 个 delay 点的电荷积分散布仍然只有 4%。</p>
+    <p class="note">&#9312; differs by 1.85 mA between light and dark <strong>before</strong> the step and both go to zero after it; &#9313; is the reverse, differing by 1.9 / 4.5 mA after the step and never decaying; &#9315; differs by 0.047 mA before the step and reads light 0.010, dark 0.055 mA after &mdash; <strong>both curves return to zero, so of course the difference does too</strong>. It is the only one of the four with nothing left over once extraction has finished.</p>
+    <p class="note">Note too that &#9315;&rsquo;s light and dark minima are exactly equal (&minus;20.27 mA). That is neither coincidence nor physics: two independently averaged acquisitions do not agree to the float, and both are pressed against the same range floor. So &#9315;&rsquo;s <strong>peak height is unusable</strong> &mdash; but only 11 ns is clipped away, and the charge integrals over the seven delay points still scatter by only 4%.</p>
   </section>
 
   <footer>
-    数据：<code>runs/…_20260901_{180546, 175932, 181143, 181536}</code>，delay = +80 ns，20 次平均 × 3 圈。<br>
-    画的是 <code>traces/light</code> 和 <code>traces/dark</code> 本身，没有相减、没有基线校正。<br>
-    每一轮的绝对偏置由 autorange 决定，各轮不可直接比较；同一轮内亮暗共用量程，所以同一格里的两条可以比。
+    Data: <code>runs/&hellip;_20260901_{180546, 175932, 181143, 181536}</code>, delay = +80 ns, 20 averages &times; 3 loops.<br>
+    What is drawn is <code>traces/light</code> and <code>traces/dark</code> themselves &mdash; no subtraction, no baseline correction.<br>
+    Each run&rsquo;s absolute offset is set by auto-range, so runs are not directly comparable; within one run light and dark share a range, so the two traces in one panel are.
   </footer>
 </div>

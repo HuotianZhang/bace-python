@@ -11,7 +11,7 @@ extended, and focused on **measurement** — analysis stays downstream.
 | **`HANDOFF.md`** | the current state, what is built, what is not, and every trap. **Read this first.** |
 | `BENCH.md` | how to exercise it against the real rig, stage by stage |
 | `bace/service/README.md` | how to run the service and drive it by hand; `docs/service-contract.md` has every shape |
-| `docs/bace-status.html` | the full narrative with evidence and figures |
+| `docs/history/bace-status.html` | the full narrative with evidence and figures, through 31 August 2026 |
 | `rig.toml` / `run.toml` | the bench and the recipe, kept separate |
 | `scripts/` | the double-click `.bat` entry points, one per bench stage; `setup.sh` for a Linux checkout |
 | `docs/ui-kickoff.md` | where the console work starts, with `docs/ui-rules.md` and `docs/design/` |
@@ -75,15 +75,20 @@ bace/           the package
   consoles/     standalone per-instrument panels: one instrument, one process,
                 one port, no service and no ui/. keithley/ is the first
 ui/             the console — plain ES modules, no build step, served by the
-                service at /ui. ui/README.md; docs/ui-plan.md is the plan
+                service at /ui. ui/README.md; docs/ui-plan.md is the plan.
+                studies/ holds the layout comparisons, kept as record
 tools/          standalone rig scripts — scan, bare, lightpower, shutter, relay,
                 identify_dio; and the console's fixture recorders
 scripts/        the double-click .bat entry points; each cd's to the repo root first
-examples/       standalone folders that share nothing with the package but the
-                hardware — shutter_console/ is the shutter as one page in a browser
+examples/       what to run to see it work — the four demo_*.py against the
+                simulator, and standalone folders that share nothing with the
+                package but the hardware (shutter_console/). examples/README.md
 recipes/        the named recipe variants, passed with --run
 tests/          the suite
-docs/           the figure pages; docs/README.md indexes them
+docs/           the living documents — the service contract, the ui plan and
+                rules, the naming. figures/ is the evidence, one measurement a
+                page; history/ is accurate for its date and not for today.
+                docs/README.md indexes all three
 bench-archive/  the 2026-08-07 reference run the regression test reproduces
 acceptance/     the 2026-09-02 pair — LabVIEW and the service on the same
                 device half an hour apart — and three journals of that rig day
@@ -99,8 +104,8 @@ before doing anything, so every relative path below still resolves.
 Everything runs end to end on the simulated rig, with no instruments present:
 
 ```
-python -m pytest -q                    # 814 passed, and nothing skipped
-python demo_scan.py                    # a simulated transient scan
+python -m pytest -q                    # 880 passed, and nothing skipped
+python -m examples.demo_scan           # a simulated transient scan
 python -m bace.bench                   # the offline stages of the bench harness
 python -m bace.service --sim --fast    # the service on the simulated rig, http://127.0.0.1:8900/
 python -m bace.consoles.keithley --sim # just the Keithley's front panel, http://127.0.0.1:8924/
@@ -111,7 +116,7 @@ python -m bace.consoles.keithley --sim # just the Keithley's front panel, http:/
 The measurement half is written, tested, and exercised on the rig: scope
 acquisition, auto-range, DIO identity, shutter, and first light on a real device
 have all been run. A LabVIEW run and a port run eight minutes apart are set side
-by side in `HANDOVER-2026-09-02.md`, and a second pair in
+by side in `docs/history/HANDOVER-2026-09-02.md`, and a second pair in
 `acceptance/20260902_service-vs-labview/`; both carry the numbers, and what to
 make of them is the reader's.
 

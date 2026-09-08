@@ -37,7 +37,7 @@ One exception, stated because it is one: **the two polarity knobs are "how" and
 sit above anyway.** `invert_polarity` and `output_polarity` are the sign
 convention that cost this port a day — the port read all-positive where
 LabVIEW read all-negative, and the fix was `current_sign = -1` in `rig.toml`
-(`HANDOVER-2026-09-02.md`). A wrong polarity does not fail; it produces a
+(`docs/history/HANDOVER-2026-09-02.md`). A wrong polarity does not fail; it produces a
 plausible curve with the sign flipped. The artboard already gives both the
 accent treatment. They stay above the fold and keep it.
 

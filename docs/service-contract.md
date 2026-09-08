@@ -66,7 +66,8 @@ extra); `bace.service.pipeline`, `modules`, `journal`, `worker`, `executor` must
 import without FastAPI installed — only `app.py` and `__main__.py` need it.
 
 **Engine changes made in round 1 beyond the plan's five items** (recorded here
-so "only the round-1 items changed" is true, the plan's 不重写测量逻辑
+so "only the round-1 items changed" is true, the plan's "no rewriting the
+measurement logic"
 notwithstanding; each is a sequencing gap the design pack had already
 recorded, the design pack 01-modules §4, `docs/ui-rules.md`): `run_jv` opens the shutter for a light
 curve and shuts it for a dark one (`_set_shutter`) and yields
@@ -167,7 +168,7 @@ journaled as the transitions they were).
 
 - `run_id = f"{session_id}-{n:03d}"`, `n` counting every run in the session
   (manual and pipeline alike). A manual run IS a pipeline run with one module
-  node, same code path (plan: 手动跑一张卡 = 单节点 pipeline).
+  node, same code path (plan: "a manual run of one card = a single-node pipeline").
 - A module execution inside a run is addressed by `(run_id, node_path)`.
 - `seq` is a per-session monotonic counter over every envelope (events from
   runs and from the service itself). `GET /events?since=<seq>` replays.
@@ -891,7 +892,7 @@ a flat, ordered list of `Step`s, each `{node_path, kind: "loop-enter"|"module"|"
 The schedule is what `Dry run` shows ("what it will do, in order") and what the
 executor runs; the executor must never re-derive structure.
 
-### The three bindings (plan, "唯一的新逻辑")
+### The three bindings (plan, "the only new logic")
 
 1. **illumination loop → `led_v` of every module inside it.** Set as
    `Source.INHERITED` (detail `"illumination loop"`) on `jv_bace.led_levels_v = [led_v]`
@@ -924,8 +925,8 @@ and then nothing is opened and nothing is reported unavailable. `--sim` is
 unchanged and deliberately does not follow `address`: any non-empty `console`
 attaches the simulator's stand-in, and the default (none) is the
 operator-pause path, because that is the one a UI has to handle well. Wiring
-the 331 changed no route, no tree field and no event type (plan, P3: "API
-不变").
+the 331 changed no route, no tree field and no event type (plan, P3: "the
+API does not change").
 
 **With a controller attached** the node settles on its own. It is read first
 — the first poll, at zero on the poll clock, is the cryostat as found and
@@ -1120,8 +1121,8 @@ A synchronous generator run as one worker job. For each schedule step:
 `loop-enter` → `NodeStarted`, apply the binding (illumination: `led.set_pulse`
 happens inside the module builder, not here; the loop only sets the context),
 temperature: the settle through the console, or `NeedsOperator` + wait + `hold_s` (see "Temperature" above); `Progress(node_path=<loop path>, done=i, total=n, eta_s=…)`.
-**`eta_s` is re-derived from what this run has measured** (the plan's "ETA
-随实测重算"): the sum of what is left in the schedule, where a module costs the
+**`eta_s` is re-derived from what this run has measured** (the plan's "the
+ETA is recomputed as it measures"): the sum of what is left in the schedule, where a module costs the
 median duration of the same module in this run once one has completed (its
 `estimate_s` until then) and a temperature costs the median settle the
 operator has taken *in this run* once one has been measured (the journal's
@@ -1281,7 +1282,7 @@ py -3 -m bace.service --rig rig.toml --run run.toml      # the lab PC
   which extra and nothing has touched the bench or written a journal header.
 - `--host 127.0.0.1` fixed unless overridden **with another loopback address**
   (`127.0.0.0/8`, `::1`, `localhost`); anything else is refused with exit 2. No
-  auth (plan: 不做鉴权), which is acceptable only where nobody but this machine
+  auth (plan: "no auth"), which is acceptable only where nobody but this machine
   can connect.
 - `scripts\Run Service.bat` / `Run Service (sim).bat` `cd` to the repo root, as
   every other script does, so `--out runs`, `rig.toml` and `run.toml` resolve

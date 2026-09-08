@@ -1,7 +1,8 @@
 """Standalone instrument consoles: one instrument, one process, one port.
 
 `docs/service-plan.md` fixed this shape for the two instruments that already
-had their own programs -- "既有的独立 console 保持独立", the 1918-C on :8918 and
+had their own programs -- "the existing standalone consoles stay standalone",
+the 1918-C on :8918 and
 the Lake Shore 331 on :8331 -- and `bace/drivers/newport1918c/console.py` and
 `lakeshore331/console.py` are the *clients* the service reaches them through.
 This package is the other half: consoles written here, in this repository, for
