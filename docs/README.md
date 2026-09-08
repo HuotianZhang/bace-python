@@ -7,33 +7,45 @@ self-contained and readable with no account and no network.
 Open them in a browser. They are single files with no external dependencies
 beyond a web font, and they fall back cleanly without it.
 
+Three lifetimes, three folders, so the shelf says which is which before you open
+anything (2026-09-08):
+
+* **`docs/` itself** — the living documents. The contract the service was built
+  to, the plans `ui/` is still being built against, the rules and the naming.
+  Wrong here is a defect; fix it in place.
+* **`figures/`** — the evidence pages. Each records one measurement and stays
+  true for it. Where a later measurement overturned one, the page carries a
+  dated correction and the claim is listed under *What has been overturned*.
+* **`history/`** — accurate for their date, not for today. Kept for the
+  reasoning, not to be read as current.
+
 ## Start here
 
 | file | what it is |
 |---|---|
-| `../HANDOVER-2026-09-02.md` | **Start here.** The closing summary: what was proved, what was fixed, what is still open, and how to run it. |
-| `bace-wrapup.html` | 《BACE 移植收官》 — the same summary as a figure page, with the four runs charted. |
-| `bace-drift.html` | 《参考本身在漂》 — the evidence that the port reproduces the LabVIEW engine, and that the earlier 4× gap was the sample drifting. |
+| `history/HANDOVER-2026-09-02.md` | **Start here.** The closing summary: what was proved, what was fixed, what is still open, and how to run it. |
+| `figures/bace-wrapup.html` | 《BACE 移植收官》 — the same summary as a figure page, with the four runs charted. |
+| `figures/bace-drift.html` | 《参考本身在漂》 — the evidence that the port reproduces the LabVIEW engine, and that the earlier 4× gap was the sample drifting. |
 
 ## The rest, by subject
 
 | file | what it is |
 |---|---|
-| `bace-timing.html` | 《BACE 触发链时序》 — the trigger chain in time: five edges, the 502 ns optical path, and where the delay axis' zero really is. |
-| `bace-polarity.html` | 《四种极性组合的瞬态》 — the four combinations of `output_polarity` × `invert_polarity`, and why only ④ is valid. |
-| `bace-polarity-raw.html` | 《四种组合的原始亮暗电流》 — the same four, as raw light and dark traces rather than differences. |
-| `bace-delay-scan-1.html` | 《第一次 delay 扫描》 — the first attempt to calibrate the zero of the delay axis. |
-| `bace-delay-scan-2.html` | 《第二次 delay 扫描》 — the second, and the baseline-correction trap it exposed. |
-| `bace-chain.html` | The instrument chain — what is wired to what, and which command reaches which box. |
-| `bace-anatomy.html` | What one BACE run actually does, step by step. |
-| `bace-architecture.html` | The module layout and why the dependencies point the way they do. |
+| `figures/bace-timing.html` | 《BACE 触发链时序》 — the trigger chain in time: five edges, the 502 ns optical path, and where the delay axis' zero really is. |
+| `figures/bace-polarity.html` | 《四种极性组合的瞬态》 — the four combinations of `output_polarity` × `invert_polarity`, and why only ④ is valid. |
+| `figures/bace-polarity-raw.html` | 《四种组合的原始亮暗电流》 — the same four, as raw light and dark traces rather than differences. |
+| `figures/bace-delay-scan-1.html` | 《第一次 delay 扫描》 — the first attempt to calibrate the zero of the delay axis. |
+| `figures/bace-delay-scan-2.html` | 《第二次 delay 扫描》 — the second, and the baseline-correction trap it exposed. |
+| `figures/bace-chain.html` | The instrument chain — what is wired to what, and which command reaches which box. |
+| `figures/bace-anatomy.html` | What one BACE run actually does, step by step. |
+| `figures/bace-architecture.html` | The module layout and why the dependencies point the way they do. |
 
 ## Historical — accurate for their date, not for today
 
 | file | what it is |
 |---|---|
-| `bace-status.html` | The running record of the port **through 31 August 2026**. Carries a 2026-09-02 banner listing what has since changed. |
-| `port-plan.html` | The original plan, written before any of it was built. Kept for the reasoning. It is where the 47 ns error started; that paragraph is corrected in place. |
+| `history/bace-status.html` | The running record of the port **through 31 August 2026**. Carries a 2026-09-02 banner listing what has since changed. |
+| `history/port-plan.html` | The original plan, written before any of it was built. Kept for the reasoning. It is where the 47 ns error started; that paragraph is corrected in place. |
 
 ## The UI design canvas
 
@@ -64,14 +76,14 @@ list is here too, so nobody has to discover it twice:
 
 | claim | where it was | what is true |
 |---|---|---|
-| trigger offset = 47 ns | `port-plan.html`, and from there everywhere | **0** on the scan path. At the same `Delay(ns) = 90`, LabVIEW and the port both put the displacement spike at 328 ns of record time. |
+| trigger offset = 47 ns | `history/port-plan.html`, and from there everywhere | **0** on the scan path. At the same `Delay(ns) = 90`, LabVIEW and the port both put the displacement spike at 328 ns of record time. |
 | `timebase_ns_per_div` = 500 | the 2026-09-01 backlog | **200**. On the panel, Timebase 200 ns and Pulse Width 5e3 ns sit side by side; they are unrelated. |
-| the LED never goes dark | `bace-delay-scan-1.html`, `bace-delay-scan-2.html`, `bace-polarity.html` | It does. The power meter reads its off level at **0.009 %** of the on level. |
-| the device may be damaged | `bace-polarity.html` | It is not. V_oc 1.02771 V, J_sc −126.127 A/m², FF 0.5505. |
-| light and dark sharing an extreme means clipping | `bace-delay-scan-1.html`, `bace-polarity.html` | They should share it. Clipping shows as 7–8 consecutive samples at one float inside a single averaged trace. |
+| the LED never goes dark | `figures/bace-delay-scan-1.html`, `figures/bace-delay-scan-2.html`, `figures/bace-polarity.html` | It does. The power meter reads its off level at **0.009 %** of the on level. |
+| the device may be damaged | `figures/bace-polarity.html` | It is not. V_oc 1.02771 V, J_sc −126.127 A/m², FF 0.5505. |
+| light and dark sharing an extreme means clipping | `figures/bace-delay-scan-1.html`, `figures/bace-polarity.html` | They should share it. Clipping shows as 7–8 consecutive samples at one float inside a single averaged trace. |
 | the port is 3× low against LabVIEW | working notes, 2026-09-01 | The reference moved. LabVIEW's own τ fell from 190 ns to 71 ns over three hours; against a run eight minutes away the port agrees to 4 % on charge. |
-| `Q:` and `D:` are one store over the network | `bace-status.html` (already withdrawn there) | Two separate trees. Mirror with `D:\BACE\sync-bace.sh` and verify by fingerprint. |
-| combination ④ means `invert_polarity` + `:OUTP1:POL INV` | `recipes/run-labview.toml`, `recipes/run-bace.toml` (the "④" comments), `bace-polarity.html`'s labels as read into the recipes | The validated pair is `invert_polarity = true` with **NORM**: `bare.py --invert` matched LabVIEW to 4 % at 02:08 with the generator read back at NORM, and the 02:20 bit-exact read-back shows LabVIEW itself finishes at NORM. Through the inverting ×4 amplifier, INV rests the device at v_coll so extraction never stops: every INV run (the four replicas of 23:41–01:22 and the service run of 2026-09-02 14:52) shows the photo peak collapsed from ~3 mA to ~0.5 mA and the displacement spike with the opposite sign. |
+| `Q:` and `D:` are one store over the network | `history/bace-status.html` (already withdrawn there) | Two separate trees. Mirror with `D:\BACE\sync-bace.sh` and verify by fingerprint. |
+| combination ④ means `invert_polarity` + `:OUTP1:POL INV` | `recipes/run-labview.toml`, `recipes/run-bace.toml` (the "④" comments), `figures/bace-polarity.html`'s labels as read into the recipes | The validated pair is `invert_polarity = true` with **NORM**: `bare.py --invert` matched LabVIEW to 4 % at 02:08 with the generator read back at NORM, and the 02:20 bit-exact read-back shows LabVIEW itself finishes at NORM. Through the inverting ×4 amplifier, INV rests the device at v_coll so extraction never stops: every INV run (the four replicas of 23:41–01:22 and the service run of 2026-09-02 14:52) shows the photo peak collapsed from ~3 mA to ~0.5 mA and the displacement spike with the opposite sign. |
 
 ## The criterion, since it was got wrong repeatedly
 

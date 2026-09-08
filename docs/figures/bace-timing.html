@@ -166,7 +166,7 @@ footer{margin-top:4rem;padding-top:1.1rem;border-top:1px solid var(--rule);
   <div class="callout">
     <span class="tag">2026-09-02 后续</span>
     <p><strong>第六节说的那个 delay 扫描做了，结论支持本页：<code>TRIGGER_OFFSET_S</code> 现在是 0。</strong>在同样的 <code>Delay(ns) = 90</code> 下，LabVIEW 和 Python 端口的位移尖峰都落在记录的 328 ns——扫描路径上 <code>:PULS:DEL1</code> 收到的就是 <code>delay_ns</code> 本身，没有任何偏移。原来那 47 ns 是从另一条路径量出来的。</p>
-    <p>所以本页第四节的判断成立（47 ns 既不是线缆延迟、数值也不对），只是最终答案不是 60–75 ns 而是 0。第五节的 <code>[timing]</code> 块仍未实现。完整对照见 <code>HANDOVER-2026-09-02.md</code>。</p>
+    <p>所以本页第四节的判断成立（47 ns 既不是线缆延迟、数值也不对），只是最终答案不是 60–75 ns 而是 0。第五节的 <code>[timing]</code> 块仍未实现。完整对照见 <code>docs/history/HANDOVER-2026-09-02.md</code>。</p>
   </div>
 
   <section>

@@ -8,14 +8,14 @@ the generated module cards, the charts, the run monitor, the pipeline tab, and
 the results tab — R2·3 as it stands, drawn from the record); the design
 iteration on results with the user is still to be had, on the built tab.
 
-Read `docs/bace-status.html` first — it is the full narrative with the evidence.
+Read `docs/history/bace-status.html` first — it is the full narrative with the evidence.
 This file is the operational summary.
 
 ---
 
 ## 2026-09-02 — 端口复现了 LabVIEW 引擎
 
-**当前状态见 `HANDOVER-2026-09-02.md`.** 相隔八分钟的两轮对照（LabVIEW 02:16
+**当前状态见 `docs/history/HANDOVER-2026-09-02.md`.** 相隔八分钟的两轮对照（LabVIEW 02:16
 vs 端口 02:08）：峰值差 6.0%、τ 差 2.8%、Q 差 4.0%，尖峰都在记录的 328 ns。
 测试 212 passed / 7 skipped。
 
@@ -33,7 +33,7 @@ vs 端口 02:08）：峰值差 6.0%、τ 差 2.8%、Q 差 4.0%，尖峰都在记
 `docs/service-contract.md`。测试 528 passed / 7 skipped。
 
 以下内容写于 2026-09-01 之前，其中 `timebase 500`、`trigger_offset 47 ns`、
-「光根本没关」三条已被数据推翻，以 `HANDOVER-2026-09-02.md` 为准。
+「光根本没关」三条已被数据推翻，以 `docs/history/HANDOVER-2026-09-02.md` 为准。
 
 ---
 
@@ -141,7 +141,7 @@ end on the lab PC, the bace against LabVIEW fifteen minutes apart — Q −1.72e
 vs −2.24e−10 C at a vpre 2 mV apart, within the single-shot scatter
 (σ 5.2e−11 at n = 2), photo peak −0.76 vs −1.26 mA, both tails at zero. The
 six defects the rig day exposed are §6 items 10–11 and the
-HANDOVER-2026-09-02.md evening section.
+docs/history/HANDOVER-2026-09-02.md evening section.
 
 Design rules that are load-bearing:
 
@@ -462,7 +462,7 @@ to reach for the same shortcuts.
    serves the result.
 3. **Side-by-side** — done 2026-09-02 evening, through the service: LabVIEW
    15:06 vs service 15:37, same device, Q within the single-shot scatter,
-   both tails at zero (HANDOVER-2026-09-02.md, evening section). A longer
+   both tails at zero (docs/history/HANDOVER-2026-09-02.md, evening section). A longer
    confirmation against `Q:\Huotian\2026\BACE\20260831\220K` at proper
    n_loops remains worthwhile but is no longer the gate.
 4. **Temperature** — done since (contract section 7): the 331 is a

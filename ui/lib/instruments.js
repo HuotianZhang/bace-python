@@ -106,7 +106,7 @@ export function panelModel(bench, light) {
  * is. A second way to abort a run and drop a queue is not reach; it is a
  * second place to hit it by accident.
  *
- * **One row, since 2026-09-06** (`bench-head.html`, option B). It was three
+ * **One row, since 2026-09-06** (`studies/bench-head.html`, option B). It was three
  * stacked rows of 57 px each — 172 px, the least dense surface in the
  * console, immediately under a rail that had just been cut to 27 px for eight
  * live readings. The switches sit side by side now, and the `Instruments`

@@ -7,7 +7,7 @@ maps each step to 81150A pulse levels, generates synthetic light/dark traces,
 and runs the full dark-subtraction / baseline / running-average /
 charge-integration chain.
 
-    python demo_pipeline.py
+    python examples/demo_pipeline.py
 """
 from dataclasses import replace
 
