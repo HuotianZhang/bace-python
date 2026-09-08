@@ -188,10 +188,36 @@ def make_server(panel: KeithleyPanel, *, host: str, port: int) -> ThreadingHTTPS
                         f"-H 'content-type: {CONTROL_CONTENT_TYPE}'.")
             return None
 
+        def _drain(self) -> None:
+            """Read the request body the handler is about to answer without.
+
+            A refusal -- the cross-site 403, a 404 -- replies before `_body`
+            has run, and the client is still sending. Closing on unread data
+            resets the connection instead of finishing it: on Windows the
+            caller then gets WinError 10053 where POSIX still hands it the
+            403 (`test_a_page_on_another_site_cannot_drive_the_instrument`,
+            2026-09-08). The bytes are read and dropped -- refusing to parse
+            them is the point -- and never more than `MAX_BODY`.
+            """
+            if getattr(self, "_body_taken", False):
+                return
+            self._body_taken = True
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                return
+            left = min(length, MAX_BODY)
+            while left > 0:
+                chunk = self.rfile.read(min(left, 65536))
+                if not chunk:
+                    return
+                left -= len(chunk)
+
         def _body(self) -> dict:
             length = int(self.headers.get("Content-Length") or 0)
             if length > MAX_BODY:
                 raise ValueError(f"body is larger than {MAX_BODY} bytes")
+            self._body_taken = True
             if not length:
                 return {}
             raw = self.rfile.read(length)
@@ -204,6 +230,7 @@ def make_server(panel: KeithleyPanel, *, host: str, port: int) -> ThreadingHTTPS
             return parsed
 
         def _json(self, status: int, payload: Any) -> None:
+            self._drain()
             data = json.dumps(payload, allow_nan=False).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
