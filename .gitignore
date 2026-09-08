@@ -20,6 +20,13 @@ dist/
 
 # Environments
 .venv/
+
+# `.github/workflows/tests.yml` installs eslint into the repo root so
+# `tests/test_ui.py` can find it (`npx --no-install`); anyone reproducing the
+# CI locally gets one too. There is no package.json here on purpose — the
+# console has no build step.
+node_modules/
+package-lock.json
 venv/
 env/
 

@@ -115,10 +115,18 @@ def main(folder: str) -> int:
 
 
 ARCHIVE_ENV = "BACE_ARCHIVE"
+_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 ARCHIVE_GLOBS = (
     os.environ.get(ARCHIVE_ENV, ""),
     "/mnt/user-data/uploads/s4_PTQ10*",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "s4_PTQ10*"),
+    # The copy the repository carries. It was there all along and nothing
+    # looked for it, so the numerical regression against the 2026-08-07 run and
+    # the byte-exact `.dat` round trip -- seven tests, and two of the most
+    # valuable in the suite -- skipped on every checkout that had not set
+    # `BACE_ARCHIVE` by hand. Last, so a folder somebody named still wins.
+    os.path.join(_REPO, "bench-archive", "s4_PTQ10*"),
 )
 
 

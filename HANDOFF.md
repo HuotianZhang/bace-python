@@ -227,6 +227,31 @@ the new route turned "editable in `run.toml`" into "typeable in a text box".
 as it will be spelled. The plan's directory allocator (its collision section)
 is still open.
 
+**2026-09-08, CI** (`.github/workflows/tests.yml`). The suite on every push and
+pull request, on **ubuntu-latest and windows-latest**. Windows is the point:
+the lab PC runs WinPython, the `.dat` files are byte-exact with CRLF, and §3
+already records a defect that failed there and passed on Linux (a colon in
+`material` building a path segment). 3.11 on both — `requires-python`, and what
+the bench runs — plus 3.12 on Linux. Nothing touches an instrument, so the
+`rig` extra is not installed.
+
+Two things had to be fixed before it could be green, and both were defects in
+their own right:
+
+* **`pip install -e .[service,dev]` could not run the suite.** Starlette's
+  TestClient needs `httpx2` and nothing declared it, so
+  `tests/test_service_api.py` failed at *collection* with a message about a
+  package nothing here names. It is a test dependency, not a service one --
+  the service never makes an HTTP request -- so it went in `dev`.
+* **Seven tests skipped on every checkout, and the data was already here.**
+  `find_archive` looked at `$BACE_ARCHIVE`, a sandbox upload path and
+  `tests/data/`, but never at `bench-archive/`, which this repository carries.
+  So the numerical regression against the 2026-08-07 run (worst relative
+  difference 1.6e-06) and the byte-exact `.dat` round trip -- the two tests
+  that hold the port to the LabVIEW original -- ran only for whoever knew to
+  set the variable. `python -m pytest -q` is now **814 passed, nothing
+  skipped**.
+
 **2026-09-08, the Keithley console** (`bace/consoles/keithley/`, and its own
 README). The 2400 driven by hand: source a voltage or a current, hold a
 compliance, switch the output on, watch what comes back. No module, no run, no

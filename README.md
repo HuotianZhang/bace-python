@@ -49,6 +49,14 @@ One test fails on the machine this port was written on — a stray 64-bit
 `delib64.dll` in System32 makes the DIO backend findable where the test needs it
 absent. There is no DELIB on Linux, so expect a clean run there.
 
+`.github/workflows/tests.yml` runs the suite on every push and pull request, on
+**ubuntu-latest and windows-latest** — Windows because the lab PC runs
+WinPython and this project has already been bitten by the difference (a colon
+in `material` built a path that failed there and passed on Linux; the `.dat`
+files are byte-exact with CRLF). No runner touches an instrument: the suite is
+the simulated rig and recorded transcripts throughout, so the `rig` extra is
+not installed.
+
 ## Layout
 
 ```
@@ -89,7 +97,7 @@ before doing anything, so every relative path below still resolves.
 Everything runs end to end on the simulated rig, with no instruments present:
 
 ```
-python -m pytest -q                    # 795 passed, 7 skipped
+python -m pytest -q                    # 814 passed, and nothing skipped
 python demo_scan.py                    # a simulated transient scan
 python -m bace.bench                   # the offline stages of the bench harness
 python -m bace.service --sim --fast    # the service on the simulated rig, http://127.0.0.1:8900/

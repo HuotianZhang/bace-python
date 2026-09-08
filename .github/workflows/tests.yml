@@ -1,0 +1,75 @@
+# The suite, on both platforms this project actually runs on.
+#
+# **Why Windows is not optional here.** The lab PC runs WinPython, and this
+# repository has already been bitten by the difference: `material =
+# "PTQ10:IT-4F"` — the service contract's own example — built a path segment
+# with a colon in it, which failed on the lab PC and passed on Linux
+# (`HANDOFF.md` §3). The `.dat` files are byte-exact with CRLF line endings and
+# a round-trip test to match, which is the other class of thing that only
+# diverges on Windows. A green Linux run says nothing about either.
+#
+# Python 3.11 on both, because that is `requires-python` and what the bench
+# runs; 3.12 on Linux as well, so the floor and a newer interpreter are both
+# covered without paying for a second Windows job.
+#
+# Nothing here touches an instrument. The whole suite runs against
+# `bace.drivers.simulated` and against recorded transcripts, so no runner needs
+# VISA — the `rig` extra is deliberately not installed.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push supersedes the run still going for the first.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  suite:
+    name: ${{ matrix.os }} · py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Both platforms report, always. A red Linux job that hid the Windows
+      # result would waste the reason this matrix exists.
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, python: "3.11" }
+          - { os: ubuntu-latest, python: "3.12" }
+          - { os: windows-latest, python: "3.11" }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # `ui/`'s own suite is Node's (`node --test`), and `tests/test_ui.py`
+      # runs it from pytest — skipping where there is no Node, which is every
+      # machine that has not installed one. A runner has one.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # And eslint, which `tests/test_ui.py` also skips without. It is one
+      # rule, `no-undef`, and it is there because a name that was renamed in
+      # one module and read in another took the console's router down (#82) —
+      # no test mounts a view, so nothing else would have caught it.
+      - name: install eslint
+        run: npm install --no-save --no-audit --no-fund eslint@^9
+
+      - name: install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[service,dev]"
+
+      # `-rs` so a skip is visible: this suite skips only when something it
+      # needs is absent, and a silent skip on CI is a test nobody is running.
+      - name: suite
+        run: python -m pytest -q -rs
