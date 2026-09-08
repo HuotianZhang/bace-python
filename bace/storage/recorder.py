@@ -172,7 +172,8 @@ class RunRecorder:
             # stored traces are averaged over loops while this is per shot, so
             # it cannot be recomputed from the file afterwards (2026-09-08).
             "sync_lag_ns": None if (ev.sync_light is None or ev.sync_dark is None)
-            else sync_lag_ns(ev.sync_light.y, ev.sync_dark.y, float(ev.sync_light.dt)),
+            else sync_lag_ns(ev.sync_light.y, ev.sync_dark.y, float(ev.sync_light.dt),
+                             float(ev.sync_light.t0)),
             "edge_light_ns": edge_10_90_ns(ev.light.y, dt),
             "edge_dark_ns": edge_10_90_ns(ev.dark.y, dt),
             "sync_edge_light_ns": None if ev.sync_light is None else sync_edge_ns(

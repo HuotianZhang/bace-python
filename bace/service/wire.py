@@ -425,7 +425,8 @@ def _alignment(light: np.ndarray, dark: np.ndarray, dt: float | None,
     if yl is not None and yd is not None and getattr(sync_light, "dt", None):
         out["sync_lag_ns"] = sync_lag_ns(np.asarray(yl, dtype=float),
                                          np.asarray(yd, dtype=float),
-                                         float(sync_light.dt))
+                                         float(sync_light.dt),
+                                         float(getattr(sync_light, "t0", 0.0)))
     for key, tr in (("averages_light", light_tr), ("averages_dark", dark_tr)):
         count = getattr(tr, "count", None)
         out[key] = None if count is None else int(count)

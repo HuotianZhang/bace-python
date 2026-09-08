@@ -193,6 +193,35 @@ def test_an_offset_the_charge_hides_from_the_spike_lag_is_still_caught():
     assert v["level"] == "warn" and "offset in time" in v["text"]
 
 
+def test_a_sync_of_noise_or_glitches_gives_no_lag_at_all():
+    """A trace of digitiser noise has a peak-to-peak above zero and correlates
+    against another one to an arbitrary number -- -1.54 ns for these two --
+    and two single-sample glitches gave 1.5 ns. Either would be read as a
+    verdict: over the threshold it voids a good shot, under it the `ok` line
+    calls a spike lag "charge, not jitter" on a number that means nothing."""
+    from bace.core.diagnostics import sync_lag_ns
+
+    rng = np.random.default_rng(7)
+    noise_a, noise_b = rng.normal(0, 2e-3, N), rng.normal(0, 2e-3, N)
+    assert sync_lag_ns(noise_a, noise_b, DT, T0) is None
+    glitch_a, glitch_b = np.full(N, 0.01), np.full(N, 0.01)
+    glitch_a[int(round(-T0 / DT))] = 1.2
+    glitch_b[int(round(-T0 / DT)) + 3] = 1.2
+    assert sync_lag_ns(glitch_a, glitch_b, DT, T0) is None
+    # and a real pair still reads
+    assert sync_lag_ns(sync(0.0), sync(1.0), DT, T0) == pytest.approx(1.0, abs=0.15)
+
+    # the verdict must then say the timing was not checked, not that it was
+    light = Trace(spike(0.0) + extraction(), DT, T0, count=200)
+    dark = Trace(spike(0.0), DT, T0, count=200)
+    v = W.shot_verdict(light.y, dark.y, {"autorange_passes": 1}, dt=DT,
+                       light=light, dark=dark,
+                       sync_light=Trace(noise_a, DT, T0), sync_dark=Trace(noise_b, DT, T0))
+    assert v["sync_lag_ns"] is None
+    assert "no sync to check the timing" in v["text"]
+    assert "charge, not jitter" not in v["text"]
+
+
 def test_a_photocurrent_cannot_hide_a_real_offset_from_the_sync():
     """The case that defeats every measure taken from the light and dark
     traces alone: a 14 mA extraction current on top of a genuine 1 ns offset.

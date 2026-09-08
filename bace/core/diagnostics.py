@@ -82,8 +82,19 @@ def spike_lag_ns(light: np.ndarray, dark: np.ndarray, dt: float) -> float | None
     return float(-(shift - (x.size - 1)) * dt * 1e9)
 
 
+MIN_SYNC_V = 0.1
+"""How far a sync trace must swing before there is an edge on it to align.
+
+The rig's sync is 1.19 V and its digitiser noise is about 2 mV, so this sits
+an order of magnitude clear of both. Without it `sync_lag_ns` correlates
+noise against noise and returns a number: a noise-only pair measured -1.54 ns
+here, which either voids a good shot or, worse, passes as proof that a real
+lag was checked. Same value as `experiment.transient.MIN_SYNC_SWING_V`, which
+is where the run refuses to measure at all."""
+
+
 def sync_lag_ns(sync_light: np.ndarray, sync_dark: np.ndarray,
-                dt: float) -> float | None:
+                dt: float, t0: float = 0.0) -> float | None:
     """Lag of the dark acquisition's trigger edge behind the light one, in ns.
 
     **The one measurement that separates a real timing offset from the charge
@@ -105,13 +116,26 @@ def sync_lag_ns(sync_light: np.ndarray, sync_dark: np.ndarray,
     chain moved and the spike lag is the device's.
 
     Same sign convention as `spike_lag_ns`: positive means the dark edge came
-    later. None when either trace has no edge, or the window does not fit.
+    later.
+
+    **None unless both traces actually carry the edge**, which is not the same
+    as carrying samples. A trace of digitiser noise has a peak-to-peak above
+    zero and correlates against another one to an arbitrary lag -- measured
+    -1.54 ns on two noise traces -- and a pair of single-sample glitches gave
+    1.5 ns. Either would be read as a verdict: over `SYNC_LAG_NS` it voids a
+    good shot, under it the `ok` line calls a spike lag "charge, not jitter"
+    on the strength of a number that means nothing. So both traces must swing
+    at least `MIN_SYNC_V` and both must have an edge `sync_edge_ns` can read,
+    and when they do not this returns None and the caller says the timing
+    could not be checked (2026-09-08).
     """
     a = np.asarray(sync_light, dtype=float)
     b = np.asarray(sync_dark, dtype=float)
     if a.size == 0 or a.size != b.size or not dt or not np.isfinite(dt):
         return None
-    if np.ptp(a) <= 0 or np.ptp(b) <= 0:
+    if np.ptp(a) < MIN_SYNC_V or np.ptp(b) < MIN_SYNC_V:
+        return None
+    if sync_edge_ns(a, dt, t0) is None or sync_edge_ns(b, dt, t0) is None:
         return None
     # The edge, by its steepest step -- the same way `sync_edge_ns` finds it,
     # and for the same reason: a sync may be a narrow pulse or a step, and
