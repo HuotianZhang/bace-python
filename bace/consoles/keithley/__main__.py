@@ -32,6 +32,7 @@ is acceptable only where nobody but this machine can connect.
 from __future__ import annotations
 
 import argparse
+import errno
 import ipaddress
 import os
 import sys
@@ -58,6 +59,19 @@ def is_loopback(host: str) -> bool:
         return ipaddress.ip_address(host.strip()).is_loopback
     except ValueError:
         return False
+
+
+WINDOWS_PORT_TAKEN = (10013, 10048)
+"""`WSAEACCES` and `WSAEADDRINUSE`. Windows does not answer a bound port with
+`EADDRINUSE`: a second `bind` raises 10013. Matched on `winerror` rather than
+`errno`, which Python maps 10013 to `EACCES` -- and `EACCES` on POSIX is a
+privileged port, not a busy one."""
+
+
+def _port_is_taken(exc: OSError) -> bool:
+    """Whether `exc` from `bind` means somebody already has the port."""
+    return (getattr(exc, "errno", None) == errno.EADDRINUSE
+            or getattr(exc, "winerror", None) in WINDOWS_PORT_TAKEN)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -212,7 +226,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\nthe panel  http://{a.host}:{server.server_port}/   (Ctrl-C to stop; "
               "the output goes off on the way out)")
 
-    serve_forever(panel, host=a.host, port=a.port, on_ready=ready)
+    try:
+        serve_forever(panel, host=a.host, port=a.port, on_ready=ready)
+    except OSError as exc:
+        # Almost always the console started twice. A traceback about a socket
+        # would send somebody looking at the instrument — and the instrument
+        # is fine; `serve_forever`'s own `finally` has already switched its
+        # output off on the way out. Same treatment, and the same reasoning,
+        # as `examples/shutter_console`.
+        print(f"cannot listen on {a.host}:{a.port}: {exc}", file=sys.stderr)
+        if _port_is_taken(exc):
+            print(f"  a Keithley console is already running — its page is at "
+                  f"http://{a.host}:{a.port}/", file=sys.stderr)
+        return 2
     return 0
 
 

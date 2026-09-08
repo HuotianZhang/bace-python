@@ -54,7 +54,11 @@ because a typo that silently ran the defaults would be a bench nobody chose.
   so no third key was invented to hold the same number twice.
 * **The output goes off when the console stops.** Ctrl-C, `kill`/`SIGTERM`, a
   closed terminal (`SIGHUP`), Ctrl-Break on Windows, an exception out of the
-  server — each is caught and the source is switched off on the way out.
+  server — and a port that turns out to be taken, which is how starting the
+  console twice ends, by which time the instrument is open and may already
+  have been driving. Each is caught and the source is switched off on the way
+  out; a taken port also gets a sentence rather than a traceback about a
+  socket.
   `SIGKILL` and Windows' `TerminateProcess` cannot be caught by anything, so
   the output survives those; nothing in software fixes that, and the
   instrument's own OUTPUT key does. A

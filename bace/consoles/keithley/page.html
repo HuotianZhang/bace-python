@@ -266,6 +266,13 @@ async function call(path, body) {
     if (!r.ok) {
       say(answer.error || (path + " → " + r.status), answer.level || "warn");
       formRev += 1;
+    } else if (answer && answer.pending) {
+      // 202: the console took it and it has not run yet — an output-off
+      // waiting behind a read that has not finished. `r.ok` is true for a
+      // 202, so this used to fall into the `else` below and clear the
+      // message, leaving the operator with a source still live and a page
+      // saying nothing at all about it.
+      say(answer.error || "queued; it will run", answer.level || "warn");
     } else said = null;
     if (answer && answer.panel !== undefined) apply(answer);
     return r.ok ? answer : null;
@@ -422,7 +429,10 @@ function draw() {
     text: "the last display reading failed: " + state.poll.last_error });
   if (inst.mode === "sim") notes.push({ level: "warn", key: "sim",
     text: "simulated: there is no instrument behind this panel. The numbers come from a model of a solar cell and must never be read as a measurement." });
-  keyed($("notes"), JSON.stringify(notes.map((n) => [n.key, n.level])), () =>
+  // The text is in the key, not just the kind. Two display reads failing in a
+  // row with *different* errors both produce `["pollerr", "warn"]`, so the
+  // page went on showing the first one while calling it the last.
+  keyed($("notes"), JSON.stringify(notes.map((n) => [n.key, n.level, n.text])), () =>
     notes.map((n) => el("p", { class: "note " + n.level, text: n.text })));
 
   const say_ = $("say");

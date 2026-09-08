@@ -29,7 +29,7 @@ from bace.consoles.keithley.__main__ import build_parser, is_loopback, main
 from bace.consoles.keithley import panel as panel_module
 from bace.consoles.keithley.panel import (JOB_TIMEOUT_S, KeithleyPanel, PanelPending,
                                           PanelRefused, PanelUnavailable, source_args)
-from bace.consoles.keithley.server import make_server
+from bace.consoles.keithley.server import make_server, serve_forever
 from bace.drivers.keithley2400 import PanelSetup, SourceMeterConfig
 from bace.drivers.simulated import make_bench
 
@@ -329,6 +329,36 @@ def test_a_refused_cross_site_request_is_told_nothing_about_the_bench(console):
     status, out = console("POST", "/api/state", {}, **{"Content-Type": "text/plain"})
     assert status == 403
     assert "panel" not in out and "output" not in out
+
+
+def test_a_port_already_taken_still_switches_a_live_output_off():
+    """Starting the console twice is the ordinary way to meet this, and by the
+    time the port is refused the instrument is open — `_open_real` may already
+    have found its output live, left there by whoever was using it. The server
+    was built *outside* the try, so that raised straight out of the program:
+    no output-off, no warning, a source driving and a traceback about a
+    socket."""
+    import socket
+
+    held = socket.socket()
+    held.bind(("127.0.0.1", 0))
+    held.listen(1)
+    taken = held.getsockname()[1]
+
+    p = make_panel()
+    p.start()
+    p.set_source({"function": "I", "level": 0.0})
+    p.set_output(True)
+    p._bus.stop()                       # `serve_forever` starts its own worker
+    p._bus = panel_module._Bus()
+    assert p.smu.output_enabled is True
+
+    try:
+        with pytest.raises(OSError):
+            serve_forever(p, host="127.0.0.1", port=taken)
+    finally:
+        held.close()
+    assert p.smu.output_enabled is False, "the finally ran even though the bind did not"
 
 
 def test_a_ceiling_that_is_not_a_number_is_refused_at_construction():

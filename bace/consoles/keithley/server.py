@@ -256,14 +256,23 @@ def serve_forever(panel: KeithleyPanel, *, host: str, port: int,
     `kill`, a closed terminal, an exception out of the server -- the source is
     switched off on the way out.
     """
-    server = make_server(panel, host=host, port=port)
+    # The worker starts **before** anything that can fail, and everything after
+    # it is inside the `try`. `make_server` raises when the port is taken --
+    # the ordinary way of starting the console twice -- and by then the
+    # instrument is open and `_open_real` may already have found its output
+    # live, left there by whoever was using it. Constructed outside the `try`,
+    # that raised straight out of the program: no output-off, no warning, a
+    # source driving and a traceback about a socket.
     panel.start()
-    thread = threading.Thread(target=server.serve_forever, name="keithley-http",
-                              daemon=True)
-    thread.start()
+    server = None
+    thread = None
     stop = threading.Event()
     restore = _catch_stop_signals(stop)
     try:
+        server = make_server(panel, host=host, port=port)
+        thread = threading.Thread(target=server.serve_forever, name="keithley-http",
+                                  daemon=True)
+        thread.start()
         if on_ready is not None:
             on_ready(server)
         # Not `thread.join()`: a signal handler can only ask, and this is what
@@ -274,8 +283,9 @@ def serve_forever(panel: KeithleyPanel, *, host: str, port: int,
         pass
     finally:
         restore()
-        server.shutdown()
-        server.server_close()
+        if server is not None:
+            server.shutdown()
+            server.server_close()
         if not panel.close():
             print("\nWARNING: the SourceMeter output could not be confirmed off — the "
                   "instrument did not answer in time. Check it, and switch the output "
