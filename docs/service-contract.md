@@ -1,7 +1,7 @@
 # BACE service layer — contract v1
 
 2026-09-02. This is the implementation contract for `bace/service/`, derived from
-`docs/service-plan.md` (the plan), the Round 3 console design
+`docs/history/service-plan.md` (the plan), the Round 3 console design
 (`docs/bace-console-round3.html`, artifact *UI mockups: Pipeline bench timeline*)
 and the design pack, historical since 2026-09-02 — what survives of it is
 `docs/ui-rules.md`, and the canvas source is `docs/design/`. Where this file
@@ -324,8 +324,8 @@ LabVIEW original waited on is set per acquisition, not per completed
 average — and the engine yields a warning `Notice` when a trace folded fewer
 than `n_averages`. Since 2026-09-06 the driver empties the averager before
 every acquisition (it was never emptied before, so `averages_dark` read
-`averages_light + ~27` and the dark trace was half light — `HANDOFF.md`
-trap 5), acquires with `:DIG` + `*OPC?`, which runs to the whole count, and
+`averages_light + ~27` and the dark trace was half light — `docs/notes.md`, hardware
+defect 5), acquires with `:DIG` + `*OPC?`, which runs to the whole count, and
 refuses a short count as `ScopeError`; `null` now means only that the
 firmware did not answer `:WAV:COUN?` with a number. `sync_edge_ns` reads a **narrow-pulse sync** as well as a step
 (2026-09-07): this rig's sync is 5.5 ns wide, 11 samples of the 400 in the
@@ -434,11 +434,11 @@ sample, sample_file, out, rig_toml, run_toml, fingerprint, journal, errors,
 last_error`. The same `session` block rides on `GET /bench` and in `Hello`.
 
 **`PUT /session/sample`** (2026-09-05) sets the `[sample]` block — the console's
-identity field, `docs/ux-screening.md` finding 5. Before it, the block came
+identity field, `docs/history/ux-screening.md` finding 5. Before it, the block came
 only from `run.toml`, so an operator who mounted a device on a session already
 running could not say so without editing the file and restarting the process
 that owns every instrument; the folder name is the record
-(`docs/naming-plan.md`) and every run of that session was filed without one.
+(`docs/history/naming-plan.md`) and every run of that session was filed without one.
 
 ```
 PUT /session/sample  {"sample": "s4", "material": "PTQ10IT4F", "pixel": null}
@@ -481,7 +481,7 @@ spelled.** `sample`, `material` and `pixel` reached
 `RunMetadata.folder_name()` **raw** until 2026-09-05 — only the comment was
 slugged — so `material = "PTQ10:IT-4F"`, §4's own example, built a path segment
 with a colon in it, which fails on the lab PC and passes on Linux, and
-`sample = "a/b"` was two directories (`docs/naming-plan.md` §2, a live defect
+`sample = "a/b"` was two directories (`docs/history/naming-plan.md` §2, a live defect
 since it was written). All three are slugged now, at `NAME_MAX = 24`, and
 `as_dict()` keeps them verbatim — for a material whose real name has a colon
 in it, the difference between recording the material and recording somebody's
@@ -797,7 +797,7 @@ warns that it was ignored rather than letting it vanish from the schedule.
 - `GET /runs?session=<id>|all` → `[RunSummary]`: `run_id, session_id, kind ("manual"|"pipeline"), name, module|tree_summary, sample, state, queued_at, started_at, finished_at, kept, requested, outcome_text, folder, node_count, node_count_done, voc_min, voc_max, light_curves`.
   `sample` is the `[sample]` block the run was queued under (`sample, material,
   pixel, operator, comment, temperature_k`), on every row — the identity
-  travels with the run, not only in the session header (`docs/naming-plan.md`
+  travels with the run, not only in the session header (`docs/history/naming-plan.md`
   rule 1, 2026-09-04), so a grid grouped by device parses no folder name.
 - `GET /runs/{id}` → the full record: tree, resolved schedule, params with
   provenance as executed per node, per-node outcomes (`NodeDone` details),

@@ -4,7 +4,7 @@
 # repository has already been bitten by the difference: `material =
 # "PTQ10:IT-4F"` — the service contract's own example — built a path segment
 # with a colon in it, which failed on the lab PC and passed on Linux
-# (`HANDOFF.md` §3). The `.dat` files are byte-exact with CRLF line endings and
+# (`docs/history/naming-plan.md` §2). The `.dat` files are byte-exact with CRLF line endings and
 # a round-trip test to match, which is the other class of thing that only
 # diverges on Windows. A green Linux run says nothing about either.
 #

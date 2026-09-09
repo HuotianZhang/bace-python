@@ -1,48 +1,26 @@
-# Bench check — what to run on the lab PC
+# Bench check-out
 
-Nothing in this port has ever spoken to an instrument. Every SCPI string was
-recovered from a LabVIEW binary. This harness sends each one and reads the
-instrument's error queue **immediately afterwards**, so the report comes back
-with an exact list of what worked, what was rejected, and where the recovered
-behaviour differs from what the instruments actually do.
+Every SCPI string in this port was recovered from a LabVIEW binary. The
+harness sends each one and reads the instrument's error queue immediately
+afterwards, so the report is an exact list of what worked, what was rejected,
+and where the recovered behaviour differs from the instrument's own.
 
-Three files land in `bench-reports/`: a `.txt` to read now, a `.html` to look
-at, and a `.json` with the full command transcript. **Send the `.json` back** —
-that is the one with everything in it.
-
-## Where to run it from
-
-**Run the copy I commit to, or tell me which copy is canonical.** The second
-bench session ran `Q:\Huotian\bace-python` while the fixes had gone to
-`D:\BACE\bace-python`, so the session repeated three defects that were already
-fixed. Either re-copy before each run, or say which path to write to.
+Three files land in `bench-reports/`: a `.txt` to read, a `.html` to look at,
+and a `.json` with the full command transcript.
 
 ## Setup, once
 
-Double-click **`scripts\Setup.bat`**. It installs into `py -3` -- the
-interpreter every other `.bat` here calls -- checks that `bace.service`
-imports, and says what came in.
-
-By hand it is one line, from the repo root:
+From the repository root:
 
 ```
-cd D:\BACE\bace-python
 py -3 -m pip install -e .[lab,dev]
 ```
 
-In PowerShell quote it, `pip install -e '.[lab,dev]'`, or the brackets are
-read as an index.
+`scripts/Setup.bat` does the same by double-click. In PowerShell quote it,
+`pip install -e '.[lab,dev]'`, or the brackets are read as an index.
 
-`lab` is the rig and the service together, which is what a bench PC needs:
-numpy, scipy and h5py for the measurement; fastapi, uvicorn and websockets
-for the service the console talks to; pyvisa for the instruments. `dev` adds
-pytest and httpx2, so the suite runs here too. The `-e` is what makes this
-folder the code that runs -- edit a file and the next run has it -- which
-matters on a bench that keeps more than one copy of the tree.
-
-On a machine with no instruments, `scripts\Setup (sim).bat` installs the same
-thing without pyvisa: `--sim` never imports it, so the console and the whole
-API work with no VISA backend at all.
+`h5py` is optional but worth having: without it the `.dat` files are still
+written and the run is not lost, but there is no HDF5 alongside them.
 
 `pyvisa` uses the NI-VISA already installed for LabVIEW, so GPIB works. Nothing
 is installed system-wide by the harness and nothing is written outside
@@ -50,14 +28,13 @@ is installed system-wide by the harness and nothing is written outside
 
 ## Which copy am I running?
 
-There is more than one copy of this tree on the bench — it is edited in one
-folder and executed from another — and on 2026-09-01 the executed copy sat ten
-files behind for an hour with nothing saying so. So pass 1 reports a **code
+There may be more than one copy of this tree on the bench, edited in one
+folder and executed from another. Pass 1 therefore reports a **code
 fingerprint**: a hash over every `.py` in the package, path and content, ignoring
 `__pycache__`.
 
 ```
-package            = Q:\Huotian\bace-python\bace
+package            = <checkout>\bace
 code fingerprint   = 3279a559bfa8
 newest source file = bench/checks.py (2026-09-01 00:02)
 ```
@@ -197,10 +174,10 @@ readings, 4.7513e-11 and 4.7638e-11 A, agree to 0.26 % — that is the SMU readi
 itself, with nothing attached — and the nearest connected reading is four decades
 above. Not a close call.
 
-Before that, the evidence was: `shutter_lv2012.vi` hard-codes `module nr = 0`
-(good), plus my reading of `open/close shutter 2` in `BACE_Mehrdad.vi` as the
-relay (a guess — the binary never calls it one). `routing.Relay` guards module 1
-as the path switch, so that guess was load-bearing. It is now a measurement.
+Before that, the evidence was `shutter_lv2012.vi` hard-coding `module nr = 0`,
+and a reading of `open/close shutter 2` in `BACE_Mehrdad.vi` as the relay,
+which the binary never names. `routing.Relay` guards module 1 as the path
+switch, so that reading was load-bearing. It is now a measurement.
 
 Re-run it after any rewiring; it takes about a minute.
 
@@ -215,7 +192,7 @@ four states of the two lines and takes three readings in each:
 | not connected | undefined | ~0 | leakage floor |
 
 **Photocurrent** marks the one state where the device is on the Keithley *and*
-light reaches it (Huotian's rule). That fixes the values of both lines but not
+light reaches it. That fixes the values of both lines but not
 which line is which — both are set the same way there, so the pair is
 symmetric. **Forward conduction** breaks the symmetry: flipping one line at a
 time from the photocurrent state, the flip that stops conduction moved the
@@ -279,14 +256,13 @@ as any other measurement.
 **Set `--vcoll` and `--vpre` to values you would normally use on that sample.**
 The defaults are the archive's, not yours.
 
-## What to send back
+## Output
 
-`bench-reports\bench_<stamp>.json`. If `--measure` ran, the run folder under
-`bench-reports\first-light\` too.
+`bench-reports\bench_<stamp>.json` is the record of a session. If `--measure`
+ran, the run folder under `bench-reports\first-light\` is too.
 
 ## If something goes wrong
 
 Every check is caught, so one broken instrument never ends the session — the
 report just records the traceback and continues. A half-complete report from a
-rig with one dead instrument is far more useful than no report, so if a pass
-errors, send the `.json` anyway.
+rig with one dead instrument is still a report; keep the `.json`.

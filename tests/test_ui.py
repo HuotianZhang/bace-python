@@ -217,7 +217,7 @@ def test_the_nested_fixture_is_a_temperature_loop_inside_a_temperature_loop():
 
 
 def test_the_journals_have_no_seq_gaps():
-    """`docs/ui-kickoff.md` says these carry "real seq gaps". They do not.
+    """`docs/history/ui-kickoff.md` says these carry "real seq gaps". They do not.
 
     A journal is one monotonic counter with `StepPhase` — the only unjournalled
     frame — consuming no number. Gaps belong to the *socket*, where a client
@@ -368,7 +368,7 @@ def test_every_console_suite_is_reached_by_the_one_that_runs_them():
 
 def test_the_results_fixtures_carry_the_identity_and_a_partial_cell():
     """What the results tab draws from (`docs/ui-plan.md` M6), and the shape
-    `docs/naming-plan.md` rule 1 promised it: every row of `GET /runs` names
+    `docs/history/naming-plan.md` rule 1 promised it: every row of `GET /runs` names
     the device it ran on, every module node of `GET /runs/{id}` carries the
     temperature triple, its LED level, its V_oc and what it measured -- and
     the grid has a cell that was stopped early, because R2·3's "outlined,

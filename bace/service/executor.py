@@ -9,7 +9,7 @@ It never re-derives structure from the tree -- what runs, in which order, was
 decided once in `pipeline.py`, where it can be tested without a rig, and the
 Dry run the operator saw is the schedule this walks.
 
-**The three bindings** (the plan, "The pipeline executor -- the only new logic", docs/service-plan.md;
+**The three bindings** (the plan, "The pipeline executor -- the only new logic", docs/history/service-plan.md;
 contract section 7). The pipeline resolved them between *parameters*; this
 is where they meet the instruments:
 
@@ -654,7 +654,7 @@ class _Executor:
         # off the raw `ctx.temperature_k` this was absent on every manual run
         # and every pipeline without a temperature node, so the journal said
         # nothing about the temperature of exactly the runs whose folder
-        # name was the only record of it (`docs/naming-plan.md` §1).
+        # name was the only record of it (`docs/history/naming-plan.md` §1).
         kelvin, how, source = ctx.temperature()
         if kelvin is not None:
             detail["temperature_k"] = kelvin

@@ -68,7 +68,7 @@ inverted_output = false   # unused while output_polarity is set explicitly below
                                 # and pulsed to Vcoll, which is BACE as described.
                                 # First light on 2026-09-01 gave Q = -2.07e-10 C
                                 # where the archive at the same Vcoll and delay
-                                # gives +3.65e-10 C -- see BENCH.md.
+                                # gives +3.65e-10 C -- see docs/bench-checkout.md.
 invert_polarity = true   # swap-and-negate the computed levels (the original's "New Sample?")
                                 # both levels for an inverted device. A sign
                                 # convention — wrong here flips every charge.

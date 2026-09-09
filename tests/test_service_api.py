@@ -292,8 +292,8 @@ def test_a_refused_action_is_a_409_with_the_text_and_nothing_moves(service):
 # only way to say what was mounted was to edit `run.toml` and restart the
 # process that owns every instrument, so a session opened on a fresh checkout
 # filed every run of that day under a name with no device in it -- and the
-# folder name is the record (`docs/naming-plan.md`), which is why this was the
-# one finding in `docs/ux-screening.md` whose cost was permanent.
+# folder name is the record (`docs/history/naming-plan.md`), which is why this was the
+# one finding in `docs/history/ux-screening.md` whose cost was permanent.
 
 def test_the_sample_block_is_merged_and_a_null_puts_a_key_back_to_the_file(service):
     client, session = service
@@ -355,7 +355,7 @@ def test_an_unnamed_key_is_refused_with_what_is_accepted(service):
 
 
 def test_an_awkward_name_is_reduced_where_the_name_is_built_and_kept_where_it_matters(service):
-    """`docs/naming-plan.md` §2's live defect, closed at its source.
+    """`docs/history/naming-plan.md` §2's live defect, closed at its source.
 
     `sample`, `material` and `pixel` reached `folder_name()` raw until
     2026-09-05 — only the comment was slugged — so `material = "PTQ10:IT-4F"`
@@ -564,7 +564,7 @@ def test_a_manual_run_streams_over_the_websocket_and_lands_in_the_record(service
 
 
 def test_the_identity_travels_with_the_run_and_both_endpoints_agree_on_the_nodes(service):
-    """`docs/naming-plan.md` rule 1, on the wire. Every row of `GET /runs`
+    """`docs/history/naming-plan.md` rule 1, on the wire. Every row of `GET /runs`
     carries the `[sample]` block it was queued under; `GET /runs/{id}` carries
     it too, and its `nodes` -- each module node with its temperature triple,
     its LED level, its V_oc and what it measured -- are the same shape whether

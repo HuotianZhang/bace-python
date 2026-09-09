@@ -45,7 +45,7 @@ with a `#201e1d` border, both 800-weight Archivo.
 
 ## R2·3 — the results design
 
-`docs/ui-kickoff.md` used to say the results tab was undesigned on both sides.
+`docs/history/ui-kickoff.md` used to say the results tab was undesigned on both sides.
 It is not: Round 2's third artboard is a finished results view, set aside with
 Round 2 and never given a Round 3 replacement.
 

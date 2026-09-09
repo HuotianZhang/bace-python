@@ -28,7 +28,7 @@ lines and nothing else, so the session must journal them for every run:
   one run, show the whole card as last-used and hide a recipe edit behind it
   for twenty sessions. `sample` is the `[sample]` block the run was queued
   under -- its identity, per run rather than only in the header
-  (`docs/naming-plan.md` rule 1): `Journal` resumes an existing file and
+  (`docs/history/naming-plan.md` rule 1): `Journal` resumes an existing file and
   writes `SessionStarted` only when it did not, so two processes started in
   the same second share a file and the second one's device would otherwise
   be attributed to the first's. `run_index` exposes it on every row.

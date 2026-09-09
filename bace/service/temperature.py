@@ -20,7 +20,7 @@ the setpoint is written. When there is no controller the node pauses exactly
 as it did before the console was wired: `NeedsOperator`, the worker blocks in
 `Job.wait_for_operator`, the resume's `temperature_k` becomes the subtree's
 temperature, `hold_s` is slept after the resume. The plan
-(docs/service-plan.md, P3) promised that wiring the 331 would automate this
+(docs/history/service-plan.md, P3) promised that wiring the 331 would automate this
 node with the API unchanged, and it is unchanged: no new route, no new tree
 field, no new event type. The pause is still there, as the fallback and as
 the path every failure takes.

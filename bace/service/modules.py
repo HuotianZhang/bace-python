@@ -1687,7 +1687,7 @@ def _bind_temperature(ctx: RunContext, rig: Rig) -> tuple[float | None, str, str
     `ctx.temperature()` is the tree's binding or the session's typed number.
     Until 2026-09-04 every recipe typed 290, so a run on a bench sitting at
     220 K was filed as `290 K · typed` -- a wrong number wearing an honest
-    label (`docs/naming-plan.md` §4). The recipes now type nothing, and a
+    label (`docs/history/naming-plan.md` §4). The recipes now type nothing, and a
     bench with a 331 is asked once, when the node starts: `how = "read"`,
     the source the same classifier the settle uses. Bound onto `ctx`, so the
     executor's `NodeDone` says the same as the file. A bench with no

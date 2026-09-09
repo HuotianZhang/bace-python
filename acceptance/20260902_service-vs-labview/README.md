@@ -42,7 +42,7 @@ service_153722/     the service's own HDF5 (bace-run/2). It carries the
 journals/           three sessions of the rig day, in order:
                     125751  the run refusing to measure: "no sync on CHAN3,
                             4.4 mV peak to peak". The trigger calibration
-                            was circular (HANDOFF section 6, defect 11).
+                            was circular (`docs/notes.md`, hardware defect 11).
                     144844  everything working, wrong polarity: :OUTP1:POL
                             INV, photo peak 0.23 mA, Q +5e-11, and the
                             "tail is not a baseline" warning firing.

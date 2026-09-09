@@ -38,7 +38,7 @@ compliance check on a new pixel, a look at a diode before it is worth queueing
 a run.
 
 That constraint is why the 1918-C has a console on `:8918` and the 331 one on
-`:8331` (`docs/service-plan.md`). This is the same shape for the 2400, and
+`:8331` (`docs/history/service-plan.md`). This is the same shape for the 2400, and
 `8924` continues the convention: the last two digits are the instrument's GPIB
 address, so the port says which instrument answers.
 

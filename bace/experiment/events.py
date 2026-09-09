@@ -290,7 +290,7 @@ class RunQueued(Event):
     travels with it rather than only in the session header, because a
     journal file is resumed by a second process started in the same second
     and a header is a property of the file, not of the runs in it
-    (`docs/naming-plan.md` rule 1). A fact about the queue, not something a
+    (`docs/history/naming-plan.md` rule 1). A fact about the queue, not something a
     run emits, so the recorders never see it; it lives here so the wire has
     one vocabulary and the service assembles none of it."""
 
