@@ -2,6 +2,12 @@
 
 Dated, newest first. Details and evidence are in `docs/`.
 
+## 2026-09-09
+
+- `introduction.html` at the repository root: how to run it and how the code
+  is arranged, with the rig schematic and the architecture diagrams. A single
+  file; opens from disk with the fonts in `ui/fonts/`.
+
 ## 2026-09-08
 
 - Repository reorganised for publication: `docs/figures/`, `docs/history/`,

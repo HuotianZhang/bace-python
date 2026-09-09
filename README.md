@@ -92,6 +92,7 @@ rig is built.
 
 | | |
 |---|---|
+| `introduction.html` | start here: how to run it and how the code is arranged, with diagrams. Open in a browser; no network needed |
 | `docs/README.md` | index of everything below |
 | `docs/notes.md` | the rig as measured, defects the hardware found, deliberate deviations from the original, open and closed questions |
 | `docs/bench-checkout.md` | the staged hardware check-out |
