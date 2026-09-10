@@ -1,0 +1,102 @@
+probe_averager 20260906_030246 on TCPIP0::PwM-DSO9054H.local::inst0::INSTR, source CHAN2
+    0.004  ? *IDN?                  -> KEYSIGHT TECHNOLOGIES,DSO9054H,MY53310104,06.74.01819   (3 ms)
+IDN: KEYSIGHT TECHNOLOGIES,DSO9054H,MY53310104,06.74.01819
+    0.007  > :SYST:HEAD OFF;
+    0.008  > :WAV:SOUR CHAN2;
+    0.012  ? :ACQ:AVER?             -> 1   (3 ms)
+    0.015  ? :ACQ:AVER:COUN?        -> 200   (3 ms)
+    0.019  ? :TRIG:SWE?             -> AUTO   (3 ms)
+    0.022  ? :CHAN2:RANG?           -> 5.35E-01   (3 ms)
+as found: AVER=1 COUN=200 SWE=AUTO RANG=5.35E-01
+    0.026  ? :CHAN2:RANG?           -> 5.35E-01   (3 ms)
+    0.028  > :TRIG:SWE AUTO;
+
+A. running versus stopped reads. AVER ON, COUN 200, then :RUN and read the count as it goes
+    0.032  > :STOP;:ACQ:AVER ON;:ACQ:AVER:COUN 200;
+    0.055  ? :WAV:COUN?             -> 200   (23 ms)
+   stopped, before :RUN: 200
+    0.058  > :RUN;
+    0.067  ? :WAV:COUN?             -> 200   (9 ms)
+    0.375  ? :WAV:COUN?             -> 200   (7 ms)
+    0.679  ? :WAV:COUN?             -> 200   (3 ms)
+    0.986  ? :WAV:COUN?             -> 200   (6 ms)
+    1.297  ? :WAV:COUN?             -> 200   (10 ms)
+    1.603  ? :WAV:COUN?             -> 200   (6 ms)
+    1.906  > :STOP;
+    1.925  ? :WAV:COUN?             -> 200   (18 ms)
+   stopped, after ~1.8 s: 200
+   -> if the running reads all say 200 and the stopped read is smaller, :WAV:COUN? reports the
+      configured count while running and the real one stopped; if they climb, it reports the real one
+
+B. does :STOP / :RUN continue the average? (no reset in between)
+    1.936  ? :WAV:COUN?             -> 200   (9 ms)
+    1.938  > :RUN;
+    2.440  > :STOP;
+    2.460  ? :WAV:COUN?             -> 200   (19 ms)
+   200 -> 200   (larger = continued, ~same small number = restarted)
+
+C. does :CDIS empty it? (scope stopped)
+    2.471  ? :WAV:COUN?             -> 200   (10 ms)
+    2.473  > :CDIS;
+    2.499  ? :WAV:COUN?             -> 0   (25 ms)
+   right after :CDIS, stopped: 0
+    2.501  > :RUN;
+    3.004  > :STOP;
+    3.025  ? :WAV:COUN?             -> 63   (20 ms)
+   200 -> 63 after 0.5 s running   (small = emptied, larger than before = not)
+
+D. AVER OFF, one single shot, then AVER ON again: emptied, or seeded as complete?
+    3.029  ? :WAV:COUN?             -> 63   (3 ms)
+    3.032  > :STOP;:ACQ:AVER OFF;
+    3.034  > :RUN;
+    3.336  > :STOP;
+    3.362  ? :WAV:COUN?             -> 1   (25 ms)
+   after the single shot, AVER OFF: 1
+    3.364  > :ACQ:AVER ON;:ACQ:AVER:COUN 200;
+    3.579  ? :WAV:COUN?             -> 0   (214 ms)
+   AVER ON again, still stopped: 0
+    3.582  > :RUN;
+    4.085  > :STOP;
+    4.101  ? :WAV:COUN?             -> 52   (16 ms)
+   63 -> 52 after 0.5 s running   (~50-250 = restarted from the shot; 200 = seeded complete)
+
+E. the LabVIEW double configure: COUN 64, :RUN, COUN 200
+    4.106  ? :WAV:COUN?             -> 52   (3 ms)
+    4.108  > :ACQ:AVER ON;:ACQ:AVER:COUN 64;
+    4.110  > :RUN;
+    4.112  > :ACQ:AVER ON;:ACQ:AVER:COUN 200;
+    4.615  > :STOP;
+    4.635  ? :WAV:COUN?             -> 125   (20 ms)
+   52 -> 125 after 0.5 s running
+
+F. a channel range write
+    4.645  ? :WAV:COUN?             -> 125   (9 ms)
+    4.647  > :CHAN2:RANG 5.35E-01;
+    4.649  > :RUN;
+    5.152  > :STOP;
+    5.171  ? :WAV:COUN?             -> 191   (18 ms)
+   same range rewritten: 125 -> 191
+    5.175  ? :WAV:COUN?             -> 191   (3 ms)
+    5.177  > :CHAN2:RANG 0.642;
+    5.178  > :RUN;
+    5.681  > :STOP;
+    5.708  ? :WAV:COUN?             -> 47   (27 ms)
+   range changed: 191 -> 47
+    5.712  > :CHAN2:RANG 5.35E-01;
+    5.714  > :RUN;
+    6.217  > :STOP;
+    6.237  ? :WAV:COUN?             -> 51   (20 ms)
+   range restored: 51
+
+G. :DIGitize with averaging on: does it complete the whole count?
+    6.241  > :STOP;:ACQ:AVER ON;:ACQ:AVER:COUN 32;:CDIS;
+    6.243  > :DIG CHAN2;
+    6.659  ? *OPC?                  -> 1   (416 ms)
+    6.688  ? :WAV:COUN?             -> 32   (28 ms)
+   *OPC? -> 1 after 0.42 s; count now 32  (32 = it waits for the average)
+    6.692  ? :ADER?                 -> +1   (3 ms)
+   ADER after that: +1
+    6.695  > :ACQ:AVER OFF;:RUN;
+    6.878  ? :CHAN2:RANG?           -> 5.35E-01   (183 ms)
+
+left AVER OFF, running, range 5.35E-01. Written to Q:\Huotian\bace-python\service-layer-dev-04d292\runs\probe_averager_20260906_030246.txt
