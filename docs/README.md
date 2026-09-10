@@ -1,6 +1,6 @@
 # Documentation
 
-Three kinds, in three places.
+Four kinds, in four places.
 
 - **`docs/` itself** — current documents. Wrong here is a defect; fix it in
   place.
@@ -9,6 +9,8 @@ Three kinds, in three places.
   claim is listed in `notes.md`.
 - **`history/`** — accurate for their date, not for today. Kept for the
   reasoning.
+- **`analysis/`** — one day's data worked through: the write-up, its figures
+  and tables. Accurate for their date, like `history/`.
 
 The figure pages are single HTML files with no external dependencies beyond a
 web font. Open them in a browser.
@@ -53,3 +55,11 @@ web font. Open them in a browser.
 | `history/ui-kickoff.md` | The brief the console was built from. |
 | `history/ux-screening.md` | A review of the measurement flow from the operator's side, 2026-09-05, and what it changed. |
 | `history/naming-plan.md` | How run folders and records carry sample identity. Rule 1 is built; the rest is record. |
+
+## Analysis
+
+| file | what it is |
+|---|---|
+| `analysis/2026-09-06/README.md` | The scope averager defect, and the 220–295 K sweep. |
+| `analysis/2026-09-06/spike-lag-and-dark-charge.md` | The spike-lag warning traced to the extracted charge, and Q split into photogenerated and injected parts by the shutter-shut control. |
+| `analysis/*.png` | Working figures from the same days that no write-up references: J–V curves and J–V(T), kinetics with the shutter open and shut, ln Q against V_pre, the shutter-shut control, V_oc against intensity. |

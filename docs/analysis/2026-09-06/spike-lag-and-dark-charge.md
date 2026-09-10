@@ -1,42 +1,51 @@
-# spike lag 的真正来源，与关快门对照拆开的 Q
+# Where the spike lag really comes from, and Q split by the shutter-shut control
 
-分析于 2026-09-07，用的是 2026-09-06 的数据。图：`spike-lag-diagnosis.png`、
-`spike-lag-explained.png`、`spike-lag-revised.png`。
+Analysed 2026-09-07 on the data of 2026-09-06. Figures: `spike-lag-diagnosis.png`,
+`spike-lag-explained.png`, `spike-lag-revised.png`.
 
-起因是控制台反复报的一条 warn：
+It started with a warning the console kept raising:
 
 > the light and dark displacement spikes are 0.46 ns apart (spike edges 6.0, 6.0 ns):
 > the trigger jittered during this shot, so their difference leaves the spike in the
 > photocurrent and Q of this shot is not a charge.
 
-## 0. 这条判据是什么
+## 0. What the rule is
 
-`core/diagnostics.spike_lag_ns`：把 light 和 dark 曲线在位移尖峰前后 60/100 ns
-的窗口里做互相关，峰值位置抛物线插值到亚采样，得到 dark 相对 light 的滞后。
-`service/wire.py` 的 `SPIKE_LAG_NS = 0.25` 以上判 warn。
+`spike_lag_ns` in `bace/core/diagnostics.py` cross-correlates the light and dark traces over a window
+60 ns before and 100 ns after the displacement spike, interpolates the correlation peak
+parabolically to sub-sample precision, and returns the dark trace's lag behind the light
+one. `SPIKE_LAG_NS = 0.25` in `bace/service/wire.py` is the threshold above which it warns.
 
-规则写于 2026-09-04/05 的一次真实抖动事故：23 个 shot 里 6 个光电流大十倍、
-符号反了，当时**三个特征同时出现**——滞后 0.3–1.2 ns、边沿从 6 ns 抹到 8–13 ns、
-尖峰幅度低 4–14 %。
+The rule was written after a real jitter incident on 2026-09-04/05: six of twenty-three
+shots had a photocurrent ten times too large with the sign flipped, and there **all three
+symptoms appeared together** — a lag of 0.3–1.2 ns, edges smeared from 6 ns to 8–13 ns,
+and spike heights 4–14 % apart.
 
-## 1. 现在的 shot 只满足滞后一项
+## 1. These shots show only the lag
 
-边沿 6.0/6.0 ns（好 shot 的值），尖峰幅度 light/dark 差 0.6 %。
+The edges are 6.0/6.0 ns, which is what a good shot gives, and the light and dark spike
+heights differ by 0.6 %.
 
-滞后在五次独立扫描里随温度单调增长且曲线重合（220 K 约 0.14 ns，295 K 约 0.46 ns），
-与光强无关。真正的触发抖动不会这样可重复。采样间隔 0.5 ns，滞后 0.43 ns 不到一个点。
+Across five independent sweeps the lag grows monotonically with temperature and the
+curves lie on top of each other (about 0.14 ns at 220 K, about 0.46 ns at 295 K),
+independent of intensity. Real trigger jitter does not repeat like that. The sample
+interval is 0.5 ns, so a 0.43 ns lag is less than one point.
 
-## 2. 三个检验（Huotian 提出，数据支持）
+## 2. Three tests (proposed by Huotian, and borne out by the data)
 
-**(a) 不是时间位移。** 把 dark 按测得的滞后平移后重新相减，尖峰区的差值只减少
-**3.5–4.6 %**。纯位移应当基本抵消。纯位移的残差形状应为 `lag × dI/dt`，与实测差值
-只在最初 2 ns 内接近（`spike-lag-revised.png` 面板 C）。所谓"滞后"只是两条形状不同
-的曲线的一个汇总统计量，不是时序误差。
+**(a) It is not a time shift.** Shifting the dark trace by the measured lag and
+subtracting again reduces the difference over the spike by only **3.5–4.6 %**. A pure
+shift should very nearly cancel. The residual of a pure shift would have the shape
+`lag × dI/dt`, which matches the measured difference only over the first 2 ns
+(`spike-lag-revised.png`, panel C). The "lag" is a summary statistic of two curves of
+different shape, not a timing error.
 
-**(b) 滞后由被抽出的电荷造成，不是时序。** 取关快门那次同样预偏（Voc）下的曲线，
-位移尖峰**一个采样点都不移动**，只加上纯光生电流项，再与无光的暗参考做互相关：
+**(b) The lag is made by the extracted charge, not by timing.** Take the trace from the
+shutter-shut run at the same prebias (Voc), leave the displacement spike **exactly where
+it is**, add only the pure photocurrent term, and cross-correlate against the no-light
+dark reference:
 
-| T / K | 实测滞后（有光） | 合成（不移位，只加信号） | 只有偏压区间差（全程无光） |
+| T / K | measured lag (with light) | synthesised (no shift, signal added) | prebias span alone (no light throughout) |
 |---|---|---|---|
 | 220 | −0.155 | −0.162 | −0.059 |
 | 240 | −0.185 | −0.192 | −0.073 |
@@ -44,29 +53,34 @@
 | 280 | −0.336 | −0.331 | −0.214 |
 | 290 | −0.428 | −0.423 | −0.275 |
 
-合成与实测几乎完全相同。**对齐两个峰等于扣掉真实信号。**
+The synthesis reproduces the measurement almost exactly. **Aligning the two peaks means
+subtracting real signal.**
 
-**(c) 不是电路阻抗，是 Voc 预偏下器件里的电荷。** 尖峰自身的 1/e 衰减时间：
+**(c) It is not the circuit impedance, it is the charge in the device held at Voc.** The
+1/e decay time of the spike itself:
 
-| T / K | 预偏 Voc，无光 | 预偏 Voc，有光 | 预偏 0 V（暗参考） |
+| T / K | prebias Voc, no light | prebias Voc, with light | prebias 0 V (dark reference) |
 |---|---|---|---|
 | 220 | 20.0 ns | 25.0 ns | 19.0 ns |
 | 250 | 21.0 ns | 28.0 ns | 19.5 ns |
 | 280 | 26.5 ns | 29.5 ns | 20.0 ns |
 | 290 | 29.5 ns | 30.5 ns | 21.0 ns |
 
-无光时 τ 照样从 20 涨到 29.5 ns，而预偏 0 V 的暗参考全程 19–21 ns 不动。阻抗随温度
-变化会让两条一起变；只有被держ在 Voc 的那条变慢，说明变的是器件里存着的电荷量与
-分布。290 K 时有光与无光的 τ 只差 1 ns，光几乎不再起作用。
+Without light, τ still grows from 20 to 29.5 ns, while the dark reference at a prebias of
+0 V stays at 19–21 ns throughout. An impedance that changed with temperature would move
+both; only the trace held at Voc slows down, so what changes is the amount and
+distribution of charge stored in the device. At 290 K the light and no-light τ differ by
+only 1 ns: the light has almost stopped mattering.
 
-**先前写在 `README.md` 里的"电路 RC 随温度变化"的解释作废。**
+**The "circuit RC changing with temperature" explanation written earlier in `README.md`
+is withdrawn.**
 
-## 3. 由此得到的主要结果：关快门对照把 Q 拆开了
+## 3. The main result that follows: the shutter-shut control splits Q
 
-`pipeline_20260906_035040`（开快门）对
-`T220-295K_..._-shutter-shut_20260906_160959`（全程关快门），LED 1.030 V：
+`pipeline_20260906_035040` (shutter open) against
+`T220-295K_..._-shutter-shut_20260906_160959` (shutter shut throughout), at LED 1.030 V:
 
-| T / K | 总 Q (nC) | 无光 Q (nC) | 光生 Q (nC) | 无光占比 |
+| T / K | total Q (nC) | no-light Q (nC) | photogenerated Q (nC) | no-light share |
 |---|---|---|---|---|
 | 220 | 0.870 | 0.423 | 0.447 | 49 % |
 | 230 | 1.026 | 0.424 | 0.602 | 41 % |
@@ -77,28 +91,39 @@
 | 280 | 1.523 | 1.168 | 0.356 | 77 % |
 | 290 | 1.598 | 1.372 | 0.226 | 86 % |
 
-**光生电荷在 250 K 达峰，到 290 K 只剩一半；注入电荷从 0.42 涨到 1.37 nC。**
-总 Q 单调上升完全掩盖了这一点，`README.md` 里 285–295 K 的"饱和"就是两者此消彼长
-的交叉点。
+**The photogenerated charge peaks at 250 K and is halved again by 290 K, while the
+injected charge grows from 0.42 to 1.37 nC.** The monotonic rise of the total Q hides
+this completely, and the "saturation" at 285–295 K in `README.md` is simply where the two
+cross.
 
-**保留**：两次 run 相隔 12 小时，低温端 Voc 差 40 mV（1.086 对 1.126），220–250 K 的
-相减只是近似；280–290 K 两者 Voc 差 2–6 mV，那里最可靠。要坐实低温端需要开/关快门在
-同一 pipeline 里交替测——recipe `T220-290Kby10_led1010-1030mV_open-vs-shut` 就是为此。
+**A reservation**: the two runs are twelve hours apart, and at the cold end their Voc
+differs by 40 mV (1.086 against 1.126), so the subtraction over 220–250 K is only
+approximate. At 280–290 K the two differ by 2–6 mV, and that is where it is most
+trustworthy. Settling the cold end needs shutter-open and shutter-shut alternating within
+one pipeline, which is what the recipe
+`T220-290Kby10_led1010-1030mV_open-vs-shut` is for.
 
-## 4. 顺带发现的两个真问题
+## 4. Two real problems found along the way
 
-1. **"No sync trace was fetched" 是错的**：sync 曲线取到了（1.197 V，存在 h5 的
-   `traces/sync_light`）。是 `sync_edge_ns` 拒绝了它——这台 sync 是一个 **5.5 ns 宽的
-   窄脉冲**，而该函数假设 sync 是台阶，用触发点 ±100 ns 窗口的 5 %/95 % 分位数判断；
-   窄脉冲在 400 个采样点里只占 11 个，分位数 span 只有 0.038 V，远低于要求的 0.30 V。
-   所以这台机器上永远报不出 sync 边沿。
-2. **同一格子内 Q 会漂**：2026-09-07 11:52 的 run（LED 改 DC、光路去掉 OD0.5 加
-   f100mm 之后，光强 146 µW），290 K 单格九次 shot 里 Q 从 −1.004 单调漂到 −1.304 nC
-   （+30 %），滞后同步从 0.339 漂到 0.436 ns。取稳定值需要更长的光浸润。
+1. **"No sync trace was fetched" is wrong**: the sync trace was fetched (1.197 V, stored
+   in the HDF5 as `traces/sync_light`). It was `sync_edge_ns` that rejected it — this
+   rig's sync is a **5.5 ns wide pulse**, and the function assumed a step, judging the
+   levels from the 5th and 95th percentiles of a ±100 ns window around the trigger. A
+   pulse that brief occupies 11 of the 400 samples, so the percentile span came out at
+   0.038 V against the 0.30 V the test demanded. On this machine a sync edge could
+   therefore never be reported.
+2. **Q drifts within one cell**: in the run of 2026-09-07 11:52 (after the LED went to DC
+   and the optical path lost its OD0.5 and gained an f100mm lens, giving 146 µW), the
+   nine shots of the single 290 K cell drifted monotonically from −1.004 to −1.304 nC
+   (+30 %), with the lag drifting in step from 0.339 to 0.436 ns. Getting a settled value
+   needs a longer light soak.
 
-## 5. 对代码的建议（尚未实施）
+## 5. Suggestions for the code (not yet implemented)
 
-- 判 warn 需要"滞后超标 **且**（边沿 > 8 ns 或尖峰幅度失配 > 2 %）"；单独的滞后降为
-  info，并说明它主要由被抽出的电荷产生。
-- `sync_edge_ns` 支持窄脉冲 sync（用最大梯度定位边沿，而非分位数）。
-- 区分"没取到 sync"与"取到了但量不出边沿"。
+- A warn should need the lag to be over threshold **and** either an edge slower than 8 ns
+  or spike heights more than 2 % apart; a lag on its own drops to info, saying that it is
+  mostly made by the extracted charge.
+- `sync_edge_ns` should handle a narrow-pulse sync, locating the edge by the largest
+  gradient rather than by percentiles.
+- "no sync was fetched" and "one was fetched but its edge could not be measured" should
+  be told apart.
