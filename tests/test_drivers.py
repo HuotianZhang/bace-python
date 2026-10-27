@@ -147,6 +147,20 @@ def test_sweep_is_one_point_at_a_time_and_unpacks_each_reading():
     np.testing.assert_allclose(i, [-2e-4, -1.5e-4, 1e-4])
 
 
+def test_a_reply_garbled_on_the_bus_is_read_again_once():
+    """2026-10-26: a dark J-V died one second in on `)1*088301A)08`, which is
+    `+1.088301E-08` with bits dropped on the GPIB lines. The point is read
+    again; two bad replies in a row raise, naming both."""
+    io = FakeIO(reads=["-2.0E-4", ")1*088301A)08", "1.088301E-08", "1.0E-4"])
+    k = Keithley2400(io)
+    assert list(k.sweep_points(0.0, 1.0, 3)) == [(0.0, -2e-4), (0.5, 1.088301e-8), (1.0, 1e-4)]
+    assert k.read_retries == 1 and io.log.count(":READ?") == 4
+
+    k = Keithley2400(FakeIO(reads=[")1*0", "+1.0#-08"]))
+    with pytest.raises(SourceMeterError, match=r"\)1\*0.*\+1\.0#-08.*GPIB"):
+        k.measure_jsc(settle_ms=0)
+
+
 def test_the_sweep_files_the_setpoint_and_asks_the_2400_for_current_only():
     """The point's voltage is the level sourced, never the V element of the
     reply (2026-09-05). Only current is sensed (`:SENS:FUNC?` -> "CURR:DC"
@@ -944,7 +958,9 @@ def test_run_toml_builds_a_usable_plan():
     # from ~3 mA to ~0.5 mA (the device rests at v_coll through the
     # inverting amplifier, so extraction never stops).
     assert run.invert_polarity and run.output_polarity == "NORM"
-    assert run.shutter_settle_s == pytest.approx(5.0)
+    # 0.5 / 0.5 / 1 s since 2026-10-26: the same Q as 2 / 2 / 5 s at 294 K,
+    # with less scatter (docs/analysis/2026-10-26/scope-window/)
+    assert (run.settle_s, run.dark_settle_s, run.shutter_settle_s) == (0.5, 0.5, 1.0)
     # Not typed since 2026-09-04: a bench with a 331 reads it as the node
     # starts, and a recipe that says nothing files nothing.
     assert meta.temperature_k is None and meta.temperature_how == ""

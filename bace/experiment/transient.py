@@ -33,8 +33,8 @@ from typing import Callable, Iterator
 import numpy as np
 
 from ..core.axis import ScanPlan, ScanSpec
-from ..core.process import (ChargeAccumulator, RunningAverage, baseline_is_flat,
-                            charge, photocurrent)
+from ..core.process import (PRE_TRIGGER_GUARD_S, ChargeAccumulator, RunningAverage,
+                            baseline_is_flat, charge, photocurrent)
 from ..core.pulses import pulse_levels
 from .events import (AxisResolved, Event, InstrumentState, LoopDone, Notice,
                      Progress, RunAborted, RunFinished, RunStarted, StepDone,
@@ -178,8 +178,34 @@ class RunConfig:
     pulse actually has. So this controls the lamp, not the extraction."""
 
     offset_correct: bool = True
-    """Subtract the mean of the last 10 % of the scope's photocurrent record
-    from the whole trace, taking a constant baseline off with it."""
+    """Subtract a constant baseline from the photocurrent record: the mean of
+    the region `offset_region` names."""
+
+    offset_region: str = "tail"
+    """Where `offset_correct` takes its baseline: `"tail"` | `"pre-trigger"`.
+
+    `"tail"` is the last 10 % of the record, what the original did. It is only
+    a baseline if the transient is over by then, and on 2026-10-26 it was not:
+    with a 2 us record the tail still held extraction current and Q read
+    10-20 % low; with longer records the tail mean carried the amplifier's
+    shot-to-shot drift into Q instead.
+
+    `"pre-trigger"` is the record before the trigger (less
+    `core.process.PRE_TRIGGER_GUARD_S` for the sync pickup). Neither trace has seen the step there, the scope's
+    zero error (about 1 mV, and different at each vertical range) is the same
+    for both, and it does not move with the record length. A null run on the
+    rig (shutter shut for both traces, `dark_reference = "same"`) put the
+    drift that is left at -1.2 +/- 2.9 uA per shot, the same as a real BACE
+    run -- see `docs/analysis/2026-10-26/scope-window/`."""
+
+    alternate_order: bool = False
+    """Take the dark trace first on every even loop, so the light-then-dark
+    order alternates. Whatever drifts in time between the two acquisitions of
+    a shot (the amplifier did, by -1.2 uA on average, on 2026-10-26) then
+    enters Q with opposite signs on successive loops and cancels in the mean
+    over an even number of loops. The first trace of a shot sets the vertical
+    range either way, and the second inherits it, so both share one scope
+    zero. Off by default, which keeps the original's order."""
 
     invert_polarity: bool = False
     """Swap and negate both 81150A bias levels in software, before they are
@@ -345,6 +371,10 @@ class RunConfig:
             raise ValueError(
                 f"light_shutter must be 'open' or 'shut', not {self.light_shutter!r}"
             )
+        if self.offset_region not in ("tail", "pre-trigger"):
+            raise ValueError(
+                f"offset_region must be 'tail' or 'pre-trigger', not "
+                f"{self.offset_region!r}")
         if self.output_polarity.lower() not in ("auto", "norm", "inv", "leave"):
             raise ValueError(
                 f"output_polarity must be 'auto', 'NORM', 'INV' or 'leave', not "
@@ -601,68 +631,87 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
             # Nothing about the measurement changes: these are yields
             # between the same instrument calls in the same order.
             same_dark = config.dark_reference == "same"
-            phases = ["levels", "light settle", "acquire light"]
-            phases += [] if same_dark else ["dark levels"]
-            phases += ["dark settle", "acquire dark", "process"]
+            dark_first = config.alternate_order and s.loop % 2 == 0
+            light_phases = ["levels", "light settle", "acquire light"]
+            # With `dark_reference = "same"` and the light trace first, the
+            # levels are already the dark trace's; only a dark trace that
+            # comes first, or a translated one, writes its own.
+            dark_phases = ([] if same_dark and not dark_first else ["dark levels"]) \
+                + ["dark settle", "acquire dark"]
+            if dark_first:
+                light_phases[0] = "light levels"
+            phases = (dark_phases + light_phases if dark_first
+                      else light_phases + dark_phases) + ["process"]
             of = len(phases)
 
             def phase(name: str) -> StepPhase:
                 return StepPhase(index=s.index, phase=name,
                                  k=phases.index(name) + 1, of=of)
 
-            # light: levels first, then shutter, then acquire with autorange
-            yield phase("levels")
-            rig.bias.set_levels(levels.high_light, levels.low_light,
-                                delay_s=levels.delay_s, width_s=levels.width_s)
-            if config.light_shutter == "shut":
-                rig.shutter.shut()          # the dark-only control, see RunConfig
+            sync_failed_box = [sync_failed]
+
+            def take(which: str, autorange: bool):
+                trace = rig.scope.acquire(config.n_averages, source=cfg.current_source,
+                                          autorange_first=autorange,
+                                          timeout_s=config.acquisition_timeout_s)
+                sync, note = _sync_trace(rig, cfg, sync_failed_box[0])
+                notes = []
+                if note:
+                    sync_failed_box[0] = True
+                    notes.append(note)
+                note = _averages_notice(trace, config.n_averages, s.index, which)
+                if note:
+                    notes.append(note)
+                return trace, sync, notes
+
+            def light_part(autorange: bool):
+                # levels first, then shutter, then acquire
+                yield phase(light_phases[0])
+                rig.bias.set_levels(levels.high_light, levels.low_light,
+                                    delay_s=levels.delay_s, width_s=levels.width_s)
+                if config.light_shutter == "shut":
+                    rig.shutter.shut()          # the dark-only control, see RunConfig
+                else:
+                    rig.shutter.unblock()
+                yield phase("light settle")
+                sleep(config.settle_s + config.shutter_settle_s)
+                intensity = None
+                if config.read_intensity and rig.power is not None:
+                    intensity = rig.power.read_power()
+                yield phase("acquire light")
+                trace, sync, notes = take("light", autorange)
+                yield from notes
+                return trace, sync, intensity
+
+            def dark_part(autorange: bool):
+                # shutter closed. With `dark_reference = "same"` after the
+                # light trace nothing but the shutter moves, so the levels are
+                # not rewritten at all -- and the settle before the shutter has
+                # nothing to settle.
+                if "dark levels" in dark_phases:
+                    yield phase("dark levels")
+                    dark_levels = ((levels.high_light, levels.low_light) if same_dark
+                                   else (levels.high_dark, levels.low_dark))
+                    rig.bias.set_levels(*dark_levels, delay_s=levels.delay_s,
+                                        width_s=levels.width_s)
+                    sleep(config.dark_settle_s)
+                yield phase("dark settle")
+                rig.shutter.shut()
+                sleep(config.shutter_settle_s)
+                yield phase("acquire dark")
+                trace, sync, notes = take("dark", autorange)
+                yield from notes
+                return trace, sync
+
+            # The first trace of the shot sets the vertical range and the
+            # second inherits it, so the pair shares one scope zero.
+            if dark_first:
+                dark, sync_dark = yield from dark_part(autorange=True)
+                light, sync_light, intensity = yield from light_part(autorange=False)
             else:
-                rig.shutter.unblock()
-            yield phase("light settle")
-            sleep(config.settle_s + config.shutter_settle_s)
-
-            intensity = None
-            if config.read_intensity and rig.power is not None:
-                intensity = rig.power.read_power()
-
-            yield phase("acquire light")
-            light = rig.scope.acquire(config.n_averages, source=cfg.current_source,
-                                      autorange_first=True,
-                                      timeout_s=config.acquisition_timeout_s)
-            sync_light, note = _sync_trace(rig, cfg, sync_failed)
-            if note:
-                sync_failed = True
-                yield note
-            note = _averages_notice(light, config.n_averages, s.index, "light")
-            if note:
-                yield note
-
-            # dark: shutter closed, range inherited. With `dark_reference =
-            # "same"` nothing but the shutter moves, so the levels are not
-            # rewritten at all -- and the settle before the shutter has nothing
-            # to settle.
-            if same_dark:
-                dark_levels = (levels.high_light, levels.low_light)
-            else:
-                yield phase("dark levels")
-                dark_levels = (levels.high_dark, levels.low_dark)
-                rig.bias.set_levels(*dark_levels, delay_s=levels.delay_s,
-                                    width_s=levels.width_s)
-                sleep(config.dark_settle_s)
-            yield phase("dark settle")
-            rig.shutter.shut()
-            sleep(config.shutter_settle_s)
-            yield phase("acquire dark")
-            dark = rig.scope.acquire(config.n_averages, source=cfg.current_source,
-                                     autorange_first=False,
-                                     timeout_s=config.acquisition_timeout_s)
-            sync_dark, note = _sync_trace(rig, cfg, sync_failed)
-            if note:
-                sync_failed = True
-                yield note
-            note = _averages_notice(dark, config.n_averages, s.index, "dark")
-            if note:
-                yield note
+                light, sync_light, intensity = yield from light_part(autorange=True)
+                dark, sync_dark = yield from dark_part(autorange=False)
+            sync_failed = sync_failed_box[0]
             yield phase("process")
 
             # -- process ---------------------------------------------------
@@ -698,7 +747,18 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                     f"{sp.delay_ns:g} ns): the window is cut short there, and "
                     "along a delay axis by a different amount at each point. A "
                     "longer timebase or a shorter t_int_width_s makes it whole")
-            if config.offset_correct and first:
+            baseline_end = None
+            if config.offset_correct and config.offset_region == "pre-trigger":
+                # `-t0` is where the trigger sits in the record (`:WAV:XOR?`
+                # is the record's origin relative to it).
+                baseline_end = -light.t0 - PRE_TRIGGER_GUARD_S
+                if first:
+                    yield Notice(
+                        "info",
+                        f"baseline: light − dark before {baseline_end * 1e9:.0f} ns of "
+                        f"record time ({int(baseline_end / dt) + 1} samples before the "
+                        "trigger)")
+            if config.offset_correct and config.offset_region == "tail" and first:
                 flat, head, tail, peak = baseline_is_flat(light.y, dark.y)
                 if not flat:
                     yield Notice(
@@ -711,7 +771,8 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                         f"record. Q will look plausible and be wrong. Both raw "
                         f"traces are stored, so this is recoverable offline")
             photo = photocurrent(light.y, dark.y, dt,
-                                 offset_correct=config.offset_correct)
+                                 offset_correct=config.offset_correct,
+                                 baseline_end_s=baseline_end)
             if averaged is None:
                 averaged = RunningAverage(n_steps=plan.n_steps, n_samples=photo.size)
             photo_avg = averaged.update(s.step, s.loop, photo)
@@ -735,7 +796,8 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                            # `test_every_real_driver_satisfies_its_protocol`.
                            clipped=bool(rig.scope.clipped),
                            sync_light=sync_light, sync_dark=sync_dark,
-                           t0_int_record_s=t0_rec, t1_int_record_s=t1_rec)
+                           t0_int_record_s=t0_rec, t1_int_record_s=t1_rec,
+                           dark_first=dark_first)
 
             elapsed = time.monotonic() - t_start
             per = elapsed / done if done else 0.0

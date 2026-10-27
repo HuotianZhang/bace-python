@@ -926,6 +926,8 @@ def test_a_pipeline_record_carries_a_measured_eta_and_no_duplicate_verdicts(tmp_
         assert len(keys) == len(set(keys)), "one entry per (code, node): the Start re-read " \
                                              "replaces the submit-time copy"
         assert "chain.led-polarity" in {k for k, _ in keys}
+        [led] = [c for c in rec["verdicts"] if c["code"] == "chain.led-polarity"]
+        assert led["level"] == "info", "the bace run writes the 33220A polarity itself, so the "                                        "Start re-read keeps the tree's info, not the bench card's warn"
 
 
 def test_run_record_answers_from_the_journal_for_a_run_of_an_earlier_session(tmp_path):

@@ -626,6 +626,102 @@ def test_the_light_trace_can_be_taken_with_the_shutter_shut():
     assert abs(charges["shut"][0]) < 0.05 * abs(charges["open"][0]),         f"shut {charges['shut'][0]:.3e} vs open {charges['open'][0]:.3e}"
 
 
+# -- the pre-trigger baseline and the alternating order (2026-10-26) ----------
+def test_the_pre_trigger_baseline_keeps_a_tail_that_is_still_signal():
+    """The 2026-10-26 traces: a scope zero of about 0.16 mA under both traces,
+    and an extraction current still flowing at the end of the record. The tail
+    baseline takes that current off as if it were offset; the pre-trigger one
+    takes off the zero and nothing else."""
+    from bace.core.process import charge, photocurrent
+    n, dt, step = 5000, 1e-9, 500
+    t = np.arange(n) * dt
+    after = (t - step * dt).clip(0)
+    slow = np.where(t >= step * dt, 0.5e-3 / (1 + after / 50e-9), 0.0)   # ~1/t, unfinished
+    light = 0.16e-3 + 0.02e-3 + slow                 # zero error + a little light offset
+    dark = np.full(n, 0.16e-3)
+    true_q = slow[step:].sum() * dt
+    head = photocurrent(light, dark, dt, baseline_end_s=(step - 10) * dt)
+    tail = photocurrent(light, dark, dt)
+    assert abs(head[:step].mean()) < 1e-9
+    assert charge(head, dt, (step - 2) * dt) == pytest.approx(true_q, rel=1e-6)
+    assert charge(tail, dt, (step - 2) * dt) < 0.9 * true_q, "the tail eats signal"
+
+
+def test_a_pre_trigger_baseline_of_a_few_samples_is_refused():
+    from bace.core.process import photocurrent
+    with pytest.raises(ValueError, match="pre-trigger baseline"):
+        photocurrent(np.zeros(100), np.zeros(100), 1e-9, baseline_end_s=5e-9)
+
+
+def test_a_misspelt_offset_region_is_refused():
+    with pytest.raises(ValueError, match="offset_region must be"):
+        RunConfig(offset_region="head")
+
+
+def test_a_run_with_the_pre_trigger_baseline_recovers_the_photocharge():
+    sim, rig = build()
+    cfg = RunConfig(n_averages=200, settle_s=0.0, dark_settle_s=0.0, t0_int_s=-2e-9,
+                    invert_polarity=True, offset_region="pre-trigger")
+    evs = run(rig, bace_sweep(0.86, 0.90, 0.02, n_loops=2), cfg)
+    f = finished(evs)
+    physical = np.array([sim.bench.device.photocharge(v, 1.020) for v in f.values])
+    np.testing.assert_allclose(f.q_mean, sim.scope.current_sign * physical, rtol=0.05)
+    said = [e.text for e in evs if isinstance(e, E.Notice) and e.text.startswith("baseline:")]
+    assert len(said) == 1, "said once, on the first shot"
+    assert not any(isinstance(e, E.Notice) and "not a baseline" in e.text for e in evs), \
+        "the tail check belongs to the tail baseline"
+
+
+def test_alternate_order_takes_the_dark_trace_first_on_even_loops():
+    """Loop 1 keeps the original order; loop 2 starts with the dark trace, which
+    then sets the vertical range the light trace inherits."""
+    sim = make_bench(seed=5)
+    log: list = []
+
+    class Watched:
+        def __init__(self, inner): self._i = inner
+        def unblock(self): log.append(("shutter", "open")); return self._i.unblock()
+        def shut(self): log.append(("shutter", "shut")); return self._i.shut()
+        def __getattr__(self, n): return getattr(self._i, n)
+
+    rig = Rig(bias=sim.bias, scope=sim.scope, shutter=Watched(sim.shutter), config=RigConfig())
+    real_acquire = rig.scope.acquire
+    def acquire(*a, **k):
+        log.append(("acquire", k.get("autorange_first", False), bool(sim.shutter.is_open)))
+        return real_acquire(*a, **k)
+    rig.scope.acquire = acquire                      # type: ignore[method-assign]
+    cfg = RunConfig(n_averages=4, record_length=400, settle_s=0.0, dark_settle_s=0.0,
+                    alternate_order=True)
+    evs = list(run_transient_scan(rig, bace_sweep(0.90, 0.90, 0.02, n_loops=2), cfg,
+                                  sleep=NO_SLEEP))
+    shots = [e for e in log if e[0] == "acquire"][-4:]
+    assert shots == [("acquire", True, True), ("acquire", False, False),     # loop 1: light, dark
+                     ("acquire", True, False), ("acquire", False, True)]     # loop 2: dark, light
+    phases = [(e.phase, e.of) for e in evs if isinstance(e, E.StepPhase)]
+    assert phases[7:] == [("dark levels", 7), ("dark settle", 7), ("acquire dark", 7),
+                          ("light levels", 7), ("light settle", 7), ("acquire light", 7),
+                          ("process", 7)]
+
+
+def test_alternate_order_writes_the_light_levels_for_a_same_dark_trace_taken_first():
+    """With `dark_reference = "same"` the dark trace normally relies on the light
+    trace having written the levels; taken first, it has to write them itself."""
+    sim = make_bench(seed=2)
+    rig = Rig(bias=sim.bias, scope=sim.scope, shutter=sim.shutter, config=RigConfig())
+    seen: list = []
+    real = rig.bias.set_levels
+    def watch(hi, lo, **kw):
+        seen.append((round(hi, 6), round(lo, 6)))
+        return real(hi, lo, **kw)
+    rig.bias.set_levels = watch                      # type: ignore[method-assign]
+    cfg = RunConfig(n_averages=8, settle_s=0.0, dark_settle_s=0.0, record_length=400,
+                    t0_int_s=2.71e-7, dark_reference="same", alternate_order=True)
+    list(run_transient_scan(rig, bace_sweep(0.90, 0.90, 0.02, n_loops=2), cfg,
+                            sleep=NO_SLEEP))
+    # setup, loop 1 light; loop 2 dark (its own write), loop 2 light
+    assert len(seen) == 4 and len(set(seen)) == 1
+
+
 def test_a_misspelt_light_shutter_is_refused():
     with pytest.raises(ValueError, match="light_shutter must be"):
         RunConfig(light_shutter="closed")
@@ -863,7 +959,7 @@ def test_a_generator_that_reports_its_output_still_off_stops_the_run():
     cfg = RunConfig(n_averages=8, settle_s=0.0, dark_settle_s=0.0,
                     t0_int_s=2.71e-7, calibrate_trigger=True)
     seen = []
-    with pytest.raises(BiasOutputError, match=":OUTP1\? = 0"):
+    with pytest.raises(BiasOutputError, match=r":OUTP1\? = 0"):
         for ev in run_transient_scan(rig, bace_sweep(0.9, 0.9, 0.0), cfg, sleep=NO_SLEEP):
             seen.append(ev)
     states = [e.values for e in seen if isinstance(e, E.InstrumentState)]

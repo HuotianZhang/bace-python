@@ -92,7 +92,7 @@ one line is still a line a person can open; the HDF5 holds the rest."""
 
 STEPDONE_SCALARS: tuple[str, ...] = ("index", "loop", "step", "setpoint", "axis_value",
                                      "q", "q_mean", "q_std", "intensity_w", "clipped",
-                                     "t0_int_record_s", "t1_int_record_s")
+                                     "t0_int_record_s", "t1_int_record_s", "dark_first")
 STEPDONE_ARRAYS: tuple[str, ...] = ("light", "dark", "photo", "photo_averaged",
                                     "sync_light", "sync_dark")
 JVCURVE_SCALARS: tuple[str, ...] = ("index", "label", "dark", "led_level_v", "direction",

@@ -997,3 +997,29 @@ def test_a_temperature_module_binds_the_rest_of_the_run_not_one_iteration(tmp_pa
         ("settled", "simulated")
     assert "290K" not in os.path.basename(second["folder"])
     assert f"{settled_at:g}K" in os.path.basename(second["folder"])
+
+
+def test_a_bace_run_writes_the_33220a_polarity_its_arming_edge_needs(tmp_path):
+    """A NORM left on the 33220A's panel makes the rising Sync edge light on,
+    so extraction runs during illumination and still gives a plausible Q
+    (the bench read NORM on 2026-10-26). The run writes INV itself."""
+    b = bench()
+    b.rig.led.set_polarity(False)
+    evs = list(run_pipeline(b.rig, schedule_of(bace_node(1, measure_dc=True)),
+                            catalogue=catalogue(), ctx_factory=factory(None, str(tmp_path))))
+    assert evs[-1].outcome == "ok"
+    assert b.rig.led.polarity() == "INV"
+    states = [e.values for e in evs if isinstance(e, E.InstrumentState)
+              and "led_polarity" in e.values]
+    assert states and states[0]["led_polarity"] == "INV", "the file says which edge armed"
+
+
+def test_the_run_summary_is_q_in_nc_with_the_standard_error_of_the_mean():
+    from bace.service.journal import finished_text
+    q = np.array([[-1.80e-10], [-2.00e-10], [-1.90e-10], [-1.90e-10]])
+    data = {"q_mean": q.mean(0), "q_std": q.std(0, ddof=1), "q_all": q}
+    assert finished_text(data, 4, 4) == "Q -0.190 ± 0.0041 nC (sem), 4 loops · 4/4"
+    q3 = np.hstack([q, q * 1.05, q * 0.95])
+    data3 = {"q_mean": q3.mean(0), "q_std": q3.std(0, ddof=1), "q_all": q3.tolist()}
+    assert finished_text(data3, 12, 12) ==         "3 points, Q -0.200 to -0.180 nC, sem ≤ 0.0043, 4 loops · 12/12"
+    assert finished_text({"q_mean": [-1.9e-10], "q_std": [None]}, None, None) == "Q -0.190 nC",         "a journal line without q_all still reads"

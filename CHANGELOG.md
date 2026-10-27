@@ -2,6 +2,24 @@
 
 Dated, newest first. Details and evidence are in `docs/`.
 
+## 2026-10-27
+
+- **The record was too short and the baseline read part of the signal.** At
+  200 ns/div the record ended while Q was still rising, and the last-10 %
+  offset subtracted the slow tail: Q read 10–20 % low. `run.toml` now takes
+  1 µs/div, a 6 µs window and a 10 µs pulse, and the offset comes from the
+  record before the trigger (`offset_region = "pre-trigger"`). Evidence in
+  `docs/analysis/2026-10-26/scope-window/`.
+- `alternate_order`: the dark trace first on even loops, so drift between the
+  two acquisitions cancels over loop pairs.
+- Settle times 0.5 / 0.5 / 1 s instead of 2 / 2 / 5 s: the same Q, 6.3 s a
+  shot instead of 17.3, and half the scatter per loop.
+- Every bace run writes the 33220A `:OUTP:POL` itself before it pulses.
+- The 2400 reads again once when GPIB garbles a reply.
+- Per-shot diagnostics in the file: the pre-trigger levels of both traces,
+  the light − dark offset after the window, and which trace came first.
+- The run summary is Q in nC with the standard error of the mean.
+
 ## 2026-09-09
 
 - `introduction.html` at the repository root: how to run it and how the code

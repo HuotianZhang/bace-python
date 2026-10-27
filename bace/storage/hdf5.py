@@ -173,7 +173,10 @@ def write_run(path: str, *, metadata: dict, rig_config: dict, run_config: dict,
             dg = f.create_group("diagnostics")
             for name, arr in diagnostics.items():
                 d = dg.create_dataset(name, data=np.asarray(arr, dtype=float))
-                d.attrs["unit"] = "ns" if name.endswith("_ns") else "acquisitions"
+                d.attrs["unit"] = ("ns" if name.endswith("_ns") else
+                                   "uA" if name.endswith("_ua") else
+                                   "1 = dark trace first" if name == "dark_first" else
+                                   "acquisitions")
             dg.attrs["note"] = "(loop, step); NaN where a shot could not say"
 
         if intensity_mean is not None:

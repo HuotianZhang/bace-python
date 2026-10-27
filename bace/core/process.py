@@ -36,9 +36,27 @@ def to_current(trace_volts: np.ndarray, resistor_ohm: float,
     return np.asarray(trace_volts, dtype=float) * probe_attenuation / resistor_ohm
 
 
+PRE_TRIGGER_GUARD_S = 10e-9
+"""How far before the trigger a pre-trigger baseline stops. The sync edge
+couples into the current channel at the trigger itself (the 2026-09-06 records
+show the pickup from about 200 ns, with the trigger at 200 ns), and the step
+reaches the device some 30 ns after it; 10 ns keeps the baseline clear of
+both."""
+
+
 def photocurrent(light: np.ndarray, dark: np.ndarray, dt: float, *,
-                 offset_correct: bool = True) -> np.ndarray:
+                 offset_correct: bool = True,
+                 baseline_end_s: float | None = None) -> np.ndarray:
     """Dark-subtracted transient, optionally baseline-corrected.
+
+    `baseline_end_s = None` takes the baseline from the last 10 % of the record,
+    as the original did. A number takes it from the samples **before** that
+    record time instead -- the pre-trigger stretch, where neither trace has
+    seen the step. On 2026-10-26 the last 10 % of a 2 us record still held
+    extraction current, so the tail baseline read Q 10-20 % low, and with a
+    longer record it only traded that for the amplifier's shot-to-shot drift
+    (`docs/analysis/2026-10-26/scope-window/`). Refuses a pre-trigger stretch
+    of fewer than 20 samples, which would be a noise sample, not a baseline.
 
     `dark` is not a zero reference. It is the same measurement repeated in the
     dark over the same bias *swing*, translated down by V_oc:
@@ -67,10 +85,18 @@ def photocurrent(light: np.ndarray, dark: np.ndarray, dt: float, *,
     if offset_correct:
         n = photo.size
         t = np.arange(n) * dt
-        total = dt * (n - 1)
-        tail = t > total * 0.9
-        if tail.any():
-            photo = photo - photo[tail].mean()
+        if baseline_end_s is None:
+            total = dt * (n - 1)
+            region = t > total * 0.9
+        else:
+            region = t < baseline_end_s
+            if region.sum() < 20:
+                raise ValueError(
+                    f"the pre-trigger baseline ends at {baseline_end_s * 1e9:.1f} ns of "
+                    f"record time, which leaves {int(region.sum())} samples before it; "
+                    "a longer timebase puts more of the record before the trigger")
+        if region.any():
+            photo = photo - photo[region].mean()
     return photo
 
 

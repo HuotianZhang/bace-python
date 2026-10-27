@@ -28,6 +28,10 @@ from .legacy_dat import LegacyWriter
 from .naming import RunMetadata
 
 
+def _ua(amps: float | None) -> float | None:
+    return None if amps is None else amps * 1e6
+
+
 @dataclass
 class RunRecorder:
     """Accumulates a run and writes it out.
@@ -156,11 +160,13 @@ class RunRecorder:
 
     DIAG_KEYS = ("averages_light", "averages_dark", "spike_lag_ns", "sync_lag_ns",
                  "edge_light_ns",
-                 "edge_dark_ns", "sync_edge_light_ns", "sync_edge_dark_ns")
+                 "edge_dark_ns", "sync_edge_light_ns", "sync_edge_dark_ns",
+                 "pre_trigger_light_ua", "pre_trigger_dark_ua", "late_offset_ua",
+                 "dark_first")
 
     def _diagnose(self, ev: E.StepDone, loop_i: int, step_i: int) -> None:
-        from ..core.diagnostics import (edge_10_90_ns, spike_lag_ns, sync_edge_ns,
-                                        sync_lag_ns)
+        from ..core.diagnostics import (edge_10_90_ns, late_offset, pre_trigger_mean,
+                                        spike_lag_ns, sync_edge_ns, sync_lag_ns)
         if self._diag is None:
             self._diag = {k: np.full((self._n_loops, self._n_steps), np.nan)
                           for k in self.DIAG_KEYS}
@@ -180,6 +186,14 @@ class RunRecorder:
                 ev.sync_light.y, float(ev.sync_light.dt), float(ev.sync_light.t0)),
             "sync_edge_dark_ns": None if ev.sync_dark is None else sync_edge_ns(
                 ev.sync_dark.y, float(ev.sync_dark.dt), float(ev.sync_dark.t0)),
+            # Raw levels, before any baseline: the scope's zero at this range
+            # and, after the window, what the baseline left behind -- the
+            # amplifier's drift between the two traces, shot by shot (2026-10-26).
+            "pre_trigger_light_ua": _ua(pre_trigger_mean(ev.light.y, dt, float(ev.light.t0))),
+            "pre_trigger_dark_ua": _ua(pre_trigger_mean(ev.dark.y, dt, float(ev.dark.t0))),
+            "late_offset_ua": _ua(late_offset(ev.light.y, ev.dark.y, dt, float(ev.light.t0),
+                                              ev.t1_int_record_s)),
+            "dark_first": float(ev.dark_first),
         }
         for k, v in values.items():
             if v is not None and 0 <= loop_i < self._n_loops and 0 <= step_i < self._n_steps:

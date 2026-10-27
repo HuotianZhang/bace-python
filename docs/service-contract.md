@@ -197,7 +197,7 @@ Wire format = `experiment.wire.envelope_to_wire(Envelope)`:
 
 | event | WebSocket | journal |
 |---|---|---|
-| `StepDone` | `light`, `dark`, `photo`, `photo_averaged` decimated to ≤ 1000 points (stride, first and last kept — the last kept sample is the record's final one, at `t0 + (n-1)*dt`, not one stride after its predecessor) | scalars only: index, loop, step, setpoint, axis_value, q, q_mean, q_std, intensity_w, clipped + `verdict` |
+| `StepDone` | `light`, `dark`, `photo`, `photo_averaged` decimated to ≤ 1000 points (stride, first and last kept — the last kept sample is the record's final one, at `t0 + (n-1)*dt`, not one stride after its predecessor) | scalars only: index, loop, step, setpoint, axis_value, q, q_mean, q_std, intensity_w, clipped, t0_int_record_s, t1_int_record_s, dark_first + `verdict` |
 | `StepPhase` | in full, **live only**: `seq` null (like the drop `Notice`), not in the `since=` ring | not written |
 | `JVPoint` | in full, **live only**, exactly as `StepPhase` — one per point of a sweep as it is read | not written |
 | `RunFinished` | `photo_averaged` omitted; `values`, `q_mean`, `q_std`, `q_all` in full | same minus `q_all` if > 10 000 cells |

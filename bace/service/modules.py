@@ -213,9 +213,8 @@ def _led_problems(state: dict[str, str], wanted: dict) -> list[str]:
     freq = state.get("frequency_hz", "?")
     if freq != "?" and abs(float(freq) - float(wanted["frequency"])) > 1.0:
         problems.append(f"frequency reads {freq} Hz against {wanted['frequency']:g} Hz asked")
-    # Polarity is deliberately NOT refused here: NORM is the chain card's
-    # warn with a one-click fix, and a warn never blocks (the three-tier
-    # rule). It is in the read-back so the file says which edge armed.
+    # Polarity is not refused here: `_build_bace` writes it before the pulse
+    # (2026-10-26), and the read-back puts in the file which edge armed.
     errors = state.get("errors", "")
     if errors and errors != "?":
         problems.append(f"the generator rejected a command: {errors}")
@@ -337,6 +336,7 @@ class RunContext:
 RUN_CHOICES: dict[str, tuple[str, ...]] = {
     "dark_reference": ("translated", "same"),
     "light_shutter": ("open", "shut"),
+    "offset_region": ("tail", "pre-trigger"),
     "output_polarity": ("auto", "NORM", "INV", "leave"),
     "trigger_sweep": ("AUTO", "TRIG"),
 }
@@ -353,9 +353,9 @@ RUN_UNITS: dict[str, str] = {
 RUN_GROUPS: dict[str, str] = {
     **{f: "acquisition" for f in ("n_averages", "timebase_ns_per_div", "record_length",
                                   "read_intensity", "acquisition_timeout_s",
-                                  "light_shutter")},
+                                  "light_shutter", "alternate_order")},
     **{f: "processing" for f in ("t0_int_s", "t_int_width_s", "offset_correct",
-                                 "invert_polarity", "dark_reference")},
+                                 "offset_region", "invert_polarity", "dark_reference")},
     **{f: "timing" for f in ("settle_s", "dark_settle_s", "shutter_settle_s",
                              "pulse_width_ns", "pulse_frequency_hz", "duty_percent")},
     **{f: "trigger" for f in ("external_trigger", "trigger_slope_positive",
@@ -1332,6 +1332,15 @@ class Catalogue:
                                             how="measure_dc")
 
                 s = drive.pulse_settings()
+                # The edge the 81150A arms on has to be light off: the rising
+                # Sync edge under INV. Written here, not left to the bench
+                # card's warning, because a NORM left on the front panel
+                # (as on 2026-10-26) extracts during illumination and still
+                # integrates to a plausible charge. The Sync is not inverted
+                # with the waveform, and DC (the V_oc measurement above) is
+                # not affected.
+                if run_cfg.external_trigger:
+                    rig.led.set_polarity(run_cfg.trigger_slope_positive)
                 rig.led.set_pulse(s["high"], s["low"], frequency_hz=s["frequency"],
                                   duty_percent=s["duty"])
                 rig.led.enable_output(True)

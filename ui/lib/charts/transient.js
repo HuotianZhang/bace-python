@@ -216,7 +216,7 @@ export function transientModel(input, options = {}) {
   const {
     width = 560, height = null, columns = null,
     t0_int_s = null, t_int_width_s = null, pulse_delay_s = 0,
-    offset_corrected = null, dark_reference = null,
+    offset_corrected = null, offset_region = null, dark_reference = null,
   } = options;
   const set = traceSet(input, { t0_int_s, t_int_width_s, pulse_delay_s });
   if (set.absent) {
@@ -253,7 +253,7 @@ export function transientModel(input, options = {}) {
   // them. A reader who has to carry a line from below the axis back up to the
   // trace has been given a footnote where a label was wanted.
   const panels = [
-    { key: 'traces', weight: 1.25, label: 'light and dark  ·  I / mA' + offsetClause(offset_corrected) },
+    { key: 'traces', weight: 1.25, label: 'light and dark  ·  I / mA' + offsetClause(offset_corrected, offset_region) },
     // `suffix`, not a baked-in label: `photoPanel` swaps the whole label for
     // `set.photoLabel` when the run stored loop averages, and a clause written
     // into the base label would be dropped in exactly that case.
@@ -482,7 +482,8 @@ function darkClause(dark_reference) {
 }
 
 /** What has already been taken off the light and dark baselines, if anything. */
-function offsetClause(offset_corrected) {
+function offsetClause(offset_corrected, offset_region = null) {
+  if (offset_corrected === true && offset_region === 'pre-trigger') return '  ·  offset corrected, before the trigger';
   if (offset_corrected === true) return '  ·  offset corrected, last 10 % of the record';
   if (offset_corrected === false) return '  ·  no offset correction';
   return '';
