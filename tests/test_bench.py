@@ -597,6 +597,24 @@ def test_each_averaged_acquisition_starts_from_an_empty_averager():
         previous = f
 
 
+def test_a_dark_first_pair_is_acquired_in_the_window_it_is_given():
+    """A pair taken dark first does not auto-range on the dark trace, which can
+    be far smaller than the light one; it writes the window a light trace at
+    the same point settled on, and the light trace inherits it."""
+    from bace.drivers.infiniium import Infiniium
+
+    io = _MeasuredScope()
+    scope = Infiniium(io)
+    dark = scope.acquire(200, window=(0.4, -0.1))
+    light = scope.acquire(200)
+
+    assert dark.count == 200 and light.count == 200
+    assert scope.window == (0.4, -0.1)
+    up = [c.upper() for c in io.log]
+    assert ":CHAN2:OFFS -0.1;RANG 0.4;" in up
+    assert sum(c.startswith(":WAV:POIN?") for c in up) == 2, "no auto-range pass"
+
+
 def test_the_autorange_passes_are_not_averaged():
     """A pass only wants the extremes of the signal in the window now in
     force; averaged, it would report the buffer from before -- on the rig the

@@ -611,6 +611,11 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
 
         # -- the loop ------------------------------------------------------
         sync_failed = False
+        # Per step, the vertical window the last light-first light trace
+        # settled on and whether its auto-range ended clipped. A pair taken
+        # dark first is acquired in it: a range fitted to the dark trace can
+        # be too small for the light one, which would then clip.
+        light_windows: dict[int, tuple[tuple[float, float], bool]] = {}
         for s in plan:
             if abort is not None and abort():
                 aborted = True
@@ -631,7 +636,10 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
             # Nothing about the measurement changes: these are yields
             # between the same instrument calls in the same order.
             same_dark = config.dark_reference == "same"
-            dark_first = config.alternate_order and s.loop % 2 == 0
+            # Dark first only where a light trace at this step has set the
+            # window -- always so on an even loop of a run started at loop 1.
+            dark_first = (config.alternate_order and s.loop % 2 == 0
+                          and s.step in light_windows)
             light_phases = ["levels", "light settle", "acquire light"]
             # With `dark_reference = "same"` and the light trace first, the
             # levels are already the dark trace's; only a dark trace that
@@ -650,10 +658,13 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
 
             sync_failed_box = [sync_failed]
 
-            def take(which: str, autorange: bool):
+            def take(which: str, autorange: bool, window=None):
                 trace = rig.scope.acquire(config.n_averages, source=cfg.current_source,
                                           autorange_first=autorange,
-                                          timeout_s=config.acquisition_timeout_s)
+                                          timeout_s=config.acquisition_timeout_s,
+                                          window=window)
+                if autorange:
+                    light_windows[s.step] = (rig.scope.window, bool(rig.scope.clipped))
                 sync, note = _sync_trace(rig, cfg, sync_failed_box[0])
                 notes = []
                 if note:
@@ -683,7 +694,7 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                 yield from notes
                 return trace, sync, intensity
 
-            def dark_part(autorange: bool):
+            def dark_part(autorange: bool, window=None):
                 # shutter closed. With `dark_reference = "same"` after the
                 # light trace nothing but the shutter moves, so the levels are
                 # not rewritten at all -- and the settle before the shutter has
@@ -699,17 +710,20 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                 rig.shutter.shut()
                 sleep(config.shutter_settle_s)
                 yield phase("acquire dark")
-                trace, sync, notes = take("dark", autorange)
+                trace, sync, notes = take("dark", autorange, window)
                 yield from notes
                 return trace, sync
 
-            # The first trace of the shot sets the vertical range and the
-            # second inherits it, so the pair shares one scope zero.
+            # One vertical window for the pair, so both share one scope zero:
+            # the light trace's auto-range, or for a dark-first pair the
+            # window this step's light trace settled on a loop earlier.
             if dark_first:
-                dark, sync_dark = yield from dark_part(autorange=True)
+                window, clipped = light_windows[s.step]
+                dark, sync_dark = yield from dark_part(autorange=False, window=window)
                 light, sync_light, intensity = yield from light_part(autorange=False)
             else:
                 light, sync_light, intensity = yield from light_part(autorange=True)
+                clipped = light_windows[s.step][1]
                 dark, sync_dark = yield from dark_part(autorange=False)
             sync_failed = sync_failed_box[0]
             yield phase("process")
@@ -794,7 +808,9 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                            # rig. `clipped` is in the `Digitizer` protocol now,
                            # so a driver that lacks it fails loudly here and in
                            # `test_every_real_driver_satisfies_its_protocol`.
-                           clipped=bool(rig.scope.clipped),
+                           # Read after the light trace's auto-range: the window
+                           # both traces of the pair were taken in.
+                           clipped=clipped,
                            sync_light=sync_light, sync_dark=sync_dark,
                            t0_int_record_s=t0_rec, t1_int_record_s=t1_rec,
                            dark_first=dark_first)

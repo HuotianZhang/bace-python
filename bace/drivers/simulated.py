@@ -431,9 +431,12 @@ class SimulatedDigitizer:
         return self._range_v, self._offset_v
 
     def acquire(self, n_averages: int, *, source: str = "CHAN2",
-                autorange_first: bool = False, timeout_s: float = 30.0) -> Trace:
+                autorange_first: bool = False, timeout_s: float = 30.0,
+                window: tuple[float, float] | None = None) -> Trace:
         if autorange_first:
             self.autorange(source)
+        elif window is not None:
+            self._range_v, self._offset_v = float(window[0]), float(window[1])
         if self._range_v is None:
             raise SimulatedDigitizerError(
                 "no vertical range set — the light trace must autorange before the "
@@ -464,6 +467,10 @@ class SimulatedDigitizer:
     def clipped(self) -> bool:
         """True if the last acquisition hit the vertical limits."""
         return self._clipped
+
+    @property
+    def window(self) -> tuple[float, float] | None:
+        return None if self._range_v is None else (self._range_v, self._offset_v)
 
     def close(self) -> None:
         pass

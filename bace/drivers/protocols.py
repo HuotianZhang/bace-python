@@ -147,14 +147,24 @@ class Digitizer(Protocol):
                                sweep: str = ...) -> None: ...
 
     def acquire(self, n_averages: int, *, source: str = ...,
-                autorange_first: bool = ..., timeout_s: float = ...) -> Trace:
+                autorange_first: bool = ..., timeout_s: float = ...,
+                window: tuple[float, float] | None = ...) -> Trace:
         """One hardware-averaged acquisition.
 
         `autorange_first=True` on the light trace only. The dark trace must
         inherit the vertical range the light trace left behind — re-ranging
         between the pair changes the digitiser scaling and invalidates the
-        subtraction.
+        subtraction. A pair taken dark first sets `window` instead: the
+        (range, offset) a light trace at the same point settled on earlier,
+        because a range fitted to the dark trace can be too small for the
+        light one.
         """
+        ...
+
+    @property
+    def window(self) -> tuple[float, float] | None:
+        """(vertical range, offset) in volts of the current channel, as the
+        last auto-range or `acquire(window=...)` left it; None before either."""
         ...
 
     def fetch_volts(self, source: str) -> Trace:

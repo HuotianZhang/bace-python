@@ -11,7 +11,9 @@ Dated, newest first. Details and evidence are in `docs/`.
   record before the trigger (`offset_region = "pre-trigger"`). Evidence in
   `docs/analysis/2026-10-26/scope-window/`.
 - `alternate_order`: the dark trace first on even loops, so drift between the
-  two acquisitions cancels over loop pairs.
+  two acquisitions cancels over loop pairs. That pair is taken in the vertical
+  window the light trace set at the same point a loop earlier, so a light
+  trace larger than the dark one does not clip.
 - Settle times 0.5 / 0.5 / 1 s instead of 2 / 2 / 5 s: the same Q, 6.3 s a
   shot instead of 17.3, and half the scatter per loop.
 - Every bace run writes the 33220A `:OUTP:POL` itself before it pulses.

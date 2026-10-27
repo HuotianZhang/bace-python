@@ -103,6 +103,7 @@ class Infiniium:
         still reports in the rig's convention."""
         self.probe_attenuation = probe_attenuation
         self._ranged = False
+        self.window: tuple[float, float] | None = None
         self.last_fetch_method = ""
         self.last_autorange_passes = 0
         self.last_autorange_clipped = False
@@ -455,7 +456,8 @@ class Infiniium:
 
         self._io.write(":RUN;")
         self._ranged = True
-        return float(vrange), float(voffset)
+        self.window = (float(vrange), float(voffset))
+        return self.window
 
     @staticmethod
     def _settled(reported: float | None, asked: float,
@@ -646,15 +648,22 @@ class Infiniium:
         self._io.write(":STOP;")
 
     def acquire(self, n_averages: int, *, source: str = "CHAN2",
-                autorange_first: bool = False, timeout_s: float = 30.0) -> Trace:
+                autorange_first: bool = False, timeout_s: float = 30.0,
+                window: tuple[float, float] | None = None) -> Trace:
         """One hardware-averaged acquisition.
 
         `autorange_first=True` for the light trace, False for the dark one —
-        see the module docstring.
+        see the module docstring. `window` writes a known (range, offset)
+        instead, for a pair taken dark first (`Digitizer.acquire`).
         """
         self._io.write(":RUN;:WAV:FORM WORD;")
         if autorange_first:
             self.autorange(source)
+        elif window is not None:
+            channel = int(str(source).upper().removeprefix("CHAN"))
+            self.configure_channel(channel, vertical_range=window[0], offset=window[1])
+            self.window = (float(window[0]), float(window[1]))
+            self._ranged = True
         elif not self._ranged:
             raise ScopeError(
                 "no vertical range has been set — call acquire(..., autorange_first=True) "
