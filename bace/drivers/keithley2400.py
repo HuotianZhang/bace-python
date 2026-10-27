@@ -278,6 +278,8 @@ class Keithley2400:
         self.config = config
         self._output = False
         self._panel: PanelSetup | None = None
+        self.read_retries = 0
+        """How many `:READ?` replies were not numbers and were asked again."""
 
     # -- identity ---------------------------------------------------------
     def identify(self) -> str:
@@ -503,7 +505,7 @@ class Keithley2400:
         if raise_it:
             self._io.timeout = budget_ms
         try:
-            raw = self._io.query(":READ?").strip().split(",")
+            raw = self._read()
             # Which limit can bite is decided by what is being sourced, so
             # only that one is asked for: the other's TRIP is meaningless.
             node = "CURR" if panel.function == "voltage" else "VOLT"
@@ -514,6 +516,27 @@ class Keithley2400:
         return PanelReading(volts=float(raw[0]), amps=float(raw[1]),
                             compliance=tripped, function=panel.function,
                             level=panel.level)
+
+    def _read(self) -> list[float]:
+        """`:READ?` as numbers, asked again once if the reply is not numbers.
+
+        On 2026-10-26 a dark J-V failed one second in on `)1*088301A)08`:
+        `+1.088301E-08` with bits 1 and 2 dropped from the non-digit
+        characters -- a GPIB line, not the instrument. A second `:READ?`
+        measures again at the same level, so retrying costs one point's time
+        and nothing else; a second bad reply raises, naming both."""
+        replies = []
+        for _ in range(2):
+            raw = str(self._io.query(":READ?")).strip()
+            replies.append(raw)
+            try:
+                return [float(x) for x in raw.split(",")]
+            except ValueError:
+                self.read_retries += 1
+        raise SourceMeterError(
+            f"the 2400 answered :READ? with {replies[0]!r} and then {replies[1]!r}, "
+            "neither a number: check the GPIB cables and that every instrument on "
+            "the bus is powered")
 
     # -- the three DC quantities -----------------------------------------
     def _prepare(self) -> None:
@@ -550,7 +573,7 @@ class Keithley2400:
         # left, which is not the limit anyone chose. Compliance first here.
         self.enable_output(True)
         time.sleep(settle_ms / 1000.0)
-        value = float(self._io.query(":READ?").strip().split(",")[0])
+        value = self._read()[0]
         self.disable_output()
         return value
 
@@ -568,7 +591,7 @@ class Keithley2400:
         self._io.write(":FORM:ELEM VOLT;")
         self.enable_output(True)
         time.sleep(settle_ms / 1000.0)
-        value = float(self._io.query(":READ?").strip().split(",")[0])
+        value = self._read()[0]
         self.disable_output()
         return value
 
@@ -689,7 +712,7 @@ class Keithley2400:
                 level = f"{x:g}"
                 self._io.write(f":SOUR:VOLT:LEV {level};")
                 # `:READ?` steps to the level, waits `:SOUR:DEL`, integrates.
-                raw = self._io.query(":READ?").strip().split(",")
+                raw = self._read()
                 # The level as the instrument received it, not linspace's
                 # 0.49999999999999994 -- the point's voltage is what was sourced.
                 yield float(level), float(raw[0])

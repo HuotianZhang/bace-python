@@ -103,6 +103,7 @@ from typing import Any, Callable, Iterator
 from ..experiment import events as E
 from ..experiment.jv import JVCurveDone, JVFinished, JVStarted
 from ..experiment.rig import Rig
+from .journal import finished_text
 from .modules import RunContext, VocSource
 from .pipeline import TEMPERATURE_DEFAULTS, Schedule, Step
 from .temperature import TEMPERATURE_POLL_S, settle  # noqa: F401 -- the poll clock, re-exported
@@ -178,7 +179,8 @@ class _Tally:
         elif isinstance(ev, E.RunFinished):
             self.kept = self.requested
             self.finished = True
-            self.summary = _finished_text(ev, self.kept, self.requested)
+            self.summary = finished_text({"q_mean": ev.q_mean, "q_std": ev.q_std, "q_all": ev.q_all},
+                                         self.kept, self.requested)
         elif isinstance(ev, E.RunAborted):
             self.aborted = ev
             self.kept, self.requested = ev.done, ev.total
@@ -207,18 +209,6 @@ class _Tally:
             self.summary = f"{ev.kelvin:g} K"
         elif isinstance(ev, E.Notice) and not self.summary:
             self.summary = ev.text
-
-
-def _finished_text(ev: E.RunFinished, kept: int | None, requested: int | None) -> str:
-    tail = f" · {kept}/{requested}" if kept is not None and requested is not None else ""
-    q_mean = [float(x) for x in ev.q_mean]
-    q_std = [float(x) for x in ev.q_std]
-    if len(q_mean) == 1 and math.isfinite(q_mean[0]):
-        text = f"Q {q_mean[0]:.3e}"
-        if q_std and math.isfinite(q_std[0]):
-            text += f" ± {q_std[0]:.1e}"
-        return text + " C" + tail
-    return f"{len(q_mean)} point" + ("" if len(q_mean) == 1 else "s") + tail
 
 
 class _Executor:

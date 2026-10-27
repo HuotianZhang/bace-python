@@ -238,7 +238,7 @@ def test_run_index_reconstructs_every_run_newest_first(history):
     assert done["queued_at"] == T0 and done["started_at"] == T0 + 0.1
     assert done["finished_at"] == pytest.approx(T0 + 1.0 + 2.4 + 0.2)
     assert done["kept"] == 20 and done["requested"] == 20
-    assert done["outcome_text"] == "Q -3.520e-10 ± 1.8e-12 C · 20/20"
+    assert done["outcome_text"] == "Q -0.352 ± 0.0009 nC (sem), 4 loops · 20/20"
     assert done["folder"] == "runs/s4_290K_20260902_120000"
     assert done["tree_summary"] == "bace" and done["node_count"] == 1
 

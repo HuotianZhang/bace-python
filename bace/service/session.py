@@ -909,8 +909,6 @@ class Session:
             with self._lock:
                 self._snapshot = snapshot
                 rec.chain_at_start = snapshot["chain"]
-            for verdict in self.bench.chain_verdicts(snapshot):
-                self._dispatch(job, verdict, node_path="")
             # Against the V_oc the tree was validated with (a jv_bace queued
             # behind it must not change that) and the bench as it is now:
             # a `crit` is the safety block; an `invalid` here is an
@@ -919,6 +917,18 @@ class Session:
             check = pipeline.validate(rec.tree, self.catalogue, bench=snapshot,
                                       history=self.journal, session_voc=rec.session_voc,
                                       rig_config=self.rig_config)
+            # The chain as this tree sees it, not as the bench card does: a
+            # bace run writes the 33220A polarity itself, so NORM is `info`
+            # here, and the record keeps one entry per code -- the bench's
+            # `warn` would replace it.
+            chain = [c for c in check.checks if c.code.startswith("chain.")]
+            tree_codes = {c.code for c in chain}
+            for verdict in self.bench.chain_verdicts(snapshot):
+                if verdict.code not in tree_codes:
+                    self._dispatch(job, verdict, node_path="")
+            for c in chain:
+                if c.level != "ok":
+                    self._dispatch(job, c, node_path="")
             blocking = [c for c in check.checks if c.level in ("invalid", "crit")]
             for c in blocking:
                 self._dispatch(job, c, node_path="")

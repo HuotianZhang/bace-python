@@ -428,3 +428,36 @@ def test_the_file_keeps_the_sync_traces_and_the_per_shot_diagnostics(tmp_path):
     assert (diag["averages_light"] == 64).all() and (diag["averages_dark"] == 64).all()
     assert np.isfinite(diag["spike_lag_ns"]).all() and np.abs(diag["spike_lag_ns"]).max() < 0.25
     assert np.isfinite(diag["edge_light_ns"]).all()
+
+
+# -- the baseline, shot by shot (2026-10-26) ------------------------------------
+def test_pre_trigger_mean_and_late_offset_read_the_zero_and_what_the_baseline_left():
+    from bace.core.diagnostics import late_offset, pre_trigger_mean
+    t = np.arange(N) * DT + T0                     # trigger at -T0 of record time
+    zero = 0.16e-3
+    light = np.full(N, zero) + 3e-3 * np.exp(-np.clip(t, 0, None) / 1e-7) * (t > 3e-8)
+    dark = np.full(N, zero)
+    light[t > 1.5e-6] += 2e-6                      # drift after the window, light only
+    assert pre_trigger_mean(light, DT, T0) == pytest.approx(zero)
+    assert late_offset(light, dark, DT, T0, window_end=1.5e-6 - T0) == pytest.approx(2e-6, rel=1e-3)
+    assert pre_trigger_mean(light, DT, -5e-9) is None, "too few samples before the trigger"
+    assert late_offset(light, dark, DT, T0, window_end=(N - 5) * DT) is None
+
+
+def test_the_file_says_which_shots_took_the_dark_trace_first(tmp_path):
+    import dataclasses
+    from bace.storage.hdf5 import read_run
+    from bace.storage.naming import RunMetadata
+
+    _, rig = _rig()
+    rec = RunRecorder(str(tmp_path), RunMetadata(sample="sim", temperature_k=290.0,
+                                                  temperature_how="typed"))
+    cfg = dataclasses.replace(CFG, alternate_order=True, offset_region="pre-trigger")
+    list(record(run_transient_scan(rig, ScanSpec(axis=Axis("vpre", 0.9, 1.0, 0.1), vcoll=-2.0,
+                                                 n_loops=2), cfg, sleep=NO_SLEEP), rec))
+    d = read_run([p for p in rec.written if p.endswith(".h5")][0])
+    diag = d["diagnostics"]
+    assert diag["dark_first"].tolist() == [[0.0, 0.0], [1.0, 1.0]]
+    assert np.isfinite(diag["pre_trigger_light_ua"]).all()
+    assert np.isfinite(diag["pre_trigger_dark_ua"]).all()
+    assert diag["late_offset_ua"].shape == (2, 2)

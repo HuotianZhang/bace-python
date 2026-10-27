@@ -135,6 +135,9 @@ class StepDone(Event):
     first sample). Pinned to the pulse, so it differs from shot to shot along
     a delay axis; stored with the run so the file can say what its own charge
     integrated."""
+    dark_first: bool = False
+    """Whether this shot took its dark trace before its light trace
+    (`RunConfig.alternate_order`, on even loops)."""
     """The trigger channel's trace out of the same record as `light` and
     `dark`, in volts (2026-09-05). What the edge the scope fired on looked
     like: smeared, the jitter is between the sync and the scope's trigger;

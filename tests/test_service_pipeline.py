@@ -767,7 +767,12 @@ def test_a_temperature_loop_inside_an_illumination_loop_warns_with_the_cost():
 
 
 def test_the_chain_read_back_becomes_warnings_with_named_fixes():
+    # A bace tree: every bace run writes the 33220A polarity itself (2026-10-26).
     v = validate(canonical(), bench=bench_snapshot(led_pol="NORM"))
+    [i] = v.by_code("chain.led-polarity")
+    assert i.level == "info" and "writes it at start" in i.text and "NORM" in i.text
+    # A tree whose transient is not armed from the Sync leaves it alone, so it warns.
+    v = validate(canonical(external_trigger=False), bench=bench_snapshot(led_pol="NORM"))
     [w] = v.by_code("chain.led-polarity")
     assert w.level == "warn" and w.data["fix"] == "set-33220a-pol-inv"
     assert "NORM" in w.text and "during illumination" in w.text
@@ -990,7 +995,7 @@ def test_an_unreadable_33220a_polarity_is_a_warn_for_a_transient_and_info_for_a_
     """The bench card calls a `?` a warn; the validator used to call the same
     read-back `info` for a bace tree. An unreadable polarity on a transient
     is as unproven as NORM, so the two agree now."""
-    v = validate(canonical(), bench=bench_snapshot(led_pol="?"))
+    v = validate(canonical(external_trigger=False), bench=bench_snapshot(led_pol="?"))
     [w] = v.by_code("chain.led-polarity")
     assert w.level == "warn" and w.data["fix"] == "set-33220a-pol-inv"
     assert "unproven" in w.text and w.data["value"] == "?"

@@ -203,7 +203,8 @@ function renderCharts() {
           width: w,
           t0_int_s: values.t0_int_s, t_int_width_s: values.t_int_width_s,
           pulse_delay_s: pulseDelayS(shot, values, rig),
-          offset_corrected: values.offset_correct, dark_reference: values.dark_reference,
+          offset_corrected: values.offset_correct, offset_region: values.offset_region,
+          dark_reference: values.dark_reference,
         } : { width: w }))
         : h('p.absent', 'load the rig transient fixture, or replay a recorded stream'),
       h('h3', 'Q per loop, or Q(axis) · M4'),

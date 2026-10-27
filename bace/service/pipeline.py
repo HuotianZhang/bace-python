@@ -1496,6 +1496,13 @@ def _c_chain_led_polarity(f: _Facts) -> list[Verdict]:
     # The bench card (rigs.chain) always warns because it describes the
     # bench, not a tree; the contract records the difference.
     transient = bool(f.transients)
+    if transient and all(bool(s.values().get("external_trigger", True)) for s in f.transients):
+        # Every bace run writes it before it pulses (`_build_bace`, 2026-10-26),
+        # as the recipe's output_polarity does for the 81150A.
+        return [_v("info", "chain.led-polarity",
+                   f"33220A :OUTP:POL reads {value}; each bace run writes it at start "
+                   "(INV when it arms on the rising Sync edge, which is then light off)",
+                   value=value, expected="INV")]
     level = "warn" if transient or f.schedule is None else "info"
     if value == "?":
         # Unreadable is as unproven as NORM for a transient: nothing says

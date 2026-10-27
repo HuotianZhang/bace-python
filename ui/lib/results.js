@@ -239,6 +239,7 @@ function baceResult(entry, found, bench) {
       t_int_width_s: values.t_int_width_s,
       pulse_delay_s: pulseDelayS(shot, values, rig),
       offset_corrected: values.offset_correct,
+      offset_region: values.offset_region,
       dark_reference: values.dark_reference,
     })),
     chart((w) => loopsModel(found, { width: w })),

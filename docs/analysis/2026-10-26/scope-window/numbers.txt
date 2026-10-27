@@ -1,0 +1,17 @@
+run test_293.99K_1000mVLED_484mVVOC_20261026_125108
+Voc 0.4843 V, window 0.544-4.844 us, dt 0.80 ns
+
+-Q / nC: file: no offset, 4.3 us | pre-trigger, 4.3 us | last 10 %, 4.3 us | old recipe emulated: 2 us record, last 10 %, 1.5 us | pre-trigger, 1.5 us
+-1 mV  0.1671  0.1640  0.1407  0.1282  0.1457
++0 mV  0.0771  0.1607  0.1509  0.1219  0.1446
++1 mV  0.0291  0.2048  0.1847  0.1382  0.1641
+
+baselines / mA (head, tail, old)
+-1 mV  -0.0007 -0.0062 -0.0124
++0 mV  +0.0194 +0.0172 +0.0043
++1 mV  +0.0408 +0.0362 +0.0236
+
+fraction of 4.3 us Q (pre-trigger baseline) reached at
+-1 mV  0.5us 0.693  1.0us 0.822  1.5us 0.888  1.8us 0.912  2.5us 0.959  3.0us 0.963  3.5us 0.976
++0 mV  0.5us 0.705  1.0us 0.824  1.5us 0.900  1.8us 0.925  2.5us 0.961  3.0us 0.986  3.5us 0.992
++1 mV  0.5us 0.592  1.0us 0.726  1.5us 0.801  1.8us 0.827  2.5us 0.898  3.0us 0.939  3.5us 0.961

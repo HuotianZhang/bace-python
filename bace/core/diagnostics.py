@@ -171,6 +171,37 @@ def sync_lag_ns(sync_light: np.ndarray, sync_dark: np.ndarray,
     return float(-(shift - (x.size - 1)) * dt * 1e9)
 
 
+def pre_trigger_mean(trace: np.ndarray, dt: float, t0: float) -> float | None:
+    """Mean of the trace before the trigger (less `PRE_TRIGGER_GUARD_S`), in
+    the trace's units. With nothing driven this is the scope's zero at the
+    range in force: 0.16 mA on the rig at 0.86 V (2026-10-26). None when fewer
+    than 20 samples precede the trigger."""
+    from .process import PRE_TRIGGER_GUARD_S
+    a = np.asarray(trace, dtype=float)
+    n = int((-t0 - PRE_TRIGGER_GUARD_S) / dt) if dt else 0
+    if n < 20 or n > a.size:
+        return None
+    return float(a[:n].mean())
+
+
+def late_offset(light: np.ndarray, dark: np.ndarray, dt: float, t0: float,
+                window_end: float | None) -> float | None:
+    """Mean of `light - dark` after the integration window, less its mean
+    before the trigger: what a pre-trigger baseline leaves at the end of the
+    record. A null run (2026-10-26) put it at -1.2 +/- 2.9 uA per shot, the
+    amplifier's drift between the two acquisitions, and a real BACE run the
+    same. None when fewer than 20 samples follow the window or precede the
+    trigger."""
+    p = np.asarray(light, dtype=float) - np.asarray(dark, dtype=float)
+    head = pre_trigger_mean(p, dt, t0)
+    if head is None or window_end is None or not dt:
+        return None
+    k = int(np.ceil(window_end / dt))
+    if p.size - k < 20:
+        return None
+    return float(p[k:].mean() - head)
+
+
 def edge_10_90_ns(trace: np.ndarray, dt: float) -> float | None:
     """The 10-90 % time of the displacement spike's leading edge, in ns.
 

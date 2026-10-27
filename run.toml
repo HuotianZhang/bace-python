@@ -25,19 +25,19 @@ delay_ns = 90.0   # what the LabVIEW panel held on 2026-09-02 (Delay(ns) = 90); 
 
 [acquisition]
 n_loops = 100
-n_averages = 200   # hardware averages per trace. 200 is the panel's and the 02:16 LabVIEW run's; 20 was a quick-check value
-timebase_ns_per_div = 200.0     # ten divisions -> 2 us screen, which is what a
-                                # screenshot of the LabVIEW panel (2026-09-01)
-                                # actually shows: Timebase (200 ns) = 200E+0
-                                # *and* Pulse Width (ns) 5e3 = 5E+3. They are
-                                # not equal, so the "timebase*10 = pulse width"
-                                # reading that briefly put 500 here was wrong.
-                                # 200 is also what the 2026-08 archive used.
-record_length = 5000            # a request, not a promise: the instrument gives
-                                # window x sample rate. 2 us at 2 GSa/s gave
-                                # 4000; 5 us may give 10000, or the scope may
-                                # drop to 1 GSa/s and give 5000 at dt = 1 ns.
-                                # Nothing downstream assumes either.
+n_averages = 200   # hardware averages per trace. 200 is the panel's and the 02:16 LabVIEW run's; 50 gave three times the scatter per loop (2026-10-26)
+timebase_ns_per_div = 1000.0    # ten divisions -> 10 us: 1 us before the
+                                # trigger (the pre-trigger baseline) and 9 us
+                                # after it. 2026-10-26: at 200 ns/div (the LabVIEW
+                                # panel's and the 2026-08 archive's 2 us) the
+                                # record ended while extraction was still
+                                # running, and Q read 10-20 % low. See
+                                # docs/analysis/2026-10-26/scope-window/.
+record_length = 10000           # a request, not a promise: the instrument gives
+                                # window x sample rate. On 2026-10-26 a 5 us record
+                                # gave 6250 of 10000 asked (dt 0.8 ns) and a 20 us
+                                # one 20000 of 25000 (dt 1 ns). Nothing downstream
+                                # assumes either.
 t0_int_s = -2e-9                # where the charge integral starts, measured
                                 # from the field's arrival at the device:
                                 # trigger + :PULS:DEL1 + trigger_offset_s
@@ -52,15 +52,24 @@ t0_int_s = -2e-9                # where the charge integral starts, measured
                                 # different part of each point's transient.
                                 # (The 2026-09-03 scan's `pulse` + 45 ns with a
                                 # 47 ns latency folded in is this -2 ns.)
-t_int_width_s = 1.5e-6          # how long the window is. The end travels with
-                                # the pulse too; ~6 tau at tau ~ 265 ns. The
-                                # run warns once if the record ends first.
-pulse_width_ns = 5000.0
+t_int_width_s = 6e-6            # how long the window is. The end travels with
+                                # the pulse too. 2026-10-26, 20 us records with a
+                                # null run beside them: Q is ~96 % collected by
+                                # 6 us and ~98 % by 8 us, while the amplifier's
+                                # shot-to-shot drift (+/-3 uA) adds scatter in
+                                # proportion to the window; 6 us is the balance.
+                                # The run warns once if the record ends first.
+pulse_width_ns = 10000.0        # outlasts the 6 us window and the 9 us record;
+                                # the period is 2 ms, so it costs nothing
 pulse_frequency_hz = 500.0        # read off the rig 2026-08-31: both
                                 # generators were at 500 Hz, not the
                                 # 1 kHz assumed from the old code
 duty_percent = 50.0
-offset_correct = true           # subtract the mean of the last 10 %
+offset_correct = true           # subtract a constant baseline, from offset_region
+offset_region = "pre-trigger"   # the record before the trigger, not the last
+                                # 10 %, which on 2026-10-26 still held signal
+alternate_order = true          # dark trace first on even loops, so drift between
+                                # the two acquisitions cancels over loop pairs
 inverted_output = false   # unused while output_polarity is set explicitly below
                                 # what the device sits at between pulses, so with
                                 # NORM and LoLvl = Vcoll it is held in extraction
@@ -82,11 +91,14 @@ output_polarity = "NORM"       # :OUTP1:POL. The validated pair is invert_polari
                                # 14:52 on 2026-09-02) rests the device at v_coll instead,
                                # extraction never stops, and the photo peak collapses from
                                # ~3 mA to ~0.5 mA with Q an order of magnitude small.
-settle_s = 0.3   # after the levels are written (bare.py --level-settle 0.3)
-dark_settle_s = 0.3   # after the dark levels, before the shutter shuts
-shutter_settle_s = 5.0          # after the shutter has moved, BOTH traces, before acquiring. bare.py --settle 5
-                                # is what matched LabVIEW at 02:08 (peak 6 %, tau 2.8 %, Q 4 %); run.toml carried 0.2 s of
-                                # settle and no shutter settle, and the port's first service runs were made with that.
+settle_s = 0.5   # after the levels are written
+dark_settle_s = 0.5   # after the dark levels, before the shutter shuts
+shutter_settle_s = 1.0          # after the shutter has moved, BOTH traces, before acquiring.
+                                # 2026-10-26, 294 K, interleaved at Voc: 0.5/0.5/1 s gave the same Q as
+                                # 2/2/5 s within the error, at 6.3 s a shot instead of 17.3, and less
+                                # scatter per loop (0.009 against 0.021 nC): the amplifier drifts less
+                                # in the shorter gap between the light and the dark trace. Check once
+                                # at the coldest temperature, where the device is slowest.
 read_intensity = true
 trigger_sweep = "AUTO"          # AUTO or TRIG. AUTO is what the LabVIEW driver
                                 # used, and it sweeps even when no trigger
