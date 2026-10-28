@@ -103,3 +103,20 @@ def test_no_console_code_is_lost_to_a_misread_comment_string_or_regex():
                                uncommented, flags=re.M):
             assert name in names, (path, name)
         assert found == tokens(source + "\n// trailing comment\n"), path
+
+
+def test_a_comment_may_not_add_or_remove_a_line_break_between_tokens():
+    tokens = _tool().js_tokens
+    one = "function f() { return /* reason */ 42; }"
+    assert tokens(one) != tokens("function f() { return /* reason\n */ 42; }")
+    assert tokens(one) == tokens("function f() { return /* a longer reason */ 42; }")
+    wrapped = "a();\n// one\n// two\nb();"
+    assert tokens(wrapped) == tokens("a();\n// one, two, three\nb();")
+
+
+def test_a_regular_expression_after_a_control_condition():
+    tokens = _tool().js_tokens
+    run = "if (ok) /[//]/.test(x); run();"
+    assert tokens(run) != tokens(run.replace("run()", "destroy()"))
+    assert "/[//]/" in tokens(run)
+    assert tokens("f(a) / 2") == ["f", "(", "a", ")", "/", "2"]
