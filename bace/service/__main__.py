@@ -176,10 +176,12 @@ def load_configs(rig_path: str | None, run_path: str | None, *,
             "run_config": run_config, "rig_path": p_rig, "run_path": p_run}
 
 
-def build_session(a: argparse.Namespace, *, warn: Callable[[str], Any] = print) -> Session:
-    """A `Session` from the parsed arguments. Nothing runs until the app's
-    startup hook starts it."""
-    cfg = load_configs(a.rig, a.run, warn=warn)
+def build_session(a: argparse.Namespace, *, warn: Callable[[str], Any] = print,
+                  cfg: dict[str, Any] | None = None) -> Session:
+    """A `Session` from the parsed arguments, and from `cfg` when the configs
+    are already loaded. Nothing runs until the app's startup hook starts it."""
+    if cfg is None:
+        cfg = load_configs(a.rig, a.run, warn=warn)
     return Session(cfg["rig_config"], cfg["run_toml"], out=a.out,
                    mode="sim" if a.sim else "rig", fast=a.fast,
                    smu_config=cfg["smu_config"], run_config_defaults=cfg["run_config"],
@@ -225,6 +227,14 @@ def main(argv: list[str] | None = None) -> int:
               "machine alone can reach it; bind 127.0.0.1 and put a proxy in front "
               "if the console must be reached from elsewhere.")
         return 2
+    # The configs are read before the port is taken: a missing or malformed
+    # file is the operator's to correct whatever else holds the port, and
+    # reading them opens no instrument.
+    try:
+        cfg = load_configs(a.rig, a.run)
+    except ConfigError as exc:
+        print(f"config: {exc}")
+        return 2
     try:
         sock = listen_socket(a.host, a.port)
     except OSError as exc:
@@ -232,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
               f"service, or another program, holds it. Nothing was opened.")
         return 3
     try:
-        session = build_session(a)
+        session = build_session(a, cfg=cfg)
     except ConfigError as exc:
         sock.close()
         print(f"config: {exc}")

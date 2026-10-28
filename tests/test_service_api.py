@@ -1391,6 +1391,11 @@ def test_the_cli_builds_a_sim_session_without_pyvisa_and_refuses_fast_on_the_rig
     assert main(["--fast", "--port", "1"]) == 2, "--fast is for --sim only"
     assert main(["--sim", "--ui", str(tmp_path / "nope")]) == 2
     assert main(["--sim", "--run", str(tmp_path / "nope.toml")]) == 2
+    with socket.socket() as held:                       # a config error is reported
+        held.bind(("127.0.0.1", 0))                     # whatever holds the port
+        held.listen(1)
+        busy = str(held.getsockname()[1])
+        assert main(["--sim", "--port", busy, "--run", str(tmp_path / "nope.toml")]) == 2
     assert parse_args(["--sim"]).power_monitor is None
     assert parse_args(["--sim", "--power-monitor", "0.5"]).power_monitor == 0.5
     # The temperature monitor is the other way round: on unless refused, so
