@@ -48,6 +48,9 @@ def test_an_envelope_names_known_modules_and_parameters_with_sound_bounds():
             ({**ENVELOPE, "modules": {"bace": {"vcoll": [-4, 0]}}}, "a bound is"),
             ({**ENVELOPE, "loops": {"spiral": {}}}, "not one of"),
             ({**ENVELOPE, "max_runs": 0}, "max_runs"),
+            ({**ENVELOPE, "max_total_s": "NaN"}, "finite"),
+            ({**ENVELOPE, "max_total_s": float("inf")}, "finite"),
+            ({**ENVELOPE, "modules": {"bace": {"vcoll": {"max": float("nan")}}}}, "finite"),
             ({**ENVELOPE, "surprise": 1}, "unknown key")):
         with pytest.raises(PlanError, match=says):
             Envelope.from_wire(bad, catalogue=CAT)
@@ -182,6 +185,8 @@ def test_the_gate_end_to_end(service):
     assert decided[0]["data"]["fingerprint"] == fp
     queued = [line for line in lines if line["type"] == "RunQueued"]
     assert queued[0]["data"]["plan"] == pid and queued[1]["data"]["plan"] is None
+    # After a restart the record is rebuilt from the journal, plan included.
+    assert session.journal.run_record(run_id)["plan"] == pid
 
 
 def test_a_proposal_the_service_cannot_accept_is_a_422(service):

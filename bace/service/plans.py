@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
@@ -71,8 +72,8 @@ def _bound(where: str, spec: Any) -> dict[str, Any]:
     for side in ("min", "max"):
         if side in spec:
             value = spec[side]
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise PlanError(f"{where}: {side} is a number, not {value!r}")
+            if isinstance(value, bool) or not isinstance(value, (int, float))                     or not math.isfinite(value):
+                raise PlanError(f"{where}: {side} is a finite number, not {value!r}")
             out[side] = float(value)
     if "min" in out and "max" in out and out["min"] > out["max"]:
         raise PlanError(f"{where}: min {out['min']:g} is above max {out['max']:g}")
@@ -160,6 +161,8 @@ class Envelope:
             expires_s = float(data.get("expires_s", 24 * 3600.0))
         except (TypeError, ValueError):
             raise PlanError("envelope: max_runs, max_total_s and expires_s are numbers") from None
+        if not (math.isfinite(max_total_s) and math.isfinite(expires_s)):
+            raise PlanError("envelope: max_total_s and expires_s are finite numbers")
         if max_runs < 1 or max_total_s <= 0 or not 0 < expires_s <= MAX_EXPIRES_S:
             raise PlanError(f"envelope: max_runs ≥ 1, max_total_s > 0 and expires_s in "
                             f"(0, {MAX_EXPIRES_S:g}] s")

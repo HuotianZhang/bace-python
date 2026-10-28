@@ -467,6 +467,8 @@ class _Run:
         Start read-back verdicts supersede submit-time checks.
         """
         self.sample: dict | None = None
+        self.plan: str | None = None
+        """The approved plan the run was submitted under (`service.plans`)."""
         self.nodes: dict[str, dict] = {}
         """Stores module `NodeDone` data reduced by `node_record`.
         This supplies run details and results grids across sessions.
@@ -497,6 +499,7 @@ class _Run:
                 self.folder = str(data["folder"])
             if isinstance(data.get("sample"), dict):
                 self.sample = dict(data["sample"])
+            self.plan = data.get("plan")
         elif kind == "NodeStarted":
             self._started[str(data.get("node_path") or line.get("node_path") or "")] = ts
         elif kind == "RunStateChanged":
@@ -634,6 +637,7 @@ class _Run:
         return {"run_id": self.run_id, "session_id": self.session_id, "kind": self.kind,
                 "name": self.name, "module": self.module,
                 "sample": dict(self.sample) if self.sample else None,
+                "plan": self.plan,
                 "tree_summary": _tree_summary(self.tree),
                 "node_count": _node_count(self.tree), "state": self.state,
                 "parked": self.parked, "queued_at": self.queued_at,
