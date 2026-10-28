@@ -140,9 +140,10 @@ CHECK_DOCS: dict[str, tuple[str, str, str]] = {
         "Correct the axis, the loop count or the J–V range the message names."),
     "bench.instrument": (
         "invalid",
-        "An instrument a module needs is unavailable in the last read-back. A dark "
-        "`jv` is also refused when the shutter or the LED is unavailable, although it "
-        "does not use them. `info` before the first read-back.",
+        "An instrument a module needs is unavailable in the last read-back. `warn` "
+        "when a plain `jv` has no shutter or LED to read: it runs, and the curve is "
+        "recorded with its illumination unknown, not as dark. `info` before the first "
+        "read-back.",
         "Switch the instrument on and connect it, then read the bench again."),
     "smu.ceiling": (
         "crit",
@@ -226,12 +227,15 @@ VOC_FLAGS: tuple[str, ...] = ("centre_on_voc", "vpre_on_voc")
 centred on it, or a pinned prebias set as an offset from it (TDCF at V_oc,
 the design's inherited "vpre = V_oc + 0.000 V")."""
 
-ADVISORY_NEEDS: frozenset[str] = frozenset({"voc", "power", "temperature"})
+ADVISORY_NEEDS: frozenset[str] = frozenset({"voc", "power", "temperature", "illumination"})
 """`Catalogue.needs` codes that are the V_oc source's business (`voc.source`
 reports it) or a warning, not a missing instrument -- except for the `power`
 module itself, whose instrument *is* the meter. `temperature` is advisory
 because a temperature node runs either way: through the 331 console, or as
-a pause for the operator (`temperature.not-wired` says which)."""
+a pause for the operator (`temperature.not-wired` says which).
+`illumination` is a plain `jv` on a bench with no shutter or LED to read:
+the curve is recorded with its illumination unknown, and no other check
+says so, so `bench.instrument` reports it as a `warn`."""
 """The catalogue, in the order `validate` reports it. Stable: the UI keys on
 these strings, and a renamed id is a check that silently stops showing."""
 
@@ -1438,6 +1442,7 @@ def _c_bench_instrument(f: _Facts) -> list[Verdict]:
         return [_v("info", "bench.instrument",
                    "instruments not read yet; which are on the bench is read at Start")]
     failures = []
+    blind = []
     checked = 0
     for s in f.modules:
         try:
@@ -1451,8 +1456,11 @@ def _c_bench_instrument(f: _Facts) -> list[Verdict]:
         if missing:
             failures.append((s, f"{s.module}: " + "; ".join(str(n.get("text")) for n in missing),
                              {"missing": [n.get("code") for n in missing]}))
-    if failures:
-        return _grouped("bench.instrument", "invalid", failures)
+        blind += [(s, f"{s.module}: {n.get('text')}", {}) for n in items
+                  if n.get("code") == "illumination"]
+    if failures or blind:
+        return (_grouped("bench.instrument", "invalid", failures)
+                + _grouped("bench.instrument", "warn", blind))
     return [_v("ok", "bench.instrument",
                f"every instrument the tree needs is on this bench ({checked} module run"
                f"{'s' if checked != 1 else ''} checked)", checked=checked)]

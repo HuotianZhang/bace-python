@@ -1039,6 +1039,29 @@ def test_a_module_whose_instrument_is_unplugged_is_refused_at_validate():
     assert "bench.instrument" in P.CHECKS
 
 
+def test_a_dark_jv_runs_on_a_bench_with_no_shutter_or_led():
+    """`Catalogue.needs` says "illumination" for a plain `jv` with nothing to
+    read the light from, and says it is not a `missing`. The check used to
+    treat every code outside `ADVISORY_NEEDS` as one and refused the run;
+    now it warns that the label will be unknown. `jv_bace` needs both."""
+    from bace.service.modules import Catalogue
+
+    cat = Catalogue(rig_config=RIG, run_toml={}, history=None)
+    snap = bench_snapshot()
+    snap["unavailable"] = {"shutter": "the shutter is not on this bench",
+                           "led": "the 33220A is not on this bench"}
+    v = validate(module("jv"), catalogue=cat, bench=snap)
+    assert v.valid
+    [c] = v.by_code("bench.instrument")
+    assert c.level == "warn" and c.node_path == "jv"
+    assert "unknown, not as dark" in c.text
+
+    v = validate(module("jv_bace"), catalogue=cat, bench=snap)
+    assert not v.valid
+    [c] = v.by_code("bench.instrument")
+    assert c.level == "invalid" and c.data["missing"] == ["led", "shutter"]
+
+
 def test_a_pinned_prebias_on_voc_needs_a_source_and_a_pinned_vpre():
     """The design's inherited "vpre = V_oc + 0.000 V" when delay_ns is the
     axis: `vpre_on_voc` makes V_oc mandatory the way `centre_on_voc` does,
