@@ -13,14 +13,14 @@ This manual covers the bench, the physics behind its measurements and the softwa
 
 | Content | Source | How it reaches the manual |
 |---|---|---|
-| Parameters, checks | The code: parameter specs, the check catalogue | Generated (4.1, 4.2) by `tools/build_manual.py` |
+| Parameters, checks, bench actions | The code: parameter specs, `CHECK_DOCS`, `SHOT_CHECKS`, `ACTION_DOCS` | Generated (4.1–4.3) by `tools/build_manual.py` |
 | Hardware constants | `rig.toml` | Quoted with the file as the source |
 | Measured values | `analysis/` | Quoted as data, with the folder as the source |
 | Physics | The literature in 2.1 and `bace-principle.md` | Derived in Part II |
 
 ## Book
 
-The chapters can be read directly as Markdown. `tools/build_manual.py` will also combine them into one HTML file with a contents page and a print stylesheet, for printing or PDF export from a browser.
+The chapters can be read directly as Markdown. `python tools/build_manual.py --book` combines them into one HTML file, `build/bace-manual.html`, with a contents page and a print stylesheet, for printing or PDF export from a browser. The same tool writes 4.1–4.3 from the code; `tests/test_manual.py` fails when they are out of date.
 
 ## The assistant
 

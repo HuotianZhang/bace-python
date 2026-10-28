@@ -97,6 +97,130 @@ CHECKS: tuple[str, ...] = (
     "trigger.auto", "power.console", "intensity.factor", "cost.long", "chain.stale",
 )
 
+CHECK_DOCS: dict[str, tuple[str, str, str]] = {
+    "tree.shape": (
+        "invalid",
+        "The tree has an unknown kind, loop or module, a loop without children, or a "
+        "malformed value.",
+        "Correct the node the message names."),
+    "tree.owned-param": (
+        "invalid",
+        "A module inside an illumination loop sets `led_v` or another LED level, which "
+        "the loop sets for it.",
+        "Remove the value from the module."),
+    "light.undone-by-park": (
+        "invalid",
+        "The run's only module is `light`. Every run ends parked, so the light it sets "
+        "would be undone at once.",
+        "Set the light with the bench actions: `shutter-open`, `shutter-shut`, "
+        "`set-led-dc`, `set-led-pulse`."),
+    "voc.source": (
+        "invalid",
+        "A `bace` node takes its prebias from V_oc (`centre_on_voc` or `vpre_on_voc`) "
+        "and nothing in its scope provides one.",
+        "Add a `jv_bace` node before it, set `measure_dc`, or type `voc`."),
+    "voc.coupling": (
+        "invalid",
+        "The V_oc a `bace` node centres on was measured at another LED level than the "
+        "node's own.",
+        "Give both the same `led_v`, or place both in one illumination loop."),
+    "led.levels": (
+        "invalid",
+        "The LED drive is refused: the level is below the LED threshold or not above "
+        "the low level; for a pulse, the low level is at or above the threshold, the "
+        "frequency is not positive or the duty is outside 0–100 %; or a J–V plan has "
+        "neither a light level nor a dark curve.",
+        "Set `led_v` at or above `led_threshold_v` in `rig.toml` and `led_low_v` "
+        "below it; correct the frequency, duty or J–V levels the message names."),
+    "axis.geometry": (
+        "invalid",
+        "A scan is refused: a step that is not positive over a span that is not zero, "
+        "fewer than one loop, a negative `delay_ns`, or a J–V voltage or LED range "
+        "whose step does not fit it.",
+        "Correct the axis, the loop count or the J–V range the message names."),
+    "bench.instrument": (
+        "invalid",
+        "An instrument a module needs is unavailable in the last read-back. A dark "
+        "`jv` is also refused when the shutter or the LED is unavailable, although it "
+        "does not use them. `info` before the first read-back.",
+        "Switch the instrument on and connect it, then read the bench again."),
+    "smu.ceiling": (
+        "crit",
+        "A source-meter compliance is above the ceiling in `rig.toml`.",
+        "Lower the compliance."),
+    "relay.interlock": (
+        "crit",
+        "The tree moves the relay between a J–V module and `bace` and the bench has no "
+        "relay, or a source output is on where the relay would move.",
+        "Turn the outputs off (`bias-off`, `smu-off`, or `park`); without a relay, run "
+        "the J–V and `bace` modules separately."),
+    "bench.live-at-start": (
+        "crit",
+        "The bias or source-meter output was on at the last read-back. A run starts "
+        "with both off.",
+        "`bias-off`, `smu-off`, or `park`."),
+    "voc.typed": (
+        "warn",
+        "`voc` is typed by hand rather than measured in this session, or a typed `voc` "
+        "is ignored because `measure_dc` on the same node measures it.",
+        "Measure V_oc with `measure_dc` or a `jv_bace` node."),
+    "chain.led-polarity": (
+        "warn",
+        "The 33220A's output polarity reads NORM or cannot be read, so its Sync's "
+        "rising edge is not light off. `info` when no transient in the tree uses the "
+        "edge, or when every transient arms externally, since each `bace` run writes "
+        "the polarity at its start.",
+        "`set-33220a-pol-inv`."),
+    "chain.bias-arm": (
+        "warn",
+        "The 81150A's arming differs from what the recipe asks for: the external "
+        "input, on the edge `trigger_slope_positive` selects. The run writes it at "
+        "its start; the warning describes the bench as it is now.",
+        "`arm-81150a-ext` for the rising edge, the one BACE uses."),
+    "chain.bias-polarity": (
+        "warn",
+        "The 81150A's `:OUTP1:POL` differs from `output_polarity`. `info` when the "
+        "recipe leaves it as found or it was not read; the run writes it at Start.",
+        "Check that `output_polarity` is intended: NORM with `invert_polarity = true` "
+        "(manual 3.2)."),
+    "temperature.not-wired": (
+        "warn",
+        "A temperature loop with no 331 answering: the run pauses at each "
+        "temperature for the operator to set it. `ok` when the 331 answers.",
+        "Connect the 331, or set each temperature by hand when the run pauses."),
+    "temperature.inside-illumination": (
+        "warn",
+        "A temperature loop sits inside an illumination loop, so the cryostat settles "
+        "again for every LED level.",
+        "Put the illumination loop inside the temperature loop."),
+    "trigger.auto": (
+        "info",
+        "`trigger_sweep = AUTO`: the digitiser sweeps without a trigger, so a loose "
+        "Sync cable gives untriggered noise that subtracts to a plausible charge.",
+        "Set `trigger_sweep = TRIG` once the trigger path is known to work."),
+    "power.console": (
+        "warn",
+        "A module reads the power meter and the meter does not answer: the intensity "
+        "will be NaN.",
+        "Connect the 1918-C, or close the program that holds it."),
+    "intensity.factor": (
+        "info",
+        "No calibration factor: the intensity is recorded as watts at the meter, not "
+        "as irradiance at the sample.",
+        "None; convert offline if needed."),
+    "cost.long": (
+        "warn",
+        "The estimated run time is above 8 h, or `store_shots` would write more than "
+        "2 GB.",
+        "Split the pipeline, or reduce the points, the loops or `store_shots`."),
+    "chain.stale": (
+        "info",
+        "The trigger-chain read-back is older than 10 min. It is read again at Start.",
+        "None."),
+}
+"""For each check: the most severe level it reports, when it reports it, and the
+remedy. The source of manual 4.2 (`tools/build_manual.py`)."""
+
 VOC_FLAGS: tuple[str, ...] = ("centre_on_voc", "vpre_on_voc")
 """The `bace` parameters that make a V_oc source mandatory: a swept prebias
 centred on it, or a pinned prebias set as an offset from it (TDCF at V_oc,
@@ -1829,3 +1953,4 @@ _CHECKS: dict[str, Callable[[_Facts], list[Verdict]]] = {
     "chain.stale": _c_chain_stale,
 }
 assert tuple(_CHECKS) == CHECKS
+assert tuple(CHECK_DOCS) == CHECKS
