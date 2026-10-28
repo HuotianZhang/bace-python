@@ -194,3 +194,61 @@ def test_another_program_on_the_port_is_named_and_nothing_starts(monkeypatch, se
     monkeypatch.setattr(launcher, "probe", lambda **kw: "other")
     assert launcher.main([]) == 3
     assert sequence["started"] == [] and "not the BACE service" in sequence["alerts"][0]
+
+
+def test_a_splash_the_operator_closed_is_not_destroyed_twice(monkeypatch):
+    import types
+
+    class Widget:
+        def __init__(self, *a, **kw):
+            pass
+
+        def pack(self, **kw):
+            pass
+
+        def configure(self, **kw):
+            pass
+
+    class Tk(Widget):
+        destroyed = 0
+
+        def title(self, t):
+            pass
+
+        def resizable(self, *a):
+            pass
+
+        def attributes(self, *a):
+            pass
+
+        def protocol(self, name, handler):
+            self.handler = handler
+
+        def update_idletasks(self):
+            pass
+
+        def update(self):
+            pass
+
+        def winfo_width(self):
+            return 300
+
+        winfo_height = winfo_screenwidth = winfo_screenheight = winfo_width
+
+        def geometry(self, g):
+            pass
+
+        def destroy(self):
+            Tk.destroyed += 1
+            if Tk.destroyed > 1:
+                raise RuntimeError("can't invoke \"destroy\" command: application has been destroyed")
+
+    fake = types.SimpleNamespace(Tk=Tk, Frame=Widget, Label=Widget)
+    monkeypatch.setitem(__import__("sys").modules, "tkinter", fake)
+    splash = launcher.Splash("starting")
+    root = splash.root
+    root.handler()                                       # the window's close button
+    splash.pump()
+    splash.say("still starting")
+    splash.close()
+    assert Tk.destroyed == 1 and splash.root is None

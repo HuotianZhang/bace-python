@@ -183,11 +183,37 @@ async function shutDown() {
     return;
   }
   stream.close();
-  document.getElementById('app').replaceChildren(h('div.ended',
-    h('p.wordmark', 'bace'),
-    h('h1', 'The service has stopped.'),
-    h('p', 'The bench is parked and the journal closed. This window can be closed; '
-      + 'BACE.pyw starts the service again.')));
+  const heading = h('h1', 'The service is shutting down …');
+  const body = h('p', 'It aborts any run, parks the bench and closes the journal, then exits.');
+  document.getElementById('app').replaceChildren(h('div.ended', h('p.wordmark', 'bace'), heading, body));
+  // The 202 says the exit was requested, not that the bench is parked: that
+  // happens as the process ends, and a run inside an instrument call that
+  // does not return leaves it unparked. So the page waits for the process to
+  // go, and says what it cannot see rather than claiming it.
+  const gone = await serviceGone(SHUTDOWN_WAIT_MS);
+  heading.textContent = gone ? 'The service has stopped.' : 'The service has not exited yet.';
+  body.textContent = gone
+    ? 'It parks the bench as it exits. If a run was inside an instrument call that did not return, '
+      + 'the bench was left as it was and the log in runs\\logs\\ says so: check the outputs on the '
+      + 'instruments then. This window can be closed; BACE.pyw starts the service again.'
+    : 'It is still waiting for a run to leave an instrument call. Check the instruments; the log in '
+      + 'runs\\logs\\ says what it is waiting for.';
+}
+
+/** The worker's abort (5 s) and its join (60 s) bound how long an exit takes. */
+const SHUTDOWN_WAIT_MS = 75000;
+
+async function serviceGone(limitMs) {
+  const deadline = Date.now() + limitMs;
+  while (Date.now() < deadline) {
+    try {
+      await api.call('GET', '/session');
+    } catch (error) {
+      if (!error.status) return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return false;
 }
 
 /**

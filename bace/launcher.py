@@ -201,6 +201,9 @@ class Splash:
         root.update_idletasks()
         w, h = root.winfo_width(), root.winfo_height()
         root.geometry(f"+{(root.winfo_screenwidth() - w) // 2}+{(root.winfo_screenheight() - h) // 3}")
+        # The operator may close it while the service starts: that only hides
+        # the wait, and `close` must then not destroy it a second time.
+        root.protocol("WM_DELETE_WINDOW", self.close)
         root.update()
         self.root = root
 
@@ -214,9 +217,12 @@ class Splash:
             self.root.update()
 
     def close(self) -> None:
-        if self.root is not None:
-            self.root.destroy()
-            self.root = None
+        root, self.root = self.root, None
+        if root is not None:
+            try:
+                root.destroy()
+            except Exception:                           # noqa: BLE001 -- already gone
+                pass
 
 
 # -- the sequence -----------------------------------------------------------------
