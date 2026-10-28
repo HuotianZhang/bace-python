@@ -156,6 +156,29 @@ charge-induced lag this rule exists to accept. The edge is not exposed to
 that: it is the generator's rise, and it measured 6.0-6.5 ns across the
 whole 220-295 K sweep while the spikes' *decay* moved by 11 ns."""
 
+SHOT_CHECKS: tuple[tuple[str, str, str, str], ...] = (
+    ("Rail", "warn",
+     f"One trace holds a single extreme value for {RAIL_RUN_SAMPLES} or more consecutive "
+     "samples: the digitiser clipped, and the shot's charge is meaningless.",
+     "Reduce the swing, or check the auto-range."),
+    ("Repeated extreme", "warn",
+     f"An extreme value occurs more than {RAIL_REPEAT_SAMPLES} times in one trace: an "
+     "averaged trace does not sit on one value, so the range is probably too small.",
+     "Repeat the point; check the auto-range if it recurs."),
+    ("Timing", "warn",
+     f"The light and dark spikes are more than {SPIKE_LAG_NS:g} ns apart and an edge is "
+     f"slower than {SPIKE_EDGE_NS:g} ns, or the Sync edges of the two traces are more "
+     f"than {SYNC_LAG_NS:g} ns apart: the trigger moved between or during the traces, "
+     "and the spike does not cancel.",
+     "Check the Sync cables and the trigger threshold, then repeat the point."),
+    ("Empty trace", "warn",
+     "The digitiser returned no samples: there is nothing to integrate.",
+     "Check the digitiser and its connection."),
+)
+"""The per-shot verdicts of `shot_verdict`: name, level, condition, remedy. A
+warning marks the shot and leaves it in the mean. The source of manual 4.2
+(`tools/build_manual.py`)."""
+
 VERDICT_KEYS: tuple[str, ...] = ("rail_light", "rail_dark", "rail_run_light", "rail_run_dark",
                                  "shared_extreme", "peak_light_a", "peak_dark_a",
                                  "spike_lag_ns", "edge_light_ns", "edge_dark_ns",

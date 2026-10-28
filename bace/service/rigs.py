@@ -102,6 +102,65 @@ can carry the value *before* it as well as the result: the session log's
 "33220A :OUTP:POL NORM -> INV · by hand" needs both halves, and a client that
 joins later has no earlier snapshot to take the first from."""
 
+ACTION_DOCS: dict[str, tuple[str, str, str]] = {
+    "park": (
+        "81150A, 2400, shutter",
+        "Bias and source-meter outputs off, shutter shut. The LED keeps running and the "
+        "relay stays where it is. While a run is active it aborts the run and cancels "
+        "the queue.",
+        "Never."),
+    "set-33220a-pol-inv": (
+        "33220A",
+        "`:OUTP:POL INV`: the Sync's rising edge becomes light off, the edge the "
+        "81150A arms on.",
+        "The 33220A output is on, or does not answer its output query."),
+    "set-33220a-pol-norm": (
+        "33220A",
+        "`:OUTP:POL NORM`.",
+        "As `set-33220a-pol-inv`."),
+    "arm-81150a-ext": (
+        "81150A",
+        "`:ARM:SOUR1 EXT`, rising edge: one bias step per LED cycle.",
+        "The 81150A output is on, or does not answer its output query."),
+    "set-led-pulse": (
+        "33220A",
+        "The LED as a pulse at the `bace` parameters in force (`led_v`, `led_low_v`, "
+        "`pulse_frequency_hz`, `duty_percent`), or at the values in the request; output "
+        "on.",
+        "The level is below the LED threshold or the low level is not below it, the "
+        "frequency is not positive, or the duty is outside 0–100 %."),
+    "set-led-dc": (
+        "33220A",
+        "The LED on continuously at `led_v` or the requested level, as for a V_oc "
+        "measurement; output on.",
+        "No level is given or in force."),
+    "led-off": ("33220A", "Output off.", "Never."),
+    "bias-off": ("81150A", "Output off.", "Never."),
+    "smu-off": ("2400", "Output off.", "Never."),
+    "shutter-open": ("Shutter", "DIO module 0, channel 0 = 1: light on the sample.", "Never."),
+    "shutter-shut": ("Shutter", "DIO module 0, channel 0 = 0.", "Never."),
+    "relay-to-sourcemeter": (
+        "Relay",
+        "DIO module 1, channel 0 = 1: the device to the 2400. The 2400 output is "
+        "then off.",
+        "A source output is on and the relay would move, or a source does not answer "
+        "its output query (`crit`)."),
+    "relay-to-amplifier": (
+        "Relay",
+        "DIO module 1, channel 0 = 0: the device to the amplifier and the digitiser. "
+        "The 81150A output is then off.",
+        "As `relay-to-sourcemeter`."),
+    "read-power": (
+        "1918-C",
+        "One power reading.",
+        "The meter does not answer."),
+}
+"""For each action: the instrument, what it does, and when the bench refuses it.
+An action of an instrument the bench does not have is always refused. Every
+action is followed by a read-back. The source of manual 4.3
+(`tools/build_manual.py`)."""
+assert tuple(ACTION_DOCS) == ACTIONS
+
 INSTRUMENT_KEYS: tuple[str, ...] = (
     "relay", "bias", "smu", "shutter", "led", "voc", "power", "temperature")
 

@@ -721,6 +721,16 @@ shows. `[jv]` is optional and is not read by `config.load_run`; its keys are
 checked here instead, because a typo that fell back to a default would be a
 J-V range nobody chose."""
 
+def recipe_keys(name: str) -> dict[str, list[str]]:
+    """Parameter -> the `run.toml` keys (`table.key`) that set it, for one module."""
+    out: dict[str, list[str]] = {}
+    for _detail, mapping in _TOML.get(name, []):
+        for key, param in mapping.items():
+            if key not in out.setdefault(param, []):
+                out[param].append(key)
+    return out
+
+
 _JV_TABLE_KEYS: frozenset[str] = frozenset(
     k.split(".", 1)[1] for k in _TOML["jv_bace"][-1][1])
 """Every key `[jv]` may carry: the jv_bace mapping's, which is a superset of
@@ -855,6 +865,11 @@ class Catalogue:
                            comment=str(s.get("comment", "")))
 
     # -- parameters -------------------------------------------------------
+    def param_specs(self, name: str) -> tuple[ParamSpec, ...]:
+        """The module's parameter specs, in the order the card shows them."""
+        self.spec(name)
+        return self._params[name]
+
     def param_set(self, name: str) -> ParamSet:
         """A fresh `ParamSet`: default < run.toml < last-used < edited. Fresh
         every call, so a resolver can add inherited/derived layers to its

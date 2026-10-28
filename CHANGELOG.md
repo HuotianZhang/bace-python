@@ -4,6 +4,13 @@ Dated, newest first. Details and evidence are in `docs/`.
 
 ## 2026-10-28
 
+- The manual's Part IV: every parameter, every check and every bench action,
+  generated from the code by `tools/build_manual.py`, which also builds the
+  whole manual as one printable HTML file (`--book`). The checks and
+  actions carry their description, level and remedy in the code
+  (`CHECK_DOCS`, `SHOT_CHECKS`, `ACTION_DOCS`); `tests/test_manual.py`
+  fails when the chapters fall behind.
+
 - The manual's Part III, maintenance: the layers and one run end to end,
   each step of a shot from physics to SCPI to code, the files the bench
   writes, how to add a module, an instrument, a check or an assistant
