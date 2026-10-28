@@ -52,8 +52,10 @@ bace/service/
                   (HTTP, no VISA, run beside a run).
   live.py         what the running step implies about the instruments, folded
                   from the run's events, overlaid on /bench as `inferred`.
-  assistant.py    the console's assistant: a Claude conversation over read-only
-                  tools on the session (§8a). Imports `anthropic` lazily.
+  assistant.py    the console's assistant: a conversation over read-only tools
+                  on the session (§8a).
+  providers.py    the assistant's vendors: Claude, and OpenAI-compatible
+                  endpoints. Imports `anthropic` and `openai` lazily.
   app.py          create_app(session) -> FastAPI. Routes, WS, static mount.
 ```
 
@@ -1253,7 +1255,8 @@ number taken mid-run is not the cryostat the shot around it was measured at.
 
 ## 8a. `/assistant` — the console's assistant
 
-A conversation with a Claude model that reads the bench and explains it. It
+A conversation with a model that reads the bench and explains it: Claude,
+or any OpenAI-compatible `/chat/completions` endpoint (`providers.py`). It
 changes nothing: its tools are `get_session`, `get_bench`, `list_modules`,
 `get_module`, `list_runs`, `get_run`, `get_events`, `get_monitors`,
 `dry_run` (`Session.validate_tree(remember=False)`, so `/pipelines/last` is
@@ -1262,16 +1265,19 @@ session's `run.toml` and `rig.toml`.
 
 | route | answers |
 |---|---|
-| `GET /assistant` | `{available, model, sdk, docs}`, or `{available: false, reason}` without `anthropic` 2.3 or later |
-| `POST /assistant/chat {"text", "conversation"?}` | NDJSON frames: `conversation {id}`, then `text {text}`, `tool {name, input}` and `tool_result {name, ok, text?}` in order, then `done {stop_reason, usage, model}` or `error {message, status}`. 401 without the key header, 503 without the SDK, 409 while the same conversation is still answering |
+| `GET /assistant` | `{available, providers: {anthropic, openai}, model, docs}`; each provider `{available, sdk}` or `{available: false, reason}` without `anthropic` 2.3 / `openai` 3.40 |
+| `POST /assistant/chat {"text", "conversation"?, "provider"?, "model"?, "base_url"?}` | NDJSON frames: `conversation {id}`, then `text {text}`, `tool {name, input}` and `tool_result {name, ok, text?}` in order, then `done {stop_reason, usage, model}` or `error {message, status}`. `provider` is `anthropic` (default) or `openai`, which needs `model` and `base_url`. 401 without a key the provider needs, 422 for an address or model it cannot use, 503 without the SDK, 409 while the same conversation is still answering |
 | `DELETE /assistant/conversations/{id}` | forgets one history; 404 when there is none |
 
-The API key is the asker's: header `X-Anthropic-Key` on each `POST`, used
-for that request and not stored, journaled or logged. Histories are kept in
-memory, the newest 32, so an assistant turn goes back exactly as it came; a
-turn that fails or is abandoned leaves the history as it was. The model is
-`claude-opus-5-5` unless `BACE_ASSISTANT_MODEL` says otherwise, at effort
-`medium`, with the API's server-side fallback on a refusal.
+The API key is the asker's: header `X-API-Key` on each `POST`, used for that
+request and not stored, journaled or logged. An OpenAI-compatible address must
+be `https://`, or `http://` to this machine, which also needs no key (a local
+model). Histories are kept in memory, the newest 32, each under its provider,
+address and model, so an assistant turn goes back exactly as it came and a
+question with another model starts a new conversation; a turn that fails or is
+abandoned leaves the history as it was. Claude is `claude-opus-5-5` unless the
+request or `BACE_ASSISTANT_MODEL` says otherwise, at effort `medium`, with the
+API's server-side fallback on a refusal for the models that take it.
 
 ---
 

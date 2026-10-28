@@ -1,4 +1,4 @@
-"""The console's assistant: a Claude conversation that can read the bench.
+"""The console's assistant: a conversation with a model that can read the bench.
 
 It explains -- the physics, the chain, what a parameter does and why it has
 the value it has -- and it reads what the service already shows: the session,
@@ -7,14 +7,17 @@ frames, a Dry run of a tree. In this version it changes nothing. Every tool is
 a read, and the Dry run is `Session.validate_tree(remember=False)`, so it does
 not even replace the tree the pipeline tab reopens.
 
-**The key is the person's, not the service's.** It arrives on each request in
-`X-Anthropic-Key`, is used for that request's calls and is never stored,
-journaled or logged here. The console keeps it in the browser only if asked to.
+**The model is the asker's choice, and so is the key.** Claude through the
+Anthropic API, or any OpenAI-compatible endpoint (`providers.py`). The key
+arrives on each request in `X-API-Key`, is used for that request's calls and
+is never stored, journaled or logged here. The console keeps it in the browser
+only if asked to.
 
 **History lives here.** A conversation's messages are kept in memory under an
 id the first answer carries, because an assistant turn has to be sent back
 exactly as it came -- thinking blocks, tool calls and all -- and the browser
-has no reason to hold those. A request either completes a turn or leaves the
+has no reason to hold those. A history is one vendor's and one model's: a
+question asked with another starts a new conversation. A request either completes a turn or leaves the
 history as it found it, so a failed or abandoned request can simply be asked
 again.
 
@@ -22,31 +25,23 @@ again.
 `conversation`, then any number of `text` and `tool`/`tool_result`, then
 `done` or `error`.
 
-`anthropic` is in the `service` extra, but nothing else imports it: without
-it the service runs as before and `GET /assistant` says what is missing.
+`anthropic` and `openai` are in the `service` extra, but nothing else imports
+them: without them the service runs as before and `GET /assistant` says what
+is missing.
 """
 from __future__ import annotations
 
 import asyncio
 import json
-import os
 import uuid
 from collections import OrderedDict
 from collections.abc import AsyncIterator, Mapping
 from pathlib import Path
 from typing import Any
 
+from . import providers
 from .modules import jsonable
 
-MODEL = os.environ.get("BACE_ASSISTANT_MODEL", "claude-opus-5-5")
-"""Overridable for a person who wants another model, never chosen for them."""
-
-SDK_MIN = "2.3"
-"""The `anthropic` release the request below was checked against: older ones
-do not take `fallbacks` or `output_config`."""
-
-MAX_TOKENS = 64000
-EFFORT = "medium"
 MAX_TOOL_ROUNDS = 16
 """A turn that has called tools this many times is stopped and says so; a read
 loop that long is a model going round in circles, not a question answered."""
@@ -118,46 +113,17 @@ comparing values. Give units.
 """
 
 
-class AssistantUnavailable(RuntimeError):
-    """The SDK is not installed."""
-
-
-def sdk():
-    """The `anthropic` module, or `AssistantUnavailable` saying how to get it."""
-    try:
-        import anthropic
-    except ImportError as exc:
-        raise AssistantUnavailable(
-            f"the assistant needs the anthropic package, {SDK_MIN} or later: "
-            "pip install -e .[service]") from exc
-    have = tuple(int(p) for p in anthropic.__version__.split(".")[:2] if p.isdigit())
-    if have < tuple(int(p) for p in SDK_MIN.split(".")):
-        raise AssistantUnavailable(
-            f"the assistant needs anthropic {SDK_MIN} or later, and this Python has "
-            f"{anthropic.__version__}: pip install -U anthropic")
-    return anthropic
-
-
-def client(key: str):
-    """The async client for one request, made with the asker's key."""
-    return sdk().AsyncAnthropic(api_key=key)
-
-
 def status() -> dict:
-    """`GET /assistant`: whether it can run, and with what."""
-    try:
-        anthropic = sdk()
-    except AssistantUnavailable as exc:
-        return {"available": False, "reason": str(exc), "model": MODEL}
-    return {"available": True, "model": MODEL, "sdk": anthropic.__version__,
-            "docs": {k: v[1] for k, v in DOCS.items()}}
+    """`GET /assistant`: which vendors can answer here, and the documents read."""
+    vendors = providers.status()
+    return {"available": any(v["available"] for v in vendors.values()), "providers": vendors,
+            "model": providers.CLAUDE_MODEL, "docs": {k: v[1] for k, v in DOCS.items()}}
 
 
 # -- tools ---------------------------------------------------------------------------
 def _tool(name: str, description: str, properties: dict | None = None,
           required: tuple[str, ...] = ()) -> dict:
     return {"name": name, "description": description,
-            "eager_input_streaming": True,
             "input_schema": {"type": "object", "properties": properties or {},
                              "required": list(required), "additionalProperties": False}}
 
@@ -297,22 +263,26 @@ class Busy(RuntimeError):
 
 
 class Conversations:
-    """Message histories by id, the newest `MAX_CONVERSATIONS` of them."""
+    """Message histories by id, the newest `MAX_CONVERSATIONS` of them, each
+    under the provider signature it was written in."""
 
     def __init__(self) -> None:
-        self._items: OrderedDict[str, list] = OrderedDict()
+        self._items: OrderedDict[str, tuple[tuple, list]] = OrderedDict()
         self._busy: set[str] = set()
 
-    def open(self, conversation_id: str | None) -> tuple[str, list]:
-        if conversation_id and conversation_id in self._items:
+    def open(self, conversation_id: str | None, signature: tuple = ()) -> tuple[str, list]:
+        """The history under `conversation_id`, or a new one when there is
+        none or it was written by another vendor or model."""
+        held = self._items.get(conversation_id) if conversation_id else None
+        if held is not None and held[0] == signature:
             self._items.move_to_end(conversation_id)
-            return conversation_id, self._items[conversation_id]
+            return conversation_id, held[1]
         cid = uuid.uuid4().hex[:12]
-        self._items[cid] = []
+        self._items[cid] = (signature, [])
         while len(self._items) > MAX_CONVERSATIONS:
             old, _ = self._items.popitem(last=False)
             self._busy.discard(old)
-        return cid, self._items[cid]
+        return cid, self._items[cid][1]
 
     def forget(self, conversation_id: str) -> bool:
         self._busy.discard(conversation_id)
@@ -327,107 +297,70 @@ class Conversations:
         self._busy.discard(conversation_id)
 
 
-def _error_text(anthropic, exc: Exception) -> tuple[str, int | None]:
-    """A sentence for the console, most specific first."""
-    if isinstance(exc, anthropic.AuthenticationError):
-        return "the API key was refused: check it in the assistant's key field", 401
-    if isinstance(exc, anthropic.PermissionDeniedError):
-        return "this API key may not use the model", 403
-    if isinstance(exc, anthropic.RateLimitError):
-        return "rate limited by the API; wait a minute and ask again", 429
-    if isinstance(exc, anthropic.BadRequestError):
-        return f"the API refused the request: {exc.message}", 400
-    if isinstance(exc, anthropic.APIStatusError):
-        return f"the API answered {exc.status_code}: {exc.message}", exc.status_code
-    if isinstance(exc, anthropic.APIConnectionError):
-        return "could not reach the API: is this PC online?", None
-    return f"{type(exc).__name__}: {exc}", None
-
-
-async def chat(session, conversations: Conversations, *, key: str, text: str,
+async def chat(session, conversations: Conversations, provider, *, text: str,
                conversation_id: str | None = None) -> AsyncIterator[dict]:
-    """Answer one question, yielding the wire's frames.
+    """Answer one question with `provider` (`providers.make`), yielding the
+    wire's frames.
 
     The history is extended only when the turn completes. `Busy` is raised
     before the first frame, so a route can turn it into a 409."""
-    anthropic = sdk()
-    cid, messages = conversations.open(conversation_id)
+    cid, messages = conversations.open(conversation_id, provider.signature)
     conversations.claim(cid)
     start = len(messages)
     done = False
     try:
         yield {"type": "conversation", "id": cid}
-        api = client(key)
-        turn = [{"role": "user", "content": text}]
+        turn = [provider.user(text)]
         usage = {"input": 0, "output": 0, "cache_read": 0}
         by_name = {t["name"]: t for t in TOOLS}
-        stop = None
-        json_retries = 0
         rounds = 0
         while True:
-            try:
-                async with api.beta.messages.stream(
-                    model=MODEL, max_tokens=MAX_TOKENS, system=SYSTEM, tools=TOOLS,
-                    messages=messages + turn, output_config={"effort": EFFORT},
-                    cache_control={"type": "ephemeral"},
-                    betas=["server-side-fallback-2026-07-01"], fallbacks="default",
-                ) as stream:
-                    async for event in stream:
-                        if event.type == "text":
-                            yield {"type": "text", "text": event.text}
-                    response = await stream.get_final_message()
-                json_retries = 0
-            except ValueError:
-                # Tool input the SDK could not parse at all: there is no
-                # tool_use id to answer, so the turn is asked again.
-                json_retries += 1
-                if json_retries > 2:
-                    raise
-                continue
-            u = response.usage
-            usage["input"] += u.input_tokens or 0
-            usage["output"] += u.output_tokens or 0
-            usage["cache_read"] += getattr(u, "cache_read_input_tokens", 0) or 0
-            stop = response.stop_reason
-            turn.append({"role": "assistant", "content": response.content})
-            tool_uses = [b for b in response.content if b.type == "tool_use"]
-            if stop == "max_tokens":
+            answer = None
+            async for frame in provider.turn(messages + turn, SYSTEM, TOOLS):
+                if frame["type"] == "turn":
+                    answer = frame["turn"]
+                else:
+                    yield frame
+            for k in usage:
+                usage[k] += answer.usage.get(k, 0)
+            if answer.stop == "max_tokens":
                 # Before the text-only exit: a cut-off answer is not kept as if
                 # it were whole, and a cut-off tool input is not run.
                 yield {"type": "error", "message": "the answer ran out of room mid-way; ask a narrower question"}
                 return
-            if stop == "refusal" or not tool_uses:
+            turn.append(answer.message)
+            if answer.stop == "refusal" or not answer.calls:
                 break
             rounds += 1
             if rounds > MAX_TOOL_ROUNDS:
                 yield {"type": "error", "message": f"stopped after {MAX_TOOL_ROUNDS} rounds of reading"}
                 return
             results = []
-            for block in tool_uses:
-                tool = by_name.get(block.name)
-                problem = "no such tool" if tool is None else check_input(tool, block.input)
-                yield {"type": "tool", "name": block.name, "input": block.input}
+            for call in answer.calls:
+                tool = by_name.get(call.name)
+                if call.input is None:
+                    problem = "the arguments were not JSON"
+                else:
+                    problem = "no such tool" if tool is None else check_input(tool, call.input)
+                yield {"type": "tool", "name": call.name, "input": call.input}
                 if problem:
-                    results.append({"type": "tool_result", "tool_use_id": block.id, "is_error": True,
-                                    "content": json.dumps({"INVALID_JSON": json.dumps(block.input),
-                                                           "problem": problem})})
-                    yield {"type": "tool_result", "name": block.name, "ok": False, "text": problem}
+                    bad = call.raw or json.dumps(call.input)
+                    results.append((call, json.dumps({"INVALID_JSON": bad, "problem": problem}), False))
+                    yield {"type": "tool_result", "name": call.name, "ok": False, "text": problem}
                     continue
                 try:
-                    out = run_tool(session, block.name, block.input)
-                    ok = True
+                    out, ok = run_tool(session, call.name, call.input), True
                 except Exception as exc:                   # noqa: BLE001 -- told to the model
                     out, ok = f"{type(exc).__name__}: {exc}", False
-                results.append({"type": "tool_result", "tool_use_id": block.id, "content": out,
-                                **({} if ok else {"is_error": True})})
-                yield {"type": "tool_result", "name": block.name, "ok": ok}
+                results.append((call, out, ok))
+                yield {"type": "tool_result", "name": call.name, "ok": ok}
                 await asyncio.sleep(0)
-            turn.append({"role": "user", "content": results})
+            turn.extend(provider.results(results))
         messages.extend(turn)
         done = True
-        yield {"type": "done", "stop_reason": stop, "usage": usage, "model": MODEL}
+        yield {"type": "done", "stop_reason": answer.stop, "usage": usage, "model": provider.model}
     except Exception as exc:                               # noqa: BLE001 -- a sentence, not a 500
-        message, status_code = _error_text(anthropic, exc)
+        message, status_code = providers.error_text(provider.sdk, exc)
         yield {"type": "error", "message": message, "status": status_code}
     finally:
         if not done:
@@ -435,5 +368,5 @@ async def chat(session, conversations: Conversations, *, key: str, text: str,
         conversations.release(cid)
 
 
-__all__ = ["AssistantUnavailable", "Busy", "Conversations", "DOCS", "MODEL", "SYSTEM", "TOOLS",
-           "chat", "check_input", "client", "compact", "read_doc", "run_tool", "status"]
+__all__ = ["Busy", "Conversations", "DOCS", "SYSTEM", "TOOLS",
+           "chat", "check_input", "compact", "read_doc", "run_tool", "status"]

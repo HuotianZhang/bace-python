@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { splitLines, applyFrame, blocks, inline, toolLabel } from '../lib/assistant.js';
+import { splitLines, applyFrame, blocks, inline, toolLabel, missing, keySlot, isLocal, PRESETS } from '../lib/assistant.js';
 
 test('a frame split across two chunks is parsed once, whole', () => {
   const a = splitLines('{"type":"text","text":"hel');
@@ -82,4 +82,21 @@ test('inline spans: code and bold, the rest as text', () => {
     { t: 'text', s: 'set ' }, { t: 'code', s: 'n_averages' }, { t: 'text', s: ' to ' },
     { t: 'b', s: '200' }, { t: 'text', s: ' <b>' },
   ]);
+});
+
+test('what is still needed: a key for Claude; address, model and key for the others', () => {
+  assert.equal(missing({ provider: 'anthropic' }, ''), 'an Anthropic API key');
+  assert.equal(missing({ provider: 'anthropic' }, 'k'), null);
+  assert.equal(missing({ provider: 'openai', base_url: '', model: 'm' }, 'k'), 'the API address');
+  assert.equal(missing({ provider: 'openai', base_url: 'https://api.deepseek.com', model: '' }, 'k'), 'the model name');
+  assert.equal(missing({ provider: 'openai', base_url: 'https://api.deepseek.com', model: 'm' }, ''), 'an API key');
+  // A model on this PC takes no key.
+  assert.equal(missing({ provider: 'openai', base_url: 'http://localhost:11434/v1', model: 'qwen' }, ''), null);
+});
+
+test('one stored key per provider address, and the presets are addresses', () => {
+  assert.equal(keySlot({ provider: 'anthropic', base_url: 'x' }), 'anthropic');
+  assert.equal(keySlot({ provider: 'openai', base_url: 'https://api.deepseek.com' }), 'https://api.deepseek.com');
+  assert.ok(isLocal('http://127.0.0.1:11434/v1') && !isLocal('https://api.openai.com/v1') && !isLocal('nonsense'));
+  for (const p of PRESETS) assert.match(p.base_url, /^https:\/\/|^http:\/\/localhost/);
 });
