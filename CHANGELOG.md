@@ -4,6 +4,13 @@ Dated, newest first. Details and evidence are in `docs/`.
 
 ## 2026-10-28
 
+- The manual's Part I, operation: measurement overview, the bench, a first
+  measurement, results, troubleshooting.
+- `Run Service.bat` and `Run Service (sim).bat` serve the console
+  (`--ui ui`); before, they started the service without it. Their notes no
+  longer tell the operator to start the 1918-C and 331 consoles, which the
+  service now opens itself.
+
 - `docs/style.md`, the rules every text here follows, and the outline of the
   bench manual in `docs/manual/`: operation, principle, maintenance,
   reference, with a glossary that fixes one name, symbol and unit per term.
