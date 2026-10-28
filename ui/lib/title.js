@@ -1,43 +1,17 @@
-// The window title — the console's only channel to an operator who is not
-// looking at it.
-//
-// The measurement this console drives is built out of waiting: a temperature
-// step is 14 minutes to 2 hours (`ui-rules` §5), a nine-temperature sweep
-// measured 4.5 hours, and where the 331 is not on the bus **every one of those
-// steps stops and waits for a person** (`NeedsOperator`, contract §7). The
-// design tells that person, correctly and in detail — inside a window they are
-// by construction not watching, because the thing they are waiting for takes
-// half an hour. Nothing reached the taskbar, the tab strip or the window
-// switcher, so the gap between the rig stopping and somebody noticing was
-// however long it took them to look, on a sample that is cold and drifting.
-//
-// So the title says what the run needs, and `document.title` alone: it is the
-// one surface that needs no permission, works behind another window, survives
-// a minimised console and costs nothing. (The Notification API would ask for a
-// grant, and a lab PC that has denied it once denies it silently for good.)
-//
-// Three states earn it, and nothing else does:
-//
-//   * **paused** — `⏸ needs you · set 250.0 K`. Ungated: the pause stands until
-//     it is answered, so the title is true whether or not anybody is looking.
-//   * **running** — `⏵ bace · T 250 K · 1 of 9`. The outermost loop counter
-//     and no more: the shot counter moves at shot rate, and a taskbar entry
-//     that rewrites itself twice a second is not a glance. The counters at
-//     three scales are the monitor's job, on the screen.
-//   * **ended, unseen** — `✓ done`, `✕ failed`, `⏹ stopped · 20/100`. Only
-//     while the operator has not looked since (`announce`), because an ending
-//     is a fact about the past: it should be waiting for them when they come
-//     back, and gone once they have.
-//
-// The model is the monitor's, re-rendered — never a second opinion about what
-// the run is doing. `monitorModel` is null exactly when nothing holds the
-// worker, which is the same test the monitor draws itself on.
+// The title reaches operators outside the console window. Temperature steps take 14
+// min to 2 h and a nine-temperature sweep measures 4.5 h on this bench
+// (`docs/ui-rules.md` §5). Without a controller, steps pause for a person
+// (`docs/service-contract.md` §7). `document.title` needs no permission and remains
+// visible in tabs and window switching; denied notification permissions would be
+// unreliable. Pauses persist through focus. Running titles use only the outermost
+// counter to avoid shot-rate changes. Endings remain only while unseen. The title
+// renders the monitor model rather than deriving another run state.
 
 import { currentRun, TERMINAL } from './store.js';
 import { monitorModel } from './monitor.js';
 import * as fmt from './format.js';
 
-/** What the title reads when nothing is happening — `index.html`'s own. */
+/** The idle title matches `index.html`. */
 export const BASE = 'BACE console';
 
 /** The ending, as one word and one mark. Anything else is reported verbatim. */
@@ -51,9 +25,8 @@ const ENDINGS = {
 };
 
 /**
- * What the pause is asking for, in the few words a taskbar has room for.
- * The whole of it — the tolerance, the hold, why the controller gave up — is
- * on the monitor; this is the part that gets somebody to walk back.
+ * Pause titles retain the request that brings the operator back. Tolerance, hold and
+ * controller failure details stay in the monitor because taskbar space is limited.
  */
 function asking(prompt) {
   if (prompt.temperature && prompt.setpoint_k !== null && prompt.setpoint_k !== undefined) {
@@ -63,12 +36,9 @@ function asking(prompt) {
 }
 
 /**
- * The title, as a model.
- *
- * @param state the store's state.
- * @param announce the run whose ending has not been seen yet, or `null`. The
- *   shell owns that judgement — it is the one thing here that depends on
- *   whether the window has focus, which is not in the store.
+ * The model builds the window title from store state. The shell supplies `announce`,
+ * the run ending awaiting acknowledgement, because focus and visibility are outside
+ * the store.
  */
 export function titleModel(state, { announce = null } = {}) {
   const live = monitorModel(state);
@@ -88,9 +58,8 @@ export function titleModel(state, { announce = null } = {}) {
   if (ended && (TERMINAL.has(ended.state) || ended.parked_at)) {
     const how = ENDINGS[ended.state] || { mark: '⏹', word: ended.state || 'ended' };
     const label = ended.module || ended.name || ended.kind || 'run';
-    // `ui-rules` §9: a truncated run is normal, and *kept of requested* is how
-    // it is said — including here, where it is the difference between a sweep
-    // that finished and one that gave up at shot 20.
+    // The title includes kept/requested counts to distinguish truncated runs from
+    // complete sweeps (`docs/ui-rules.md` §9).
     const counts = how.word === 'done' || ended.kept === null || ended.kept === undefined
       ? '' : ` · ${fmt.keptOf(ended.kept, ended.requested)}`;
     return { level: 'ended', text: `${how.mark} ${how.word} · ${label}${counts} — ${BASE}` };
@@ -99,12 +68,9 @@ export function titleModel(state, { announce = null } = {}) {
 }
 
 /**
- * The run holding the worker right now, by id, or `null`.
- *
- * The shell watches this across draws to notice an ending: `activeRunId` is
- * cleared at `parked` and the record keeps `parked_at`, so "was live, is not"
- * is the whole test and it needs no frame of its own — a `parked` lost to a
- * ring gap must not cost the operator the only sign their run is over.
+ * The helper returns the worker-owning run ID or `null`. Comparing draws detects
+ * endings through `activeRunId` and `parked_at`, even if a ring gap loses `parked`;
+ * absent operators still need the ending announcement.
  */
 export function liveRunId(state) {
   const run = currentRun(state);
@@ -113,10 +79,8 @@ export function liveRunId(state) {
 }
 
 /**
- * Write it, if it moved. Compared rather than assigned every notify: the store
- * notifies once per animation frame for the length of a run, and a title
- * rewritten sixty times a second is a taskbar entry that flickers in some
- * window managers and a diff in none.
+ * The writer changes the title only when its text differs. Per-frame assignment can
+ * cause taskbar flicker in some window managers without conveying any change.
  */
 export function renderTitle(doc, state, options) {
   const model = titleModel(state, options);

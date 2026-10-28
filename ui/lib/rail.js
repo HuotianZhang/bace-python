@@ -1,43 +1,22 @@
-// The pinned rail and the chain strip — `docs/ui-plan.md` M1.
-//
-// They come before the module cards because they are in *every* view, and
-// because they carry the two hardest things `GET /bench` says:
-//
-//   * **`how: "inferred"` is not a read-back.** While a run holds the worker
-//     the snapshot is the one Start took, with the running step's implications
-//     overlaid (`service/live.py`): during a `bace` the bias being LIVE, the
-//     relay being on the amplifier and the shutter being open are *inferred
-//     from the run's own events*, not read off an instrument. A rail that
-//     draws them identically is telling the operator something it does not
-//     know.
-//   * **The relay is the interlock**, not "info" (`docs/ui-rules.md` §3): the
-//     two positions are physically different circuits, and it gets its own
-//     treatment rather than a level colour.
-//
-// The model is separated from the DOM on purpose: `railModel` is a pure
-// function of the store's state, so `ui/tests/rail.test.mjs` can hold every
-// one of these rules down against a recorded `/bench` without a browser.
-//
-// Nothing here re-derives provenance (`ui-rules` §6). `how`, `inferred`, the
-// chain's `expected`/`level`/`fix` and the V_oc's `from` are the service's
-// answers; this file decides where they sit and what they look like, and
-// invents no value of its own — an absent reading renders as an absence.
+// The rail and strip appear in every view. Inferred state differs visibly from
+// read-back because an active run overlays event implications rather than querying
+// instruments (`docs/service-contract.md` §4). The relay identifies the device
+// circuit and gets interlock treatment (`docs/ui-rules.md` §3). Pure `railModel`
+// supports fixture tests. Service provenance, expected state, severity, remedies and
+// V_oc source stay authoritative; missing readings stay absent.
 
 import { h, fill, keyed } from './dom.js';
 import { icon } from './icons.js';
 import * as fmt from './format.js';
 
-/** The relay's three nodes, left to right, as `design/BenchRail.dc.html` draws them. */
+/** The relay diagram orders its three circuit nodes from left to right. */
 export const RELAY_NODES = ['2400', 'device', 'amp'];
 
 /**
- * How many monitor intervals may pass with no reading before the temperature
- * on the rail stops being presented as current. The 331's monitor reads only
- * while it can hold the worker's bus lock (`service/monitors.py`), so a
- * pipeline run holding the bus for an hour leaves the card's reading exactly
- * that old — the service counts those ticks as `skipped`, and the contract
- * (§8) says to render *why* rather than an old number as if it were now.
- * Three, so one missed tick is not an announcement.
+ * Temperature becomes stale after three monitor intervals, tolerating one missed
+ * tick. The 331 monitor skips reads while the worker holds the bus. Long pipelines
+ * therefore need `skipped` to explain reading age rather than imply current
+ * temperature (`docs/service-contract.md` §8).
  */
 const TEMPERATURE_STALE_TICKS = 3;
 
@@ -50,12 +29,9 @@ const CHAIN_CELL = {
 };
 
 /**
- * The eight live values of `docs/ui-rules.md` §1, as a plain object per cell:
- * `{key, label, value, sub, level, inferred, how}`.
- *
- * `level` is the loudness §3 gives: `alert` for a live bias output and nothing
- * else on the rail, `warn` for a chain state that reads wrong or a monitor
- * that will not answer, `off` for an output that is off, `null` for ink.
+ * The model supplies eight live values (`docs/ui-rules.md` §1). Alert is reserved for
+ * live bias, warning for incorrect chain state or unavailable monitoring, off for
+ * disabled output and ordinary ink otherwise (§3).
  */
 export function railModel(state) {
   const bench = state.bench || {};
@@ -78,28 +54,12 @@ export function railModel(state) {
 }
 
 /**
- * The temperature the rail draws: the read-back's block with the newest
- * `TemperatureRead` the stream carried laid over it, plus what the monitor
- * is doing.
- *
- * The overlay is the one the service already makes on its own snapshot
- * (`session._temperature_block`), made again here because `/bench` is fetched
- * at boot and after an action while readings arrive every few seconds in
- * between. Without it the rail would show the boot read-back all day — the
- * monitor's readings would reach the journal and the chart and not the one
- * number the operator looks at.
- *
- * `wired` is never overlaid, and an unwired bench is never overlaid at all: a
- * reading does not make the 331 wired, and the value an operator types at a
- * pause arrives as a `TemperatureRead` too (`source: "operator"`, service
- * `temperature.py`) — on a bench with no controller that number is a typed
- * one and the cell has to keep saying so.
- *
- * Age is measured on the service's clock and never on the browser's: the
- * newest frame's `ts` against the newest reading's, both off the same stream.
- * So a console on another machine, or one whose clock is minutes out, reads
- * what the lab PC reads, and an idle bench — no frames at all, so no clock
- * moving — never drifts into looking stale for want of a run.
+ * Temperature readings overlay the snapshot so the rail follows monitoring between
+ * HTTP fetches. `wired` never changes through this overlay: operator values also
+ * arrive as `TemperatureRead`, and readings cannot prove a controller exists. Unwired
+ * benches retain typed provenance. Age compares service frame and reading timestamps
+ * to avoid browser-clock skew. Without frames, the clock does not advance, so an idle
+ * stream alone cannot imply staleness.
  */
 export function temperatureNow(state) {
   const bench = state.bench || {};
@@ -112,8 +72,8 @@ export function temperatureNow(state) {
     t = { ...t, kelvin: live.kelvin, in_band: live.in_band, source: live.source, read_at: live.ts };
     if (live.setpoint_k !== null && live.setpoint_k !== undefined) t.setpoint_k = live.setpoint_k;
   }
-  // `monitors` is the service's list of what is *running*; the block's
-  // `monitor` is the same answer taken at the read-back. Either says yes.
+  // Either active `monitors` state or the snapshot's `monitor` flag establishes
+  // monitoring.
   const running = Boolean((monitor && monitor.running) || (t && t.monitor));
   const interval = monitor ? monitor.interval_s : null;
   const at = t ? t.read_at : null;
@@ -141,16 +101,14 @@ function chainLevel(chain, cell) {
 }
 
 /**
- * The interlock. Not a level: the value is *which circuit the device is in*,
- * and the three-node diagram is the whole point — "amplifier" and
- * "sourcemeter" are not two settings of one thing.
+ * The relay model identifies the physical circuit containing the device. The diagram
+ * distinguishes source-meter, amplifier and neutral rather than numeric levels.
  */
 function relayCell(relay, inferred) {
   const position = (relay && relay.position) || 'unknown';
   const how = relay && relay.how;
-  // "neutral" is a statement about the interlock — the device is in neither
-  // circuit — so it is said only when the service answered. No snapshot, or a
-  // router that would not answer, is an absence.
+  // Neutral requires an explicit service answer. Missing snapshots and unreadable
+  // routers remain absent states.
   const answered = Boolean(relay) && how !== 'unavailable';
   const value = { amplifier: 'amplifier', sourcemeter: 'Keithley 2400' }[position]
     || (answered ? 'neutral' : fmt.ABSENT);
@@ -166,9 +124,8 @@ function relayCell(relay, inferred) {
 }
 
 /**
- * The one alert on the rail. `output: true` means the 81150A is driving the
- * device — §3 keeps that intensity for exactly this, a `crit` and a saturation
- * verdict, and nothing else on this row may compete with it.
+ * Live bias is the rail alert: `output: true` means the 81150A drives the device.
+ * Other cells must not compete with it (`docs/ui-rules.md` §3).
  */
 function biasCell(bias, chain, inferred) {
   const b = bias || {};
@@ -191,9 +148,8 @@ function pulseLevels(b) {
 }
 
 /**
- * What the chain says about the arming. The source and the slope are two
- * checks and one fact — armed from the 33220A Sync, on the edge that is light
- * off — so they carry one mark between them; the strip below has them apart.
+ * Arming source and slope jointly determine whether Sync arms on the light-off edge.
+ * The rail combines their mark; the strip lists them separately.
  */
 function armText(b, chain) {
   const checks = [chain.bias_arm, chain.bias_arm_slope].filter(Boolean);
@@ -203,18 +159,16 @@ function armText(b, chain) {
 }
 
 /**
- * `ui-rules` §6: the compliance ceiling belongs beside the value. `compliance`
- * is what the run in force chose, `ceiling` what `rig.toml` will not go above,
- * and a 2400 will happily push 1 A into a small cell — so when no run has
- * chosen one, the ceiling is shown as a ceiling (`≤`) rather than as a setting.
+ * Compliance sits beside the ceiling (`docs/ui-rules.md` §6). `compliance` is the run
+ * setting; `ceiling` is the `rig.toml` limit. Without a run setting, ≤ marks the
+ * limit rather than implying selection. A 2400 can source 1 A into a small cell.
  */
 function smuCell(smu, inferred) {
   const s = smu || {};
   const compliance = s.compliance || {};
   const ceiling = s.ceiling || {};
-  // Each half is answered separately: a run may choose a current compliance
-  // and leave the voltage to the ceiling, and showing only the half it chose
-  // would drop the limit `rig.toml` is actually enforcing.
+  // Current and voltage compliance resolve independently. Showing only a selected
+  // half would hide the ceiling enforced for the other.
   const current = limit(compliance.current_a, ceiling.current_a, fmt.amps);
   const voltage = limit(compliance.voltage_v, ceiling.voltage_v,
     (v) => fmt.volts(v, { decimals: 1 }));
@@ -232,7 +186,10 @@ function smuCell(smu, inferred) {
   };
 }
 
-/** The run's choice if it made one, else `rig.toml`'s ceiling, marked as one. */
+/**
+ * The value uses the run setting when present, otherwise an explicitly marked
+ * `rig.toml` ceiling.
+ */
 function limit(chosen, ceiling, render) {
   if (chosen !== null && chosen !== undefined) return { text: render(chosen), ceiling: false };
   if (ceiling !== null && ceiling !== undefined) return { text: render(ceiling), ceiling: true };
@@ -250,10 +207,8 @@ function shutterCell(shutter, inferred) {
 }
 
 /**
- * The LED carries the chain's loudest routine warning: `POL NORM` makes the
- * Sync's rising edge mean light ON, so extraction would happen *during*
- * illumination. The rail says it where the operator is already looking; the
- * strip below carries the one-click fix.
+ * LED NORM makes rising Sync coincide with light on, putting extraction during
+ * illumination. The rail marks the warning; the strip offers its remedy.
  */
 function ledCell(led, chain, inferred) {
   const l = led || {};
@@ -263,9 +218,9 @@ function ledCell(led, chain, inferred) {
   const parts = [];
   if (on && l.mode) parts.push(String(l.mode).toLowerCase());
   if (l.polarity) parts.push(`POL ${l.polarity}${polarity ? (polarity.level === 'ok' ? ' ✓' : ' ⚠') : ''}`);
-  // The low level, not the frequency: "the LED low level must sit below
-  // turn-on, so the dark half of the cycle really is dark" (`ui-rules` §10).
-  // The frequency has a home in M3's timing diagram; this cell has one line.
+  // The low level must stay below LED turn-on so the dark phase is dark
+  // (`docs/ui-rules.md` §10). Frequency belongs in the timing diagram; this cell has
+  // one line.
   if (l.low_v !== null && l.low_v !== undefined) parts.push(`low ${fmt.volts(l.low_v, { decimals: 3, unit: false })} V`);
   return {
     key: 'led', label: 'LED 33220A',
@@ -278,9 +233,8 @@ function ledCell(led, chain, inferred) {
 }
 
 /**
- * `ui-rules` §6: *which* measurement supplied the V_oc, and at what LED level.
- * A V_oc from a different illumination is worse than no V_oc, so the source
- * and the level are not a detail — they are half the value.
+ * V_oc includes its source measurement and LED level. A value at another illumination
+ * cannot replace it (`docs/ui-rules.md` §6).
  */
 function vocCell(voc) {
   const v = voc || {};
@@ -297,16 +251,14 @@ function vocCell(voc) {
 }
 
 /**
- * Watts at the meter, never mW/cm²: the beam-splitter and area factors are not
- * recoverable here, and an irradiance would be a number that looks calibrated
- * and is not (`ui-rules` §2). A console that will not answer is a warning, and
- * one of the empty states §9 names.
+ * Power uses watts at the meter because beam-splitter and area factors are
+ * unavailable (`docs/ui-rules.md` §2). An unresponsive meter is a warning with an
+ * explicit empty state (§9).
  */
 function powerCell(power) {
   const p = power || {};
-  // No snapshot at all is not a meter that will not answer: before the first
-  // `GET /bench` the console knows nothing, and saying "not answering" would
-  // be a claim about a console it has not spoken to.
+  // Before the first bench response, meter state is unknown. Calling it unresponsive
+  // would assert a query failure without evidence.
   if (!power) return { key: 'power', label: 'optical power', value: fmt.ABSENT, sub: 'no read-back yet', level: null, inferred: false };
   if (!p.available) {
     return { key: 'power', label: 'optical power', value: fmt.ABSENT,
@@ -314,9 +266,8 @@ function powerCell(power) {
   }
   const parts = [];
   if (p.wavelength_nm) parts.push(`${p.wavelength_nm} nm`);
-  // The meter's averaging is what makes a pulsed LED read as a power (its
-  // mean, half the DC level at 50 % duty) rather than one instant of the
-  // square wave; a meter that is *not* averaging is worth a word.
+  // Averaging reports mean pulsed power, half the DC level at 50 % duty. Without it
+  // the meter samples one instant of the waveform (`docs/service-contract.md` §8).
   if (p.averaged === true) parts.push('avg');
   if (p.averaged === false) parts.push('not averaged');
   if (p.monitor) parts.push('monitored');
@@ -329,18 +280,10 @@ function powerCell(power) {
 }
 
 /**
- * Wired, the controller's reading and whether it is in band. Not wired, the
- * number is the one *typed* into the session — it goes into every folder name,
- * and nobody measured it. That is provenance, not decoration, so it reads as
- * a claim rather than as a reading.
- *
- * The 331 is watched from the moment the service is up (the session's
- * `temperature_monitor_s`), so on a wired bench this cell is a live reading
- * and the sub-line says at what cadence. Two things it must not do with that:
- * call a reading current when the monitor has been unable to read for several
- * intervals — a run holding the bus is the ordinary way that happens — and
- * keep the band verdict of one that is. `in_band` is a statement about *now*,
- * so a stale reading has no level at all.
+ * Wired temperature is controller read-back; unwired session temperature is typed
+ * filename provenance, not measurement. Monitoring supplies cadence and age. Stale
+ * readings cannot retain in-band verdicts because the present state is unknown during
+ * skipped reads.
  */
 function temperatureCell(temperature, session) {
   const t = temperature || {};
@@ -350,14 +293,11 @@ function temperatureCell(temperature, session) {
     if (t.source) parts.push(t.source);
     if (t.ramping) parts.push('ramping');
     if (t.stale) parts.push(t.skipped ? `stale · ${fmt.plural(t.skipped, 'tick')} skipped` : 'stale');
-    // The cadence and not the count of readings: both are the service's, but
-    // `readings` is only as new as the last snapshot, and a counter standing
-    // still beside a number that moves says the wrong thing about which of
-    // them is live. `every 5 s` is what the operator is actually asking.
+    // The sub-line shows cadence rather than a snapshot count. A frozen count beside
+    // changing readings would misrepresent monitoring.
     else if (t.running) parts.push(t.interval > 0 ? `every ${+t.interval} s` : 'monitored');
-    // Not the default: somebody stopped the monitor, or the service was
-    // started with --no-temperature-monitor. The number is then as old as
-    // the last read-back, which the operator has to be told.
+    // Stopped or disabled monitoring leaves only the last read-back, so the operator
+    // needs that limitation beside the value.
     else parts.push('read-back only');
     return {
       key: 'temperature', label: 'T', value: fmt.kelvin(t.kelvin),
@@ -377,10 +317,8 @@ function temperatureCell(temperature, session) {
 }
 
 /**
- * The chain strip: the four trigger-chain checks, each with the bench action
- * that fixes it. `fix` is the service's own name for that action — the strip
- * offers it, and never performs one by itself (`ui-rules` §3: warn states
- * evidence and never blocks; the operator clicks).
+ * The strip shows chain checks and service-supplied `fix` actions. Remedies require
+ * operator clicks and never run automatically (`docs/ui-rules.md` §3).
  */
 export function chainModel(state) {
   const bench = state.bench || {};
@@ -391,19 +329,17 @@ export function chainModel(state) {
     read_at: chain && chain.read_at,
     ok: chain ? chain.ok : null,
     total: chain ? chain.total : null,
-    // A bench action is a worker job, and the worker is running the run: every
-    // action except `park` answers 409 while one is active. A button that
-    // offered itself and then failed would be worse than one that says why.
+    // Bench actions use the worker. During a run, all except park return 409
+    // (`docs/service-contract.md` §4), so controls explain their unavailability
+    // before a click.
     busy,
-    // Runs waiting for the worker. Park takes them with it (#53), so the
-    // count is part of what its confirmation has to say — and, because the
-    // model is the strip's render key, part of what redraws the label when a
-    // run is queued while Park is already armed.
+    // Park cancels queued runs, so their count belongs in its visible confirmation
+    // and render key. Queue changes must update an already armed label.
     queued: (state.queue || []).length,
     items: items.map((item) => ({
       ...item,
-      // `fix` on an `ok` item is the action that *made* it ok; offering it
-      // again is noise. Only a check that reads wrong gets a button.
+      // An `ok` check's `fix` names its satisfying action. Only failing checks need a
+      // remedy button.
       action: item.level !== 'ok' && item.fix ? item.fix : null,
       actionLabel: item.fix ? fixLabel(item) : null,
     })),
@@ -411,15 +347,9 @@ export function chainModel(state) {
 }
 
 /**
- * What a refused fix needs first.
- *
- * The chain fixes are made with the output off — `set-33220a-pol-*` refuses
- * while the LED output is ON *as the instrument reports it*, and
- * `arm-81150a-ext` while the bias output is (contract §4). The service says so
- * in a sentence that names the remedy; without a button for it the operator
- * would be told what to do and given no way to do it.
- *
- * Each entry is one action doing one thing: the strip never chains them.
+ * LED polarity changes require LED output off; external arming requires bias output
+ * off (`docs/service-contract.md` §4). A refusal naming a prerequisite gets its own
+ * button. Each click performs one action; the strip never chains them.
  */
 export const PREREQUISITE = {
   'set-33220a-pol-inv': 'led-off',
@@ -435,16 +365,9 @@ function fixLabel(item) {
 // -- the DOM ----------------------------------------------------------------
 
 /**
- * What an armed Park is about to do, in full.
- *
- * `park` on a busy bench is `worker.stop_runs`: it aborts the run *and
- * cancels every queued one*. The confirmation said "abort the run and park?"
- * — one run, singular — and named the queue only in a `title` nobody hovers
- * before the second click (#53). An operator who reached for Park to stop one
- * scan lost the rest of the night without being told which.
- *
- * The count only appears when there is one, so the ordinary case — stop this,
- * nothing behind it — keeps the shorter sentence.
+ * The armed label states active-run abort and queue cancellation
+ * (`docs/service-contract.md` §4). Queue loss must be visible before confirmation
+ * rather than only on hover. The count appears only when nonzero.
  */
 export function parkLabel(queued = 0) {
   return queued > 0
@@ -453,8 +376,8 @@ export function parkLabel(queued = 0) {
 }
 
 /**
- * The same thing at length, on hover. "not after the queue" is the point of
- * the sentence and it only has one when there is a queue to be ahead of.
+ * Hover text expands the Park consequence. Queue precedence is mentioned only when a
+ * queue exists.
  */
 export function parkTitle(queued = 0) {
   return queued > 0
@@ -464,13 +387,8 @@ export function parkTitle(queued = 0) {
 }
 
 /**
- * The rail, into a container. One cell per value, in the design's order.
- *
- * The model is the render key (`dom.keyed`): eight small objects, built on
- * every notify because that is cheap and pure, and put on the screen only when
- * one of them says something different from what is already there. A rail
- * rebuilt sixty times a second to draw the same eight values is not just
- * waste — it is the operator's selection dropped mid-copy.
+ * The renderer keys the rail on its pure model. Rebuilding unchanged DOM on every
+ * frame wastes work and drops text selection during copying.
  */
 export function renderRail(el, state) {
   const model = railModel(state);
@@ -478,13 +396,8 @@ export function renderRail(el, state) {
 }
 
 /**
- * Which glyph belongs to which cell, from `design/icons.js` — the pack drew one
- * per rail cell and R3·1 places them exactly here, on the label.
- *
- * A cell with no icon would be the odd one out in a row of eight, so every key
- * is named rather than defaulted; a cell this map does not know falls back to
- * the dashed ring, which reads as *nothing identified* instead of borrowing
- * some other instrument's mark.
+ * Each cell maps to its instrument glyph. Unknown keys use a dashed ring rather than
+ * another instrument's mark.
  */
 const CELL_ICON = {
   relay: 'relay',
@@ -501,15 +414,11 @@ function cellEl(cell) {
   const classes = ['brc'];
   if (cell.level) classes.push('lv-' + cell.level);
   if (cell.inferred) classes.push('inferred');
-  // What the diagram already says, the words need not repeat. A closed
-  // circuit is in the drawing; `neutral` and an absent read-back are not —
-  // an unlit diagram is both of them at once — so only a lit one is `drawn`.
+  // The diagram identifies a connected circuit. Unlit can mean neutral or absent
+  // read-back, so those states retain words.
   if (cell.key === 'relay' && cell.links && (cell.links[0] || cell.links[1])) classes.push('drawn');
-  // The rail is one line (`style.css`), so the sub-line is a panel the cell
-  // opens rather than a third row. It opens on hover **and on focus**, which
-  // is what the `tabindex` is for: a reading reachable only by a pointer is a
-  // reading half the operators cannot get to. `title` says the same thing
-  // where a screen reader will find it, and where the panel runs off-screen.
+  // A one-line rail opens details on hover and focus. `tabindex` provides keyboard
+  // access; `title` also exposes text when the panel extends off-screen.
   return h('div', {
     class: classes.join(' '),
     tabindex: cell.sub ? '0' : null,
@@ -518,11 +427,8 @@ function cellEl(cell) {
     h('span.brl',
       icon(CELL_ICON[cell.key] || 'blank'),
       h('span', { text: cell.label }),
-      // The inferred mark rides on the label, so the value keeps the register
-      // of a number: this cell is what the run implies, not what was read.
-      // On one line there is no room for the badge and the dashed rule under
-      // the value carries it instead, so this is the mark's title, not the
-      // mark — `style.css` hides the element and keeps what it says.
+      // Inference attaches to the label while the value remains numeric. A dashed
+      // rule conveys it on one line; the hidden badge retains title text.
       cell.inferred ? h('span.tag-inferred', { title: 'implied by the running step, not read back', text: 'inferred' }) : null),
     h('span.brv', {
       text: cell.value,
@@ -544,10 +450,8 @@ function relayEl(cell) {
 }
 
 /**
- * The strip, into a container. `onFix(name)` and `onPark()` are the only two
- * things it can do to the bench, and both are explicit: nothing here touches
- * it on its own. `onDismiss()` touches nothing at all — it clears the sentence
- * the last action left.
+ * The strip renders explicit `onFix(name)` and `onPark()` actions. It never acts
+ * automatically; `onDismiss()` only clears the last action message.
  */
 export function renderChainStrip(el, state, { onFix, onPark, onDismiss, status, parkArmed } = {}) {
   const model = chainModel(state);
@@ -560,10 +464,8 @@ export function renderChainStrip(el, state, { onFix, onPark, onDismiss, status, 
     h('span.sk', { text: model.total === null ? 'trigger chain' : `trigger chain ${model.ok} / ${model.total}` }),
     model.items.map((item) => h('span', { class: 'st ' + (item.level === 'ok' ? '' : 'bad') },
       h('span', { text: `${item.label} ${item.value}` }),
-      // The verdict was a `✓` / `⚠` text character: 106 px² of glyph for the
-      // one thing on the strip that decides whether a result means anything.
-      // The pack's `ok` / `warn` are drawn to the same optical weight as the
-      // number beside them, and take the cell's colour through `currentColor`.
+      // Verdict icons match adjacent numbers in optical weight and inherit severity
+      // through `currentColor` so interpretation constraints stay visible.
       icon(item.level === 'ok' ? 'ok' : 'warn', {
         cls: 'mark', size: 13, title: item.level === 'ok' ? 'reads as configured' : 'reads wrong',
       }),
@@ -577,9 +479,8 @@ export function renderChainStrip(el, state, { onFix, onPark, onDismiss, status, 
     h('span.spacer'),
     status ? h('span', { class: 'st status ' + (status.level || '') },
       h('span', { text: status.text }),
-      // A refused Start answers 422 with the checks that refused it, and the
-      // list is the answer -- "invalid" alone tells the operator nothing they
-      // can act on. `error.checks`, not `detail` (M1's finding).
+      // Refused Start returns 422 with actionable `error.checks`. A bare invalid
+      // label cannot explain the remedy.
       (status.checks || []).length
         ? h('span.checks', (status.checks || [])
           .filter((c) => c.level === 'crit' || c.level === 'invalid')
@@ -590,19 +491,15 @@ export function renderChainStrip(el, state, { onFix, onPark, onDismiss, status, 
       status.offer
         ? h('button.btns', { onclick: () => onFix && onFix(status.offer, { label: status.offer }) }, status.offer)
         : null,
-      // A way to be rid of it. The strip is the console's one place for a
-      // sentence, and a sentence has no clock on it: an `ok` from a queue
-      // three hours ago and a refusal that was fixed twenty minutes ago both
-      // sat here reading as news, and the operator could only replace them by
-      // provoking another. Nothing dismisses itself — a refusal that vanished
-      // on a timer is the failure mode this replaces, not a version of it.
+      // The operator can dismiss a persistent message without another bench action.
+      // No timer clears it because a refusal must remain available to read.
       h('button.stx', {
         title: 'clear this message',
         'aria-label': 'clear this message',
         onclick: () => onDismiss && onDismiss(),
       }, '✕')) : null,
-    // Bench properties, not per-run choices, and multiplicative: they leave no
-    // trace in the data, so `ui-rules` §6 restates them beside it.
+    // Gain, R_s and attenuation multiply results without leaving evidence in their
+    // values. Bench properties stay beside results (`docs/ui-rules.md` §6).
     h('span.st.quiet', { text: rigText(rig) }),
     h('button', {
       class: parkArmed ? 'btns armed' : 'btns',

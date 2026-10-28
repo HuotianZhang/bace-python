@@ -1,52 +1,19 @@
-// The run monitor — `docs/ui-plan.md` M4: what a run looks like while it runs.
-//
-// Shell furniture, like the rail: it sits under the rail on every tab for as
-// long as a run holds the worker, and is gone when the bench is parked. A
-// pause at hour three of a temperature sweep has to be answerable from
-// whichever tab happens to be open, and a stop has to be one click from
-// anywhere — both are about the bench, not about a view, which is the same
-// reason Park lives on the strip.
-//
-// What it says, and where each line comes from (`docs/ui-rules.md` §5 — three
-// counters at three time scales, and *"step 412 of 8400 is useless here"*):
-//
-//   * **the loops**, outermost first, from the executor's own `Progress`
-//     frames — one per loop node, keyed by its `node_path`, which the store
-//     keeps apart from the leaf's (`progressByNode`). `T=250K · 1 of 2`,
-//     `LED 1.020 V · 2 of 2`. A temperature that is settling is said to be
-//     *waiting*, never drawn as a step that runs.
-//   * **the shots**, from the leaf's `Progress` and the node's own count —
-//     `shot 4 of 24 · loop 2 · point 1`.
-//   * **the segment**, from `StepPhase` — `5 · acquire light` — which is what
-//     tells a slow settle from a hung acquisition (contract §3). Live-only,
-//     never replayed, so it is shown only while the stream carries it.
-//   * **the ETA**, the executor's re-derived one from the outermost loop's
-//     `Progress` when there is one, else the module's own — and, when neither
-//     has one (a J-V's `Progress` carries `eta_s: null` on purpose), the cost
-//     model's prediction from submit, marked `~` and labelled as predicted.
-//
-// And the two things the operator can *do*: stop — `after_shot`, the honest
-// verb, or `abort`, armed first like Park — and answer a `NeedsOperator`, with
-// the `temperature_k` the cryostat actually reached. `monitorModel` is pure;
-// the DOM is beside it, and `ui/tests/monitor.test.mjs` holds the model down
-// against the recorded tree.
+// The monitor remains below the rail on every tab while a run holds the worker,
+// including park. Stop and prompts must be reachable from every view. Outer loops,
+// shots and segments use separate counters (`docs/ui-rules.md` §5). `StepPhase` is
+// live-only (`docs/service-contract.md` §3). Settling reads as waiting. ETA prefers
+// outer-loop progress, then module progress, then a labelled cost prediction. Stop
+// completes the shot; Abort arms first. Resume records the reached temperature. Pure
+// `monitorModel` supports fixture tests.
 
 import { h, keyed } from './dom.js';
 import * as fmt from './format.js';
 import { TERMINAL } from './store.js';
 
 /**
- * The module kinds that acquire something a counter can count. A leaf node's
- * `kind` is its module name (`NodeStarted.data.kind`), and of the nine the
- * service offers only these three produce shots or curves: `light`, `power`,
- * `temperature`, `park`, `wait` and `note` produce neither, and a loop's kind
- * is the loop. Counted as a shot producer, a long `wait` read `shot 0` for
- * its whole execution and a settling temperature looked like a step that
- * runs, which `ui-rules` §5 says it must never.
- *
- * A whitelist, not a blacklist: a module the service adds later gets no
- * counter until this file knows what it acquires, and no counter is better
- * than a wrong one.
+ * Only known measurement modules get acquisition counters. Long waits and settling
+ * must not imply acquisition (`docs/ui-rules.md` §5). Unfamiliar kinds receive no
+ * counter before their semantics are known.
  */
 const SHOT_KINDS = new Set(['bace']);
 const CURVE_KINDS = new Set(['jv', 'jv_bace']);
@@ -97,21 +64,10 @@ export function loopCounters(record, path) {
 }
 
 /**
- * `shot 4 of 24 · loop 2 · point 1`, for the leaf the run is at — **the shot
- * being acquired**, not the last one that finished.
- *
- * `kept` counts `StepDone`s; between a `StepStarted` and its `StepDone` the
- * instrument is inside the next one, which is a second on the rig and the
- * whole of the first acquisition. Counted from `kept` alone the monitor
- * opened every node with `shot 0 of 630` and then trailed the loop, point and
- * segment beside it by one for the rest of the run.
- *
- * The in-flight shot is trusted only when it is this node's — the index
- * restarts at zero on every module node — and only when it is not *behind*
- * what has completed: a `StepStarted` replayed out of the ring after a drop
- * describes a shot that finished long ago, and its loop and point would be
- * the tail of the run rather than its head. `kept` never moves backwards, so
- * it is the floor.
+ * The counter describes the shot in progress. Counting only `StepDone` would show
+ * zero during the first acquisition and disagree with loop, point and segment.
+ * `StepStarted` must belong to this node because indices restart per node. Replayed
+ * starts can precede completed shots, so monotonic `kept` supplies the lower bound.
  */
 export function shotCounter(record, node) {
   if (!node) return null;
@@ -119,8 +75,8 @@ export function shotCounter(record, node) {
   const shots = (node.shots || []).length;
   const isJv = CURVE_KINDS.has(node.kind) || (!node.kind && curves > 0);
   const acquires = isJv || SHOT_KINDS.has(node.kind) || (!node.kind && shots > 0);
-  // An unknown kind with nothing acquired says nothing; a node whose
-  // `NodeStarted` left the ring is read from what it has produced instead.
+  // Unknown kinds without acquisitions have no counter. Recorded acquisitions
+  // identify nodes whose start has left the ring.
   if (!acquires) return null;
   const kept = typeof node.kept === 'number' ? node.kept : (isJv ? curves : shots);
   const requested = typeof node.requested === 'number' ? node.requested : null;
@@ -129,18 +85,15 @@ export function shotCounter(record, node) {
     && (started.node_path || '') === (node.node_path || '')
     && typeof started.index === 'number' && started.index + 1 >= kept
     ? started : null;
-  // A J-V has no per-curve start: `JVStarted`, then a blocking sweep that is
-  // minutes on the rig, then `JVCurveDone`. Counted from `kept` the monitor
-  // would read `curve 0 of 2` for the whole of the first one, so an open node
-  // is inside the curve after the last one that finished — capped, because
-  // the sweep that has just finished the last curve is not starting another.
+  // J–V has no per-curve start event. An open node is inside the curve following its
+  // last completion, capped at the requested total to avoid implying an extra sweep.
   const inFlight = isJv && !node.outcome
     ? Math.min(kept + 1, requested === null ? kept + 1 : requested)
     : null;
   const nth = step ? Math.max(kept, step.index + 1) : inFlight ?? kept;
   const parts = [`${isJv ? 'curve' : 'shot'} ${nth}${requested !== null ? ' of ' + requested : ''}`];
-  // The point inside the sweep, from the live `JVPoint`s (2026-09-04): the
-  // J-V's equivalent of the shot's `StepPhase`.
+  // Live `JVPoint` supplies within-sweep progress, analogous to `StepPhase` within a
+  // shot.
   if (isJv && !node.outcome && node.partial && node.partial.of) {
     parts.push(`point ${node.partial.k} of ${node.partial.of}`);
   }
@@ -152,15 +105,9 @@ export function shotCounter(record, node) {
 }
 
 /**
- * The runs waiting for the worker, in order.
- *
- * A queued run is never `activeRunId` — the store keeps that for the run that
- * holds the bench — so the monitor, which draws that run, could never reach
- * one. `POST /runs/{id}/stop` cancels a run the worker has not picked up
- * (contract §6), and without this the only way to be rid of one is to wait
- * for it to start and then stop it, which on a rig is an hour of the sample's
- * life. The id is the fallback label: a queue folded from a `/bench` snapshot
- * can name a run whose `RunQueued` this console never saw.
+ * Queued runs need individual Cancel controls. Stop cancels before execution
+ * (`docs/service-contract.md` §6); starting first would unnecessarily expose the
+ * sample. The ID labels entries whose `RunQueued` is absent from this console.
  */
 export function queuedRuns(state) {
   return (state.queue || []).map((runId, i) => {
@@ -172,22 +119,19 @@ export function queuedRuns(state) {
 }
 
 /**
- * The shell's own state *about one run* — an armed Abort, the answer a stop
- * came back with — belongs to that run and to no other.
- *
- * Both outlive the run they describe unless something ends them, and the
- * frame that would (`parked`) is a frame like any other: a reconnect whose
- * ring gap swallowed it leaves the next run rendered with an Abort already
- * armed, so its first click discards a shot with no confirmation at all. The
- * owner is carried with the value and compared here rather than cleared on a
- * frame that may never arrive.
+ * Armed Abort and action replies belong to one run ID. A ring gap can omit `parked`,
+ * so clearing only on that frame can arm the next run. Ownership travels with the
+ * value and is checked during rendering.
  */
 export function scopedTo(runId, held) {
   if (!held || !runId) return null;
   return (typeof held === 'string' ? held : held.run_id) === runId ? held : null;
 }
 
-/** `5 · acquire light`, or nothing: `StepPhase` is live-only and belongs to the shot in flight. */
+/**
+ * `5 · acquire light`, or nothing: `StepPhase` is live-only and belongs to the shot in
+ * flight.
+ */
 export function phaseIndicator(record) {
   const phase = record.phase;
   if (!phase || !phase.phase) return null;
@@ -199,13 +143,9 @@ export function phaseIndicator(record) {
 }
 
 /**
- * The prompt a `NeedsOperator` opens. `what` is `temperature` for a node with
- * no controller, and names the reason otherwise (`temperature timeout`,
- * `temperature refused`); the detail carries the target, and — for a timeout
- * — the reading it got to and why it gave up. The newest `TemperatureRead`
- * since the pause is shown beside it: with a controller attached the
- * cryostat is polled while the person decides, and that reading is *for*
- * them (contract §7).
+ * The prompt renders the pause reason, target and any timeout reading. Readings
+ * during the pause stay beside it because the controller polls while the operator
+ * decides (`docs/service-contract.md` §7).
  */
 export function pausePrompt(record, state) {
   const pending = record.needsOperator;
@@ -233,15 +173,14 @@ export function pausePrompt(record, state) {
     setpoint_k: d.setpoint_k ?? null,
     lines,
     reading: reading ? { kelvin: reading.kelvin, source: reading.source, in_band: reading.in_band, ts: reading.ts } : null,
-    // What a resume with nothing typed takes: the last reading polled while
-    // the operator decided, else nothing is bound and the setpoint's own
-    // provenance stands (`how: "setpoint"`, never confirmed).
+    // Blank resume uses the last pause reading. Without one, the setpoint stays
+    // unconfirmed (`docs/service-contract.md` §7).
     fallback: reading ? `resume with nothing typed takes the last reading, ${fmt.kelvin(reading.kelvin)}`
       : 'resume with nothing typed leaves the temperature unconfirmed — the folder names carry the setpoint',
   };
 }
 
-/** Which of the run's verbs apply right now, and why the others do not. */
+/** The helper identifies applicable run actions and reasons for unavailable ones. */
 export function stopModel(record) {
   const state = record.state;
   const terminal = TERMINAL.has(state) || Boolean(record.parked_at);
@@ -258,10 +197,8 @@ export function stopModel(record) {
 }
 
 /**
- * The whole monitor, as one plain object — `null` when nothing holds the
- * worker. The run being parked still owns it (`store.js`), so the monitor
- * says `stopping` through the park rather than vanishing before the bench is
- * safe.
+ * The model is `null` when no run holds the worker. Parking retains ownership so
+ * stopping remains visible through park.
  */
 export function monitorModel(state) {
   const record = state.activeRunId ? state.runs[state.activeRunId] : null;
@@ -285,8 +222,8 @@ export function monitorModel(state) {
     loops,
     shots: shotCounter(record, node),
     phase: paused ? null : phaseIndicator(record),
-    // Temperature settling is the slowest thing in the system by three orders
-    // of magnitude and must not look like a step that "runs" (§5).
+    // Temperature settling dominates by three orders of magnitude and must appear as
+    // waiting rather than acquisition (`docs/ui-rules.md` §5).
     waiting: paused ? (prompt ? prompt.node_path : 'operator') : null,
     eta: paused ? null : eta,
     prompt,
@@ -298,12 +235,9 @@ export function monitorModel(state) {
 }
 
 /**
- * The ETA, counting down. The executor re-derives it at every loop boundary
- * (`executor.py`: "the ETA is recomputed as it measures"), which for the
- * outermost loop of a
- * temperature sweep is once every half hour — so between boundaries the
- * finish time is what stands, and the seconds left are measured from the
- * newest frame's clock rather than repeated as the number the frame carried.
+ * ETA counts down from absolute finish time. The executor recalculates at loop
+ * boundaries (`docs/service-contract.md` §7), about half an hour apart on this bench.
+ * Between them the most recent frame clock updates remaining seconds.
  */
 function etaOf(outer, record, nowTs) {
   const source = outer && outer.eta_s !== null && outer.eta_s !== undefined ? outer
@@ -311,21 +245,14 @@ function etaOf(outer, record, nowTs) {
       : null;
   if (!source) {
     if (record.eta && (record.eta.finish_at || record.eta.eta_s !== undefined)) {
-      // Hydrated from `/bench` or `GET /runs/{id}` when the ring lost the
-      // loop's `Progress`: it carries the absolute `finish_at` beside the
-      // seconds it had *when it was measured*, and repeating those would
-      // freeze the countdown — and keep it positive past the finish.
+      // Hydrated ETA retains `finish_at` and seconds at measurement. Repeating those
+      // seconds would freeze the countdown beyond the finish.
       const at = nowTs !== null && nowTs !== undefined ? nowTs : Date.now() / 1000;
       const finishAt = record.eta.finish_at ?? ((record.eta.at || at) + record.eta.eta_s);
       return { seconds: Math.max(0, finishAt - at), finish_at: finishAt, from: 'record' };
     }
-    // A J-V emits `Progress` with `eta_s: null` deliberately — there is
-    // nothing measured to re-derive from until a curve finishes — and
-    // `record.eta` is the executor's, which a manual run has none of. What is
-    // left is the cost model's prediction, made when the run was submitted
-    // (`/bench`'s `run.finish_at`, `GET /runs/{id}`'s `cost.finish_at`). It
-    // is the only ETA a slow sweep ever has, and it is labelled as what it
-    // is: predicted, not measured.
+    // J–V lacks measured ETA before a curve completes. Manual runs have no executor
+    // ETA, so submit-time cost supplies a prediction that must be labelled predicted.
     if (record.finish_at) {
       const at = nowTs !== null && nowTs !== undefined ? nowTs : Date.now() / 1000;
       return { seconds: Math.max(0, record.finish_at - at), finish_at: record.finish_at, from: 'predicted' };
@@ -353,19 +280,17 @@ function lastShotLine(node) {
 // -- the DOM ----------------------------------------------------------------
 
 /**
- * Into `el`, keyed in two halves. The counters, the phase and the buttons are
- * keyed on the model; the prompt is keyed on *which pause it is*, so a
- * `TemperatureRead` arriving while the operator is halfway through typing
- * 250.1 does not rebuild the field under their caret — the reading goes in
- * the half that may rebuild.
+ * Counters and controls have separate keys from the pause prompt. Temperature updates
+ * must not replace the input while the operator types; the live reading has its own
+ * replaceable line.
  */
 export function renderMonitor(el, state, { onStop, onAbort, onResume, armedRun = null, status = null } = {}) {
   const model = monitorModel(state);
   const queued = queuedRuns(state);
   if (!model && !queued.length) {
     el.hidden = true;
-    // Clear the keys with the content, or a run that ends and starts again
-    // with an identical first model would leave the old prompt on screen.
+    // Removing content also clears its keys so an identical model in another run
+    // cannot retain a stale prompt.
     if (el.__key !== undefined) { el.__key = undefined; el.textContent = ''; }
     return null;
   }
@@ -389,13 +314,12 @@ export function renderMonitor(el, state, { onStop, onAbort, onResume, armedRun =
     keyed(promptEl, '', () => []);
     return null;
   }
-  // Both belong to a run, and this may not be the run they were held for.
+  // Armed Abort and replies are displayed only for their owning run.
   const abortArmed = Boolean(scopedTo(model.run_id, armedRun));
   const answer = scopedTo(model.run_id, status);
-  // The counters move with every shot; the buttons do not. Keyed together,
-  // a `--fast` scan rebuilt the row 4850 times in eight seconds (measured),
-  // and a Stop pressed between two shots would land on a button that no
-  // longer existed — the M2 finding, on the one control that must not miss.
+  // Controls are keyed apart from counters so frames cannot replace buttons during a
+  // click. A fast scan measured on this bench rebuilds a combined row 4850 times in
+  // eight seconds, enough to consume Stop clicks.
   keyed(live, JSON.stringify([model.state, model.label, model.loops, model.shots, model.waiting, model.phase,
     model.lastShot, model.eta && Math.round(model.eta.seconds), model.eta && model.eta.finish_at]),
   () => liveRow(model));
@@ -448,7 +372,9 @@ function liveRow(model) {
   return kids;
 }
 
-/** Stop, abort or cancel — keyed apart from the counters, so a click always lands. */
+/**
+ * Action controls have keys separate from counters so clicks survive progress updates.
+ */
 function actionButtons(model, { onStop, onAbort, abortArmed, status }) {
   const kids = [];
   if (status) kids.push(h('span', { class: 'mon-status ' + (status.level || ''), text: status.text }));
@@ -494,7 +420,10 @@ function queueRow(queued, status, onStop) {
   ];
 }
 
-/** The seven (or six) segments, the current one lit — R3·2's `5 · acquire light`. */
+/**
+ * The strip highlights the current segment among seven, or six with the same dark
+ * reference.
+ */
 function phaseEl(phase) {
   return h('span.mon-phase', { title: 'where inside the shot the run is, from StepPhase' },
     h('span.mon-seg-row', phase.segments.map((name, i) => h('span', {
@@ -526,11 +455,9 @@ function promptForm(model, p, onResume) {
 }
 
 /**
- * The reading, and what a blank resume binds — together, because the second
- * follows from the first: once a reading has been polled, a resume with
- * nothing typed takes it, and a sentence still saying "unconfirmed" would
- * have the operator submit under the wrong description of what the service
- * will do.
+ * The prompt pairs the reading with what blank resume binds. Once polling supplies a
+ * reading, calling it unconfirmed would misstate the service's behaviour
+ * (`docs/service-contract.md` §7).
  */
 function readingLine(p) {
   const r = p.reading;

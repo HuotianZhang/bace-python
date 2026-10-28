@@ -1,53 +1,26 @@
-// One store. Every view subscribes to it and nothing fetches for itself.
-//
-// `docs/ui-plan.md` decision 2: the screen is a projection of the event
-// stream. The `/bench` snapshot and the `/events` frames fold into the state
-// here, which is what makes `docs/ui-rules.md` §8 — "a manual run and a
-// pipeline step share the same live monitor" — true by construction rather
-// than by discipline: they are the same `run_id` on the same stream, and a
-// manual run *is* a one-node pipeline in the service.
-//
-// The fold is deliberately dumb about meaning. It records what each frame
-// says; it does not decide what a number means, and it never re-derives
-// provenance (§6). Views read `source`/`detail`/`editable` as they arrived.
+// The store folds bench snapshots and events for all views. Manual runs and pipeline
+// nodes share one event model and monitor (`docs/ui-rules.md` §8). Folding records
+// service facts without interpreting quantities or re-deriving provenance; views
+// retain supplied `source`, `detail` and `editable` (§6).
 
 import { hasReplayedTraces } from './stream.js';
 
 const LOG_LIMIT = 800;
 
 /**
- * How many shots keep their decimated traces — across the whole store, not
- * per node.
- *
- * This is `session.RING_TRACES_KEPT`, and it is global there too: `_traces` is
- * one `deque(maxlen=200)` for the session, appended on every `StepDone`
- * whatever run or node it belongs to (`session.py`). So the ring replays the
- * traces of the last 200 shots *anyone* took, and strips the rest
- * (`decimated[…].replay`). Mirroring it globally makes an invariant out of
- * what was already half true: a console that had ever been dropped held
- * exactly those, and one that had not held every trace that arrived while its
- * socket stayed up.
- *
- * Global is also the only version that bounds anything. Measured on
- * `--sim --fast`, a decimated shot costs ~14.6 kB of heap; capped per *node*
- * this would keep 200 per leaf, so the canonical 9 T x 5 level tree of
- * `docs/ui-plan.md` M5 — 45 leaves — would hold 9000 of them, ~130 MB. One
- * ring of 200 is ~3 MB whatever the tree.
- *
- * Nothing on screen needs more: the live monitor draws the shot that is
- * arriving, the loop curve comes from the scalars, and the results tab redraws
- * from `GET /runs/{id}/data` at full precision.
+ * Trace retention is global across runs and nodes, matching the service's last 200
+ * shots (`docs/service-contract.md` §3). A decimated shot uses about 14.6 kB of heap
+ * on this bench. Per-node retention across 45 leaves would keep 9000 traces, about
+ * 130 MB; one global ring uses about 3 MB regardless of tree size. Monitors need the
+ * current shot, Q charts use scalars and results fetch full precision, so older
+ * arrays are unnecessary.
  */
 const TRACES_KEPT = 200;
 
 /**
- * A run's state as `GET /bench` says it — `session._bench_state`, mirrored so
- * the rail does not read `idle` for the length of a run. The snapshot is
- * fetched once at boot and again when a run parks; between those two the only
- * thing that knows the bench is busy is the stream.
- *
- * A terminal state maps to `stopping` because the worker is still parking, and
- * `parked` is not a bench state at all: it is the transition to `idle`.
+ * Stream state keeps the rail busy between snapshot fetches. Terminal outcomes map to
+ * stopping while the worker parks; `parked` transitions the bench to idle rather than
+ * becoming a lasting bench state (`docs/service-contract.md` §2).
  */
 export function benchStateOf(runState) {
   if (BENCH_STATES.has(runState)) return runState;
@@ -57,7 +30,10 @@ export function benchStateOf(runState) {
 
 const BENCH_STATES = new Set(['idle', 'preflight', 'running', 'paused', 'stopping']);
 
-/** Terminal run states, from the contract's state diagram. */
+/**
+ * The set contains terminal outcomes in the service state model
+ * (`docs/service-contract.md` §2).
+ */
 export const TERMINAL = new Set(['done', 'stopped', 'aborted', 'failed', 'blocked', 'cancelled']);
 
 /** Frames that describe a run, and are meaningless without one. */
@@ -69,17 +45,16 @@ const RUN_SCOPED = new Set([
 ]);
 
 /**
- * How many power-monitor readings the console keeps for the trace: 5.5 h at
- * 1 Hz, 66 min at 0.2 s. Older ones are the service's (`GET
- * /monitors/power/history` holds 200 000) and the journal's on disk.
+ * The console cap covers about 5.5 h at 1 Hz or 66 min at 0.2 s. Older readings
+ * remain in service history, capped at 200 000, and the journal
+ * (`docs/service-contract.md` §8).
  */
 export const POWER_LOG_MAX = 20000;
 
 /**
- * Put one reading into a log sorted by `ts`, or refuse it when that `ts` is
- * already there. The stream and `GET /monitors/power/history` deliver the
- * same readings under the same `ts` (the service stamps both from one clock),
- * and a console that folds both must hold each once.
+ * Insertion orders readings by `ts` and rejects duplicates. Stream and history share
+ * the service timestamp, so merging must retain each reading once
+ * (`docs/service-contract.md` §8).
  */
 export function insertReading(log, entry) {
   const last = log.length ? log[log.length - 1] : null;
@@ -100,10 +75,8 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
   const listeners = new Set();
   let pending = false;
   /**
-   * The shots that still carry their arrays, oldest first — the store's
-   * counterpart to the service's `_traces`, and global for the same reason.
-   * Not on `state`: no view reads it, and it holds the same objects
-   * `runs[id].shots` does.
+   * The global trace queue holds shots oldest first. Views do not read it, so it
+   * stays outside `state` and shares objects with run shot records.
    */
   let traced = [];
 
@@ -128,9 +101,8 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
   }
 
   function log(frame, level, text) {
-    // Counted as well as kept: the log is appended to and trimmed from the
-    // front, so its length stops changing once it is full and a view that
-    // keyed on the length would freeze at 800 lines.
+    // A separate log counter changes after the capped length stops growing. Keying
+    // only on length would freeze rendering at 800 entries.
     state.logged += 1;
     state.log.push({
       seq: frame.seq, ts: frame.ts, type: frame.type, level,
@@ -148,7 +120,7 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
       return () => listeners.delete(listener);
     },
 
-    /** Wholesale: a new session, or the page reloading. */
+    /** Reset clears session state for a reload or service-session change. */
     reset() {
       state = emptyState();
       traced = [];
@@ -156,50 +128,32 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
     },
 
     /**
-     * `GET /bench`, and the `data.bench` every `Hello` carries.
-     *
-     * `readBack` is for a snapshot fetched *because* something changed the
-     * bench — the refetch after a run parks. An HTTP response and the socket
-     * race, so by the time that snapshot arrives the next queued run may
-     * already have reported `preflight` on the stream; applying its `run`,
-     * `queue` and `state` would put the console back where the bench was a
-     * moment ago, or resurrect a run that has finished. Those three come from
-     * the stream, which cannot arrive out of order. What the refetch is
-     * actually for — the read-back: the instruments, the chain, the V_oc a
-     * J-V just measured — is applied either way.
+     * The snapshot supplies instruments, chain and V_oc. With `readBack`, run, queue
+     * and bench state stay stream-owned: a response can race the next queued run's
+     * start or an ending. Applying stale HTTP state would move the console backward.
+     * Boot and Hello snapshots instead establish initial state.
      */
     applyBench(bench, { readBack = false } = {}) {
       if (!bench) return;
       state.bench = bench;
       state.session = bench.session || state.session;
       state.readAt = bench.read_at || null;
-      // The observers, on every snapshot: the power panel's switch shows
-      // whether the monitor *is* running, which is the service's to say.
+      // Snapshot monitor state determines the power switch; the requested preference
+      // cannot establish that polling is active.
       if (Array.isArray(bench.monitors)) state.monitors = bench.monitors;
-      // The read-back's verdicts are on the snapshot and nowhere else: a socket
-      // opened after them replays nothing, so a console that only folded
-      // `Verdict` frames would show a clean bench with a warning on it.
-      //
-      // And the snapshot is the *whole* answer, not an addition to one:
-      // `chain_verdicts()` omits a check that now reads ok, so a warning the
-      // operator has just fixed disappears by being absent. Merging into the
-      // list we hold would leave it on screen for the life of the page. So the
-      // snapshot is the base, and only what the stream said *after* this
-      // read-back was taken survives on top of it.
+      // Snapshots replace the base verdict list because resolved warnings disappear
+      // by omission. Merging would preserve them indefinitely. Only stream verdicts
+      // following the snapshot survive above that base; relying on stream alone would
+      // miss warnings emitted before connection.
       const readAt = bench.read_at || 0;
       const merged = (bench.verdicts || []).map((v) => ({ ...v, node_path: v.node_path || '', ts: readAt }));
       for (const verdict of state.verdicts) {
         if ((verdict.ts || 0) > readAt) replaceVerdict(merged, verdict);
       }
       state.verdicts = merged;
-      // The cost model's finish time is a *constant* of the run, computed when
-      // it was submitted (`session.py`: `rec.cost`), so unlike `run`, `queue`
-      // and `state` it cannot race the stream and is taken from a read-back
-      // too. That is the only path it ever arrives by for a run started while
-      // the console was open: the boot snapshot is older than the run, and
-      // `applyRunRecord` is asked only when the ring fell short. Without it a
-      // J-V — whose every `Progress` carries `eta_s: null` on purpose — shows
-      // no ETA at all for the whole of a sweep that is minutes on the rig.
+      // Submit-time cost prediction is constant for the run and can be read from a
+      // snapshot without reverting stream state. Active J–V progress lacks measured
+      // ETA, and ordinary starts need this refetch path to display any prediction.
       if (bench.run && bench.run.run_id && bench.run.finish_at) {
         run(bench.run.run_id).finish_at = bench.run.finish_at;
       }
@@ -214,10 +168,9 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
           record.module = bench.run.module || record.module;
           record.progress = bench.run.progress || record.progress;
           record.eta = bench.run.eta || record.eta;
-          // Authoritative: this snapshot is the boot's or a reconnect's
-          // `Hello`, assembled from the record as it stands, and the replay
-          // that follows re-delivers whatever the ring still holds. So a
-          // pause it does not mention is a pause that is not open.
+          // Boot and Hello snapshots authoritatively describe open pauses; replay
+          // follows with retained events. A pause absent from the snapshot is not
+          // open.
           adoptPending(record, bench.run.pending, { authoritative: true });
         } else {
           state.activeRunId = null;
@@ -234,9 +187,8 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
     },
 
     /**
-     * `GET /monitors/power/history`: the readings the service holds, merged
-     * into the log by `ts` — the trace is whole after a reload, and a
-     * reading the stream already delivered is not held twice.
+     * History merges by `ts` so reloads recover retained readings without duplicating
+     * stream data (`docs/service-contract.md` §8).
      */
     applyPowerHistory(body) {
       const points = (body && body.points) || [];
@@ -248,7 +200,7 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
       notify();
     },
 
-    /** The trace forgotten here, as `DELETE /monitors/power/history` forgot it there. */
+    /** Clearing service power history also clears the console trace. */
     clearPowerLog() {
       state.powerLog = [];
       notify();
@@ -266,12 +218,9 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
     },
 
     /**
-     * The session block, as `PUT /session/sample` answers it.
-     *
-     * Applied from the response rather than waited for on the socket: the
-     * `SampleNamed` is coming and folds to the same place, but the operator
-     * who typed the name should see it in the bar on the keystroke that
-     * committed it, not one round trip later.
+     * The sample-update response applies immediately, without waiting for
+     * `SampleNamed` on the socket. Both fold to the same session block; the
+     * committing action should update the bar promptly.
      */
     applySession(session) {
       if (!session) return;
@@ -284,24 +233,17 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
       if (!entry || !entry.name) return;
       state.modules.byName = { ...state.modules.byName, [entry.name]: entry };
       if (!state.modules.order.includes(entry.name)) state.modules.order.push(entry.name);
-      // `at` is when this catalogue last changed, which is what a view keys on.
+      // Catalogue `at` changes provide a view render key.
       state.modules.at = Date.now() / 1000;
       notify();
     },
 
     /**
-     * `GET /runs/{id}` for a run the stream cannot fully rebuild.
-     *
-     * The ring holds 5000 envelopes, and a 100 x 51 scan produces three times
-     * that in `StepStarted`/`StepDone`/`Progress` alone — so a console opened
-     * late in a long run replays a *tail*: no `RunQueued`, no `RunStarted`, no
-     * `AxisResolved`. `/bench` carries the run's summary and not its shape, so
-     * the record and the data endpoint are asked for the rest.
-     *
-     * Nothing here moves anything backwards: the stream is the newer source
-     * for whatever it has already said, and a count that has been folded from
-     * shots the ring did carry is not undone by the smaller number a request
-     * in flight was answered with.
+     * The record hydrates a run whose opening events have left the 5000-envelope ring
+     * (`docs/service-contract.md` §3). A 100 × 51 scan exceeds that limit threefold
+     * with shot and progress events alone. Bench summaries lack the axis and data,
+     * requiring record and endpoint fetches. Hydration never reduces counts or
+     * overwrites more recent stream facts.
      */
     applyRunRecord(payload) {
       if (!payload || !payload.run_id) return;
@@ -372,10 +314,8 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
     const data = frame.data || {};
     const record = run(frame.run_id);
     if (!record && RUN_SCOPED.has(frame.type)) {
-      // `run_id` is null for everything the service says about itself
-      // (`BenchAction`, `PowerReading`, the bench `Verdict`s). A run's own
-      // event without one would be a service bug, and the session log is
-      // where it should show, rather than a crash in the fold.
+      // Service events can have no `run_id`. Run-specific events without one belong
+      // in the session log as malformed input rather than crashing folding.
       log(frame, 'warn', `${frame.type} with no run_id`);
       return;
     }
@@ -397,11 +337,9 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
       case 'RunStateChanged': {
         record.states.push({ state: data.state, reason: data.reason, ts: frame.ts });
         if (data.state === 'parked') {
-          // Every terminal state is reached *through* `parked`, and the
-          // journal's last line for a finished run says so: done, then parked.
-          // It is a transition, not a resting state (contract §2), so it must
-          // not overwrite the outcome the run actually had — a run that reads
-          // `parked` where it should read `failed` is the bench lying quietly.
+          // `parked` records safe-state transition, not outcome
+          // (`docs/service-contract.md` §2). It must not overwrite failed, stopped or
+          // completed status.
           record.parked_at = frame.ts;
           record.phase = null;
           record.needsOperator = null;
@@ -413,13 +351,10 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
           break;
         }
         if (record.state === 'stopping' && (data.state === 'preflight' || data.state === 'running')) {
-          // A stop accepted during preflight: the session says `stopping` the
-          // moment it is accepted, and the worker's start-of-run reports
-          // follow it. The service refuses to let them displace it
-          // (`Session._apply_state`) and so must this — a rail that went back
-          // to `running` would be telling the operator their stop had lapsed.
-          // The transitions are still recorded, exactly as the journal keeps
-          // them, because they did happen.
+          // An accepted preflight stop remains stopping despite subsequent worker
+          // start reports. Otherwise the rail would imply the stop no longer applies.
+          // Transitions stay recorded even when they cannot replace the displayed
+          // state.
           log(frame, 'info', `${data.state} · after the stop was accepted`);
           break;
         }
@@ -427,10 +362,9 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         record.reason = data.reason || '';
         if (data.state === 'running' && !record.started_at) record.started_at = frame.ts;
         if (data.state === 'queued') {
-          // The queue the rail counts is the service's: runs waiting for the
-          // worker. A `POST /runs` behind a running one is queued here and
-          // leaves the moment the worker picks it up — otherwise the count
-          // only ever changed when a run parked and the snapshot was re-read.
+          // Queue membership follows stream events as runs wait for or acquire the
+          // worker. Waiting for park-time refetch alone would leave the count stale
+          // during execution.
           if (!state.queue.includes(frame.run_id)) state.queue = [...state.queue, frame.run_id];
         } else {
           if (state.queue.includes(frame.run_id)) {
@@ -440,16 +374,13 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         if (TERMINAL.has(data.state)) {
           record.finished_at = frame.ts;
           record.phase = null;
-          // A run stopped, aborted or failed while waiting at a pause emits no
-          // `OperatorResumed` — nobody answered it — so the prompt has to go
-          // with the run, as the service drops its own `pending` on every
-          // terminal state. A finished run still asking for an operator is a
-          // screen asking for something nothing is waiting for.
+          // Terminal states clear pending prompts even without `OperatorResumed`. A
+          // stopped, aborted or failed pause has no waiting consumer and must not
+          // retain a Resume form.
           record.needsOperator = null;
-          // The run still owns the worker while `park()` makes the bench safe,
-          // and on hardware that can block on instrument I/O for a while. So
-          // `activeRunId` is cleared at `parked` above, not here: cleared now,
-          // `currentRun` would pick a run that is still sitting in the queue.
+          // The active run retains the worker while park performs potentially
+          // blocking instrument I/O. Clearing `activeRunId` before `parked` could
+          // select a queued run as active.
           if (state.activeRunId === frame.run_id && data.state !== 'cancelled') {
             state.benchState = benchStateOf(data.state);
           }
@@ -467,7 +398,7 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
           kind: data.kind, label: data.label, started_at: frame.ts, outcome: null,
         });
         record.node_path = data.node_path;
-        // Whatever segment the previous node was in, this one is not in it.
+        // A node change clears the preceding node's segment.
         record.phase = null;
         break;
 
@@ -493,9 +424,9 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         });
         const node = nodeOf(record, frame.node_path);
         if (typeof data.n_shots === 'number') node.requested = data.n_shots;
-        // Per node as well: a pipeline's every `RunStarted` overwrites the
-        // run-level copy, and a card showing an earlier node's shot would
-        // otherwise label it with a later node's `trigger_sweep`.
+        // Trigger mode is node-scoped because each module start replaces the
+        // run-level copy. Earlier node shots must not acquire another node's trigger
+        // label.
         node.config = data.config || null;
         rollUp(record);
         break;
@@ -518,20 +449,14 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         break;
 
       case 'StepStarted':
-        // With its node path, for the reason the phase carries one: the index
-        // restarts at zero on every module node, so the shot in flight is
-        // only this node's if the frame said so.
+        // Shot identity includes node path because indices restart at zero in each
+        // module node.
         record.step = { ...data, node_path: frame.node_path || '' };
-        // The phase is cleared only by a shot at or after the one it
-        // describes. `StepPhase` is live-only and the numbered frames are
-        // not: a client catching up after a 1008 drop folds the ring's
-        // `StepStarted` for shot 300 while the instrument is inside shot 560
-        // — and clearing the phase on every replayed start starved the
-        // indicator for the whole of a `--fast` scan, measured in a browser.
-        // The phase carries its own `index`, so it knows which shot it is.
-        // The index restarts at zero on every module node, so a shot that
-        // looks older may be the next node's first: the phase is kept only
-        // for a start on the *same* node that is behind it.
+        // Live phase clears only for an equal or later shot on the same node, or a
+        // different node. During catch-up, replay can describe shot 300 while live
+        // acquisition is at 560; clearing for every replayed start would suppress the
+        // indicator. A lower index on another node can instead be that node's first
+        // shot.
         if (!record.phase || typeof record.phase.index !== 'number'
             || (frame.node_path || '') !== (record.phase.node_path || '')
             || data.index >= record.phase.index) {
@@ -540,9 +465,9 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         break;
 
       case 'StepPhase':
-        // Live-only, `seq` null, never journalled or replayed: where inside
-        // the shot the run is *now* (`docs/ui-rules.md` §7). Held on its own,
-        // so a reconnect that loses it leaves the shot itself untouched.
+        // Live-only `StepPhase` has null sequence and stays outside replay
+        // (`docs/service-contract.md` §3). Keeping it separate lets reconnect loss
+        // leave shot data intact.
         record.phase = { ...data, node_path: frame.node_path || '', ts: frame.ts };
         break;
 
@@ -562,12 +487,9 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
       }
 
       case 'Progress': {
-        // Three counters at three time scales, and they are three *events*:
-        // the executor emits `Progress(node_path="T=250K")` for a loop node
-        // while the leaf emits its own with `node_path: ""`. Folding them onto
-        // one field would leave the temperature counter holding the shot
-        // counter's numbers — which is `docs/ui-rules.md` §5's whole point,
-        // that "step 412 of 8400" is useless here.
+        // Loop and leaf progress require separate node keys. Combining them would
+        // replace temperature progress with shot counts, losing the three distinct
+        // scales (`docs/ui-rules.md` §5).
         const scope = data.node_path || '';
         record.progressByNode[scope] = { ...data, ts: frame.ts };
         if (scope === '') record.progress = record.progressByNode[scope];
@@ -605,11 +527,9 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
       }
 
       case 'JVPoint': {
-        // Live-only, `seq` null, like `StepPhase`: the sweep in flight, one
-        // point at a time. Held on the node as a curve-shaped object so the
-        // J-V chart draws it with the finished ones; the `JVCurveDone` that
-        // follows carries the whole curve and replaces it. A reconnect that
-        // missed some points loses only the picture of the curve growing.
+        // Live `JVPoint` accumulates a node's incomplete curve. `JVCurveDone`
+        // replaces it with the full curve. Reconnect loss affects only the growth
+        // display (`docs/service-contract.md` §3).
         const node = nodeOf(record, frame.node_path);
         let p = node.partial;
         if (!p || p.index !== data.index || p.direction !== data.direction) {
@@ -640,9 +560,8 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
       }
 
       case 'JVFinished':
-        // The summary's curves are the same objects, reduced the same way in
-        // the journal; the ones already collected carry the arrays when the
-        // frame came off the socket, so they win.
+        // Collected curves retain socket arrays; reduced journal summary curves
+        // cannot replace that richer data.
         record.jvFinished = data;
         if (record.curves.length === 0) record.curves = (data.curves || []).slice();
         break;
@@ -661,9 +580,8 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
       }
 
       case 'Notice': {
-        // Not every Notice belongs to a run: the one that says this client is
-        // being dropped for falling behind carries no `run_id` at all, and
-        // arrives (with `seq` null) on the way to a 1008 close.
+        // Drop notices can have null `run_id` and null sequence before close 1008.
+        // They belong to the service rather than a run.
         const notice = { level: data.level, text: data.text, since: data.since, ts: frame.ts };
         (record ? record.notices : state.notices).push(notice);
         log(frame, data.level === 'warning' ? 'warn' : (data.level || 'info'), data.text);
@@ -690,9 +608,8 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         state.power = { watts: data.watts, trustworthy: data.trustworthy,
                         wavelength_nm: data.wavelength_nm, source: data.source,
                         averaged: data.averaged ?? null, ts: frame.ts };
-        // Into the trace, in `ts` order: a replay after a reconnect can hand
-        // back a reading older than the newest one held, and the history
-        // fetched on connect may already have it.
+        // Replay can deliver readings out of order relative to retained data; history
+        // may contain them too. Timestamp insertion handles both cases.
         if (Number.isFinite(frame.ts) && Number.isFinite(data.watts)) {
           insertReading(state.powerLog, { ts: frame.ts, watts: data.watts, trustworthy: data.trustworthy !== false });
           trimPowerLog(state);
@@ -700,12 +617,9 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         break;
 
       case 'SampleNamed':
-        // The identity of everything measured from here on. Folded rather
-        // than waited for on the next `/bench`, because two consoles may be
-        // open and the one that did not type it must not keep filing runs
-        // under a name the operator has already corrected. `after` is the
-        // whole block, so this is a replacement and not a merge — the merge
-        // happened in the service, which owns the layer below it.
+        // `SampleNamed.after` replaces the full identity block for all consoles. The
+        // service owns merging and lower layers. Waiting for another bench fetch
+        // would leave other consoles displaying stale filing identity.
         state.session = { ...(state.session || {}), sample: { ...data.after } };
         log(frame, 'info', `sample · ${(data.changed || []).join(', ') || 'named'}`);
         break;
@@ -716,9 +630,8 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         break;
 
       default:
-        // An event type this console does not know yet still belongs in the
-        // session log: the service's vocabulary may grow, and a silent drop
-        // would be the one thing nobody could see.
+        // Unrecognized event types remain in the log. Service vocabulary can expand,
+        // and silent drops would conceal those events.
         log(frame, 'info', frame.type);
     }
     state.lastFrame = { type: frame.type, seq: frame.seq, ts: frame.ts, run_id: frame.run_id };
@@ -728,29 +641,21 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
 }
 
 /**
- * One shot. The branch that only shows itself after a reconnect: a **replayed**
- * `StepDone` carries every scalar and its verdict with the four traces `null`
- * and `decimated[name].replay === true`. It means *redraw the loop curve, the
- * trace is gone* — so the scalars are folded as usual and whatever traces are
- * held are left alone. A client that blanked the chart here would have a bug
- * that only appears after being dropped at 1008.
+ * A replayed shot can carry scalars and verdict but null traces with
+ * `decimated[name].replay` (`docs/service-contract.md` §3). Folding retains scalar Q
+ * points and existing curves rather than blanking the chart during reconnect.
  */
 function foldStepDone(record, node, frame, data, traced) {
-  // Two ways a shot arrives without its arrays, and they mean the same thing
-  // on screen: the ring dropped them (`decimated[…].replay`, after a
-  // reconnect), or the journal never stored them at all
-  // (`decimated[…].omitted`, which is every shot in an offline replay — the
-  // payload policy keeps "enough to render the session log and the history
-  // queries, never the traces"). Either way there is no curve to draw and the
-  // loop point comes from the scalars; a `traces` object of four nulls would
-  // just be a chart's null dereference waiting to happen.
+  // Replay-dropped and journal-omitted arrays both mean no curve, with loop points
+  // still available from scalars. `tracesGone` expresses this explicitly; a trace
+  // object containing only nulls would invite dereferences
+  // (`docs/service-contract.md` §3).
   const replay = hasReplayedTraces(frame);
   const arrays = data.light || data.dark || data.photo || data.photo_averaged;
   const gone = replay || !arrays;
-  // A pipeline is one `run_id` over many nodes and each module node numbers
-  // its own shots from one, so `loop:index` alone is not an identity: the
-  // second `bace` would overwrite the first's shots and a shorter node would
-  // leave the previous one's tail behind, describing no node that ever ran.
+  // Shot keys include node path because every pipeline module restarts numbering.
+  // `loop:index` alone would overwrite another node's shots and could leave an
+  // unrelated tail.
   const key = `${node.node_path}|${data.loop}:${data.index}`;
   const previous = record.shotsByKey[key];
   const shot = {
@@ -777,9 +682,8 @@ function foldStepDone(record, node, frame, data, traced) {
   }
   record.lastShot = shot;
   node.lastShot = shot;
-  // Never downwards: a run whose opening frames have fallen out of the ring is
-  // hydrated from `GET /runs/{id}/data`, and the shots the replay did carry
-  // are fewer than the shots that ran.
+  // Hydrated counts cannot decrease when replay contains fewer shots than the run
+  // acquired.
   node.kept = Math.max(node.kept || 0, node.shots.length);
   if (shot.traces) keepTraces(traced, shot, previous);
   rollUp(record);
@@ -789,19 +693,10 @@ function foldStepDone(record, node, frame, data, traced) {
 }
 
 /**
- * Remember this shot's arrays, and forget the oldest beyond `TRACES_KEPT`.
- *
- * `tracesGone` is the store's existing word for *no curve, the loop point
- * comes from the scalars* — the same state a shot is in when the ring replayed
- * it without its arrays — so a chart needs no second case for this one. The
- * shot object is edited in place because `record.shots`, `node.shots` and
- * `record.shotsByKey` all hold the same object, and replacing it would mean
- * finding it in three places to say the same thing.
- *
- * A shot that arrives twice (the replay path, where `previous` exists and its
- * arrays may be reused) takes the place its predecessor held rather than
- * queueing behind it: two entries for one shot would let the trim null the
- * arrays out from under the copy that is on the record.
+ * The helper retains arrays up to global `TRACES_KEPT`, marking evicted shots with
+ * `tracesGone`. Shot objects are shared by run lists, node lists and keyed lookup, so
+ * mutation updates all references. A duplicate replaces its predecessor's queue
+ * position; two entries could let eviction clear the retained shot's arrays.
  */
 function keepTraces(traced, shot, previous) {
   const at = previous ? traced.indexOf(previous) : -1;
@@ -814,41 +709,26 @@ function keepTraces(traced, shot, previous) {
 }
 
 /**
- * The pause a snapshot says is open, when the stream could not say it.
- *
- * A temperature pause is the one thing on this bench that lasts hours — that
- * is what it is *for* — and the ring is 5000 envelopes, so a console opened
- * during one, or dropped and reconnected through it, replays a tail with no
- * `NeedsOperator` in it. The prompt is the only way to answer, so without
- * this the screen shows a paused run and no way to resume it, and the
- * experiment is blocked from the console until someone curls the endpoint.
- * `/bench`'s `run.pending` and `GET /runs/{id}`'s carry it (`session.py`:
- * `rec.pending`), and both are asked for at boot and after a gap.
- *
- * Nothing here moves anything backwards, which is decision 2's rule for
- * everything fetched: a run that has ended took its pause with it, a prompt
- * the stream is already showing is the newer one, and a resume the stream has
- * carried answers the pause a snapshot taken before it still describes.
+ * Hydration restores open pauses missing from ring replay. A temperature pause can
+ * last hours while the ring holds 5000 envelopes; without `pending`, a paused run
+ * would have no Resume form. Bench and record responses provide it. Hydration cannot
+ * revive terminal pauses, replace more recent stream prompts or undo a recorded
+ * resume.
  */
 function adoptPending(record, pending, { authoritative = false } = {}) {
   if (!record) return;
   if (record.parked_at || TERMINAL.has(record.state)) return;
   if (!pending || !pending.what) {
-    // The other half of the same problem: this console was away while
-    // another answered the pause, and the `OperatorResumed` that says so
-    // fell out of the ring. The snapshot reports no pause, and a prompt left
-    // on screen is a Resume form for a run that is measuring again — every
-    // submission a 409. Only an authoritative snapshot clears it; a
-    // read-back's run block is the stream's to say and is not one.
+    // An authoritative snapshot with no pause clears a prompt whose resume event has
+    // left the ring. Otherwise submissions to a measuring run return 409. A
+    // read-back-only response cannot clear it because run state remains stream-owned.
     if (authoritative) record.needsOperator = null;
     return;
   }
   const since = pending.since || 0;
-  // Newer than the prompt in hand, or there is no prompt. A console that was
-  // away while another client answered one pause and the run opened the next
-  // holds a prompt for a node the run has left — and Resume answers *the*
-  // open pause, whichever it is, so the operator would type a temperature
-  // for T=250K into the pause at T=280K and the metadata would say so.
+  // A later prompt replaces an earlier pause from another node. Resume answers the
+  // currently open pause, so stale labels could assign an operator-entered
+  // temperature to the wrong setpoint.
   if (record.needsOperator && (record.needsOperator.ts || 0) >= since) return;
   if (record.resumes.some((resume) => (resume.ts || 0) >= since)) return;
   record.needsOperator = {
@@ -865,14 +745,9 @@ function replaceVerdict(list, entry) {
 }
 
 /**
- * The part of a run that belongs to one module node rather than to the run.
- *
- * A pipeline is one `run_id` over many nodes, and each module node starts its
- * own axis, loops and shot numbering. Kept only on the run, the second node's
- * `RunFinished` would overwrite the first's — so the node-scoped facts are
- * mirrored here, keyed by the path the envelope carries, and the run-level
- * fields stay what they have always been: the newest node's, which is what a
- * manual run (one node) means by them.
+ * Module facts are keyed by node path because each pipeline node has its own axis,
+ * loops and numbering. Run-level summaries describe the most recent node; keeping
+ * data only there would let one node overwrite another.
  */
 function nodeOf(record, path) {
   const key = path || '';
@@ -884,12 +759,9 @@ function nodeOf(record, path) {
 }
 
 /**
- * `kept of requested` for the run: the sum over its module nodes, which is the
- * same sum the session's record makes, so the rail and `GET /runs` agree.
- * Every module counts in its own currency — a transient in shots, a J-V in
- * curves — and both are counted as they arrive rather than at `NodeDone`,
- * because a J-V on the rig takes minutes and a rail with no numbers on it for
- * the length of a sweep is the screen saying nothing while the bench works.
+ * Run totals sum module-node counts like the service record. Transients count shots
+ * and J–V counts curves. Counts update as acquisitions arrive rather than waiting for
+ * `NodeDone`, keeping long sweeps visible (`docs/service-contract.md` §6).
  */
 function rollUp(record) {
   let kept = null;

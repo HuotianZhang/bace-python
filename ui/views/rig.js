@@ -1,13 +1,7 @@
-// The rig tab — R3·4: the chain, one shot at three scales, and the read-back
-// under them. Reference, not a work surface.
-//
-// The two drawings are the design pack's own, ported as they stand
-// (`lib/charts/rig.js`): the numbers in them are the rig day's, 2026-09-01,
-// and they do not follow the form. The drawing that *does* follow the form is
-// on the `bace` card (`lib/charts/timing.js`, `docs/ui-plan.md` M3) — this
-// page is what to read that one against when it looks wrong. The one thing
-// taken from the bench is which axis is swept: the design highlights it, and
-// the `bace` card knows.
+// The rig tab provides chain wiring, a reference shot at four scales and read-back.
+// Static drawing values describe measurements on this bench and do not follow form
+// edits. `ui/lib/charts/timing.js` on the `bace` card supplies the form-driven
+// comparison. Only the swept-axis highlight follows the bench card.
 
 import { h, fill, keyed } from '../lib/dom.js';
 import { s } from '../lib/svg.js';
@@ -31,7 +25,10 @@ function legend() {
     h('span', { text: e.label }))));
 }
 
-/** Which axis the `bace` card sweeps, or the design's default when there is no card yet. */
+/**
+ * The helper selects the `bace` card's swept axis or the reference default without a
+ * card.
+ */
 export function sweptAxis(state) {
   const entry = state.modules && state.modules.byName && state.modules.byName.bace;
   const axis = entry ? valuesOf(entry).axis_name : null;
@@ -58,8 +55,8 @@ export default {
     ]);
 
     const off = store.subscribe((state) => {
-      // The shot redraws only when the swept axis moves — a keystroke in
-      // `delay_ns` does not touch a diagram whose numbers are the rig day's.
+      // Only swept-axis changes redraw the reference shot. Editing delay does not
+      // alter its bench-reference values.
       const axis = sweptAxis(state);
       keyed(shot, axis, () => [
         h('div.ch', h('span.cn', 'one shot · three scales'),
@@ -68,8 +65,8 @@ export default {
       ]);
 
       const rig = state.bench && state.bench.rig;
-      // `rig.toml` does not change while the service runs, and the fingerprint
-      // says so — so this is drawn once and left alone (`dom.keyed`).
+      // `rig.toml` remains constant during the service session, so fingerprint-keyed
+      // rendering avoids rebuilding unchanged read-back.
       if (!rig) return keyed(readback, 'none', () => h('div.card', h('p.absent', 'no read-back yet')));
       keyed(readback, rig.fingerprint || JSON.stringify(rig.values), () => h('div.card',
         h('h2', `rig.toml · ${rig.fingerprint || ''}`),

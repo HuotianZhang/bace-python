@@ -1,44 +1,22 @@
-// The timing diagram: one shot, one LED cycle, one record — drawn from the
-// form, before anything runs.
-//
-// `docs/ui-rules.md` §7: *"Draw the shot, do not describe it… where a wrong
-// V_coll sign or an absurd delay becomes visible before the run."* That is the
-// whole point of this component, and it is why it belongs beside M2's card
-// rather than on the rig tab: it redraws as the form is edited, and the thing
-// it makes visible is the thing the operator is typing.
-//
-// Everything below is the code's own arithmetic, not a picture of it:
-//
-//   * the seven `StepPhase` segments, in the order `run_transient_scan` yields
-//     them — six when `dark_reference = "same"` — with the shutter moves and
-//     the power read placed where the code actually does them, since those are
-//     not separately reported (§7);
-//   * `dark_settle_s` sleeps inside **`dark levels`**, so it does not happen at
-//     all under `dark_reference = "same"`;
-//   * the LED runs at `:OUTP:POL INV` on this rig, which inverts the waveform
-//     and *not* the Sync — so the Sync's rising edge means light **off**, which
-//     is the edge the 81150A arms on, and the lit fraction is
-//     `100 - duty_percent`;
-//   * the 81150A at `NORM` rests the device at V_pre and pulses to V_coll.
-//     `INV` rests it at V_coll and extraction never stops: measured, and it
-//     collapsed the photo peak from ~3 mA to ~0.5 mA (`docs/README.md`, the
-//     overturned table ④).
-//
-// The levels drawn are the levels **at the device** — what the operator typed.
-// `core.pulses` divides them by the amplifier gain on the way to the
-// generator, and that pair is shown as a caption rather than as the waveform,
-// because the device is what the experiment is about.
+// The timing diagram renders one shot, one LED cycle and one record from the form so
+// wrong signs and delays are visible before a run (`docs/ui-rules.md` §7). It follows
+// the reported phases and places unreported shutter moves and the power read between
+// them. `dark_settle_s` belongs to dark levels, which `dark_reference = "same"`
+// skips. LED INV reverses the waveform but leaves Sync unchanged: the rising Sync
+// edge marks light off and the lit fraction is `100 - duty_percent`. The 81150A at
+// NORM rests at V_pre and pulses to V_coll. INV rests at V_coll, leaving extraction
+// active; the measured photo peak falls from about 3 mA to 0.5 mA (`docs/notes.md`,
+// Closed questions). The waveform uses device levels; generator levels account for
+// amplifier gain in the caption.
 
 import * as scale from '../scale.js';
 import * as fmt from '../format.js';
 import { layout, axisTicks, heightFor, ASPECT } from './frame.js';
 
 /**
- * The shot, segment by segment, in `run_transient_scan`'s own order.
- *
- * `phase` is the `StepPhase` name where there is one and `null` for the two
- * that are not reported. `k`/`of` match the frames, so M4's live indicator can
- * light a segment from the wire without a second table of names.
+ * The helper describes shot segments in acquisition order. `phase` is the reported
+ * `StepPhase` name or `null` for an unreported segment. Matching `k` and `of` lets
+ * the live indicator use stream frames without a second phase table.
  */
 export function shotSegments(values = {}) {
   const same = values.dark_reference === 'same';
@@ -82,18 +60,15 @@ export function cyclePlan(values = {}, rig = {}, chain = {}) {
   const frequency = Number(values.pulse_frequency_hz) || 0;
   const period = frequency > 0 ? 1 / frequency : 0;
   const duty = Number(values.duty_percent);
-  // `?` is what a driver answers for a query that failed, and an absent chain
-  // is a bench nobody has read. Neither is INV. Defaulting them to the
-  // expected polarity drew a confident diagram of the *other* half of the
-  // cycle and stated that the Sync edge means light off — a claim about the
-  // instrument from a read-back that never came back.
+  // A failed polarity query returns `?`; an absent chain has no read-back. Neither
+  // establishes INV. Assuming the expected polarity would draw an unsupported light
+  // phase and Sync relationship.
   const read = chainValue(chain, 'led_polarity');
   const ledPolarity = read === 'NORM' || read === 'INV' ? read : null;
   const inverted = ledPolarity === 'INV';
-  // `set_polarity`: inverting flips which half the LED is lit for and leaves
-  // the Sync alone, so under INV the lit fraction is the *complement* of the
-  // duty written to the instrument, and raising `duty_percent` shortens the
-  // illumination. With the polarity unread there is no answer to which half.
+  // LED inversion reverses the lit phase but not Sync. Under INV, increasing
+  // `duty_percent` shortens illumination because the lit fraction is its complement.
+  // Without polarity read-back the lit phase is unknown.
   const litFraction = ledPolarity === null ? null : (inverted ? 100 - duty : duty) / 100;
   const bias = biasLevels(values, chain);
   const delayS = (Number(values.delay_ns) || 0) * 1e-9 + (Number(rig.trigger_offset_s) || 0);
@@ -103,9 +78,8 @@ export function cyclePlan(values = {}, rig = {}, chain = {}) {
     litFraction,
     ledPolarity,
     inverted,
-    // The Sync rises at the start of the written waveform's high phase, and
-    // the 81150A arms on that rising edge. Under INV that instant is the LED
-    // going *off* — which is what BACE extracts after.
+    // Sync rises at the written waveform's high phase and arms the 81150A. Under INV
+    // this edge switches the LED off before extraction.
     syncAt: 0,
     syncMeans: ledPolarity === null ? 'unknown — the 33220A has not been read' : inverted ? 'light off' : 'light on',
     lightDelayS: (Number(rig.light_path_delay_ns) || 0) * 1e-9,
@@ -118,14 +92,14 @@ export function cyclePlan(values = {}, rig = {}, chain = {}) {
   };
 }
 
-/** What the device rests at, and what it is pulsed to — through the amplifier. */
+/** The helper resolves device resting and pulse levels through the amplifier. */
 export function biasLevels(values = {}, chain = {}) {
   const vpre = numberOr(values.vpre, null);
   const vcoll = numberOr(values.vcoll, null);
   const invert = values.invert_polarity === true;
-  // `core.pulses.pulse_levels`: `invert` swaps *and negates* both levels, for
-  // a device of the opposite architecture. It is a sign convention, not a
-  // switch — getting it wrong flips the charge rather than disabling anything.
+  // `core.pulses.pulse_levels` swaps and negates both levels under `invert`. This
+  // sign convention accommodates the opposite device architecture; an incorrect
+  // setting reverses Q rather than disabling the output.
   const high = invert ? (vcoll === null ? null : -vcoll) : vpre;
   const low = invert ? (vpre === null ? null : -vpre) : vcoll;
   const declared = String(values.output_polarity || 'auto').toLowerCase();
@@ -136,8 +110,9 @@ export function biasLevels(values = {}, chain = {}) {
   return {
     vpre, vcoll, invert, polarity,
     polaritySource: declared === 'leave' ? 'left as found — this is the read-back' : `output_polarity = ${values.output_polarity}`,
-    // Measured, and the reason the recipe is NORM: through the inverting x4
-    // amplifier INV rests the device at V_coll, so extraction never stops.
+    // Through the inverting ×4 amplifier, INV rests the device at V_coll and leaves
+    // extraction active. NORM supplies the measured operating polarity
+    // (`docs/notes.md`, Closed questions).
     restsAt: polarity === 'INV' ? low : high,
     pulsesTo: polarity === 'INV' ? high : low,
     restsLabel: polarity === 'INV' ? (invert ? '−V_pre' : 'V_coll') : (invert ? '−V_coll' : 'V_pre'),
@@ -145,29 +120,25 @@ export function biasLevels(values = {}, chain = {}) {
   };
 }
 
-/** The scope's record: how long, how finely, and where the window falls in it. */
+/** The model describes record duration, sampling and integration-window position. */
 export function recordPlan(values = {}, rig = {}) {
   const perDiv = (Number(values.timebase_ns_per_div) || 0) * 1e-9;
   const span = perDiv * 10;                       // the Infiniium's ten divisions
   const points = Number(values.record_length) || 0;
   const dt = points > 0 ? span / points : 0;
-  // The field reaches the device `trigger_offset_s` after `:PULS:DEL1` elapses
-  // — the rig's sync-to-field latency, not something the generator is told —
-  // and the integration window is measured from there.
+  // Field arrival includes `trigger_offset_s` after the programmed delay. This bench
+  // latency is not sent to the generator; the integration window is relative to field
+  // arrival (manual 2.2).
   const delayS = (Number(values.delay_ns) || 0) * 1e-9 + (Number(rig.trigger_offset_s) || 0);
   const widthS = (Number(values.pulse_width_ns) || 0) * 1e-9;
   const t0 = numberOr(values.t0_int_s, null);
   const intWidth = numberOr(values.t_int_width_s, null);
-  // **The record does not begin at the trigger.** `Infiniium.configure_timebase`
-  // writes `:TIM:RANG` of ten divisions and `:TIM:POS` of *four*, which puts
-  // the horizontal reference four divisions after the trigger — so the record
-  // runs from one division before it to nine after. Drawn from zero, every
-  // edge and the whole shaded window sat one division early, and a window
-  // between nine and ten divisions after the trigger was shown as inside a
-  // record that had already ended.
-  //
-  // Both recordings agree: at 200 ns/div the sim trace carries `t0 = −200 ns`
-  // and the rig day's `−199.5 ns`, the instrument's own sample grid apart.
+  // `Infiniium.configure_timebase` sets ten divisions with the horizontal reference
+  // four divisions after the trigger. The record therefore spans one division before
+  // and nine after it. Starting the drawing at the trigger would misplace every edge
+  // and show a window beyond the record as valid. At 200 ns/div, recorded origins on
+  // this bench are −200 ns in simulation and −199.5 ns on the instrument, differing
+  // by the sample grid.
   const start = -perDiv;
   const end = perDiv * 9;
   const fromTrigger = t0 === null ? null : t0 + delayS;
@@ -178,11 +149,9 @@ export function recordPlan(values = {}, rig = {}) {
 }
 
 /**
- * What is wrong with this shot, before it is run.
- *
- * Every entry is a fact about the values in the form or about the bench's own
- * read-back — never a guess. `level` follows `ui-rules` §3: `alert` is the
- * loudest and is reserved for a run that would measure the wrong thing.
+ * The check model reports constraints visible in form values or bench read-back.
+ * Severity follows `docs/ui-rules.md` §3; `alert` is reserved for settings that
+ * measure the wrong quantity.
  */
 export function timingAlerts(values = {}, rig = {}, chain = {}) {
   const out = [];
@@ -302,10 +271,8 @@ export function timingModel(values = {}, options = {}) {
       { label: 'light at the sample', colour: 'ink', width: 1.4, dash: '5 3' },
     ],
     readout: '',
-    // `ui-rules` §4: draw the shot, do not describe it. The segment-by-segment
-    // sentence was the diagram above restated in prose — the strip is already
-    // to scale and already labelled, and the durations are on it. What is left
-    // here is only what the picture cannot say.
+    // The labelled, scaled diagram already conveys phases and durations. Its notes
+    // retain only constraints the picture cannot show.
     notes: [
       `levels are at the device · the generator sees them divided by the ×${fmt.sig(rig.pulse_amp || 1, 2)} amplifier`,
       cycle.polaritySource,
@@ -320,14 +287,9 @@ export function timingModel(values = {}, options = {}) {
 }
 
 /**
- * Panel A: the shot as its seven reported segments, to scale.
- *
- * To scale is the point and the problem: a shot with `shutter_settle_s = 5`
- * spends ten of its eleven seconds waiting for a shutter, and the two
- * acquisitions that are the measurement are slivers. Drawn any other way the
- * strip would be a diagram of the phase *names* rather than of the shot, so
- * the bar stays honest and the names that do not fit move to the list beneath
- * it — where they carry their durations anyway.
+ * Panel A draws the reported shot segments to scale. With `shutter_settle_s = 5`,
+ * shutter waits occupy ten of eleven seconds and acquisitions become narrow slivers.
+ * Labels that do not fit move to the duration list rather than distorting the timing.
  */
 function shotStrip(panel, segments) {
   const rect = panel.rect;
@@ -359,8 +321,7 @@ function shotStrip(panel, segments) {
         anchor: 'middle', colour: 'grey', size: 8.5, mono: true });
     }
     if (seg.mark) {
-      // The three events the service does not report as phases, staggered so
-      // two of them landing in the same second do not print over each other.
+      // Unreported events use staggered labels so coincident times do not overlap.
       const y = top - 6 - (markSide % 2) * 10;
       markSide += 1;
       marks.push({ x: x0 + 3, y, text: seg.mark, colour: 'grey', size: 8.5 });
@@ -401,13 +362,9 @@ function cycleRows(panel, cycle, swept) {
     `high ${fmt.volts(cycle.ledHigh, { decimals: 3 })} · low ${fmt.volts(cycle.ledLow, { decimals: 3 })} · `
     + `duty ${fmt.sig(cycle.duty * 100, 3)} % at the instrument`);
 
-  // The light: inverted under INV, and late by the fibre.
-  // Each entry is *at this time the light becomes this*. Under NORM the LED
-  // follows the written waveform, so it is lit through the duty phase; under
-  // INV it is lit through the complement. Both are shifted by the fibre.
-  //
-  // With the polarity unread there is no waveform to draw: either half would
-  // be a claim, and a diagram is a worse place than most to make one.
+  // Light at the sample follows the drive after the fibre delay. NORM lights the duty
+  // phase; INV lights its complement. Unknown polarity supplies no waveform because
+  // neither phase is supported by read-back.
   if (cycle.ledPolarity === null) {
     marks.push({ x: rect.x + 4, y: (rows[1].high + rows[1].low) / 2 + 3, size: 8.5, colour: 'warn',
       text: 'which half is lit is unknown until the 33220A\'s polarity is read back' });
@@ -425,8 +382,8 @@ function cycleRows(panel, cycle, swept) {
       + `${fmt.sig(cycle.litFraction * 100, 3)} % of the period under POL ${cycle.ledPolarity}`);
   }
 
-  // The Sync is not inverted with the waveform: it rises with the written
-  // high phase, and that is the edge the 81150A arms on.
+  // Sync rises with the written high phase and arms the 81150A. Inverting the
+  // waveform does not invert Sync.
   series.push({ key: 'sync', label: 'SYNC', colour: 'accent', width: 1.6,
     d: square(X, rows[2], [[0, true], [span * 0.02, false], [span, false]]) });
   annotate(marks, rows[2], rect,
@@ -493,11 +450,11 @@ function recordRows(panel, cycle, record, swept) {
     + `${cycle.pulsesLabel} ${fmt.volts(cycle.pulsesTo, { decimals: 3 })}`
     + (returns ? '' : ' · the return is after the record ends'),
     { mono: true });
-  // The trigger is inside the record, one division in, and the record is the
-  // only thing on this panel whose zero is not it.
+  // The trigger sits one division into the record. The record origin differs from the
+  // trigger origin used by the other signals.
   rules.push({ x1: X(0), colour: 'grey', width: 1, dash: '3 3' });
-  // A line below the panel's own caption, which starts at the left edge and
-  // reaches past the trigger's tenth of the width.
+  // The trigger label needs a separate line because the panel caption extends past
+  // its position.
   marks.push({ x: X(0) + 4, y: rect.y + 24, colour: 'grey', size: 8.5, halo: true, text: 'trigger' });
   if (record.fromTrigger !== null && record.fromTrigger >= start && record.fromTrigger < end) {
     const wx = X(record.fromTrigger);
@@ -540,11 +497,8 @@ function recordRows(panel, cycle, record, swept) {
 // -- schematic helpers ----------------------------------------------------
 
 /**
- * One band per signal: a caption line at the top, the waveform under it.
- *
- * The captions are the reason the rows are laid out at all. Placed by hand at
- * whatever y looked free, they printed over the waveform above — measured on
- * screen, which is the only way that kind of fault is ever found.
+ * Each signal band reserves a caption line above its waveform. Sharing the vertical
+ * space would let captions overlap the preceding signal.
  */
 function rowsOf(rect, names) {
   const each = rect.h / names.length;
@@ -587,15 +541,9 @@ function square(X, row, points) {
 }
 
 /**
- * The same, for a waveform whose edges are **late**: the light at the sample
- * follows the drive by the fibre's own delay, so one of its edges falls off
- * the end of the period and belongs at the start of it.
- *
- * Wrapping each point with `t % span` and drawing them in the order given
- * emits a horizontal segment that travels *backwards* across the panel — a
- * second line at the wrong level, which is what the first render showed. The
- * fix is to wrap first, sort, and start from the state that is in force at
- * zero, which is the state the last transition of the period leaves behind.
+ * The helper wraps fibre-delayed transitions into one period. Wrapped points must be
+ * sorted to avoid drawing backward horizontal segments. The state at zero comes from
+ * the period's last transition because a delayed edge can wrap to the start.
  */
 function squareWrapped(X, row, span, points) {
   const y = (high) => scale.fixed(high ? row.high : row.low);
@@ -620,9 +568,9 @@ function chainValue(chain, key) {
 }
 
 /**
- * A short time, prefixed where the prefix is natural: `2.0 ms`, `500 ns`.
- * `fmt.duration` is for the three *loop* scales — minutes and hours — and
- * reads an LED period as `0.0020 s`, which is a number nobody says out loud.
+ * The helper formats short intervals with SI prefixes, such as 2.0 ms or 500 ns.
+ * `fmt.duration` serves loop durations in seconds, minutes and hours rather than LED
+ * periods.
  */
 export function seconds(value) {
   if (value === null || value === undefined || Number.isNaN(value)) return fmt.ABSENT;

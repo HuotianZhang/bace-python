@@ -1,36 +1,10 @@
-// The WebSocket, and everything that can go wrong with it. No view knows about
-// any of this: `docs/ui-plan.md` decision 2 puts the whole reconnect
-// discipline in one module, because every rule below is a bug in a client that
-// does the obvious thing.
-//
-// The four that matter:
-//
-//   * **`seq` is per service session, not per socket.** A restarted service
-//     starts its counter at zero, so a cursor carried across the restart
-//     breaks twice over: `?since=<the old high seq>` replays nothing, and then
-//     every numbered frame the new process sends is below the cursor and gets
-//     discarded — a bench that goes quietly stale until someone reloads.
-//     `Hello` carries `data.session.id`, and its own envelope `seq` is null,
-//     so it is exempt from the dedupe it configures.
-//
-//   * **Reconnect, not just reset.** `since` is a query parameter, fixed when
-//     the socket opened; the server sends `Hello` and *then* replays from it.
-//     By the time a client sees the new session id the stale replay has
-//     already been computed. So a session change closes the socket and opens a
-//     new one — with `since=0`, which is not the same request as no `since` at
-//     all: the replay is guarded by `if since is not None`, so an absent
-//     parameter loses everything the new process emitted before the client
-//     noticed, which is exactly the completed shots this exists to recover.
-//
-//   * **A `Hello` on a reconnect must not advance the cursor.** `data.seq` is
-//     the newest seq the service has; the replay that follows carries lower
-//     ones. Adopting it would drop the whole replay — the one thing we
-//     reconnected for. It is adopted only when we deliberately asked for no
-//     replay, which is the first connection of a fresh page.
-//
-//   * **Falling behind is normal.** A `--sim --fast` scan outruns any socket:
-//     the service sends a `Notice` carrying `data.since` and closes with 1008.
-//     That is not an error to report, it is a reconnect to make.
+// The stream owns reconnect and deduplication for all views. Sequence cursors belong
+// to service sessions, not sockets. Session changes require reopening with `since=0`
+// because replay is chosen at socket creation; an absent query requests no replay.
+// Hello has null sequence and cannot advance a replay cursor to `data.seq`, which
+// would discard retained frames. Falling behind yields a Notice cursor and close
+// 1008, requiring prompt reconnect rather than an operator error
+// (`docs/service-contract.md` §6).
 
 export const EPHEMERAL_SEQ = null;
 
@@ -53,17 +27,15 @@ export function createStream({
   /** The dedupe cursor. Belongs to `session`, and dies with it. */
   let lastSeq = null;
   let session = null;
-  /** `id` plus `started_at`: which *incarnation* of the service this is. */
+  /** `id` and `started_at` identify the service process together. */
   let incarnation = null;
   /**
-   * The seq the service was at when this socket opened. Everything at or below
-   * it is replay — the ring catching us up — and everything above it is
-   * happening now. A consumer that acts on a frame (re-reading the bench when
-   * a run parks, say) needs to know which it is, or opening the console fires
-   * one of those actions per historical frame.
+   * The opening service sequence distinguishes replay from live events. Consumers
+   * triggering refetches need this distinction to avoid treating each retained event
+   * as a fresh action.
    */
   let head = null;
-  /** What we asked this socket to replay from; `null` means "no replay". */
+  /** The replay cursor requested for this socket is `null` when replay is disabled. */
   let asked = null;
 
   const stats = { frames: 0, gaps: 0, duplicates: 0, drops: 0, reconnects: 0, tracesGone: 0 };
@@ -75,9 +47,9 @@ export function createStream({
   function open(since) {
     if (closed) return;
     asked = since;
-    // Asking for a replay *is* a statement about the cursor: the server sends
-    // frames with `seq > since`, so anything at or below it is a duplicate
-    // from the moment the socket opens.
+    // Replay supplies only `seq > since`, so the requested cursor already classifies
+    // lower sequences as duplicates when the socket opens (`docs/service-contract.md`
+    // §6).
     if (since !== null && since !== undefined && lastSeq === null) lastSeq = since;
     const target = since === null || since === undefined ? url : `${url}?since=${since}`;
     status('connecting', { since });
@@ -90,24 +62,21 @@ export function createStream({
     socket = ws;
     ws.onopen = () => { retry = 0; };
     ws.onmessage = (event) => {
-      // A socket we have already replaced can still deliver what the service
-      // queued before we closed it. Those frames belong to the session we just
-      // walked away from: folded, they would advance the cursor past zero and
-      // the new socket's `since=0` replay would then be discarded as
-      // duplicates — losing exactly the completed shots the reconnect exists
-      // to recover. `onclose` has always made this check; `onmessage` must too.
+      // Replaced sockets can still deliver queued messages. Ignoring them prevents
+      // another session's frames from advancing the reset cursor and discarding the
+      // replacement socket's replay.
       if (ws !== socket) return;
       handle(parse(event.data));
     };
     ws.onerror = () => {};
     ws.onclose = (event) => {
-      if (ws !== socket) return;              // a socket we already replaced
+      if (ws !== socket) return;              // The callback ignores a socket replaced
+                                              // by a subsequent connection.
       socket = null;
       if (closed) return status('closed');
       if (event && event.code === 1008) {
-        // Dropped for falling behind. The `Notice` before it said where to
-        // resume; reconnect at once rather than backing off, because the run
-        // is still going and every frame missed is a shot off the chart.
+        // Close 1008 follows a falling-behind Notice with a resume cursor. Immediate
+        // reconnect minimizes missing live data.
         stats.reconnects += 1;
         return open(lastSeq === null ? 0 : lastSeq);
       }
@@ -132,16 +101,13 @@ export function createStream({
     if (frame.type === 'Hello') {
       const who = (frame.data && frame.data.session) || {};
       const id = who.id;
-      // `session_id` is stamped to the whole second, so two processes started
-      // inside the same second share it — and a cursor kept across that
-      // restart would discard every frame the new process sends until its
-      // counter passed the old high. `started_at` is the float the session
-      // was actually created at, so the pair identifies the incarnation.
+      // Session IDs have whole-second precision and can collide across rapid
+      // restarts. Pairing `started_at` with the ID distinguishes processes so an old
+      // high cursor cannot discard another process's frames.
       const now = `${id}@${who.started_at ?? ''}`;
       if (incarnation !== null && now !== incarnation) {
-        // The service restarted under us. Drop the cursor and the session
-        // state, and reopen: this socket's replay was computed from a cursor
-        // that matches nothing in the new session.
+        // A session change invalidates state and cursor. The socket must reopen
+        // because its replay request targets a different session.
         const previous = session;
         session = id;
         incarnation = now;
@@ -149,7 +115,7 @@ export function createStream({
         onSessionChange({ from: previous, to: id });
         const dead = socket;
         socket = null;
-        try { dead && dead.close(); } catch { /* already gone */ }
+        try { dead && dead.close(); } catch { /* The socket can be closed before this callback. */ }
         stats.reconnects += 1;
         return open(0);
       }
@@ -157,8 +123,8 @@ export function createStream({
       incarnation = now;
       head = frame.data ? frame.data.seq : null;
       if (asked === null || asked === undefined) {
-        // We asked for no replay, so we are current as of `data.seq`. On a
-        // reconnect we did ask, and adopting it here would swallow the replay.
+        // Without requested replay, `data.seq` establishes the cursor. During replay
+        // it must not advance it or retained frames would be discarded.
         lastSeq = frame.data ? frame.data.seq : null;
       }
       onHello(frame);
@@ -168,9 +134,9 @@ export function createStream({
 
     const seq = frame.seq;
     if (seq === EPHEMERAL_SEQ || seq === undefined) {
-      // Live-only, never in the ring: `StepPhase`, and the drop `Notice`.
-      // Passed through without touching the cursor — a client that dedupes
-      // these away would drop the very notice that says why it is closing.
+      // Null-sequence live frames bypass deduplication without advancing the cursor.
+      // This includes the Notice explaining an imminent close
+      // (`docs/service-contract.md` §3).
       if (isDropNotice(frame)) {
         stats.drops += 1;
         lastSeq = pickSince(frame, lastSeq);
@@ -183,9 +149,8 @@ export function createStream({
       stats.duplicates += 1;
       return;
     }
-    // A gap means the ring no longer held those frames — worth counting on
-    // the status line, and not worth a second reconnect: replaying from a
-    // cursor the ring has already passed would only report it again.
+    // A sequence gap means the ring has discarded events. Status counts it;
+    // reconnecting to the same cursor would only repeat the gap.
     if (lastSeq !== null && seq > lastSeq + 1) stats.gaps += 1;
     lastSeq = seq;
     stats.frames += 1;
@@ -200,12 +165,12 @@ export function createStream({
       if (timer) clearTimeoutImpl(timer);
       const dead = socket;
       socket = null;
-      try { dead && dead.close(); } catch { /* already gone */ }
+      try { dead && dead.close(); } catch { /* The socket can be closed before cleanup. */ }
       status('closed');
     },
     /** For the status line, and for the tests. */
     get state() { return { session, incarnation, lastSeq, head, asked, stats: { ...stats }, connected: !!socket }; },
-    /** Feed a frame in as if it had arrived — the offline replay uses this. */
+    /** Offline replay can feed frames through the live receive path. */
     inject(frame) { handle(frame); },
   };
 }

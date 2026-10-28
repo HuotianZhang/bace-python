@@ -1,17 +1,7 @@
 /**
- * What a card shows beside its form — `docs/ui-plan.md` M3.
- *
- * Round 3 puts the result inside the card that produced it: `ch-jvdark` in the
- * `jv` card, `ch-transient` in the `bace` card. The timing diagram joins them
- * there rather than sitting on the rig tab, because it is a function of the
- * *form*: it redraws as the operator types, and what it makes visible — a
- * wrong V_coll sign, an absurd delay, a duty that has shortened the
- * illumination — is visible **before** the run rather than in the file
- * afterwards (`ui-rules` §7).
- *
- * Keyed on the data behind it, never rebuilt with the card: a shot arrives
- * every fraction of a second in `--sim --fast`, and a card rebuilt that often
- * is a card whose fields cannot be typed in.
+ * Result panels stay beside their forms. Timing responds to edits so signs, delays
+ * and illumination errors are visible before a run (`docs/ui-rules.md` §7). Separate
+ * result keys prevent frequent shots from rebuilding editable fields.
  */
 
 import { h } from './dom.js';
@@ -22,23 +12,14 @@ import { timingModel } from './charts/timing.js';
 import { loopsModel, AXIS_UNITS } from './charts/loops.js';
 import * as fmt from './format.js';
 
-/** Which cards have a result panel at all. */
+/** The predicate identifies modules with result panels. */
 export const RESULT_CARDS = new Set(['bace', 'jv', 'jv_bace']);
 
 /**
- * The newest **node** of this module that has anything to draw, and the run it
- * belongs to.
- *
- * By the run's `module` it would find only manual runs: a pipeline's
- * `RunQueued.module` is `null` and the module names live on the nodes, as
- * `NodeStarted.data.kind` (`bace`, `jv_bace`; a loop's is `repeat`). So the
- * canonical 2 x bace tree drew nothing at all on the card that produced it,
- * which `ui/fixtures/stream_pipeline_sim.jsonl` shows in four shots.
- *
- * Per node, not per run, for the reason M0 left on record for M5: a pipeline
- * is one `run_id` over many nodes, each numbering its shots from one, so the
- * run-level `lastShot` is whichever node moved last. The card wants *this*
- * module's newest one.
+ * The helper finds the most recent drawable module node and its run. Pipeline
+ * `RunQueued.module` is `null`, so run-level lookup finds only manual runs. Node shot
+ * numbering restarts, and run-level `lastShot` can belong to another module.
+ * Selection must use matching nodes.
  */
 export function runFor(state, name) {
   for (let i = state.order.length - 1; i >= 0; i -= 1) {
@@ -62,23 +43,17 @@ function newestNode(record, name) {
   return null;
 }
 
-/** The values a module's form currently holds, as the timing model wants them. */
+/** The helper extracts current form values for the timing model. */
 export function valuesOf(entry) {
   return Object.fromEntries((entry.params || []).map((p) => [p.name, p.value]));
 }
 
 /**
- * The signature the result panel is rebuilt on, in **two halves**.
- *
- * `form` is what the operator typed and what the bench read back — the timing
- * diagram is a function of it, so it redraws the moment either moves.
- * `data` is the run: the newest shot, the curves so far. A shot's identity is
- * its node, its numbering and its arrival — not its arrays, which are 800
- * numbers whose JSON would cost more than the redraw it is guarding.
- *
- * They are separate because they deserve different cadences. Typing has to
- * feel immediate; shots arrive at 130 a second under `--sim --fast`, which is
- * a hundred redraws nobody can read. See `createChartThrottle`.
+ * Signatures separate form from data. Timing responds immediately to parameters and
+ * read-back; measured charts use a throttle. Shot identity uses node, numbering and
+ * arrival rather than serializing hundreds of array values. Fast simulation reaches
+ * about 130 shots/s on this bench, beyond readable redraw rates.
+ * `createChartThrottle` coalesces these updates.
  */
 export function resultKeys(name, entry, found, bench) {
   const form = [name];
@@ -94,10 +69,8 @@ export function resultKeys(name, entry, found, bench) {
     data.push(record.run_id, record.state || '', node.node_path);
     const shot = node.lastShot;
     if (shot) data.push(`${shot.node_path}:${shot.loop}:${shot.index}:${shot.ts}:${shot.tracesGone ? 'gone' : 'traces'}`);
-    // M4: the loop chart moves with every shot *and* with what the run knows
-    // about itself — the axis arriving late from `GET /runs/{id}/data`, a
-    // `LoopDone` recomputing every point's σ, the node ending `stopped` with
-    // loops never acquired.
+    // Loop charts respond to shots and metadata: hydrated axes, recomputed
+    // uncertainty and stopped nodes with unacquired loops all change the plot.
     data.push(`shots:${node.shots ? node.shots.length : 0}`, `loops:${node.loops ? node.loops.length : 0}`,
       `axis:${node.values ? node.values.length : 0}`, `kept:${node.kept ?? ''}/${node.requested ?? ''}`,
       `outcome:${node.outcome || ''}`, `aborted:${record.aborted ? record.aborted.reason : ''}`);
@@ -111,33 +84,24 @@ export function resultKeys(name, entry, found, bench) {
   return { form: form.join('|'), data: data.join('|') };
 }
 
-/** Both halves as one string — what `dom.keyed` is given. */
+/** The combined signature supplies the key for `dom.keyed`. */
 export function resultKey(name, entry, found, bench) {
   const keys = resultKeys(name, entry, found, bench);
   return `${keys.form}|${keys.data}`;
 }
 
 /**
- * At most one data-driven redraw per this many milliseconds, per card.
- *
- * **On the rig this changes nothing.** A shot takes about 0.8 s there
- * (`journal.shot_time_s`), so every one of them draws. It exists for
- * `--sim --fast`, where 1260 shots arrive in nine seconds: measured, the
- * charts were rebuilt 4043 times and the shell built 77 282 SVG elements for a
- * plot no eye could follow, the heap went 9.8 MB → 42.7 MB, and `GET /bench`
- * — which shares the main thread — went from 13 ms to a 204 ms worst case.
- * The rail met the same problem in M1 and answered it the same way; this is
- * `REFETCH_MS` for pixels.
+ * The interval bounds data redraws per card. Bench shots take about 0.8 s, allowing
+ * each to draw. With 1260 simulated shots in nine seconds, measurements on this bench
+ * give 4043 rebuilds and 77 282 SVG elements without throttling. Heap rises from 9.8
+ * MB to 42.7 MB; main-thread contention raises bench-request latency from 13 ms to
+ * 204 ms worst case. Coalescing preserves responsiveness.
  */
 export const REDRAW_MS = 500;
 
 /**
- * Draw now, or once the throttle opens — and never drop a draw.
- *
- * `paint` is a closure that re-reads the store, so a deferred redraw shows the
- * newest shot rather than the one that was pending when it was deferred. The
- * last request wins, which for a chart is exactly right: the intermediate
- * states are frames of an animation nobody asked for.
+ * The throttle paints immediately or schedules the most recent request, retaining the
+ * final draw. `paint` rereads the store so deferred work displays current data.
  */
 export function createChartThrottle({
   redrawMs = REDRAW_MS,
@@ -160,12 +124,13 @@ export function createChartThrottle({
   }
 
   return {
-    /** `immediate` for anything the operator did: typing must not wait on a scan. */
+    /**
+     * Operator-driven changes use `immediate` so scan throttling cannot delay typing
+     * feedback.
+     */
     request(name, { immediate = false, paint }) {
-      // `-Infinity`, not 0: a card that has never drawn must draw now, and
-      // with a zero the very first request is deferred whenever the clock is
-      // near its own origin — true of every fake clock, and of nothing else,
-      // which is exactly the kind of thing that ships.
+      // `-Infinity` allows the first draw at any clock origin. Zero would defer it
+      // for a clock starting near zero, including test clocks.
       const card = cards.get(name) || { at: -Infinity, timer: null, paint: null };
       cards.set(name, card);
       card.paint = paint;
@@ -186,12 +151,8 @@ export function createChartThrottle({
 
 
 /**
- * The panel's contents, built fresh each time its key changes.
- *
- * `bace` gets the shot it will take and the shot it last took, in that order:
- * the diagram is about the form and is there before any run, the transient is
- * about the run and appears with the first shot. `jv` and `jv_bace` get their
- * curves and the interpolated metrics beside them.
+ * The renderer rebuilds on key changes. `bace` includes form timing and measured
+ * traces; J–V modules include curves and derived metrics.
  */
 export function resultPanel(name, { entry, found, bench }) {
   if (name === 'bace') return baceResult(entry, found, bench);
@@ -200,28 +161,22 @@ export function resultPanel(name, { entry, found, bench }) {
 }
 
 /**
- * The `bace` card's panel. Before a run it is the shot the form describes;
- * once there is a run it is the run first — the newest shot and its verdict,
- * the transient, Q per loop or Q(axis) — and the diagram after, because a
- * form that is being edited during a scan is the *next* run, and the one
- * going is what the operator is watching (`ui-rules` §11: the running card
- * is the monitor).
+ * Before a run, timing leads the `bace` panel. During acquisition, shot values,
+ * verdict, transient and Q lead because edited forms describe the next run. The
+ * running card serves as monitor (`docs/ui-rules.md` §11).
  */
 function baceResult(entry, found, bench) {
   const values = valuesOf(entry);
   const rig = (bench && bench.rig && bench.rig.values) || {};
   const chain = (bench && bench.chain) || {};
   const timing = timingModel(values, { rig, chain });
-  // The fold gets the model for its alert count and a maker for the drawing:
-  // the count is needed shut, the drawing only when open and only at a width
-  // nobody knows until the observer measures one.
+  // Closed folds need alert counts without SVG. Drawing waits for an open fold and
+  // observed width.
   const diagram = [timingFold(entry.name, timing, (w) => timingModel(values, { rig, chain, width: w }))];
 
   const shot = found && found.node.lastShot;
-  // No early return for the unrun card. `transientModel(null)` and
-  // `loopsModel(null)` both answer with an `absent` model, and `chart()` draws
-  // that as the panels the run will fill — so the card has one geometry either
-  // side of a run rather than a sentence before and three charts after.
+  // Absent models reserve the eventual named panels. An early return would replace
+  // chart geometry with an empty sentence before acquisition.
   if (!shot) {
     return [
       chart((w) => transientModel(null, { width: w })),
@@ -248,23 +203,14 @@ function baceResult(entry, found, bench) {
 }
 
 /**
- * The newest shot, as R3·2 lists it beside the trace: Q, the running mean
- * and σ at its point, the peak of each trace, and the digitiser's verdict —
- * with `trigger_sweep` beside it, because *"AUTO plus a charge near zero is
- * worth saying out loud"* (`ui-rules` §9): AUTO sweeps anyway when no
- * trigger arrives, and a loose sync cable then produces a plausible
- * near-zero Q from untriggered noise.
+ * Shot values include Q, mean, uncertainty, peaks, verdict and trigger mode. AUTO
+ * with disconnected sync can yield plausible near-zero Q from untriggered noise
+ * (`docs/ui-rules.md` §9).
  */
 /**
- * The rows themselves, as `[label, value]` pairs — the model beside the DOM,
- * the same split the rail and the charts have.
- *
- * It is these rows, and no longer the chart's readout, that state Q, the
- * running mean and σ: the readout row belongs to the crosshair, and printing
- * the three numbers there as well said them twice on one card, the second time
- * without the shot or the point they belong to. So `ui-rules` §2's rule about
- * the σ that is not a zero is this function's to keep, and
- * `ui/tests/charts.test.mjs` holds it here.
+ * The pure row model supplies Q, mean and uncertainty with their shot and point.
+ * Repeating them in the crosshair row would lose that context. Zero Q uncertainty
+ * remains absent rather than measured zero (`docs/ui-rules.md` §2).
  */
 export function shotRows(shot, found) {
   const v = shot.verdict || null;
@@ -302,9 +248,8 @@ export function shotBlock(shot, found, config) {
       h('span.shot-title', { text: `shot ${nth} · loop ${shot.loop}${where}` }),
       shot.clipped ? h('span.tag.bad', { text: 'clipped' }) : null,
       shot.tracesGone ? h('span.tag', { text: 'no traces' }) : null),
-    // A definition list, not a table: in the narrow column beside the charts
-    // each pair stacks — the label over the number, as R3·2 sets them — and
-    // `dt`/`dd` is what a label and its value are.
+    // A definition list pairs labels and values in the narrow chart-side column,
+    // stacking each label above its number.
     h('dl.shot-rows', rows.map(([k, val]) => [h('dt', { text: k }), h('dd.num', { text: val })])),
     v ? h('div', { class: 'shot-verdict ' + level, text: `digitiser · ${v.text}` }) : null,
     trigger ? h('div', {
@@ -317,16 +262,10 @@ export function shotBlock(shot, found, config) {
 }
 
 /**
- * When the field reaches the device on **this shot**, after the trigger: its
- * `:PULS:DEL1` plus the rig's sync-to-field latency. The integration window
- * is measured from there (`experiment/transient.py` `resolve_window`).
- *
- * The service resolves the window every step from the shot's own delay, and
- * along a delay axis — `recipes/run-bace.toml` sweeps exactly that — the
- * form's `delay_ns` is only the value of one point. Taken from the form, the
- * shaded window and the running integral stood still while the real one moved
- * with every point. `trigger_offset_s` is the latency after `:PULS:DEL1`; the
- * generator is never told it.
+ * The helper resolves this shot's field arrival from delay plus `trigger_offset_s`
+ * (manual 2.2). Along a delay scan the window follows the shot, not the form's single
+ * delay. Form delay would leave shading and integral stationary while the measured
+ * window moves. The latency is not sent to the generator.
  */
 export function pulseDelayS(shot, values, rig) {
   const setpoint = (shot && shot.setpoint) || {};
@@ -349,9 +288,8 @@ function jvResult(found) {
   const jv = found.record && found.record.jv;
   const cfg = jv && jv.config && jv.config.jv;
   const planned = cfg && Number.isFinite(cfg.start_v) && Number.isFinite(cfg.stop_v) ? [cfg.start_v, cfg.stop_v] : null;
-  // Two builds on purpose: the chart's is a function of the width the
-  // observer measures, and the metrics table beneath it cannot wait for a
-  // measurement — it is text, and its numbers do not depend on the width.
+  // Charts wait for measured width; text metrics do not depend on width and render
+  // immediately. Separate builds meet both constraints.
   const model = jvModel(curves, { planned });
   const out = [chart((w) => jvModel(curves, { planned, width: w }))];
   if (model.metrics.entries.length) out.push(metricsTable(model.metrics));
@@ -359,13 +297,12 @@ function jvResult(found) {
 }
 
 /**
- * Which timing diagrams are open, by module. Per session, not per rebuild:
- * the panel is rebuilt on every edit and every shot, and a fold that closed
- * on each of them would be a fold nobody could keep open.
+ * Disclosure belongs to the session by module. Rebuilding after edits or shots must
+ * not close it.
  */
 const openTiming = new Set();
 
-/** `2 alerts · 1 warn` — the counts a shut fold shows, worst level first. */
+/** Closed folds report severity counts with the worst first. */
 export function alertSummary(alerts) {
   const order = ['invalid', 'alert', 'warn', 'info'];
   const counts = order.map((level) => [level, alerts.filter((a) => a.level === level).length])
@@ -377,11 +314,9 @@ export function alertSummary(alerts) {
 }
 
 /**
- * The timing diagram behind one line. It is the form drawn (`ui-rules` §7),
- * and the alerts under it are the reason the drawing is on the card at all —
- * but before a run the card is the form, and the drawing is most of its
- * height. Shut, the line still carries the count and the worst level, in
- * that level's colour, so nothing the diagram would have said is silent.
+ * The timing fold keeps forms compact. Its closed line retains alert counts, worst
+ * severity and colour so hidden geometry cannot hide a constraint (`docs/ui-rules.md`
+ * §7).
  */
 function timingFold(name, timing, makeTiming) {
   const summary = alertSummary(timing.alerts);
@@ -412,12 +347,9 @@ function alertList(alerts) {
 }
 
 /**
- * The metrics, one row per curve — the LED drive voltage (or `dark`) in the
- * first column, the parameters across — labelled derived (`ui-rules` §6:
- * *"J–V metrics are interpolated, not measured."*). `J_sc` carries `in amps`
- * in its header because it is: it is interpolated from `current`, whatever
- * area the run was given, so it is the one number on this card the mA/cm²
- * rule does not reach.
+ * Metrics are labelled derived (`docs/ui-rules.md` §6). `J_sc` uses A because it
+ * comes from `current` independently of area, so the density unit does not apply
+ * (`docs/service-contract.md` §6).
  */
 function metricsTable(metrics) {
   const keys = [];

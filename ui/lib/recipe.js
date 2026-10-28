@@ -1,27 +1,14 @@
-// A saved bench against the bench it is reopened on — `lib/recipe.js`.
-//
-// Two things are saved to a file and compared with the bench when they come
-// back: a **recipe** (`POST /pipelines/save`, the pipeline tab) and the
-// **bench settings** themselves (`POST /bench/save`, the bench tab). Both
-// records carry the same `bench: {module: {param: {value, source}}}` block,
-// which is why one `drift` reads both — a bench preset is a recipe record
-// with no tree, and a record with no tree covers every module in it.
-//
-// A recipe's tree carries only what its nodes override; every other value a
-// node runs with is the module's bench value at start time. So a recipe is
-// an instance, and the bench is its main component: change the bench and
-// the recipe runs differently with no diff in its file. Since the save
-// records the bench (`POST /pipelines/save` writes `bench: {module: {param:
-// {value, source}}}` for every module in the tree), reopening one can say
-// exactly where the bench has moved since — and offer to put it back.
-//
-// `drift` is pure: the recipe's `bench` against the catalogue's entries.
+// Recipes and saved benches share a value-and-source `bench` block
+// (`docs/service-contract.md` §§4, 7). One pure `drift` comparison serves both. Trees
+// store overrides; other parameters come from the bench at Start, so bench edits can
+// change execution without a tree diff. Reopening compares saved values with the
+// catalogue and offers restoration. Records without a tree cover every recorded
+// module.
 
 /**
- * Every parameter whose bench value differs from what the recipe was saved
- * with: `[{module, name, saved, now, unit}]`, in catalogue order. Empty when
- * nothing moved, or when the recipe predates the record (`bench` absent —
- * `recorded(recipe)` says which).
+ * The helper lists differing bench values in catalogue order. Empty can mean
+ * agreement or absent saved data; `recorded(recipe)` distinguishes them. Rows retain
+ * `saved`, `now` and `unit` for rendering.
  */
 export function drift(recipe, byName, { tree = null, rows = null } = {}) {
   const bench = (recipe && recipe.bench) || null;
@@ -44,18 +31,15 @@ export function drift(recipe, byName, { tree = null, rows = null } = {}) {
   return out;
 }
 
-/** Whether the recipe records the bench at all (saved after that landed). */
+/** The predicate reports whether the recipe includes saved bench values. */
 export function recorded(recipe) {
   return Boolean(recipe && recipe.bench && typeof recipe.bench === 'object');
 }
 
 /**
- * Whether there is a bench to compare the record with: at least one module
- * it records is in the catalogue. `drift` skips a module the catalogue does
- * not hold, so against no catalogue at all — before `GET /modules` answers,
- * or just after `store.reset()` on a service restart — every record reads as
- * moved-nothing, which is "✓ matches the bench" said about a bench nobody
- * has seen. That is the one moment the row most needs to be right.
+ * Comparison requires at least one recorded module in the catalogue. Since `drift`
+ * skips absent modules, an empty catalogue would otherwise claim agreement before
+ * loading or after reset. Unknown bench state cannot imply a match.
  */
 export function comparable(recipe, byName) {
   if (!recorded(recipe) || !byName) return false;
@@ -63,9 +47,8 @@ export function comparable(recipe, byName) {
 }
 
 /**
- * The `PUT` bodies that restore the recipe's bench: `{module: {param:
- * value}}`, one per module that drifted. A node's own override is not in
- * here — it is in the tree, and it never left.
+ * The helper builds per-module `PUT` bodies restoring changed bench values. Node
+ * overrides remain in the tree and need no restoration.
  */
 export function restore(items) {
   const out = {};
@@ -77,11 +60,9 @@ export function restore(items) {
 }
 
 /**
- * Per module, the parameters *every* node of it in the tree gets from
- * somewhere other than the bench: its own `params` override, or — when the
- * resolved schedule rows are given — a loop's binding (`inherited`) or a
- * run's derivation (`derived`). A parameter one node overrides and another
- * does not is still the bench's for the other, so it stays.
+ * The helper finds parameters every module node obtains outside the bench: node
+ * overrides, loop bindings or derivations. If one node still reads the bench value,
+ * comparison retains that parameter.
  */
 export function coveredBy(tree, rows) {
   const per = new Map();
@@ -107,30 +88,16 @@ export function coveredBy(tree, rows) {
 }
 
 /**
- * The `MODULES` row of the bench tab, as one object — `views/bench.js`.
- *
- * That row is the only thing about saved benches that is permanently on
- * screen, and it answers exactly one question: **which saved bench this is,
- * and whether the bench has moved since**. Everything else — the name field,
- * the file list, the drift table — is behind the `⋯` beside it, because a
- * control reached for less than once a session does not sit on the screen
- * (`ui-rules` §14's fourth question).
- *
- * Four states, and the row says which:
- *
- *   `none`   nothing saved yet — the row says so, or the `⋯` beside it is a
- *            glyph with nothing to explain it
- *   `idle`   files exist, none open against the bench: the count
- *   `match`  one open, and the bench is what it holds
- *   `drift`  one open, and `moved` lists every value that differs
- *
- * Pure, so `recipe.test.mjs` holds the four down without a browser.
+ * The saved-bench row identifies the open file and agreement with the bench.
+ * Infrequent name, list and drift controls sit behind its menu (`docs/ui-rules.md`
+ * §14). States distinguish no files, files with none open, an open match and an open
+ * mismatch. The pure model permits tests without a browser.
  */
 export function savedBenchModel(benches, loadedName, byName) {
   const files = benches || [];
   const file = loadedName ? files.find((f) => f.name === loadedName) || null : null;
-  // No catalogue is no comparison, not a match: the row falls back to the
-  // count until the modules arrive, and `loaded` is kept so it then answers.
+  // No catalogue means no comparison. The row retains `loaded` and shows the count so
+  // it can compare when modules arrive.
   if (!file || !comparable(file, byName)) {
     return { state: files.length ? 'idle' : 'none', name: null, count: files.length, moved: [] };
   }
@@ -144,16 +111,10 @@ export function savedBenchModel(benches, loadedName, byName) {
 }
 
 /**
- * The file stem a name is saved under: `app.py: _RECIPE_STEM`, in JS.
- *
- * Here because the console has to compare a typed name with the names the
- * service already has, and a raw name never matches a stemmed one — so the
- * "this will write over ⟨name⟩" arming silently did not fire for any name
- * with a space in it, which is most of them. Both tabs' Save use this.
- *
- * The two halves are pinned to the same table:
- * `tests/test_service_api.py: test_a_name_becomes_the_same_file_stem_on_both_sides`
- * and `recipe.test.mjs: a name becomes the file stem the service writes`.
+ * The helper matches the service's `_RECIPE_STEM` reduction. Overwrite confirmation
+ * compares normalized stems; a raw name containing spaces cannot match its filename.
+ * Both tabs share the rule. `tests/test_service_api.py` and
+ * `ui/tests/recipe.test.mjs` check matching examples.
  */
 export function fileStem(name) {
   return String(name === null || name === undefined ? '' : name)
@@ -161,8 +122,8 @@ export function fileStem(name) {
 }
 
 /**
- * One drifted value, for the note that lists them. Volts to three places
- * because that is what the cards show; an array as its elements.
+ * Drift text formats voltage to three decimals like the cards and lists array
+ * elements.
  */
 export function showValue(v, unit) {
   if (typeof v === 'number') return unit === 'V' ? v.toFixed(3) : Number.isInteger(v) ? String(v) : v.toFixed(3);

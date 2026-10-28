@@ -1,11 +1,6 @@
-// The SVG half of `dom.js`, and the reason it has to exist: `h()` builds every
-// element with `document.createElement`, and `createElement('svg')` is an
-// `HTMLUnknownElement` — a tag with the right name, no geometry, and nothing
-// drawn. SVG lives in its own namespace, so it needs its own constructor.
-//
-// Everything else is deliberately the same as `h()`: the same
-// `tag[.class][#id]` grammar, the same attrs-then-children shape, the same
-// `keyed()` beside it. A chart is built the way a card is built.
+// SVG requires its namespace constructor. `document.createElement('svg')` produces an
+// HTML element without SVG geometry. The helper mirrors `h` arguments and selector
+// grammar so chart and card construction stay consistent.
 
 import { append } from './dom.js';
 
@@ -16,9 +11,8 @@ export function s(spec, attrs, ...children) {
   const [tag, ...rest] = String(spec).split(/(?=[.#])/);
   const el = document.createElementNS(NS, tag || 'g');
   for (const token of rest) {
-    // `el.classList` works on SVG elements, but `className` does not: on an
-    // SVGElement it is a read-only `SVGAnimatedString`, and assigning to it
-    // fails silently in exactly the way that leaves a chart unstyled.
+    // SVG classes use `classList`. Assigning to the read-only animated `className`
+    // value can silently leave a chart unstyled.
     if (token[0] === '.') el.classList.add(token.slice(1));
     else el.setAttribute('id', token.slice(1));
   }
@@ -40,11 +34,9 @@ export function s(spec, attrs, ...children) {
 }
 
 /**
- * The root. `viewBox` with no width/height and `width: 100%` in the style is
- * what makes a chart resize with its card without re-running the model: the
- * geometry is computed once in the model's own coordinates and the browser
- * scales it. The model still owns the aspect ratio, because type inside an
- * SVG scales with it and 7 px labels are not a design.
+ * The SVG root uses `viewBox` and `width: 100%` to scale with its card. Geometry and
+ * type scale together, so models must choose dimensions and aspect deliberately to
+ * keep labels legible.
  */
 export function root(width, height, attrs, ...children) {
   return s('svg', {

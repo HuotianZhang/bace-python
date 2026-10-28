@@ -1,29 +1,14 @@
-// When to ask `GET /bench` again — the rail's other half.
-//
-// `docs/ui-plan.md` decision 2, third amendment: the bench snapshot is the one
-// thing the stream does not carry. While a run holds the worker the snapshot
-// is the one Start took with the running step's implications overlaid, every
-// field of it marked `how: "inferred"` (`service/live.py`) — and that overlay
-// reaches a client only if the client asks. A console that asked at boot and
-// at `parked` shows a cold rail — relay on the SourceMeter, bias off, shutter
-// shut — through hours of a scan driving the device.
-//
-// So the *stream* says when to ask and the *service* stays the only thing that
-// infers anything (`ui-rules` §6: render provenance, never re-derive it). The
-// alternative — folding `live.py` a second time in JavaScript — would put the
-// two out of step the first time either changed.
-//
-// This lives in its own module rather than in `app.js` because it is the one
-// piece of the shell with state of its own — a want, a flight, a throttle —
-// and that is exactly the kind of thing that is worth a test.
+// The watch refetches the bench when stream boundaries change the rail. The service
+// owns inferred state; duplicating that logic in JavaScript would let provenance
+// diverge. Fetching only at boot and park would leave an idle-looking rail during an
+// active scan. This module owns pending requests, in-flight state and throttling so
+// the policy can be tested independently.
 
 /**
- * The frames after which `GET /bench` says something new about the rail.
- *
- * They are the boundaries `service/live.py` folds: the relay at `NodeStarted`,
- * the bias and the LED at `RunStarted`, the arming and the polarity a run read
- * back, the shutter twice per shot at `StepPhase`, the SMU across a J-V, and
- * the module's own unwind at `NodeDone`.
+ * These boundaries change the rail overlay: relay at node start, bias and LED at run
+ * start, arming and polarity read-back, shutter phases, source-meter activity and
+ * node unwind. The watch asks the service rather than inferring instrument values
+ * locally.
  */
 export const BENCH_MOVERS = new Set([
   'NodeStarted', 'NodeDone', 'RunStarted', 'RunFinished', 'RunAborted', 'RunFailed',
@@ -34,26 +19,12 @@ export const BENCH_MOVERS = new Set([
 export const REFETCH_MS = 700;
 
 /**
- * The watch: `frame(f)` on every envelope, and it asks when it should.
- *
- * One request at a time, at most one per `throttleMs`, and never a dropped
- * ask: a want raised while a request is in flight or the throttle is closed is
- * served when it opens. Dropping them would be fine for the shutter, which
- * moves again in a moment, and wrong for the read-back after `parked` — the
- * one that has no frame behind it to ask again.
- *
- * **Replayed frames ask too.** They did not, once: `app.js` handed the stream's
- * `replay` flag through and skipped them, on the reasoning that one read-back
- * per historical frame would be hundreds of requests. The throttle above
- * already makes that impossible — the whole boot replay coalesces into one
- * request — and the guard cost the rail its updates at exactly the moment the
- * bench is busiest. Measured, on a 21 x 60 `--sim --fast` scan: the client
- * falls behind, is dropped at 1008, reconnects, and every frame from there to
- * the end of the run arrives at or below the new `Hello`'s seq — so it counts
- * as replay, so nothing asks. The rail changed twice in a ten-second run and
- * sat still for 9.0 s of it, and the `parked` refetch — the one with no frame
- * behind it — was left to whichever frame happened to arrive after the client
- * caught up.
+ * The watch allows one request at a time and one per `throttleMs`, retaining requests
+ * made during either wait. The park refetch needs this guarantee because no later
+ * frame may retry it. Replayed frames also request updates; throttling coalesces
+ * them. A 21 × 60 fast simulated scan measured on this bench can remain in replay
+ * after close 1008 through the run ending. Suppressing replay requests leaves the
+ * rail unchanged for 9.0 s of ten seconds and can lose its final read-back.
  */
 export function createBenchWatch({
   fetchBench,
@@ -91,18 +62,12 @@ export function createBenchWatch({
     fetching = true;
     fetchedAt = now();
     stats.asked += 1;
-    // An `async` body, not a promise chain, so that a `fetchBench` which
-    // throws *synchronously* is caught like any other failure. A chain built
-    // on the result would never get its `finally` attached, `fetching` would
-    // stay true, and the watch would go silent for the life of the page —
-    // which is the one thing "never a dropped ask" above promises it does not
-    // do. Not reachable through `api.js`, whose calls are `async`; reachable
-    // through anything else that is handed in.
-    //
-    // `readBack`: take the instruments, the chain and the verdicts, and leave
-    // the run, the queue and the bench state to the stream — this response and
-    // the next run's `preflight` frame race, and the loser must not be the one
-    // that cannot arrive out of order.
+    // The async body catches synchronous `fetchBench` exceptions and always releases
+    // `fetching`; chaining from a thrown call would leave the watch permanently
+    // blocked. Injected fetchers need this even though API calls are async.
+    // `readBack` applies instruments, chain and verdicts while leaving run, queue and
+    // bench state to the ordered stream because HTTP can race a queued run's
+    // preflight.
     (async () => {
       try { onBench(await fetchBench()); } catch { /* the next frame asks again */ }
       finally { fetching = false; pump(); }
@@ -118,14 +83,12 @@ export function createBenchWatch({
     want,
     stats: () => ({ ...stats }),
 
-    /** One envelope. Returns whether it asked for anything. */
+    /** The frame handler returns whether an envelope requests a refetch. */
     frame(frame) {
       if (!frame || !frame.type) return false;
       if (frame.type === 'RunStateChanged' && frame.data && frame.data.state === 'parked') {
-        // The one moment the snapshot is known to have changed for good: the
-        // run is off the worker, the overlay is gone, and what is on the rail
-        // now is the bench the next run will start from. The catalogue moved
-        // too — this run is the modules' `last`.
+        // Park releases the worker and removes the inference overlay. Refetch
+        // supplies the bench for the next run and catalogue last-result values.
         want({ modules: true });
         return true;
       }

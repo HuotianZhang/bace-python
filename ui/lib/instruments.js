@@ -1,28 +1,9 @@
-// The Instruments panel at the top of the bench tab: one row per instrument
-// an operator switches by hand, a switch whose lit position *is* the
-// instrument's state, and — for the LED — the levels the switch drives it at.
-//
-// This replaced the `light` card. That card had five buttons, seven fields
-// and a red verdict, and the operator could not tell which of the fields a
-// button read, whether `DC` opened the shutter, or whether `Off` used the
-// form. The answer is structural rather than written: a switch is what a
-// bench has for something that acts now, and the values beside the LED's
-// switch are the only values any position of it sends.
-//
-//   * **The lit position is the read-back**, never the last click. The
-//     snapshot after every action is what lights it, so a switch that did
-//     not take (`BenchActionRefused`) does not move. `how: "inferred"` draws
-//     the whole switch dashed, the same distinction the rail makes.
-//   * **Clicking a position is the bench action for it**, one per click, the
-//     same `POST /bench/actions/*` the chain strip posts. Nothing here goes
-//     through the worker, nothing is a run, and nothing writes a file.
-//   * **The LED's levels are the `light` module's** — `led_v`, `led_low_v`,
-//     `pulse_frequency_hz`, `duty_percent` — edited through the same `PUT`
-//     as any card, so a `light` node in a tree starts from what the switch
-//     was last set to. `DC` sends the first, `pulse` all four; the ones the
-//     lit position does not use are drawn dim, and still editable.
-//
-// `panelModel` is pure and tested; `renderInstruments` draws it.
+// The Instruments panel groups immediate shutter, LED and relay actions. Selection
+// reflects read-back, never the last click; inferred state has a dashed outline. Each
+// click sends one bench action without a run or result file. LED controls edit the
+// `light` module's level, low level, frequency and duty: DC sends the first and Pulse
+// sends all four. Unused fields stay editable but dim. Shared module values also
+// supply pipeline nodes. `panelModel` is pure; `renderInstruments` renders it.
 
 import { h } from './dom.js';
 import { driveLevel } from './fields.js';
@@ -34,11 +15,9 @@ export const LED_LEVELS = ['led_v', 'led_low_v', 'pulse_frequency_hz', 'duty_per
 const SENDS = { dc: ['led_v'], pulse: LED_LEVELS, off: [] };
 
 /**
- * `{rows}` from the `/bench` snapshot and the `light` module's entry.
- *
- * Each row is `{key, label, inferred, positions: [{id, label, on, action,
- * args}], levels?: [{spec, used}]}`. `on` is the read-back: exactly one
- * position is lit when the instrument answers, none when it does not.
+ * The model combines bench state and the `light` entry. Rows carry positions,
+ * actions, inference state and optional levels. Read-back selects one position when
+ * available and none when unreadable.
  */
 export function panelModel(bench, light) {
   const instruments = (bench && bench.instruments) || {};
@@ -95,32 +74,12 @@ export function panelModel(bench, light) {
 }
 
 /**
- * The panel. `ctx` is `{busy, act(action, args), edit(module, params)}`.
- *
- * **Park is not here.** It was, in this header, and it was the same command
- * as the strip's: one action that aborts the run and cancels the queue, with
- * two ways in. The copy that went is the one that could be missed — `ui-rules`
- * §1: the shell pins the strip to the foot of the window, and this panel sits
- * at the top of a view that scrolls under it, so on a bench with six cards the
- * panel's Park is off screen exactly when a run is going and the strip's never
- * is. A second way to abort a run and drop a queue is not reach; it is a
- * second place to hit it by accident.
- *
- * **One row, since 2026-09-06** (`studies/bench-head.html`, option B). It was three
- * stacked rows of 57 px each — 172 px, the least dense surface in the
- * console, immediately under a rail that had just been cut to 27 px for eight
- * live readings. The switches sit side by side now, and the `Instruments`
- * heading goes with the stack: `SHUTTER`, `LED · 33220A` and `RELAY` label
- * themselves, and a zone heading over three labelled things says nothing the
- * three do not.
- *
- * Measured at 1226 px of a 1250 px row at 1280, so nothing truncates at any
- * width the console runs at — but that is 24 px of slack, and a fourth
- * instrument needs this laid out again rather than squeezed into it.
- *
- * What did **not** change is the hit target's shape: a position here is a
- * bench action (`ui-rules` §14), so it keeps its ink border and its fill.
- * 4 px of padding rather than 6 is the whole of what the row cost.
+ * The panel uses `ctx` actions and edits. Park stays in the pinned strip with one
+ * visible abort-and-cancel confirmation. Side-by-side switches label themselves
+ * without a repeated heading. On this bench, the row measures 1226 px within 1250 px
+ * at a 1280 px viewport, leaving 24 px; a fourth instrument needs a layout change.
+ * Four-pixel padding retains instrument-switch borders and fill (`docs/ui-rules.md`
+ * §14).
  */
 export function renderInstruments(model, ctx) {
   const busy = Boolean(ctx.busy);

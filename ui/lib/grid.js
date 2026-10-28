@@ -1,16 +1,8 @@
-// The results tab's DOM — R2·3 drawn from `lib/history.js`'s models.
-//
-// The grid is a table because it is one: temperatures down, LED levels
-// across, one cell per `bace` node with its Q and, beneath it, the V_oc it
-// was centred on and its σ. R2·3's three cell states are three classes and
-// nothing else — `partial` is outlined in the accent, `missing` is hatched,
-// and the selected cell carries the ink border — so a reader can tell them
-// apart with the colour turned off.
-//
-// Everything here is built from a model and keyed on it (`dom.keyed`), for
-// the reason every other renderer in the shell is: the store notifies on
-// every frame, and a run finishing in the background must not tear down the
-// grid the operator is reading.
+// The results grid renders history models as a temperature-by-LED table. Each `bace`
+// cell shows Q, V_oc and uncertainty. Partial cells have an accent outline, missing
+// cells a hatch and selection an ink border, preserving distinctions without colour.
+// `dom.keyed` prevents unrelated stream frames from rebuilding the grid during
+// reading.
 
 import { h, num } from './dom.js';
 import * as fmt from './format.js';
@@ -48,7 +40,7 @@ export function renderGroups(groups, { selected = null, onSelect } = {}) {
 
 // -- the run header ---------------------------------------------------------
 
-/** R2·3's top line: who, when, how many, and the state. */
+/** The header identifies the run, its time, counts and state. */
 export function renderRunHead(record, grid, summary) {
   const identity = identityOf(record.sample);
   const sample = record.sample || {};
@@ -81,8 +73,8 @@ export function renderRunHead(record, grid, summary) {
  */
 export function renderGrid(grid, { selected = null, onSelect } = {}) {
   if (grid.shape !== 'grid') {
-    // What is here, not why the grid is not (#42): "the grid is one cell per
-    // bace" is this file explaining itself to somebody who asked for numbers.
+    // The empty state points to available results or actions rather than explaining
+    // grid internals (`docs/ui-rules.md` §9).
     return h('div.chart-absent', h('p.absent', 'no bace node in this run — its nodes are listed below'));
   }
   const head = h('tr', h('th.corner', h('span.cs', 'T / K ↓  ·  led_v →')),
@@ -93,9 +85,8 @@ export function renderGrid(grid, { selected = null, onSelect } = {}) {
       h('th', { title: t.text },
         h('span.num', { text: row.label }),
         h('span', { class: `tlv ${t.level}`, text: row.how ? `· ${row.how}${row.source && row.source !== row.how ? '/' + row.source : ''}` : '' }),
-        // What the tree asked for, when what was reached is not it: the
-        // row is the 280 K one, and it reads 280.1 K because that is what
-        // the operator typed at the pause.
+        // The cell identifies the requested temperature when the confirmed value
+        // differs; a 280 K row can contain an operator-confirmed 280.1 K.
         row.t !== null && row.asked !== null && row.asked !== undefined && Math.abs(row.t - row.asked) > 0.05
           ? h('span.tlv', { text: `· asked ${fmt.kelvin(row.asked)}` }) : null),
       grid.cols.map((col) => {
@@ -173,8 +164,8 @@ export function renderNodes(record, { selected = null, onSelect } = {}) {
 // -- the selected node ------------------------------------------------------
 
 /**
- * R2·3's right-hand column: the cell's numbers, its flags with their reasons,
- * where the files are, what its parameters resolved from, and Re-queue.
+ * The detail panel shows node values, flags with reasons, files, parameter provenance
+ * and Re-queue.
  */
 export function renderNodePanel(record, node, grid, { onRerun, rerunState = null } = {}) {
   if (!node) {

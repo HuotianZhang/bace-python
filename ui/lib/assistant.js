@@ -1,21 +1,9 @@
-// The assistant panel: a conversation with a model that reads the bench.
-//
-// What it is for is the operator who was never trained on this console — why
-// a parameter has its value, what the chain does, where to click. The service
-// side is `bace/service/assistant.py`; this is the panel, opened from the
-// bar's `ask` chip, beside every tab. In this version the model reads and
-// never acts, so nothing here confirms anything.
-//
-// The model is the asker's choice: Claude, or any OpenAI-compatible endpoint
-// (DeepSeek, Qwen, Kimi, GLM, OpenAI, a local Ollama). So is the key. It goes
-// to the service on each question in a header and is kept in this browser
-// only when they tick "remember"; the service never stores it. A console with
-// no key, or a service without the SDKs, works exactly as before — the panel
-// says what is missing and nothing else changes.
-//
-// Pure parts first (`splitLines`, `applyFrame`, `blocks`, `inline`,
-// `toolLabel`, `missing`, `isLocal`), tested in `tests/assistant.test.mjs`;
-// the DOM after them.
+// The assistant explains parameters, the chain and console controls through read-only
+// service tools (`docs/service-contract.md` §8a). It opens beside every tab and
+// cannot act on the bench. The operator chooses the provider, endpoint, model and
+// key. Each question sends the key in a header; browser storage requires the remember
+// option and the service does not retain it. Missing credentials or SDKs affect only
+// this panel. Pure parsing and state helpers precede the DOM code for testing.
 
 import { h, fill, keyed } from './dom.js';
 
@@ -23,10 +11,8 @@ export const SETTINGS_STORE = 'bace.assistant.settings';
 export const KEYS_STORE = 'bace.assistant.keys';
 
 /**
- * Where the OpenAI-compatible providers answer. Starting points to pick from,
- * not a list the service checks: the address stays editable, and the model is
- * always typed, because each provider renames its models more often than this
- * file would be edited.
+ * Provider presets supply editable starting addresses. The model remains a text field
+ * because provider model names vary independently of the console.
  */
 export const PRESETS = [
   { name: 'OpenAI', base_url: 'https://api.openai.com/v1' },
@@ -39,7 +25,7 @@ export const PRESETS = [
 
 export const DEFAULT_SETTINGS = { provider: 'anthropic', base_url: '', model: '' };
 
-/** A model served from this machine, which takes no key. */
+/** The predicate identifies a locally served model that requires no key. */
 export function isLocal(url) {
   try {
     const host = new URL(url).hostname;
@@ -49,7 +35,7 @@ export function isLocal(url) {
   }
 }
 
-/** What is still needed before a question can be sent, as a phrase, or null. */
+/** The helper returns missing question requirements or `null` when ready. */
 export function missing(settings, key) {
   if (settings.provider === 'openai') {
     if (!settings.base_url) return 'the API address';
@@ -94,19 +80,25 @@ export function toolLabel(name, input) {
   }
 }
 
-/** NDJSON: the whole lines in `buffer` parsed, and what is left of the last one. */
+/**
+ * The parser returns complete NDJSON frames from `buffer` and the remaining partial
+ * line.
+ */
 export function splitLines(buffer) {
   const lines = buffer.split('\n');
   const rest = lines.pop();
   const frames = [];
   for (const line of lines) {
     if (!line.trim()) continue;
-    try { frames.push(JSON.parse(line)); } catch { /* a line the service did not write */ }
+    try { frames.push(JSON.parse(line)); } catch { /* Malformed lines cannot supply service frames. */ }
   }
   return { frames, rest };
 }
 
-/** The transcript after one frame. `state.items`' last entry is the answer being written. */
+/**
+ * The reducer applies one frame to the transcript. The last `state.items` entry is the
+ * answer in progress.
+ */
 export function applyFrame(state, frame) {
   const items = state.items.slice();
   const last = { ...items[items.length - 1] };
@@ -146,9 +138,8 @@ export function applyFrame(state, frame) {
 }
 
 /**
- * The markdown a model writes, as blocks: headings, paragraphs, lists, code
- * and tables. Enough for an answer, and built as DOM rather than HTML so a
- * model's text can never become markup.
+ * The renderer accepts headings, paragraphs, lists, code and tables from model
+ * output. DOM construction prevents that output from becoming executable HTML.
  */
 export function blocks(text) {
   const lines = String(text || '').replace(/\r/g, '').split('\n');
@@ -209,7 +200,7 @@ export function blocks(text) {
   return out;
 }
 
-/** One line's spans: `code` and **bold**, everything else as it stands. */
+/** The parser returns inline code and bold spans, leaving other text unchanged. */
 export function inline(text) {
   const spans = [];
   const re = /(`[^`]+`|\*\*[^*]+\*\*)/g;
@@ -284,15 +275,15 @@ function hostOf(url) {
 }
 
 /**
- * The panel. `onChange` is called when it opens or closes, so the bar's chip
- * can say so.
+ * The panel reports open and closed state through `onChange` so the bar control stays
+ * consistent.
  */
 export function createAssistantPanel({ api, onChange = () => {} }) {
   const settings = { ...DEFAULT_SETTINGS, ...readJson(SETTINGS_STORE, {}) };
   let state = { open: false, status: null, settings, key: storedKey(settings), conversation: null,
                 items: [], busy: false, editing: false };
-  // The settings form edits `draft`; `formVersion` rebuilds it, which only a
-  // change of provider or preset needs — typing must not lose the caret.
+  // The settings form edits `draft`. Only provider or preset changes increment
+  // `formVersion`; rebuilding during typing would lose the caret.
   let draft = null;
   let formVersion = 0;
   let controller = null;
@@ -334,8 +325,8 @@ export function createAssistantPanel({ api, onChange = () => {} }) {
     return state.editing || Boolean(missing(state.settings, state.key));
   }
 
-  // A key belongs to the address it was typed or loaded for (`keyFrom`), so
-  // that moving the form to another provider never carries one across.
+  // `keyFrom` binds a key to its provider address so changing providers cannot carry
+  // it across.
   function freshDraft() {
     return { ...state.settings, key: state.key, keyFrom: keySlot(state.settings),
              remember: Boolean(storedKey(state.settings)) };
@@ -376,13 +367,13 @@ export function createAssistantPanel({ api, onChange = () => {} }) {
     sendBtn.textContent = state.busy ? 'stop' : 'ask';
   }
 
-  /** The settings, edited in `draft` and applied by `use`. */
+  /** The settings form edits `draft` before the Use action applies it. */
   function form() {
     const d = draft;
     const all = state.status && state.status.providers;
     const ps = all ? all[d.provider] : null;
     const rebuild = (patch) => { Object.assign(draft, patch); formVersion += 1; draw(); };
-    // Somewhere else to send the key: take the one stored for there, or none.
+    // Changing the destination selects its stored key or an empty key.
     const moveTo = (patch) => {
       const next = { ...d, ...patch };
       const key = storedKey(next);
@@ -477,7 +468,8 @@ export function createAssistantPanel({ api, onChange = () => {} }) {
       state = applyFrame(state, { type: 'error', message });
       if (error.status === 401 || error.status === 422) state = { ...state, editing: true };
     }
-    // A stream that ended without saying so (the service went away) still ends the turn.
+    // A stream ending without a terminal frame still closes the turn, including
+    // service disconnects.
     if (state.busy) state = applyFrame(state, { type: 'error', message: 'the answer was cut off' });
     controller = null;
     draw();

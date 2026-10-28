@@ -1,29 +1,9 @@
-// The results tab — `docs/ui-plan.md` M6, from R2·3.
-//
-// Two columns: the runs the journal knows, and the one that is open. The
-// left is `GET /runs?session=all`, grouped by session; the right is that
-// run's `GET /runs/{id}` — its identity, its T × LED grid with the partial
-// cell outlined and the never-run cell hatched, R2·3's summary strip, and
-// the selected node's numbers, flags, folder and provenance. Nothing on this
-// tab is computed from a folder name, and nothing opens an HDF5: the record
-// carries what a grid needs (`docs/history/naming-plan.md` rule 1, built for this).
-//
-// Three decisions, each a rule from somewhere:
-//
-//   * **The record is always asked for, this session's runs included.** The
-//     store holds this session's runs as the stream delivered them, but the
-//     shape the grid reads — `nodes` with the temperature triple and the
-//     per-point statistics — is the record's, the same from this process and
-//     from a journal file, and a view that drew this session's runs from one
-//     shape and last week's from another would be two views. One fetch per
-//     selection, a few kilobytes; the store says *when* to ask again.
-//   * **The list moves when a run parks, and not before.** A run in flight is
-//     the monitor's business, under the rail on every tab; here it is a row
-//     whose state reads off the stream (`live`), and the index is re-read at
-//     `parked` — which is when the journal's summary of it is complete.
-//   * **A manual run is a result** (`ui-rules` §8): one cell, no grid, the
-//     same panel. The grid appears when there is a grid; a bench day of single
-//     runs is listed, not apologised for.
+// Results use the run index and selected record to show identities, grid, summary,
+// node values, flags, files and provenance (`docs/service-contract.md` §6). They
+// never parse filenames or open HDF5. Every selection fetches the same record shape
+// for session and journal runs. The stream updates active row state; park triggers
+// index refresh and completes the open record. Manual runs retain the same result
+// treatment (`docs/ui-rules.md` §8).
 
 import { h, fill, keyed } from '../lib/dom.js';
 import * as fmt from '../lib/format.js';
@@ -48,7 +28,10 @@ export default {
     let recordStatus = '';
     let rerunState = null;
     let disposed = false;
-    /** The newest request wins: a click during a fetch must not be answered by the earlier one. */
+    /**
+     * Only the latest selection request applies; an earlier response cannot replace a
+     * later choice.
+     */
     let recordRequest = 0;
 
     const body = h('div.results');
@@ -101,8 +84,8 @@ export default {
       if (disposed || mine !== recordRequest) return;
       if (got) {
         record = got;
-        // The node stays selected across a re-read of the same run; a new run
-        // opens on its first grid cell, or its first node.
+        // Refetch preserves node selection in the same run. Selecting another run
+        // opens its first grid cell or node.
         const nodes = moduleNodes(record);
         if (!nodes.some((n) => n.node_path === selectedNode)) {
           const cell = nodes.find((n) => GRID_MODULES.has(n.module));
@@ -116,9 +99,9 @@ export default {
       if (runId === selectedRun && record && record.run_id === runId) return;
       selectedRun = runId;
       rerunState = null;
-      // The previous run's grid and export button must not stay under the
-      // newly highlighted row while its record is asked for -- or for ever,
-      // if the request fails. Nothing on the right until the answer.
+      // Changing run selection clears the prior grid and export button while
+      // fetching. Otherwise a failed request could leave another run's results
+      // beneath the selected row.
       record = null;
       loadRecord(runId);
     }
@@ -132,9 +115,9 @@ export default {
     // -- actions ---------------------------------------------------------
 
     /**
-     * R2·3's "Re-queue this cell": one manual run of the node's module with
-     * its own overrides. Not a pipeline: the temperature and the level were a
-     * loop's to bind, and a manual run has no loop — the caption says so.
+     * Re-queue starts one manual module run using node overrides. It does not
+     * recreate containing loops, so the caption states the missing temperature and
+     * illumination bindings.
      */
     let submitting = false;
     async function rerun(node, params) {
@@ -223,18 +206,16 @@ export default {
 
     // -- the store -------------------------------------------------------
 
-    /** Which runs this view has seen park, so each park re-reads once. */
+    /** The set records park refreshes so each run triggers one reread. */
     const parkedSeen = new Set();
     for (const id of store.getState().order) {
       if (store.getState().runs[id].parked_at) parkedSeen.add(id);
     }
     const off = store.subscribe((state) => {
-      // A run parking is the index changing and, when it is the open run,
-      // the record completing. Everything else on the stream is a state a
-      // row reads off `live`, which `render` already does. Read off the
-      // records rather than off `lastFrame`: the store folds a batch per
-      // animation frame, and the frame that parked a run is rarely the last
-      // one in its batch.
+      // Park refreshes the index and completes the selected record. Other events
+      // already update rows through `live`. Detection reads records rather than
+      // `lastFrame` because animation-frame batches can place park before their final
+      // event.
       let refetch = false;
       for (const id of state.order) {
         const run = state.runs[id];

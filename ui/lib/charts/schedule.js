@@ -1,28 +1,9 @@
-// The run as a length of time — `ch-schedule` from R3·3, and the fifth chart
-// component.
-//
-// The design draws it as alternating blocks: the cryostat settling in grey,
-// the measuring in accent, one pair per temperature, over a wall clock that
-// ends at `finish 01:36 · 4 h 32`. Two things it draws that this cannot, and
-// both are the same fact:
-//
-//   * **a settle nobody has measured has no width.** The artboard's own table
-//     shows `—` for the first temperature, and `pipeline.estimate` refuses to
-//     invent one ("Never invent a settle time"). A block drawn at the median
-//     of the others would be this file guessing at the slowest thing in the
-//     system by three orders of magnitude (`ui-rules` §5: 14 min to 2 h). So
-//     an unmeasured settle is **hatched, and takes no time on the axis** — the
-//     mark `lib/charts/loops.js` already uses for *not acquired* — and the
-//     note under the bar says the whole thing is a floor. The `hold_s` beside
-//     it is drawn at its width, because that one is a number the tree typed.
-//   * **there is no clock on a lower bound.** `cost.finish_at` is `null`
-//     exactly when `lower_bound` is set, so the axis is elapsed time from
-//     Start, and the wall clock appears only when the cost stopped being a
-//     floor. A `finish 01:36` under a number that is "at least" is a promise
-//     the run cannot keep.
-//
-// The model is a pure function of `tree.timeline()` and the cost; the DOM is
-// `charts/frame.js`, as it is for the other four.
+// The schedule shows settling and measurement as time blocks. Unknown settling time
+// has no duration on the axis; a visible hatch marks its location without inventing a
+// median. Known `hold_s` retains its duration. The estimate is then a lower bound and
+// has no wall-clock finish (`docs/service-contract.md` §7). Temperature settling
+// dominates the cost, taking 14 min to 2 h on this bench (`docs/ui-rules.md` §5). The
+// pure model consumes `tree.timeline()` and cost data; the shared frame renders it.
 
 import * as scale from '../scale.js';
 import * as fmt from '../format.js';
@@ -32,29 +13,21 @@ import { layout } from './frame.js';
 const CAPTION_PX = 34;
 
 /**
- * The width a settle nobody has measured is drawn at.
- *
- * Not zero, because a mark with no width is not a mark; not the median of the
- * others, because that would be this file guessing at the slowest thing in
- * the system. Six pixels of hatch, at the place the time will go, and the
- * note under the bar says how many of them there are.
+ * The constant gives an unknown settle a visible six-pixel hatch without assigning it
+ * a duration. The note counts these marks; using another settle's median would invent
+ * time.
  */
 export const UNKNOWN_PX = 6;
 
 /**
- * `{blocks, cost}` → a chart model. `blocks` is `tree.timeline(scheduleTree)`
- * and `cost` is `tree.costModel(validation.cost)`.
- *
- * The x domain is the cost's own `total_s` where the two agree, and the sum
- * of the blocks otherwise — they disagree only while a validate is in flight,
- * and a bar drawn to a total from the previous tree would be the one thing on
- * this screen that silently described something else.
+ * The model renders `tree.timeline(scheduleTree)` blocks with
+ * `tree.costModel(validation.cost)`. Its x domain uses `total_s` when it agrees with
+ * the blocks, otherwise their sum. During validation, the cost can describe a
+ * different tree and must not silently determine the current bar's length.
  */
-// **Not one of `frame.ASPECT`'s three shapes, on purpose.** Those size a plot
-// from its width; this is a *band* whose height is set by what surrounds it —
-// the temperature labels above and the clock axis below — and whose blocks are
-// the accent colour, which `ui-rules` §3 will not have filling a card. So the
-// height stays fixed and only the length follows the container.
+// The schedule is a fixed-height band rather than an `ASPECT` panel. Labels and the
+// clock set its height; only its length follows the container. Full-height accent
+// blocks would dominate the card (`docs/ui-rules.md` §3).
 export function scheduleModel({ blocks, cost, width = 900, height = 118, now = null } = {}) {
   const list = blocks || [];
   const spans = list.map((block) => ({
@@ -62,9 +35,8 @@ export function scheduleModel({ blocks, cost, width = 900, height = 118, now = n
     settle: block.settle_s || 0,
     hold: block.hold_s || 0,
     measuring: block.measure_s || 0,
-    // Only a temperature loop settles. A stretch of measuring outside one has
-    // no settle to be unknown about, and hatching it would say the console
-    // could not tell how long something takes that takes no time at all.
+    // Only temperature loops have settling time. Measurement outside one must not
+    // receive an unknown-settle hatch.
     unknownSettle: block.settles !== false
       && (block.settle_s === null || block.settle_s === undefined),
   }));
@@ -83,11 +55,8 @@ export function scheduleModel({ blocks, cost, width = 900, height = 118, now = n
     };
   }
 
-  // A band, not a panel filling the card. The blocks are the accent colour,
-  // and `ui-rules` §3 reserves that intensity for one thing on screen at a
-  // time — nine full-height bars of it read as nine alerts. The artboard
-  // gives the bar a quarter of its height for the same reason, and the
-  // temperature labels need the room above it.
+  // The accent band leaves space for temperature labels and avoids making every block
+  // look like an alert (`docs/ui-rules.md` §3).
   const frame = layout({
     width, height,
     panels: [{ key: 'run', weight: 1 }],
@@ -102,10 +71,8 @@ export function scheduleModel({ blocks, cost, width = 900, height = 118, now = n
   const rules = [];
   let at = 0;
   for (const span of spans) {
-    // The settle and the hold are two different kinds of waiting and only one
-    // of them is unknown: `hold_s` is a number the tree typed, and drawing it
-    // hatched alongside the settle would say the console cannot tell how long
-    // a sixty-second dwell takes.
+    // `hold_s` is a known dwell duration. It must not share the hatch for unknown
+    // settling time.
     if (span.unknownSettle) {
       shades.push({ x: X(at), w: UNKNOWN_PX, hatch: true, colour: 'rule', opacity: 1 });
     } else if (span.settle > 0) {
@@ -139,8 +106,8 @@ export function scheduleModel({ blocks, cost, width = 900, height = 118, now = n
     at += span.measuring;
   }
 
-  // The x axis: elapsed time from Start, and the wall clock only where the
-  // cost stopped being a floor (`finish_at` is null exactly when it has not).
+  // The axis uses elapsed time from Start. A wall-clock finish appears only for an
+  // estimate that is not a lower bound (`docs/service-contract.md` §7).
   const lower = Boolean(cost && cost.lower_bound);
   const finishAt = cost ? cost.finish_at : null;
   const startAt = finishAt ? finishAt - total : null;
@@ -169,9 +136,8 @@ export function scheduleModel({ blocks, cost, width = 900, height = 118, now = n
     key: 'schedule',
     width: frame.width, height: frame.height, margin: frame.margin,
     cursor: false,
-    // No panel note: the setpoint labels sit along the top of the bar, and a
-    // caption in the corner lands on the last one of them. The counts belong
-    // under the bar with the rest of the prose.
+    // A panel note would collide with the last setpoint label above the bar. Counts
+    // belong below it.
     panels: [{ ...panel, shades, marks, rules }],
     x: { ticks, label: startAt ? 'clock' : 'elapsed / from Start' },
     legend: [
@@ -183,7 +149,9 @@ export function scheduleModel({ blocks, cost, width = 900, height = 118, now = n
   };
 }
 
-/** Round hours or half-hours where the run is long, minutes where it is not. */
+/**
+ * The tick step uses hours or half-hours for long runs and minutes for shorter ones.
+ */
 function tickValues(total) {
   const step = total > 4 * 3600 ? 3600
     : total > 3600 ? 1800

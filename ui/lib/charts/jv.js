@@ -1,41 +1,19 @@
-// The J–V sweep: `ch-jv` and `ch-jvdark`, as one component.
-//
-// Almost everything here is a unit decision, because that is where this plot
-// goes wrong:
-//
-//   * **`density` is mA/cm² on the wire.** The factor of a thousand belongs to
-//     the quantity and is applied once, where the pixel area is
-//     (`experiment.jv.current_density`), so this chart converts nothing and
-//     picks no prefix. A client that applies it again is out by a thousand in
-//     the other direction (`docs/ui-plan.md`, what M0 taught M3).
-//   * **`pixel_area_cm2 = 0` means there is no density.** The service sends
-//     `null` and the axis becomes amps, rather than defaulting to 1 cm² and
-//     mislabelling A as mA/cm² (`ui-rules` §6).
-//   * **`metrics.jsc` is in amps**, not a density — it is interpolated from
-//     `current`, whatever area the run was given. It is a number beside the
-//     chart, never a point on the mA/cm² axis.
-//   * **the metrics are interpolated, not measured**, so they say so.
-//
-// And one layout decision: **the −4 V start is a layout problem, not a
-// cropping problem** (`ui-rules` §4). The real sweep runs from −4 V, so the
-// reverse arm is four times the power quadrant, and an axis that starts at
-// −0.2 V because that is where the interesting part is has thrown away the
-// part that shows the shunt.
+// The J–V chart uses `density` in mA/cm² without conversion. With no device area,
+// `density` is `null` and the axis uses A. `metrics.jsc` remains in A because it is
+// interpolated from `current`, so it cannot sit on a density axis
+// (`docs/service-contract.md` §6). Metrics are labelled derived. The −4 V start
+// remains visible: cropping the reverse arm hides the shunt even though it occupies
+// four times the power quadrant (`docs/ui-rules.md` §§4, 6).
 
 import * as scale from '../scale.js';
 import * as fmt from '../format.js';
 import { layout, axisTicks, heightFor, ASPECT } from './frame.js';
 
 /**
- * The illumination ramp: dim → bright, light → dark, one hue.
- *
- * The design's five values are `#bab6b6 · #9b9797 · #ff9783 · #ff563c ·
- * #ae1800`, a grey pair spliced to a red trio. Measured in OKLab their
- * lightnesses are 0.78, 0.68, 0.78, 0.68, 0.48 — the first and third are the
- * *same* step, and so are the second and fourth, so five levels cannot be
- * ordered by eye and collapse into three in greyscale or in print. A
- * sequential encoding has one job, which is to be ordered, so this is the red
- * half of the same ramp continued: strictly darkening, 0.78 → 0.48.
+ * The illumination ramp darkens monotonically from dim to bright so levels remain
+ * ordered in greyscale and print. The reference palette's OKLab lightnesses, measured
+ * on this bench, are 0.78, 0.68, 0.78, 0.68 and 0.48, which collapse five levels into
+ * three. This ramp spans 0.78 to 0.48 without repeating lightness.
  */
 export const RAMP = ['#ff9783', '#ff563c', '#ec3013', '#cc2408', '#ae1800'];
 
@@ -62,10 +40,8 @@ function mix(a, b, t) {
 
 /** Which array a curve is plotted from, and what the axis is then called. */
 export function currentOf(curves) {
-  // Mixed is not a chart. One curve in mA/cm² and one in A on the same axis
-  // would be two quantities sharing a scale, so if any curve has no density —
-  // which is what a run with no pixel area sends — every curve is drawn in
-  // amps and the axis says so.
+  // All curves share one quantity and unit. If any curve lacks density because its
+  // area is absent, every curve uses A; mixing A and mA/cm² on one scale is invalid.
   const all = curves.length > 0 && curves.every((c) => Array.isArray(c.density) && c.density.length);
   return all
     ? { key: 'density', label: 'J / mA cm⁻²', magnitude: '|J| / mA cm⁻²', format: (v) => fmt.density(v), unit: 'mA/cm²' }
@@ -73,12 +49,11 @@ export function currentOf(curves) {
 }
 
 export function jvModel(curves, options = {}) {
-  // `planned` is the sweep's [start, stop]: with it the x axis is the range
-  // asked for, so a curve drawn point by point grows into a fixed frame
-  // instead of the frame growing with it.
+  // `planned` supplies the requested voltage limits so incoming points fill a stable
+  // frame rather than continually extending the axis.
   const { width = 530, height = null, log = null, planned = null } = options;
-  // A J–V is read for its shape — the power quadrant's corner, where the
-  // reverse arm flattens — so it takes `curve`, not a trace's length.
+  // A J–V uses `curve` aspect because the power quadrant and reverse-bias slope are
+  // read by shape.
   const panelSpec = [{ key: 'jv', weight: 1 }];
   const jvMargin = { left: 58, bottom: 28, top: 18 };
   const jvHeight = height ?? heightFor(width, panelSpec, { margin: jvMargin, aspect: ASPECT.curve });
@@ -86,10 +61,9 @@ export function jvModel(curves, options = {}) {
   if (!list.length) {
     return {
       key: 'jv',
-      // The slot holds the sweep's own shape before the sweep: one panel over
-      // the voltage axis, so the card does not change geometry when the first
-      // point lands. The y label is generic because whether it is A or
-      // mA cm⁻² depends on a pixel area this run has not declared yet.
+      // The empty slot reserves the sweep's panel and voltage axis to avoid a layout
+      // change at the first point. Its y label stays generic before the run supplies
+      // an area and therefore a unit.
       absent: {
         text: 'no curves yet — a sweep draws here point by point',
         detail: null,
@@ -108,20 +82,15 @@ export function jvModel(curves, options = {}) {
   const quantity = currentOf(list);
   const values = list.map((c) => c[quantity.key]);
 
-  // A sweep that is dark all through is a leakage measurement, and leakage is
-  // read over decades: that is what `ch-jvdark` draws. `dark` is `true`,
-  // `false` or **`null`** — a `jv` node sweeps under whatever light it finds
-  // and labels the curve from a read-back, so `null` is "the bench could not
-  // say", which is not the same as "not dark" and must not silently pick the
-  // log axis for a curve that may have a photocurrent in it.
+  // A fully dark sweep uses a logarithmic leakage axis. `dark` can be `true`, `false`
+  // or `null`; an unreadable illumination state must not select a dark axis for a
+  // curve that can contain photocurrent.
   const allDark = list.every((c) => c.dark === true);
   const useLog = log === null ? allDark : log;
 
-  // The ramp encodes the **illumination level**, so it is ranked by level and
-  // not by curve. With `both_directions` a level produces two curves, and one
-  // slot each made a single level's forward and reverse arms the brightest and
-  // the darkest of the ramp — two illuminations that never existed. The
-  // reverse arm is already told apart by its dash.
+  // Ramp position encodes LED level, so both directions at one level share a colour.
+  // Ranking curves separately would imply different illumination. Dashes distinguish
+  // the return sweep.
   const light = list.filter((c) => c.dark !== true);
   const levels = [...new Set(light.map((c) => c.led_level_v ?? null))]
     .sort((a, b) => (a ?? 0) - (b ?? 0));
@@ -146,11 +115,9 @@ export function jvModel(curves, options = {}) {
   } else {
     const full = scale.extent(values, { includeZero: true, pad: 0.08 }) || [-1, 1];
     const framed = powerQuadrant(list, quantity.key);
-    // **Crop in y, never in x.** Forward injection past V_oc runs to hundreds
-    // of mA/cm² and, given the whole axis, flattens the power quadrant — the
-    // part of a J–V anyone reads — into a line on the zero. The design crops
-    // the same way and says so with a clip path; what must not be cropped is
-    // the −4 V start, which is a layout problem (`ui-rules` §4) and is on x.
+    // The y window crops forward injection, which can reach hundreds of mA/cm² and
+    // flatten the power quadrant on a full scale. The x axis retains the −4 V start
+    // to preserve the reverse arm (`docs/ui-rules.md` §4).
     const cropped = framed && (full[1] - full[0]) > (framed[1] - framed[0]) * 2;
     Y = scale.linear(cropped ? framed : full, [rect.y + rect.h, rect.y]);
     Y.cropped = cropped ? countOutside(values, framed) : 0;
@@ -167,29 +134,24 @@ export function jvModel(curves, options = {}) {
       ? 'ink'
       : ramp(levels.indexOf(curve.led_level_v ?? null), Math.max(1, levels.length));
     const label = curveLabel(curve);
-    // The sweep in flight (`JVPoint`s folded by the store): the same colour
-    // as the curve it will become, dotted so it reads as unfinished, and a
-    // dot on the last point read, which is where the instrument is now.
+    // The incomplete sweep shares its completed curve's colour but uses dots to
+    // indicate progress. The last-point marker identifies the instrument's current
+    // position.
     const partial = curve.partial === true;
-    // The **key** is the identity, and forward and reverse at one level share
-    // a label: keyed on that, the renderer built two crosshair dots with the
-    // same `data-series`, `attachCursor`'s `find` updated only the first, and
-    // it carried the reverse arm's value under the forward arm's colour.
+    // Forward and reverse sweeps share a label but need distinct keys. Duplicate
+    // `data-series` values would make the crosshair's first match show one
+    // direction's value under the other's colour.
     series.push({
       key: `${label}·${curve.direction || 'forward'}${partial ? '·partial' : ''}`,
       label: partial ? `${label} · sweeping` : label,
       colour,
       width: 1.5,
-      // The return leg is a **second sweep**, not the continuation of the
-      // first: it is measured after the forward one, on a device the forward
-      // one has just been through. Drawn as one unbroken line the hysteresis
-      // reads as noise.
+      // The return leg is a separate sweep on a device exposed to the forward sweep.
+      // A continuous line would make hysteresis look like noise.
       dash: partial ? '2 3' : curve.direction === 'reverse' ? '4 2' : null,
-      // `Math.abs(null)` is **0**, and 0 is finite: mapped straight, a sample
-      // the instrument never returned became a point sitting on the log
-      // floor with the curve drawn through it — a leakage measurement out of
-      // an absence. `linePath` lifts the pen for anything non-finite, so the
-      // absolute value is taken only where there is a value to take it of.
+      // `Math.abs(null)` produces finite zero, which would invent a leakage point on
+      // the log floor. Only numeric samples take the absolute value; `linePath`
+      // breaks at missing samples.
       d: scale.linePath((i) => X(curve.voltage[i]), useLog ? y.map(magnitude) : y, (v) => v, Y),
       at: (v) => {
         const i = nearestVoltage(curve.voltage, v);
@@ -210,11 +172,9 @@ export function jvModel(curves, options = {}) {
         dots.push({ x: X(curve.voltage[last]), y: Y(yv), colour, r: 3 });
       }
     }
-    // Direct labels, on four curves or fewer: past that they collide with
-    // each other and the legend is the honest place for identity. At the
-    // sweep's **start**, where the curves are a whole J_sc apart — at the
-    // finish they are all in forward injection, on top of one another, and
-    // half of them are off the top of a cropped axis.
+    // Direct labels fit at most four curves; larger sets use the legend. Labels sit
+    // at the sweep start where curves differ by J_sc. Forward injection crowds their
+    // ends and can lie above the y window.
     if (list.length <= 4) {
       marks.push({
         x: X(curve.voltage[0]) + 5,
@@ -248,19 +208,17 @@ export function jvModel(curves, options = {}) {
     x: { scale: X, ticks: axisTicks(X, { count: 6 }), label: 'V / V', format: (v) => fmt.volts(v, { decimals: 3 }) },
     legend: legend.length > 1 ? legend : [],
     readout: '',
-    // No metrics for the sweep in flight: a V_oc interpolated on half a
-    // curve is a number nobody measured.
+    // Incomplete sweeps have no metrics because a partial curve cannot support the
+    // completed sweep's V_oc.
     metrics: metricsOf(list.filter((c) => c.partial !== true), quantity),
     notes: notes(list, quantity, { useLog, clamped, allDark, cropped: Y.cropped || 0 }),
   };
 }
 
 /**
- * The window a J–V is read in: a couple of J_sc below zero and a little above.
- *
- * Taken from the curve itself — |J| where the sweep crosses 0 V — rather than
- * from `metrics.jsc`, which is in amps and would need the area back to be
- * comparable with a density axis.
+ * The helper selects the J–V y window around the power quadrant. It uses the curve's
+ * magnitude at 0 V because `metrics.jsc` is in A and would require an area to compare
+ * with a density axis.
  */
 function powerQuadrant(list, key) {
   let reference = 0;
@@ -271,10 +229,9 @@ function powerQuadrant(list, key) {
     if (i >= 0 && Number.isFinite(y[i])) reference = Math.max(reference, Math.abs(y[i]));
   }
   if (!(reference > 0)) return null;
-  // A little over one J_sc of headroom below, and enough above for the
-  // injection to be seen turning up before it is clipped. Wider than this and
-  // a single curve sits in the top third of an empty panel; narrower and the
-  // reverse-bias slope — the shunt — has nowhere to show.
+  // Headroom exposes injection before clipping and leaves room for the reverse-bias
+  // slope. A wider window compresses the curve into the panel's top third; a narrower
+  // one hides the shunt.
   return [-1.6 * reference, 0.6 * reference];
 }
 
@@ -286,7 +243,7 @@ function countOutside(values, [lo, hi]) {
   return n;
 }
 
-/** `|v|`, and `null` for anything that was not a number — see the curve's `d`. */
+/** The helper returns absolute values for numbers and `null` for missing samples. */
 function magnitude(v) {
   return Number.isFinite(v) ? Math.abs(v) : null;
 }
@@ -326,12 +283,9 @@ function sweepNote(list, xDomain) {
 }
 
 /**
- * The interpolated metrics, labelled as what they are.
- *
- * `jsc` keeps its amps. It is the one number here the mA/cm² rule does not
- * reach, because it is interpolated from `current` rather than from `density`,
- * and printing it as a density would be inventing an area the run may not have
- * been given (`ui-rules` §6, `docs/service-contract.md` §`/runs/{id}/data`).
+ * The metrics panel labels interpolated values as derived. `jsc` retains A because it
+ * comes from `current`, not `density`; reporting density would require an area the
+ * run may lack (`docs/service-contract.md` §6; `docs/ui-rules.md` §6).
  */
 export function metricsOf(list, quantity) {
   const out = [];
@@ -353,7 +307,7 @@ export function metricsOf(list, quantity) {
   return { entries: out, note: 'derived · interpolated from the curve, not measured points' };
 }
 
-/** A power at the maximum power point: µW for a small cell, not `0.000148 W`. */
+/** Maximum-power-point values use readable prefixes, such as µW for a small cell. */
 function watts(value) {
   if (value === null || value === undefined || Number.isNaN(value)) return fmt.ABSENT;
   if (value === 0) return '0 W';

@@ -1,35 +1,22 @@
-// The rig tab's two drawings, ported from the design pack as they stand.
-//
-// `docs/ui-plan.md`'s component table lists `ch-rig` as "static, reusable as
-// it stands", and R3·4 puts it beside `ch-timing` — the one shot at four
-// scales, with the chain timing measured on 2026-09-01. Both are reference,
-// not a work surface: the numbers in them are the rig day's, baked in, and
-// they are meant to be read against the live drawing on the `bace` card
-// (`lib/charts/timing.js`), which is the code's own arithmetic over the form.
-//
-// The source is `docs/design/bace-charts-r3.js`, which builds its SVG as
-// markup strings inside a custom element. That is kept: the geometry is the
-// design's, hand-placed, and re-expressing three hundred coordinates through
-// `svg.s()` would be a transcription with nothing to check it against. What
-// changed is only the wrapper — a pure function returning the markup, so it
-// can be tested without a browser, and `root()` from `lib/svg.js` around it
-// so it resizes with its card like every other chart here.
-//
-// The palette is the console's own (`style.css` `:root`), written as hex
-// because `<marker>` fills and `stroke-opacity` do not take `var()` in every
-// engine the lab PC might run.
+// The rig drawings provide a static reference for the form-driven timing diagram.
+// Their values describe measurements on this bench rather than current form values.
+// Hand-placed markup preserves the geometry without translating hundreds of
+// coordinates. A pure markup function supports tests without a browser;
+// `ui/lib/svg.js` wraps it for responsive sizing. Palette colours use hex because
+// marker fills and `stroke-opacity` do not support CSS variables in every supported
+// browser.
 
 import { root } from '../svg.js';
 
 const F = "'IBM Plex Mono',monospace";
 const FS = "'IBM Plex Sans',sans-serif";
-const A = '#ec3013';    // --accent
-const AD = '#ae1800';   // --accent-dark
-const K = '#201e1d';    // --ink
-const G = '#7d7979';    // --grey
-const L = '#d7d3d3';    // --rule
-const LL = '#eae7e7';   // --fill
-const W = '#fff';       // --paper
+const A = '#ec3013';    // `--accent`
+const AD = '#ae1800';   // `--accent-dark`
+const K = '#201e1d';    // `--ink`
+const G = '#7d7979';    // `--grey`
+const L = '#d7d3d3';    // `--rule`
+const LL = '#eae7e7';   // `--fill`
+const W = '#fff';       // `--paper`
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const t = (x, y, s, o) => `<text x="${x}" y="${y}" style="font:${(o && o.f) || `400 9.5px ${F}`};fill:${(o && o.c) || G}"`
@@ -58,7 +45,7 @@ function box(x, y, w, h, lines, o) {
   return s;
 }
 
-/** The chain: who is wired to what. The design's `ch-rig`, 960 × 470. */
+/** The chain diagram shows instrument wiring in a 960 × 470 reference layout. */
 export const CHAIN_SIZE = { width: 960, height: 470 };
 
 export function chainMarkup() {
@@ -104,7 +91,7 @@ export function chainMarkup() {
   s += path('M264 264H512', K, 1.6, null, { m: 'ak' }); s += t(300, 260, 'DC', { f: `400 9px ${FS}` });
   // relay -> device
   s += path('M664 255H732', K, 1.8, null, { m: 'ak' });
-  // device -> R_sense -> scope
+  // The signal path runs from the device through R_s to the digitiser.
   s += path('M839 260V298', K, 1.6, null, { m: 'ak' });
   s += path('M734 325H266', K, 1.6, null, { m: 'ak' });
   s += t(600, 320, 'I(t) → CHAN1', { f: `400 9px ${FS}` });
@@ -112,15 +99,17 @@ export function chainMarkup() {
   return s;
 }
 
-/** One shot at four scales, chain timing measured 2026-09-01. The design's `ch-timing`, 1000 × 760. */
+/**
+ * The reference diagram shows one shot at four scales in a 1000 × 760 layout. Chain
+ * timing is measured on this bench.
+ */
 export const SHOT_SIZE = { width: 1000, height: 760 };
 
 export const AXES = ['vpre', 'delay_ns', 'vcoll'];
 
 export function shotMarkup(axis = 'vpre') {
-  // The swept axis is in the accent, the rest ghosted — `ui-rules` §3, as
-  // the design drew it. An axis the console has never heard of highlights
-  // nothing rather than throwing.
+  // The swept axis uses the accent and other quantities stay muted
+  // (`docs/ui-rules.md` §3). An unrecognized axis highlights nothing.
   const hv = axis === 'vpre', hd = axis === 'delay_ns', hc = axis === 'vcoll';
   let s = '';
   // A · one shot

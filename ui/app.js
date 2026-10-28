@@ -1,9 +1,6 @@
-// The shell: the store, the socket, the four tabs and the hash router.
-//
-// Hash routing, not paths: `--ui DIR` is a `StaticFiles(html=True)` mount with
-// no SPA fallback, so `/ui/bench` is a 404 and `#/bench` is not. The views are
-// stubs in M0 — `docs/ui-plan.md` cuts the work vertically, and what M0 owes
-// is the event layer underneath them, proven against real frames.
+// The console shell connects the store, socket, tabs and hash router. The `--ui DIR`
+// static mount has no SPA fallback, so `/ui/bench` returns 404. Hash routes keep
+// navigation within the served page.
 
 import { createApi } from './lib/api.js';
 import { createStore, currentRun } from './lib/store.js';
@@ -31,19 +28,15 @@ const api = createApi({});
 const store = createStore({ schedule: (fn) => requestAnimationFrame(fn) });
 
 const stream = createStream({
-  // Every connect, not only the first: the power panel's trace and its
-  // switch are re-asserted against the service each time (`syncPower`).
+  // Each connection calls `syncPower` to restore the requested monitor state and
+  // merge the service's trace.
   onHello: (frame) => { store.applyHello(frame); syncPower(); },
   onFrame: (frame, meta) => { store.applyFrame(frame); afterFrame(frame, meta || {}); },
   onStatus: (status) => store.applyConnection(status),
   onSessionChange: ({ from, to }) => {
-    // The service restarted. Everything the old session numbered is gone;
-    // the new `Hello` rebuilds the bench and the ring supplies the rest.
-    //
-    // The catalogue is not on either, and `store.reset()` has just dropped it
-    // — so without this the bench tab reads "GET /modules has not answered"
-    // until some later run parks and the watch asks for it. Which is correct
-    // and useless: a console with no cards in it, on a bench that is fine.
+    // A session change invalidates the numbered stream. `Hello` restores the bench
+    // and the ring restores events. Neither includes the catalogue, which
+    // `store.reset()` clears, so the cards need a separate fetch.
     console.info(`service session ${from} -> ${to}; rebuilding`);
     store.reset();
     watch.want({ modules: true });
@@ -60,8 +53,7 @@ const viewEl = h('main.view');
 const stripEl = h('div.strip');
 const barEl = h('footer.stream-bar');
 
-// The assistant hangs beside every tab, from the bar's `ask` chip
-// (`lib/assistant.js`).
+// The bar's `ask` control opens the assistant beside every tab.
 let askOpen = false;
 const assistant = createAssistantPanel({
   api, onChange: (open) => { askOpen = open; renderChips(store.getState()); },
@@ -83,22 +75,19 @@ function show() {
   const name = route();
   const { query } = parseHash(location.hash);
   if (name === mountedRoute) {
-    // Same tab, new query — `#/bench?module=bace` from a node form while
-    // the bench is already up. The view answers it without remounting.
+    // A query change on the active tab reaches the view without remounting it.
     if (mounted && mounted.focus) mounted.focus(query);
     return;
   }
-  // The bookkeeping first, and the tabs with it: the hash has already moved,
-  // so whatever a view does on the way down or up, the shell has to agree
-  // with the address bar afterwards. `swapView` is why (`lib/route.js`).
+  // Routing state and tab selection must match the address bar even if `swapView`
+  // encounters a view error.
   const previous = mounted;
   mounted = null;
   mountedRoute = name;
   viewEl.scrollTop = 0;
   renderTabs();
-  // Park is the strip's alone: the strip is pinned to the foot of the window
-  // and the strip is where it arms, so no view is handed it and none offers a
-  // second one.
+  // Park belongs to the strip pinned below every view. A single confirmation control
+  // avoids conflicting armed states.
   mounted = swapView(previous,
     () => BY_ROUTE[name].mount(viewEl, { store, api, stream, fmt, notify, query }));
 }
@@ -112,13 +101,9 @@ function renderTabs() {
 }
 
 /**
- * The bar's chips. **The trigger chain is not among them** (#42): it was in
- * the bar, on the rail cells as a ⚠, and on the strip with the button that
- * fixes it — one state on three surfaces, which is three places to reconcile
- * and two that can only say something is wrong. The strip is the one that
- * carries the count *and* the fix, and it is at the foot of every view, so
- * the bar's copy went and the rail's ⚠ stays as what it always was: evidence
- * on the value it is about.
+ * The bar renders the session controls. The strip carries the trigger-chain count and
+ * remedy; the rail marks the affected value. Repeating the count in the bar adds
+ * another place to reconcile the same state.
  */
 function renderChips(state) {
   const session = state.session || {};
@@ -127,9 +112,7 @@ function renderChips(state) {
                  session.mode, session.fast, currentRun(state) ? runLabel(state) : null,
                  state.queue.length, state.benchState, askOpen, quitArmed];
   keyed(chipsEl, JSON.stringify(model), () => [
-    // The identity is a control, not a label. It said `no sample named` for
-    // as long as the console has existed and gave the operator nowhere to go
-    // with that; now the sentence is the button that answers it.
+    // The identity text opens its editor so an unnamed sample has a visible remedy.
     h('button', {
       class: 'chip ident' + (ident.unnamed || ident.hazards.length ? ' bad' : '') + (identOpen ? ' on' : ''),
       title: ident.unnamed
@@ -157,11 +140,9 @@ function renderChips(state) {
 }
 
 /**
- * The service's off switch. It ran in a terminal, and Ctrl-C there was the
- * way to end it; started from `BACE.pyw` it has no window, so the console is
- * where it ends. Always two clicks: the second, within six seconds, aborts
- * whatever runs and parks the bench. Closing the window is not this — the
- * service and its run go on, and the next `BACE.pyw` reconnects.
+ * The console can end a service launched without a terminal by `BACE.pyw`. Two clicks
+ * within six seconds confirm an abort and park. Closing the browser leaves the
+ * service and its run active; `BACE.pyw` reconnects to them.
  */
 let quitArmed = false;
 let quitArmedTimer = null;
@@ -186,10 +167,9 @@ async function shutDown() {
   const heading = h('h1', 'The service is shutting down …');
   const body = h('p', 'It aborts any run, parks the bench and closes the journal, then exits.');
   document.getElementById('app').replaceChildren(h('div.ended', h('p.wordmark', 'bace'), heading, body));
-  // The 202 says the exit was requested, not that the bench is parked: that
-  // happens as the process ends, and a run inside an instrument call that
-  // does not return leaves it unparked. So the page waits for the process to
-  // go, and says what it cannot see rather than claiming it.
+  // HTTP 202 acknowledges the exit request, not park. An instrument call that does
+  // not return can prevent park. The page waits for process exit and reports the
+  // limit of what it can observe.
   const gone = await serviceGone(SHUTDOWN_WAIT_MS);
   heading.textContent = gone ? 'The service has stopped.' : 'The service has not exited yet.';
   body.textContent = gone
@@ -200,7 +180,9 @@ async function shutDown() {
       + 'runs\\logs\\ says what it is waiting for.';
 }
 
-/** The worker's abort (5 s) and its join (60 s) bound how long an exit takes. */
+/**
+ * The worker permits 5 s for abort and 60 s for joining during exit.
+ */
 const SHUTDOWN_WAIT_MS = 75000;
 
 async function serviceGone(limitMs) {
@@ -217,19 +199,10 @@ async function serviceGone(limitMs) {
 }
 
 /**
- * The identity panel — `lib/identity.js` for why it exists.
- *
- * Open only when asked: the block is set once per device and read constantly,
- * so the bar shows it and the panel edits it. `ui-rules` §1's rule against
- * progressive disclosure is about what the operator needs *while measuring*;
- * five fields nobody touches after the first minute are not that, and the
- * value itself never leaves the bar.
- *
- * It opens itself once when nothing names the device — a console that knows
- * the runs are about to be filed under no name and waits to be asked is the
- * finding this fixes, not a smaller version of it. Once, and never again in
- * this session: a panel that reopened on every reload would be a dialogue,
- * and `--sim` benches genuinely have nothing mounted.
+ * The identity panel edits the device metadata shown in the bar. These fields change
+ * infrequently, so the values stay visible while the editor opens on request. An
+ * unnamed device opens the panel once per session to prevent anonymous filing.
+ * Reopening on every reload would obstruct simulated benches with no device mounted.
  */
 let identOpen = false;
 let identStatus = null;
@@ -260,11 +233,10 @@ function toggleIdent() {
 }
 
 /**
- * One key, merged in the service. The answer carries the whole session block,
- * so the store takes it from there rather than waiting for the `SampleNamed`
- * to come back round the socket — and the run holding the bench, which keeps
- * the identity it was queued under and which the panel has to say out loud or
- * the operator will believe they have just fixed it.
+ * The service merges one identity key and returns the whole session block. Applying
+ * that answer updates the panel without a socket delay. A queued run retains its
+ * captured identity, so the panel must identify the run that does not receive the
+ * edit.
  */
 async function setSample(name, value) {
   identStatus = { level: '', text: `${name} …` };
@@ -286,9 +258,9 @@ async function setSample(name, value) {
 }
 
 /**
- * The chain strip's two actions. Neither is ever taken by the console itself:
- * `ui-rules` §3 — a warn states evidence and never blocks, and the fix is the
- * bench action the check names, which the operator clicks.
+ * The chain strip offers actions for operator confirmation. A warning states evidence
+ * without blocking; the console never performs its remedy automatically
+ * (`docs/ui-rules.md` §3).
  */
 let stripStatus = null;
 let parkArmed = false;
@@ -301,11 +273,9 @@ function drawStrip(state) {
 }
 
 /**
- * What a view says when a call is refused. It goes to the strip, which is at
- * the foot of every view, because that is already where a refusal appears and
- * a second place for the same kind of message is a second place to look. The
- * sentence is the service's own (`error.text`); `checks` is the 422's list,
- * which a refused Start carries and which the operator needs in full.
+ * A refused call appears in the strip below every view, giving refusals one location.
+ * The service supplies `error.text`; a 422 also carries `checks`, which the operator
+ * needs in full.
  */
 function notify(text, level = 'warn', checks = null) {
   stripStatus = { level: level === 'crit' || level === 'bad' ? 'bad' : level, text, checks };
@@ -313,13 +283,8 @@ function notify(text, level = 'warn', checks = null) {
 }
 
 /**
- * Clear the strip's sentence.
- *
- * It is the console's one place for a message and it is replaced only by the
- * next one, so a three-hour-old `queued …` and a refusal the operator has
- * already dealt with both keep reading as news. Dismissing is the operator's,
- * never a timer's: a refusal that faded on its own is what this exists beside,
- * not a milder version of it.
+ * The dismiss action clears the strip's message. Messages persist for the operator to
+ * read and dismiss; a timer could hide a refusal before it is read.
  */
 function dismiss() {
   stripStatus = null;
@@ -327,11 +292,8 @@ function dismiss() {
 }
 
 /**
- * An armed Park disarms itself: it is a confirmation, not a mode.
- *
- * The flag is the shell's and it is drawn in one place, the strip — which is
- * why arming only has to redraw that. It was two, and the second was a copy
- * of the button in a panel that scrolls away.
+ * An armed Park expires because arming is a confirmation, not a mode. The shell owns
+ * the flag and redraws its single control in the strip.
  */
 function armPark(on) {
   parkArmed = on;
@@ -345,16 +307,13 @@ async function fix(name, item) {
   drawStrip(store.getState());
   try {
     const out = await api.action(name);
-    // The action answers with the read-back that followed it, so the chain and
-    // the rail move without waiting for anything else. `readBack`: the run,
-    // the queue and the bench state stay the stream's to say.
+    // The action returns a read-back so the chain and rail update immediately.
+    // `readBack` leaves run, queue and bench state to the stream.
     if (out && out.bench) store.applyBench(out.bench, { readBack: true });
     stripStatus = { level: 'ok', text: `${item.label}: ${describe(out)}` };
   } catch (error) {
-    // 409 is the bench refusing — the LED is on, or a run holds the worker —
-    // and the service says why in a sentence written for this screen, which is
-    // shown as it stands. When the sentence names a remedy, the strip offers
-    // it as its own click rather than performing it.
+    // A 409 can mean the LED is on or a run holds the worker. The strip displays the
+    // service's reason unchanged and offers any remedy as a separate operator action.
     stripStatus = {
       level: 'bad',
       text: error.text || error.message,
@@ -365,10 +324,9 @@ async function fix(name, item) {
 }
 
 /**
- * `result.before` is the read-back's values of what the action changed, which
- * is there so a log can say "33220A :OUTP:POL NORM → INV · by hand" from the
- * journal alone (contract §4). The rail already shows the value now; what the
- * strip adds is what it was.
+ * `result.before` carries the read-back values preceding the action, allowing the
+ * journal to describe the change (`docs/service-contract.md` §4). The strip adds
+ * those values to the current state shown on the rail.
  */
 function describe(out) {
   const before = (out && out.result && out.result.before) || null;
@@ -377,10 +335,9 @@ function describe(out) {
 }
 
 /**
- * Park is allowed at any time, and while a run is active it **aborts that run
- * and cancels the queue** — a person who clicks park wants the bench safe now,
- * not after the runs behind this one. That is not a click to take on a stray
- * mouse, so a busy bench arms the button first and performs it on the second.
+ * Park aborts the active run and cancels the queue to make the bench safe
+ * (`docs/service-contract.md` §4). A busy bench requires two clicks to prevent an
+ * accidental abort.
  */
 async function park() {
   const busy = (store.getState().benchState || 'idle') !== 'idle';
@@ -392,9 +349,8 @@ async function park() {
     const out = await api.action('park');
     if (out && out.bench) store.applyBench(out.bench, { readBack: true });
     stripStatus = out && out.pending
-      // The aborted run is inside a VISA call that outlasted the wait. The
-      // park is not cancelled; it runs when the worker frees, and saying so is
-      // the difference between "nothing happened" and "it is coming".
+      // A blocking VISA call can exceed the wait. Park remains queued for the worker,
+      // so the operator needs to see that it is pending.
       ? { level: '', text: 'park queued behind a run still in a VISA call' }
       : { level: 'ok', text: 'parked' };
   } catch (error) {
@@ -404,9 +360,8 @@ async function park() {
 }
 
 /**
- * The run monitor's three verbs — `docs/ui-plan.md` M4. None is taken by the
- * console on its own; a refusal (409: already ended, or not paused) reaches
- * the operator as the service's sentence, on the monitor itself.
+ * The monitor exposes operator-requested run controls. A 409 for an ended run or
+ * absent pause displays the service's reason on the monitor.
  */
 let armedRun = null;
 let abortArmedTimer = null;
@@ -417,10 +372,8 @@ function drawMonitor(state) {
 }
 
 /**
- * Arm the Abort for one run, by id. Not a boolean: `parked` is a frame like
- * any other and a ring gap can swallow it, and a flag that outlived its run
- * would hand the next one an Abort that fires on the first click
- * (`monitor.scopedTo` is what refuses it).
+ * Abort arming belongs to one run ID. A ring gap can omit `parked`; a boolean could
+ * then arm the next run. `monitor.scopedTo` rejects an arm belonging to another run.
  */
 function armAbort(runId) {
   armedRun = runId;
@@ -434,8 +387,8 @@ async function stopRun(runId, mode) {
   drawMonitor(store.getState());
   try {
     const out = await api.stopRun(runId, mode);
-    // The stream says `stopping` the moment the stop was accepted; the
-    // status here is only the answer, and it clears with the run.
+    // The stream owns `stopping`; this status only acknowledges the request and
+    // clears with the run.
     monitorStatus = { run_id: runId, level: 'ok', text: out.state === 'cancelled' ? 'cancelled' : `${out.mode} accepted` };
   } catch (error) {
     monitorStatus = { run_id: runId, level: 'bad', text: error.text || error.message };
@@ -444,9 +397,9 @@ async function stopRun(runId, mode) {
 }
 
 /**
- * Abort discards the shot being acquired and starts nothing after it, which
- * on a rig is a shot of the sample's life thrown away — so, like Park on a
- * busy bench, it arms first and performs on the second click.
+ * Abort discards the shot in progress and starts no further shot
+ * (`docs/service-contract.md` §2). Two clicks protect the sample from an accidental
+ * abort.
  */
 async function abortRun(runId) {
   if (armedRun !== runId) return armAbort(runId);
@@ -455,12 +408,10 @@ async function abortRun(runId) {
 }
 
 /**
- * One Resume per pause. A double-clicked button would post twice: the first
- * answers the pause and the second is refused with 409 and dropped (contract
- * §2), leaving an error on screen for a run that resumed perfectly well. A
- * plain variable checked synchronously, not a disabled button — disabling
- * re-renders, and a re-render between the mousedown and the mouseup eats the
- * click, which `views/bench.js` found in M2 and guards its Run the same way.
+ * Resume sends one request per pause. A second request receives 409 and is dropped
+ * (`docs/service-contract.md` §2), which would leave a misleading error after a
+ * successful resume. A synchronous flag guards the request: disabling and redrawing
+ * between mouse press and release can consume the click.
  */
 let resuming = false;
 
@@ -476,21 +427,20 @@ async function resumeRun(runId, detail) {
     await api.resumeRun(runId, body);
     monitorStatus = null;
   } catch (error) {
-    // 409: not paused — the pause was answered already, or ended with the run.
+    // A 409 means the pause has an answer or the run has ended.
     monitorStatus = { run_id: runId, level: 'bad', text: error.text || error.message };
   } finally {
-    // Released whatever happened: a resume the service refused for a reason
-    // the operator can fix is one they have to be able to send again.
+    // Releasing the guard after any response lets the operator retry a refusal with a
+    // correctable cause.
     resuming = false;
   }
   drawMonitor(store.getState());
 }
 
 /**
- * The power panel — `lib/power.js`. The switch is the operator's wish and the
- * console keeps it: a reload, or the service coming back, re-asserts it, so
- * "on" stays on until somebody switches it off. What the panel *shows* as
- * running is the service's answer (`bench.monitors`), never the wish.
+ * The power panel remembers the requested monitor state across reloads and
+ * reconnects. The displayed running state comes from `bench.monitors`, not that
+ * preference.
  */
 const POWER_KEY = 'bace.power';
 let powerUi = loadPowerUi();
@@ -506,7 +456,7 @@ function loadPowerUi() {
 
 function savePowerUi(patch) {
   powerUi = { ...powerUi, ...patch };
-  try { localStorage.setItem(POWER_KEY, JSON.stringify(powerUi)); } catch { /* a private window */ }
+  try { localStorage.setItem(POWER_KEY, JSON.stringify(powerUi)); } catch { /* Browser storage can be unavailable in private windows. */ }
   drawPower(store.getState());
 }
 
@@ -527,10 +477,10 @@ function powerSay(level, text) {
 }
 
 async function refreshMonitors() {
-  try { store.applyMonitors((await api.monitors()).monitors); } catch { /* the bench snapshot will say */ }
+  try { store.applyMonitors((await api.monitors()).monitors); } catch { /* The bench snapshot supplies monitor state if this query fails. */ }
 }
 
-/** Start or stop the monitor in the service, and remember the wish. */
+/** The action changes the service monitor state and remembers the preference. */
 async function togglePower(on) {
   if (powerBusy) return;
   powerBusy = true;
@@ -551,7 +501,7 @@ async function togglePower(on) {
   }
 }
 
-/** A new interval restarts a running monitor; the trace carries on. */
+/** Changing the interval restarts an active monitor without clearing its trace. */
 async function setPowerInterval(seconds) {
   savePowerUi({ interval_s: seconds });
   const running = (store.getState().monitors || []).some((m) => m.name === 'power' && m.running);
@@ -579,7 +529,7 @@ async function clearPowerHistory() {
   }
 }
 
-/** The whole history the service holds, as the file the route names. */
+/** The download includes the complete history retained by the service. */
 function exportPowerCsv() {
   const a = h('a', { href: api.powerHistoryCsv(), download: '' });
   document.body.append(a);
@@ -606,10 +556,8 @@ function exportPowerSvg() {
 }
 
 /**
- * On every connect: the trace the service holds, merged into the log by
- * `ts`, and the switch re-asserted — a monitor the operator switched on
- * is started again after the service restarted under a console that
- * still says on.
+ * Each connection merges service history by `ts` and reapplies the monitor
+ * preference, including after a service restart.
  */
 let syncingPower = false;
 
@@ -639,13 +587,9 @@ async function syncPower() {
 }
 
 /**
- * Fill in a run the stream could not rebuild whole.
- *
- * Two cases, one cause: the ring is 5000 envelopes and a long scan is more
- * than that. Opening the console late in one replays a tail with no
- * `AxisResolved` in it, and a client dropped for longer than the ring comes
- * back the same way — the stream counts a gap and says so. Either way the run
- * is asked for its own record.
+ * The run record fills gaps in a replay. The ring holds 5000 envelopes
+ * (`docs/service-contract.md` §3), so a long scan can lose its opening `AxisResolved`
+ * or events during a disconnect. Both cases need the record.
  */
 async function hydrate(runId, nodePath) {
   if (!runId || hydrating.has(runId)) return;
@@ -664,9 +608,8 @@ const hydrating = new Set();
 let gapsSeen = 0;
 
 /**
- * Keep the rail alive for the length of a run: `lib/watch.js` owns the whole
- * policy — which frames move the bench, the throttle that collapses them, and
- * why a replayed frame asks like any other.
+ * `lib/watch.js` keeps the rail current during a run. It owns frame selection,
+ * refetch throttling and replay handling.
  */
 const watch = createBenchWatch({
   fetchBench: () => api.bench(),
@@ -676,9 +619,8 @@ const watch = createBenchWatch({
 });
 
 function afterFrame(frame, { replay = false } = {}) {
-  // A run that ends badly says so where the operator is looking. The monitor
-  // is gone the moment the bench is parked, a second later, so the sentence
-  // goes to the strip — at the foot of every view — like every other refusal.
+  // A failed run needs a message in the persistent strip. Its monitor disappears at
+  // park, so a message there alone can vanish before the operator reads it.
   if (frame.type === 'RunFailed' && !replay) {
     notify(`${frame.run_id} failed · ${(frame.data && frame.data.error) || 'no reason given'}`, 'crit');
   } else if (frame.type === 'RunAborted' && !replay) {
@@ -689,8 +631,7 @@ function afterFrame(frame, { replay = false } = {}) {
     monitorStatus = null;
     armedRun = null;
   }
-  // A gap means the ring could not supply what we asked for: whatever is
-  // running has a beginning we will never be sent.
+  // A ring gap means the active run can be missing its opening events.
   const { stats } = stream.state;
   if (stats && stats.gaps > gapsSeen) {
     gapsSeen = stats.gaps;
@@ -709,10 +650,8 @@ function runLabel(state) {
 }
 
 function renderBar(state) {
-  // The counters come off the stream rather than off the store: they move with
-  // every frame, and a status callback fires only when the socket's state
-  // changes. A bar that said `0 frames` through a scan would be describing the
-  // last connection event, not the connection.
+  // Counters update from every stream frame. A socket-status callback only fires on
+  // connection changes and would leave the frame count stale during a scan.
   const c = { ...(state.connection || {}), ...stream.state };
   const stats = c.stats || {};
   barEl.className = 'stream-bar ' + (c.state || 'idle');
@@ -730,18 +669,10 @@ function renderBar(state) {
 }
 
 /**
- * The window title — `lib/title.js` for why it exists at all.
- *
- * The one thing that model cannot get from the store is whether anybody has
- * looked at this window since a run ended, so the shell keeps it. `away` is
- * the window's focus and visibility together (a console behind another window
- * and a console in a background tab are the same case); `unseenEnd` is the run
- * that ended while it was true, and it is dropped the moment the operator
- * comes back — an ending that is still being announced after they have read it
- * is a badge that means nothing the second time.
- *
- * A *pause* is not latched this way and must not be: it stands until it is
- * answered, so the title keeps saying so with the window wide open.
+ * The shell tracks whether a run ending needs attention in the window title. `away`
+ * combines focus and visibility; `unseenEnd` retains an ending while the operator is
+ * elsewhere and clears on return. A pause remains visible even in a focused window
+ * because it requires an answer.
  */
 let away = document.hidden;
 let liveRun = null;
@@ -749,15 +680,14 @@ let unseenEnd = null;
 
 function drawTitle(state) {
   const holding = liveRunId(state);
-  // Was live, is not: the run ended. Read across draws rather than off a
-  // `parked` frame, which a ring gap can swallow — and this is the only sign
-  // of the ending an operator who is not here will get.
+  // Comparing draws detects a run ending even if a ring gap omits `parked`. An absent
+  // operator needs that ending in the title.
   if (liveRun && liveRun !== holding && away) unseenEnd = liveRun;
   liveRun = holding;
   renderTitle(document, state, { announce: unseenEnd });
 }
 
-/** They are back: the ending has been delivered, and nothing else is owed. */
+/** Returning to the window acknowledges the retained run ending. */
 function seen() {
   away = false;
   unseenEnd = null;
@@ -782,34 +712,27 @@ store.subscribe((state) => {
 });
 window.addEventListener('hashchange', show);
 
-// The bench and the catalogue come over HTTP once; everything after that
-// arrives on the socket. A service that is not there is not an error worth a
-// dialogue — the stream bar says `offline` and keeps retrying.
+// HTTP loads the initial bench and catalogue. The socket supplies subsequent events.
+// An unavailable service stays visible as offline in the stream bar while reconnect
+// attempts continue.
 async function boot() {
   show();
   try {
     const bench = await api.bench();
     store.applyBench(bench);
     store.applyModules(await api.modules());
-    // A run in progress is older than the ring may be able to say. Ask it for
-    // its own record before the replay starts, so the axis and the counts are
-    // there whether or not its opening frames survived.
+    // The active run can outgrow the ring. Fetching its record before replay restores
+    // the axis and counts even when the opening frames are absent.
     if (bench.run && bench.run.run_id) await hydrate(bench.run.run_id, bench.run.node_path);
   } catch (error) {
     console.warn('the service did not answer:', error.message);
   }
-  // `since=0`, not "no since". Opening or refreshing the console while a run
-  // is going has to rebuild that run, and `/bench` carries its summary, not
-  // its axis, its curves or its shots — a chart drawn from the live frames
-  // alone would start blank in the middle of a scan. The two HTTP requests
-  // above are another reason: a run that parks while they are in flight would
-  // otherwise leave a record that never stops running.
-  //
-  // The cost is bounded by the ring the service keeps deliberately small: 5000
-  // envelopes, of which only the last 200 shots still carry their traces, so
-  // the worst case is one loopback read of a few tens of megabytes and the
-  // rest arrive with `decimated[…].replay` set, which the store already knows
-  // means *redraw from the scalars*.
+  // `since=0` requests retained events so reopening during a run restores more than
+  // the `/bench` summary: axes, curves and shots. Replay also captures a run that
+  // parks during the initial HTTP requests. The ring bounds the transfer to 5000
+  // envelopes; only the last 200 shots retain traces (`docs/service-contract.md` §3).
+  // Other shots carry `decimated[…].replay`, so the store redraws from scalars. A
+  // full transfer is a few tens of megabytes over loopback.
   stream.start(0);
 }
 
