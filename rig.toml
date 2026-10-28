@@ -5,10 +5,13 @@
 # (manual 1.2, 3.3).
 
 [electrical]
-sense_resistor_ohm = 5.192      # R_s = 5.192 Ω, device to CHAN2. Q scales as 1/R_s;
-                                # an error here rescales every Q (manual 2.3).
-pulse_amp = 4.0                 # Bias amplifier gain, 4 V/V; only the bias path passes
-                                # through it, not measured current (manual 1.2).
+sense_resistor_ohm = 5.192      # R_s, the current chain's conversion factor in V/A:
+                                # 5.192 for the present sample-holder amplifier.
+                                # Q scales as 1/R_s; an error here rescales every Q
+                                # (manual 2.3).
+pulse_amp = 4.0                 # Gain of the bias amplifier on the sample holder,
+                                # 4 V/V; the 81150A levels are divided by it
+                                # (manual 1.2).
 probe_attenuation = 1.0
 trigger_offset_s = 47.1e-9      # Field latency: 47.1 ns after trigger + :PULS:DEL1. A
                                 # 49-point delay fit gives a 1.5 ns residual (manual
@@ -56,8 +59,11 @@ max_voltage_compliance_v = 5.0
 
 [led]
 address = "GPIB0::15::INSTR"    # 33220A LED drive, GPIB address 15 (manual 1.2).
-threshold_v = 1.0               # LED threshold at the generator, 1 V, referred through
-                                # the LED amplifier.
+threshold_v = 1.0               # Lasing threshold of the light source (a 520 nm laser
+                                # diode, called the LED in the code) at the generator:
+                                # 1 V, 4 V at the diode through the x4 light amplifier.
+                                # Above it the diode's current rises steeply with the
+                                # level; it may not exceed 2.4 A (manual 1.2).
 
 # The service opens the 1918-C USB device through bace/drivers/newport1918c/.
 # Only one process can own the meter. A separate meter console at
@@ -76,9 +82,10 @@ averaging = true                # DC-continuous mode and 5 Hz analog filtering a
                                 # filtering but still sets the mode.
 digital_filter = 100            # 100 samples of digital smoothing over the analog
                                 # filter; 0 disables PM:DIGITALFILTER.
-wavelength_nm = 530.0           # 530 nm sets detector responsivity for the LED. A wrong
-                                # wavelength can shift plausible readings by tens of
-                                # percent.
+wavelength_nm = 520.0           # The source's wavelength, which sets the detector's
+                                # responsivity (manual 1.2). Readings taken at the
+                                # earlier 530 nm setting are low by the ratio of the
+                                # responsivities at 530 and 520 nm.
 on_beam_splitter = true         # The beam splitter permits power read-back during a run
                                 # (manual 1.2).
 dll_path = ""                   # Empty selects usbdll.dll for the interpreter

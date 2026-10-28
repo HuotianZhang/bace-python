@@ -626,7 +626,7 @@ def test_the_meter_path_is_chosen_the_same_way_and_units_are_set_either_way(
                         lambda self, on=True, **kw: calls.append(f"averaging {on}") or True)
     via = open_power_meter(RigConfig(power_meter_console="http://127.0.0.1:8918"))
     assert isinstance(via, ConsolePowerMeter)
-    assert calls == ["units", "lambda 530", "averaging True"]
+    assert calls == ["units", "lambda 520", "averaging True"]
     # The direct path set it too, and read it back off the (simulated) meter.
     assert m.averaged is True and m.averaging["analog_filter_name"] == "5 Hz"
 
