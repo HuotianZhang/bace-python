@@ -11,10 +11,11 @@ with the working tree:
 | File | Compared |
 |---|---|
 | `.py` | The syntax tree with every docstring and every bare string statement removed; comments are not in the tree |
-| `.toml` | The parsed tables |
+| `.toml` | The parsed tables, each value with its type |
 
-Any other changed file is listed as not checked. Exit 1 if a checked file
-differs in more than its text.
+A checked file that was added, deleted or renamed fails: a rewrite changes
+files, it does not create or remove them. Any other changed file is listed
+as not checked. Exit 1 if a checked file differs in more than its text.
 """
 from __future__ import annotations
 
@@ -56,9 +57,29 @@ def _git(*args: str) -> str:
                           encoding="utf-8", check=True).stdout
 
 
-def changed(base: str, paths: list[str]) -> list[str]:
-    out = _git("diff", "--name-only", "--diff-filter=M", base, "--", *paths)
-    return [p for p in out.splitlines() if p]
+CHECKED = (".py", ".toml")
+
+
+def changed(base: str, paths: list[str]) -> list[tuple[str, str]]:
+    """`(status, path)` for every file that differs from `base`: `M` modified,
+    `A` added, `D` deleted, `R…` renamed, as `git diff --name-status` gives."""
+    out = _git("diff", "--name-status", base, "--", *paths)
+    rows = []
+    for line in out.splitlines():
+        fields = line.split("\t")
+        if len(fields) >= 2:
+            rows.append((fields[0], fields[-1]))
+    return rows
+
+
+def _typed(value):
+    """A parsed TOML value with the type of every leaf kept: `1` and `1.0`
+    compare equal as numbers and differ as settings."""
+    if isinstance(value, dict):
+        return {k: _typed(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_typed(v) for v in value]
+    return (type(value).__name__, value)
 
 
 def compare(path: str, base: str) -> str | None:
@@ -76,7 +97,7 @@ def compare(path: str, base: str) -> str | None:
         if tomllib is None:
             raise ValueError("tomllib needs Python 3.11")
         try:
-            same = tomllib.loads(before) == tomllib.loads(after)
+            same = _typed(tomllib.loads(before)) == _typed(tomllib.loads(after))
         except tomllib.TOMLDecodeError as exc:
             return f"does not parse: {exc}"
         return None if same else "the tables differ, not only the comments"
@@ -89,7 +110,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("paths", nargs="*", help="limit to these paths")
     a = ap.parse_args(argv)
     bad = 0
-    for path in changed(a.base, a.paths):
+    for status, path in changed(a.base, a.paths):
+        if status != "M":
+            if path.endswith(CHECKED):
+                bad += 1
+                print(f"  DIFFERS      {path}: {status[0]} -- added, deleted or renamed")
+            else:
+                print(f"  not checked  {path}")
+            continue
         try:
             why = compare(path, a.base)
         except ValueError:

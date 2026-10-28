@@ -40,3 +40,19 @@ def test_code_and_message_strings_may_not():
     assert code_of(BEFORE) != code_of(BEFORE.replace("a + X", "a - X"))
     message = 'def g():\n    raise ValueError("old")\n'
     assert code_of(message) != code_of(message.replace("old", "new"))
+
+
+def test_a_toml_value_keeps_its_type():
+    typed = _tool()._typed
+    import tomllib
+    assert typed(tomllib.loads("n = 1")) != typed(tomllib.loads("n = 1.0"))
+    assert typed(tomllib.loads("n = 1  # one")) == typed(tomllib.loads("n = 1\n# one"))
+
+
+def test_added_and_deleted_files_fail(tmp_path, monkeypatch, capsys):
+    tool = _tool()
+    monkeypatch.setattr(tool, "changed", lambda base, paths: [
+        ("D", "bace/gone.py"), ("A", "bace/added.toml"), ("A", "docs/x.md")])
+    assert tool.main(["--base", "HEAD"]) == 1
+    out = capsys.readouterr().out
+    assert "gone.py: D" in out and "added.toml: A" in out and "not checked  docs/x.md" in out
