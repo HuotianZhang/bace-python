@@ -218,15 +218,15 @@ py -3 -m bace.service --rig rig.toml --run run.toml --ui ui/</pre>
     </ul>
 
     <h3>On the lab PC, by double-click</h3>
-    <p class="sub">Three files in <code>scripts/</code> are the whole workflow.
-      Each changes to the repo root first.</p>
+    <p class="sub">Two files in <code>scripts/</code> and <code>BACE.pyw</code> at the
+      root are the whole workflow.</p>
     <div class="tw">
       <table>
         <thead><tr><th class="k">step</th><th class="k">file</th><th>does</th></tr></thead>
         <tbody>
           <tr><td class="k">1 · once</td><td class="k"><b>Setup.bat</b></td><td>installs the package into <code>py -3</code>. <code>Setup (sim).bat</code> on a machine with no instruments</td></tr>
           <tr><td class="k">2 · new bench</td><td class="k"><b>Run Bench Check.bat</b></td><td>the staged check-out, pass 1: package, simulated runs, <code>*IDN?</code> at every address. Touches nothing</td></tr>
-          <tr><td class="k">3 · every day</td><td class="k"><b>Run Service.bat</b></td><td>the service and the console at <code>127.0.0.1:8900</code>. <code>Run Service (sim).bat</code> for the simulator</td></tr>
+          <tr><td class="k">3 · every day</td><td class="k"><b>BACE.pyw</b></td><td>starts the service without a window if it is not running, and opens the console. <code>Run Service.bat</code> runs it in a terminal; <code>Run Service (sim).bat</code> on the simulator</td></tr>
         </tbody>
       </table>
     </div>

@@ -1319,6 +1319,26 @@ py -3 -m bace.service --rig rig.toml --run run.toml      # the lab PC
 - `scripts\Run Service.bat` / `Run Service (sim).bat` `cd` to the repo root, as
   every other script does, so `--out runs`, `rig.toml` and `run.toml` resolve
   there; the banner prints every path absolute.
+- **One process per port.** `main()` binds and listens on the port before it
+  builds the session (`listen_socket`), and a port in use exits 3 with nothing
+  opened. On Windows the socket takes `SO_EXCLUSIVEADDRUSE`: uvicorn's own
+  socket sets `SO_REUSEADDR`, which there lets a second process bind a port in
+  use. uvicorn then serves on the bound socket.
+- **`POST /service/shutdown`** `{"force": bool}` → 202 `{"shutting_down": true,
+  "aborts": run_id | null}`. A run holding or waiting for the bench is a 409
+  that names it (`run`) unless `force`. The route sets the server's
+  `should_exit` after answering; the lifespan's shutdown then aborts, parks and
+  closes the journal as Ctrl-C does. An app built without `request_exit` (a
+  test client, an embedding) answers 409. Open requests get
+  `GRACEFUL_SHUTDOWN_S` (5 s) to end.
+- **The launcher** (`bace/launcher.py`, `BACE.pyw` at the root) is standard
+  library only. It probes the port: free (by binding it; on Windows a refused
+  local connection takes about 2 s) → start
+  `python -m bace.service --rig rig.toml --run run.toml --ui ui` with no
+  window, output to `runs/logs/service_<stamp>.log`; held and silent → a
+  service still starting, waited for; `GET /session` answers → reuse. The
+  console opens in Edge's `--app` window, else the default browser. Failures
+  are message boxes quoting the log.
 - `--out runs` (folders and the journal); `--ui DIR` mounts static files at
   `/ui` (the front end lives elsewhere; `/` redirects to `/ui/` when mounted,
   else returns a JSON index of the routes).

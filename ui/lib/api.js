@@ -55,6 +55,14 @@ export function createApi({ base = '', fetch: fetchImpl = globalThis.fetch } = {
     base: root,
     call,
 
+    // -- the service -------------------------------------------------------
+    /**
+     * End the service: any run is aborted, the bench parked, the journal
+     * closed, the process ended. Without `force` a run holding the bench is
+     * a 409 that names it.
+     */
+    shutdown: (force = false) => call('POST', '/service/shutdown', { force }),
+
     // -- the bench ---------------------------------------------------------
     /** The cached snapshot. Never touches VISA; safe to call at any time. */
     bench: () => call('GET', '/bench'),

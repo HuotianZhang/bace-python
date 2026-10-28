@@ -4,6 +4,14 @@ Dated, newest first. Details and evidence are in `docs/`.
 
 ## 2026-10-28
 
+- **`BACE.pyw`, one double-click.** It starts the service without a
+  terminal, logging to `runs/logs/`, and opens the console in a window of its
+  own; a service already running is reused. Closing the console leaves the
+  service and its run alone; `shut down` in the bar parks the bench and ends
+  it (`POST /service/shutdown`). A second service on the port now exits
+  before it opens an instrument: on Windows the port was bound with
+  `SO_REUSEADDR`, which let two services share it.
+
 - The manual's Part I, operation: measurement overview, the bench, a first
   measurement, results, troubleshooting.
 - `Run Service.bat` and `Run Service (sim).bat` serve the console

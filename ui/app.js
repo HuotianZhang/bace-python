@@ -125,7 +125,7 @@ function renderChips(state) {
   const ident = identityModel(state);
   const model = [ident.chip, ident.unnamed, ident.hazards.length, identOpen,
                  session.mode, session.fast, currentRun(state) ? runLabel(state) : null,
-                 state.queue.length, state.benchState, askOpen];
+                 state.queue.length, state.benchState, askOpen, quitArmed];
   keyed(chipsEl, JSON.stringify(model), () => [
     // The identity is a control, not a label. It said `no sample named` for
     // as long as the console has existed and gave the operator nowhere to go
@@ -147,7 +147,47 @@ function renderChips(state) {
       title: 'the assistant: the physics, the bench and the console, explained',
       'aria-expanded': askOpen ? 'true' : 'false', onclick: () => assistant.toggle(),
     }),
+    h('button', {
+      class: 'chip quit' + (quitArmed ? ' armed' : ''),
+      text: quitArmed ? 'shut down?' : 'shut down',
+      title: 'end the service: a run in progress is aborted, the bench parked and the journal closed',
+      onclick: () => shutDown(),
+    }),
   ]);
+}
+
+/**
+ * The service's off switch. It ran in a terminal, and Ctrl-C there was the
+ * way to end it; started from `BACE.pyw` it has no window, so the console is
+ * where it ends. Always two clicks: the second, within six seconds, aborts
+ * whatever runs and parks the bench. Closing the window is not this — the
+ * service and its run go on, and the next `BACE.pyw` reconnects.
+ */
+let quitArmed = false;
+let quitArmedTimer = null;
+
+function armQuit(on) {
+  quitArmed = on;
+  clearTimeout(quitArmedTimer);
+  quitArmedTimer = on ? setTimeout(() => { quitArmed = false; renderChips(store.getState()); }, 6000) : null;
+  renderChips(store.getState());
+}
+
+async function shutDown() {
+  if (!quitArmed) return armQuit(true);
+  armQuit(false);
+  try {
+    await api.shutdown(true);
+  } catch (error) {
+    notify(error.text || error.message, 'bad');
+    return;
+  }
+  stream.close();
+  document.getElementById('app').replaceChildren(h('div.ended',
+    h('p.wordmark', 'bace'),
+    h('h1', 'The service has stopped.'),
+    h('p', 'The bench is parked and the journal closed. This window can be closed; '
+      + 'BACE.pyw starts the service again.')));
 }
 
 /**
