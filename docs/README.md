@@ -19,6 +19,8 @@ web font. Open them in a browser.
 
 | file | what it is |
 |---|---|
+| `manual/` | The bench manual, in four parts: operation, principle, maintenance, reference. `manual/README.md` lists the chapters. |
+| `style.md` | How every text in the repository is written: register, quantities, comments, the console, review. |
 | `notes.md` | The rig as measured, defects only the hardware found, deliberate deviations from the LabVIEW original, open and closed questions, and the claims that measurement overturned. |
 | `bace-principle.md` | What BACE measures, from the papers that introduced it, and which part of the code does each step. |
 | `bench-checkout.md` | Bringing the real bench up in stages with `python -m bace.bench`. |

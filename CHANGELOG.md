@@ -4,6 +4,10 @@ Dated, newest first. Details and evidence are in `docs/`.
 
 ## 2026-10-28
 
+- `docs/style.md`, the rules every text here follows, and the outline of the
+  bench manual in `docs/manual/`: operation, principle, maintenance,
+  reference, with a glossary that fixes one name, symbol and unit per term.
+
 - The assistant answers with any OpenAI-compatible model as well as Claude:
   OpenAI, DeepSeek, Qwen, Kimi, GLM, or a model on this PC through Ollama,
   which needs no key. Provider, address and model are chosen in the panel's
