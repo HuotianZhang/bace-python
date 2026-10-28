@@ -120,3 +120,21 @@ def test_a_regular_expression_after_a_control_condition():
     assert tokens(run) != tokens(run.replace("run()", "destroy()"))
     assert "/[//]/" in tokens(run)
     assert tokens("f(a) / 2") == ["f", "(", "a", ")", "/", "2"]
+
+
+def test_css_comments_may_change_and_rules_may_not():
+    css_text = _tool().css_text
+    before = '/* bar */\n.bar { color: red; /* why */ }\n.x::after { content: "/* kept */"; }\n'
+    after = '/* the bar,\n   rewritten */\n.bar { color: red; }\n.x::after { content: "/* kept */"; }\n'
+    assert css_text(before) == css_text(after)
+    assert css_text(before) != css_text(before.replace("red", "blue"))
+    assert css_text(before) != css_text(before.replace('"/* kept */"', '"kept"'))
+
+
+def test_css_whitespace_in_strings_and_comments_between_selectors_matter():
+    css_text = _tool().css_text
+    assert css_text('[data-label="a  b"] { color: red; }') != \
+        css_text('[data-label="a b"] { color: red; }')
+    assert css_text(".a/**/.b { color: red; }") != css_text(".a .b { color: red; }")
+    assert css_text(".a/**/.b { color: red; }") == css_text(".a.b { color: red; }")
+    assert css_text(".a /* why */ .b {}") == css_text(".a .b {}")
