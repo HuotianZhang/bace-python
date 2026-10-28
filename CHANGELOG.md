@@ -4,6 +4,13 @@ Dated, newest first. Details and evidence are in `docs/`.
 
 ## 2026-10-28
 
+- The manual's Part III, maintenance: the layers and one run end to end,
+  each step of a shot from physics to SCPI to code, the files the bench
+  writes, how to add a module, an instrument, a check or an assistant
+  tool, and the tests.
+- The assistant reads the manual, chapter by chapter, and starts from it.
+  Its instructions named a 50 Ω current resistor; the bench's is 5.192 Ω.
+
 - The manual's Part II, principle: what the extracted charge is, the
   transient and its timing, the measurement chain with an uncertainty
   budget, and the tests that show Q complete and n a bulk density. The
