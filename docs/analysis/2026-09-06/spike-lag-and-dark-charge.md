@@ -91,6 +91,15 @@ is withdrawn.**
 | 280 | 1.523 | 1.168 | 0.356 | 77 % |
 | 290 | 1.598 | 1.372 | 0.226 | 86 % |
 
+> **Correction, 2026-10-28.** The split below does not hold. At V_oc the carrier
+> density is set by the quasi-Fermi level splitting, so a run held at the same V_oc with
+> the shutter shut probes nearly the same carriers as the open run; in an ideal device,
+> exactly the same. "No-light" and "photogenerated" are not additive parts of Q. The
+> shut column is the charge the bias alone sustains, n(0, V_oc) − n(0, 0); the open
+> column is n(I, V_oc) − n(0, 0); their difference is how far this device is from that
+> ideal, not a photogenerated share. That the two approach each other at 290 K points to
+> carrier profiles dominated by the contacts. See `../../bace-principle.md`.
+
 **The photogenerated charge peaks at 250 K and is halved again by 290 K, while the
 injected charge grows from 0.42 to 1.37 nC.** The monotonic rise of the total Q hides
 this completely, and the "saturation" at 285–295 K in `README.md` is simply where the two
