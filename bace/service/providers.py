@@ -1,24 +1,18 @@
-"""The assistant's model vendors, one class per wire format.
+"""The model providers adapt assistant turns to each vendor's wire format.
 
-`assistant.chat` runs the same loop whoever answers: send the history, show
-the text as it arrives, run the tools the answer asks for, send the results
-back. What differs between vendors is only how a turn is sent, streamed and
-written down, and that is all a class here does:
+`assistant.chat` sends conversation messages, streams text, runs requested
+tools and returns tool results. Each provider implements the sending,
+streaming and representation of one turn. `Anthropic` uses Messages and
+returns tool results in user-message blocks. `OpenAICompatible` uses
+`/chat/completions` and one tool message per call.
 
-| | `Anthropic` | `OpenAICompatible` |
-|---|---|---|
-| speaks to | the Claude API | any `/chat/completions` endpoint: OpenAI, DeepSeek, Qwen (DashScope), Kimi (Moonshot), GLM (Zhipu), a local Ollama |
-| SDK | `anthropic` 2.3 or later | `openai` 3.40 or later |
-| tool results go back as | one user message of `tool_result` blocks | one `tool` message per call |
+A streamed turn yields `{"type": "text", "text"}` frames and ends with
+`{"type": "turn", "turn": Turn}`. `Turn.message` preserves the assistant
+message in the vendor's return format, so messages cannot be shared across
+providers within a conversation (`docs/service-contract.md`, section 8a).
 
-A turn is streamed as `{"type": "text", "text"}` frames and ends with one
-`{"type": "turn", "turn": Turn}`. `Turn.message` is the assistant message as
-the vendor wants it sent back, which is why histories are kept per vendor and
-a conversation does not change vendor half-way.
-
-Both SDKs are imported only when a provider is made, so a service without
-either still runs, and `GET /assistant` says which is missing.
-"""
+SDKs are imported when a provider is created. Missing SDKs leave the service
+available; `GET /assistant` reports them."""
 from __future__ import annotations
 
 import ipaddress
@@ -30,33 +24,36 @@ from typing import Any
 from urllib.parse import urlparse
 
 CLAUDE_MODEL = os.environ.get("BACE_ASSISTANT_MODEL", "claude-opus-5-5")
-"""The Claude model when the asker names none; overridable, never chosen for them."""
+"""The default Claude model applies when the request names none.
+
+The environment can override this default."""
 
 MAX_TOKENS = 64000
 EFFORT = "medium"
 
 FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5", "claude-fable-5-1"}
-"""Models the API's server-side refusal fallback is sent with. Another Claude
-model is asked without it rather than refused for it."""
+"""These Claude models accept the API's server-side refusal fallback.
+
+Other models are requested without that option rather than refused."""
 
 SDK_MIN = {"anthropic": "2.3", "openai": "3.40"}
-"""The releases the request shapes here were checked against."""
+"""These SDK versions support the request shapes used here."""
 
 
 class Unavailable(RuntimeError):
-    """The vendor's SDK is missing or too old, or the request cannot be made."""
+    """The unavailable-provider error identifies a missing SDK or unsupported request."""
 
 
 class NoKey(Unavailable):
-    """The provider needs a key and the request carried none."""
+    """The missing-key error identifies a provider requiring a request key."""
 
 
 class BadSetting(Unavailable):
-    """The address or the model cannot be used as given."""
+    """The setting error identifies an unusable provider address or model."""
 
 
 def sdk(name: str):
-    """The SDK module `name`, or `Unavailable` saying how to get it."""
+    """The SDK loader returns module `name` or raises `Unavailable` with a remedy."""
     try:
         module = __import__(name)
     except ImportError as exc:
@@ -69,7 +66,7 @@ def sdk(name: str):
 
 
 def status() -> dict:
-    """Each vendor's SDK: there, with its version, or why not."""
+    """The provider status reports each SDK version or its unavailability reason."""
     out = {}
     for kind, name in (("anthropic", "anthropic"), ("openai", "openai")):
         try:
@@ -91,7 +88,10 @@ def is_local(url: str) -> bool:
 
 
 def check_base_url(url: str) -> str:
-    """`url` if it is somewhere a key may be sent: https, or http to this machine."""
+    """The endpoint check permits HTTPS or HTTP to the local machine.
+
+    Other addresses are refused to prevent sending a key over remote plain HTTP
+    (`docs/service-contract.md`, section 8a)."""
     parsed = urlparse(url or "")
     if parsed.scheme == "https" and parsed.hostname:
         return url.rstrip("/")
@@ -106,7 +106,9 @@ class ToolCall:
     id: str
     name: str
     input: Any
-    """The parsed arguments, or None when they were not JSON (`raw` then holds them)."""
+    """Parsed tool arguments are `None` when the input is invalid JSON.
+
+    `raw` retains that input."""
     raw: str = ""
 
 
@@ -115,13 +117,15 @@ class Turn:
     message: Any
     calls: list[ToolCall]
     stop: str
-    """`end`, `tools`, `max_tokens` or `refusal`, whatever the vendor called it."""
+    """The turn status normalizes vendor endings to `end`, `tools`, `max_tokens` or
+    `refusal`."""
     usage: dict = field(default_factory=dict)
 
 
 def error_text(module, exc: Exception) -> tuple[str, int | None]:
-    """A sentence for the console, most specific first. Both SDKs name their
-    errors alike, so one table serves."""
+    """The provider error becomes the most specific matching console message.
+
+    Both SDKs use the same error names, so one table handles them."""
     if module is None:
         return f"{type(exc).__name__}: {exc}", None
     if isinstance(exc, module.AuthenticationError):
@@ -140,7 +144,7 @@ def error_text(module, exc: Exception) -> tuple[str, int | None]:
 
 
 class Anthropic:
-    """The Claude API: a streamed Messages request with the tools."""
+    """The Anthropic provider streams Messages requests with tools."""
 
     kind = "anthropic"
 
@@ -179,8 +183,8 @@ class Anthropic:
                     response = await stream.get_final_message()
                 break
             except ValueError:
-                # Tool input the SDK could not parse at all: there is no
-                # tool_use id to answer, so the turn is asked again.
+                # Unparseable tool input has no `tool_use` ID for a reply.
+                # Retry the turn instead.
                 retries += 1
                 if retries > 2:
                     raise
@@ -194,7 +198,7 @@ class Anthropic:
 
 
 class OpenAICompatible:
-    """Any `/chat/completions` endpoint with function tools, streamed."""
+    """The compatible provider streams `/chat/completions` with function tools."""
 
     kind = "openai"
 
@@ -204,7 +208,7 @@ class OpenAICompatible:
         self.sdk = sdk("openai")
         self.model = model
         self.base_url = check_base_url(base_url)
-        # A local server takes any key; the SDK refuses to be made without one.
+        # The local server accepts any key; SDK construction requires one.
         self.client = client or self.sdk.AsyncOpenAI(api_key=key or "local",
                                                      base_url=self.base_url)
 
@@ -262,14 +266,14 @@ class OpenAICompatible:
             message["tool_calls"] = [{"id": c.id, "type": "function",
                                       "function": {"name": c.name, "arguments": c.raw or "{}"}}
                                      for c in calls]
-        # Some servers answer "stop" with tool calls in hand; the calls decide.
+        # Tool calls take precedence when a server labels the turn `stop`.
         stop = {"length": "max_tokens", "content_filter": "refusal"}.get(finish) or \
             ("tools" if calls else "end")
         yield {"type": "turn", "turn": Turn(message, calls, stop, usage)}
 
 
 def make(kind: str, *, key: str, model: str | None = None, base_url: str | None = None):
-    """The provider a request names. `Unavailable` says why it cannot be made."""
+    """The provider factory builds the requested provider or raises `Unavailable`."""
     if kind == "anthropic":
         if not key:
             raise NoKey("the assistant needs your Anthropic API key")

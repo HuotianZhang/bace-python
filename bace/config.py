@@ -121,8 +121,9 @@ def load_rig(path: str | Path = "rig.toml") -> RigConfig:
         # `drivers.routing.BiasRouter` also rejects module 0. Checking here
         # reports a configuration error before service assembly reaches hardware.
         raise ConfigError(
-            "[dio] relay_module_nr = 0: module 0 is the shutter (measured on the "
-            "rig 2026-09-01), not the relay. The relay is module 1."
+            "[dio] relay_module_nr = 0: module 0 is the shutter (measured on this "
+            "bench with python -m bace.bench --dio), not the relay. The relay is "
+            "module 1."
         )
     return cfg
 

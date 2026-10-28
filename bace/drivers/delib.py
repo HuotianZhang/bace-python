@@ -169,7 +169,8 @@ def dio_settings(path: str | None) -> dict:
     if cfg["relay_module_nr"] == 0:
         raise DioError(
             "[dio] relay_module_nr = 0: module 0 is the shutter (measured on "
-            "the rig 2026-09-01), not the relay. The relay is module 1.")
+            "this bench with python -m bace.bench --dio), not the relay. The relay "
+            "is module 1.")
     return cfg
 
 

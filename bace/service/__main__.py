@@ -1,33 +1,28 @@
-"""`python -m bace.service`: one service process on the lab PC.
+"""The service entry point starts one process on the lab PC.
 
-    python -m bace.service --sim --fast --port 8900          # develop off the bench
-    py -3 -m bace.service --rig rig.toml --run run.toml      # the lab PC
+    python -m bace.service --sim --fast --port 8900
+    py -3 -m bace.service --rig rig.toml --run run.toml
 
-The desk needs the `service` extra (`pip install -e .[service]`); the lab PC
-needs the rig's VISA stack as well (`pip install -e .[lab]`, which is
-`rig` + `service`). Configs are found the way `bace.bench` finds them -- an
-explicit path, else `rig.toml`/`run.toml` in the working directory or
-beside the package -- and a missing file falls back to the built-in
-defaults with a printed warning, so the service comes up on a fresh
-checkout; a file that is *named* and missing is an error, because a typo in
-`--run` that silently ran the defaults would be a recipe nobody chose.
-`--fast` is refused without `--sim`: it makes every settle a no-op, which on
-the real rig is a measurement taken before the device has settled, with no
-symptom in the data. `--host` is refused unless it is a loopback address:
-there is no authentication, and that is acceptable only where nobody but
-this machine can connect.
+A desk installation needs `pip install -e .[service]`; the lab PC needs
+`pip install -e .[lab]` for both `rig` and `service`. Configuration lookup
+uses explicit paths or `rig.toml` and `run.toml` in the working directory or
+beside the package. Missing implicit files use defaults with a warning.
+A missing explicit path is an error: a typo must not select an unintended
+recipe.
 
-One service owns the instruments: the port is bound before the session is
-built, so a second service on it exits (3) before it opens anything. The
-process ends on Ctrl-C or on `POST /service/shutdown`; either parks the bench.
-`bace.launcher` starts this without a window for the operator.
+`--fast` requires `--sim`. Skipping settles on real hardware can invalidate
+a measurement without a visible symptom in the data. `--host` requires a
+loopback address because the service has no authentication
+(`docs/service-contract.md`, section 9).
 
-`pyvisa` is imported only by `Bench.build_real`, so `--sim` works on a
-machine with no VISA backend, and a real bench with no VISA runtime comes up
-with its four VISA roles marked unavailable rather than not at all;
-`uvicorn` is imported only in `main`, first thing, so a Python without the
-extra is told which extra before anything touches the bench.
-"""
+The port binds before session construction, so a second service exits with
+code 3 before opening instruments. Ctrl-C and `POST /service/shutdown` end
+the process and park the bench. `bace.launcher` starts it without a window.
+
+`Bench.build_real` imports `pyvisa` lazily so `--sim` needs no VISA backend.
+Without a VISA runtime, a real bench starts with four unavailable VISA roles.
+`main` imports `uvicorn` before creating a session, so missing dependencies
+are reported before any instrument access."""
 from __future__ import annotations
 
 import argparse
@@ -47,23 +42,25 @@ from .monitors import MAX_INTERVAL_S, MIN_INTERVAL_S, TEMPERATURE_MONITOR_S
 from .session import Session
 
 DEFAULT_HOST = "127.0.0.1"
-"""Fixed unless overridden -- and overridable only with another loopback
-address: there is no auth (the plan's "no auth", decided *because* the binding
-is 127.0.0.1), so a `--host` that reaches the LAN would hand every instrument
-on the bench to anyone on it."""
+"""The default host accepts overrides only to other loopback addresses.
+
+Without authentication, a LAN binding would expose instrument control to
+other machines (`docs/service-contract.md`, section 9)."""
 
 DEFAULT_PORT = 8900
 
 GRACEFUL_SHUTDOWN_S = 5.0
-"""How long an exit waits for open requests: a WebSocket or an assistant
-answer streams until it is closed, and would otherwise hold the exit open."""
+"""The graceful shutdown limit bounds open requests in seconds.
+
+WebSockets and assistant answers can stream indefinitely and otherwise
+prevent exit (`docs/service-contract.md`, section 9)."""
 
 SERVICE_EXTRA_HINT = ("the service needs the 'service' extra: pip install -e .[service] "
                       "(the lab PC needs the rig too: pip install -e .[lab])")
 
 
 def is_loopback(host: str) -> bool:
-    """`127.0.0.0/8`, `::1` or the name `localhost`; nothing else."""
+    """The loopback check accepts `127.0.0.0/8`, `::1` or `localhost` only."""
     if host.strip().lower() == "localhost":
         return True
     try:
@@ -73,13 +70,12 @@ def is_loopback(host: str) -> bool:
 
 
 def exclusive(sock: socket.socket) -> None:
-    """Make a bind fail while another socket listens on the port.
+    """The exclusive-socket setup prevents binding over another listener.
 
-    On Windows that takes `SO_EXCLUSIVEADDRUSE`: there `SO_REUSEADDR`, which
-    uvicorn's own socket sets, lets a second process bind a port in use.
-    Elsewhere `SO_REUSEADDR` only allows a restart over connections left in
-    TIME_WAIT, and a listener still refuses the bind.
-    """
+    Windows requires `SO_EXCLUSIVEADDRUSE`: uvicorn's `SO_REUSEADDR` permits a
+    second bind to an occupied port there. Elsewhere `SO_REUSEADDR` permits
+    restart over connections in TIME_WAIT while an active listener blocks bind
+    (`docs/service-contract.md`, section 9)."""
     if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
     else:
@@ -87,12 +83,11 @@ def exclusive(sock: socket.socket) -> None:
 
 
 def listen_socket(host: str, port: int) -> socket.socket:
-    """The service's listening socket, bound exclusively before the bench is built.
+    """The listening socket binds exclusively before bench construction.
 
-    One process owns the instruments. Binding first makes a second service
-    fail here, before it opens a VISA resource or resets the digitiser, and
-    listening at once queues a client's connection until uvicorn serves it.
-    """
+    One process must own the instruments. Binding first rejects a second service
+    before it opens VISA resources or resets the digitiser. Listening immediately
+    queues client connections for uvicorn (`docs/service-contract.md`, section 9)."""
     family = socket.AF_INET6 if ":" in host else socket.AF_INET
     sock = socket.socket(family, socket.SOCK_STREAM)
     try:
@@ -143,13 +138,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def load_configs(rig_path: str | None, run_path: str | None, *,
                  warn: Callable[[str], Any] = print) -> dict[str, Any]:
-    """The two config files as the session wants them.
+    """The config loader returns typed configuration, raw TOML tables and paths.
 
-    Returns `rig_config`, `run_toml` (the raw tables, for provenance),
-    `smu_config`, `run_config`, `rig_path`, `run_path`. A path given and not
-    found raises `ConfigError`; a path not given and not found falls back to
-    the defaults through `warn`.
-    """
+    The result is `rig_config`, `run_toml`, `smu_config`, `run_config`, `rig_path`
+    and `run_path`. Raw tables retain parameter layers. A missing explicit path
+    raises `ConfigError`. Missing implicit files use defaults through `warn`."""
     p_rig = rig_path or _find("rig.toml")
     p_run = run_path or _find("run.toml")
     if rig_path and not os.path.isfile(rig_path):
@@ -178,8 +171,9 @@ def load_configs(rig_path: str | None, run_path: str | None, *,
 
 def build_session(a: argparse.Namespace, *, warn: Callable[[str], Any] = print,
                   cfg: dict[str, Any] | None = None) -> Session:
-    """A `Session` from the parsed arguments, and from `cfg` when the configs
-    are already loaded. Nothing runs until the app's startup hook starts it."""
+    """The session builder uses parsed arguments and optional loaded configuration.
+
+    The app's startup hook starts the session."""
     if cfg is None:
         cfg = load_configs(a.rig, a.run, warn=warn)
     return Session(cfg["rig_config"], cfg["run_toml"], out=a.out,
@@ -194,11 +188,10 @@ def build_session(a: argparse.Namespace, *, warn: Callable[[str], Any] = print,
 
 def main(argv: list[str] | None = None) -> int:
     a = parse_args(argv)
-    # Everything that can refuse is refused before the session is built:
-    # `build_session` opens every VISA resource, resets the scope and writes
-    # the journal's header, and a `py -3` without the service extra used to
-    # do all of that and then die on `import uvicorn` with a traceback that
-    # named no extra.
+    # Check optional dependencies before building the session.
+    # `build_session` opens VISA resources, resets the scope and writes
+    # `SessionStarted`; missing `uvicorn` must be reported before these
+    # side effects, with the required extra named.
     try:
         import uvicorn
 
@@ -227,9 +220,9 @@ def main(argv: list[str] | None = None) -> int:
               "machine alone can reach it; bind 127.0.0.1 and put a proxy in front "
               "if the console must be reached from elsewhere.")
         return 2
-    # The configs are read before the port is taken: a missing or malformed
-    # file is the operator's to correct whatever else holds the port, and
-    # reading them opens no instrument.
+    # Read configs before binding the port. A missing or malformed file
+    # needs correction regardless of port availability. Parsing opens no
+    # instrument.
     try:
         cfg = load_configs(a.rig, a.run)
     except ConfigError as exc:

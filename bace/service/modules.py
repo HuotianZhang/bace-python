@@ -1,44 +1,32 @@
-"""The catalogue: the modules the service can run, their parameters with
-provenance, and the one place a module's parameters become dataclasses.
+"""The catalogue defines runnable modules and resolves their parameters.
 
-`/modules` is rendered from here and `/runs` is executed from here, and the
-two have to agree exactly -- the number the console shows for `n_averages`
-must be the number `RunConfig` gets. The only way to guarantee that is one
-table read both ways. So every module is a `ModuleSpec` plus a list of
-`ParamSpec`s, mostly read off the real dataclasses with
-`params.specs_from_dataclass` so a default cannot drift from the code, and
-`build()` is the single function that turns a resolved `{name: value}` dict
+The `/modules` response and `/runs` execution share one table, so the console's
+`n_averages` is the value passed to `RunConfig`. Each module has a `ModuleSpec`
+and `ParamSpec` entries. `params.specs_from_dataclass` reads most defaults from
+the dataclasses to prevent drift. `Catalogue.build` converts resolved values
 into `Axis`, `ScanSpec`, `RunConfig`, `JVConfig`, `LedDrive` and a recorder,
-and returns the event generator the worker pumps.
+then returns the event generator.
 
-What `build()` refuses, it refuses before an instrument is touched: a `bace`
-centred on V_oc with no source in scope, a V_oc measured at a different LED
-level than the one about to be pulsed, LED levels the threshold rule
-rejects, an axis the geometry rejects, a compliance above the bench ceiling.
-Each of those would otherwise produce a full set of plausible files -- the
-axis centred on nothing, the charge read against the wrong illumination --
-and be discovered, if at all, in analysis. `ModuleError` names the module
-and the parameter so the console can put the message on the right field.
+The builder refuses missing V_oc sources, mismatched LED levels, unsafe LED
+levels, invalid axis geometry and compliance above the bench ceiling before
+touching an instrument. These checks prevent plausible files with an axis
+centred on the wrong V_oc or Q measured under the wrong illumination.
+`ModuleError` names the module and parameter for the console's field error.
 
-Layers, lowest first: dataclass defaults, `run.toml` (mapped per module in
-`_TOML`), last-used (the journal), edited (this session), then whatever the
-pipeline injects as inherited or derived on the copy it resolves. The
-catalogue holds only the edited layer and rebuilds the `ParamSet` fresh on
-every `param_set()` call, so a resolver that adds an inherited layer to one
-copy cannot leak it into the bench card.
+Layers, lowest first: dataclass defaults, `run.toml` through `_TOML`, last
+used from the journal, edited in this session, then inherited or derived
+pipeline values on a copy. `Catalogue.param_set` builds a separate `ParamSet`
+on each call, so pipeline bindings cannot leak into the bench card
+(`docs/service-contract.md`, section 5).
 
-The light. No module switches the LED generator off: a `bace` leaves the
-33220A pulsing and a J-V leaves it at DC, and the shutter -- which every
-unwind shuts -- is the light switch (operator instruction, 2026-09-02, after
-a real run: a generator that is cycled loses its thermal steady state and
-the next module waits for it again). After the 33220A goes from DC to pulse
-a `bace` opens the shutter and waits for the power meter behind it to read
-stable (`_settle_led`) rather than a fixed `led_settle_s`, because the fixed
-2 s was seen not to be enough on the rig that day.
+Measurement modules keep the LED generator running: `bace` leaves the 33220A
+pulsing and J-V leaves it at DC. The shutter shuts on unwind. Cycling the
+generator loses its thermal steady state and requires another settle.
+After DC changes to pulse, `_settle_led` waits for stable power behind the
+open shutter. A 2 s wait alone is insufficient on this bench.
 
-Nothing here imports FastAPI, and nothing here sleeps except through
-`RunContext.sleep`, so `--fast` and the tests run a 20-loop scan in seconds.
-"""
+FastAPI is not imported here. Sleeps use `RunContext.sleep`, so `--fast`
+and tests can run a 20-loop scan in seconds."""
 from __future__ import annotations
 
 import dataclasses
@@ -71,70 +59,66 @@ from .rigs import apply_led, apply_shutter, power_reading
 from .temperature import settle
 
 DEFAULT_SHOT_S = 0.8
-"""What one bace shot costs when the journal has never seen one. The
-2026-08 archive averaged about that at 20 averages; the cost model says
-`t_shot_source = "default"` so the estimate is not mistaken for a measurement."""
+"""The default shot cost applies when the journal has no measured interval.
+
+Bench data at N_avg = 20 support this approximate value. The cost model
+reports `t_shot_source = "default"` to distinguish it from a measured interval."""
 
 JV_POINT_OVERHEAD_S = 0.05
-"""Per-point instrument overhead of a Keithley sweep beyond the settle."""
+"""The Keithley sweep overhead adds this many seconds per point beyond settling."""
 
 VOC_LEVEL_TOLERANCE_V = 1e-9
-"""How close a V_oc source's LED level must be to the level about to be
-pulsed. The same number `core.illumination.assert_axis_centre` uses: the
-coupling is an equality, and this is only floating-point slack."""
+"""The V_oc source and pulse LED levels must agree within this tolerance.
+
+`core.illumination.assert_axis_centre` uses the same tolerance. The coupling
+requires equality; this allowance covers floating-point rounding only."""
 
 LED_SETTLE_POLL_S = 0.5
-"""How often `_settle_led` reads the power meter while the LED settles after
-DC -> pulse. Elapsed time is counted on this clock (polls x this), not on
-the wall clock, so `--fast` is instant and a test can say exactly how long
-the wait took."""
+"""The LED settle poll interval is in seconds.
+
+Elapsed time is polls times this interval, so `--fast` takes no wall time
+and tests can determine the wait exactly."""
 
 LED_SETTLE_SPAN_S = 10.0
-"""How long the meter must read flat before the LED counts as settled.
-Three readings in 1.5 s passed on the rig at 14:52 (2026-09-02) while the
-LED was still drooping: the scan then watched the intensity fall 20.8 to
-17.0 uW over the next 40 s. A slow thermal drift is invisible inside any
-window shorter than itself; ten seconds of flat readings is what the
-operator's own eyes-on-the-meter check amounts to."""
+"""The LED settle requires this many seconds of stable meter readings.
+
+Measured on this bench, a three-reading, 1.5 s window can pass while power
+falls from 20.8 to 17.0 µW over 40 s. A short window misses slow thermal
+drift. The 10 s span provides a longer stability check."""
 
 MODULE_NAMES: tuple[str, ...] = ("jv", "jv_bace", "bace", "light", "power",
                                  "temperature", "park", "wait", "note")
 
 RETIRED: dict[str, str] = {
-    "jv_dark": "split on 2026-09-03 because it did two jobs: it swept the "
+    "jv_dark": "split into two because it did two jobs: it swept the "
                "SourceMeter *and* made the bench dark. Use a `light` node with "
                "`shutter = shut` before a `jv`, which is exactly what it did; "
                "or `jv` on its own to sweep under the light as it is found.",
 }
-"""Module names that existed and no longer do, and what to do instead.
+"""Unsupported module names carry explicit replacement instructions.
 
-A tree naming one of these is refused — never silently rewritten. `jv_dark`
-maps to *two* nodes, so translating it would change the shape of the tree, its
-node paths and therefore its folder names; and translating it to `jv` alone
-would change what is measured, from "make it dark and sweep" to "sweep under
-whatever is there", which is the failure this split exists to prevent. A saved
-recipe that names one is the operator's to re-author, and this says how.
+A tree naming one is refused rather than rewritten. Replacing `jv_dark`
+requires two nodes; automatic translation changes tree shape, node paths and
+folder names. Replacing it with `jv` alone changes a dark sweep into a sweep
+under whatever illumination is present. The operator must edit the recipe.
 
-Kept because a recipe saved through `/pipelines/save` lives on disk and
-outlives the catalogue: without it the answer is `jv_dark: 'jv_dark'`, a
-`KeyError` repr that says nothing about what happened or what to do."""
+Saved recipes persist on disk independently of the catalogue. These
+instructions explain the refusal instead of exposing an unhelpful `KeyError`."""
 
 SAMPLE_KEYS: frozenset[str] = frozenset(
     {"sample", "material", "pixel", "temperature_k", "operator", "comment"})
-"""What `[sample]` may carry -- the `RunMetadata` fields `config.load_run`
-reads from it. Not module parameters: they describe the session."""
+"""The sample keys are the `RunMetadata` fields read by `config.load_run`.
+
+They describe the session rather than module parameters."""
 
 
 def coerce_sample(values: Mapping[str, Any]) -> dict:
-    """One `[sample]` block, checked and typed, or `ValueError`.
+    """The sample coercer validates and types one `[sample]` block.
 
-    Shared by the catalogue (which validates what the file opened with) and
-    `Session.set_sample` (what the console types into it), so the refusal is
-    one sentence in one place. Everything but `temperature_k` is a string;
-    that one is a float or absent, because it reaches `RunMetadata` as a
-    number and `"290"` filed as a temperature would be a string in the HDF5
-    attribute a reader compares against 290.0.
-    """
+    The catalogue and `Session.set_sample` share it so file and console edits
+    receive the same refusal. Fields are strings except `temperature_k`, which
+    is a float or absent. `RunMetadata` requires temperature as a number so
+    HDF5 readers can compare the attribute numerically."""
     unknown = sorted(set(values) - SAMPLE_KEYS)
     if unknown:
         raise ValueError(f"[sample]: unknown key(s) {', '.join(unknown)}; "
@@ -154,11 +138,12 @@ def coerce_sample(values: Mapping[str, Any]) -> dict:
 
 
 def _read_led_state(led) -> dict[str, str]:
-    """The LED generator as it answers: `output`, `mode`, `frequency_hz`,
-    `high_v`, `low_v`, `polarity`, `sync_output` -- strings, `?` for what it
-    will not say. `read_state` is the real driver's (not a protocol member);
-    a driver without it reports its cached flags, which is what the
-    simulator has."""
+    """The LED read-back returns generator state as strings.
+
+    Fields are `output`, `mode`, `frequency_hz`, `high_v`, `low_v`, `polarity`
+    and `sync_output`. An unanswered query gives `?`. Real drivers expose
+    `read_state` outside the protocol. Drivers without it use cached flags,
+    which represent the simulator's shared state."""
     read = getattr(led, "read_state", None)
     state: dict = {}
     if callable(read):
@@ -180,15 +165,15 @@ def _read_led_state(led) -> dict[str, str]:
         except Exception:                               # noqa: BLE001
             pol = "?"
     out["polarity"] = str(pol or "?").upper()
-    # The Sync connector (`OUTP:SYNC?`) is what arms the 81150A, which is
-    # what triggers the scope; it has its own front-panel key and nothing
-    # else in the chain shows it off. Only the real driver answers it.
+    # The 33220A Sync output (`OUTP:SYNC?`) arms the 81150A, whose Sync
+    # triggers the scope. Sync has an independent front-panel control;
+    # no other chain state reveals it is off. Only the real driver queries it.
     sync = state.get("sync_output", None) if state else None
     out["sync_output"] = "?" if sync is None else ("ON" if sync else "OFF")
-    # The error queue, drained: `:VOLT:HIGH` below the LOW in force, or a
-    # width that no longer fits the period, is refused by the 33220A with
-    # `-221 Settings conflict` and no other symptom, and the run path
-    # never reads the queue itself.
+    # The 33220A rejects a high level below its current low level or a
+    # width exceeding the period with `-221 Settings conflict`. Draining
+    # the error queue exposes this otherwise silent refusal; the run path
+    # does not read the queue.
     errors = getattr(led, "errors", None)
     if callable(errors):
         try:
@@ -199,9 +184,10 @@ def _read_led_state(led) -> dict[str, str]:
 
 
 def _led_problems(state: dict[str, str], wanted: dict) -> list[str]:
-    """What the read-back contradicts in the recipe. `?` is not a problem:
-    a driver that cannot answer (the simulator) is not a generator that
-    said no."""
+    """The LED check reports contradictions between read-back and requested state.
+
+    `?` is not a contradiction: an unqueryable simulator field does not mean
+    the generator refuses the setting."""
     problems = []
     if state.get("output") == "OFF":
         problems.append("output is OFF (:OUTP? = 0)")
@@ -213,8 +199,8 @@ def _led_problems(state: dict[str, str], wanted: dict) -> list[str]:
     freq = state.get("frequency_hz", "?")
     if freq != "?" and abs(float(freq) - float(wanted["frequency"])) > 1.0:
         problems.append(f"frequency reads {freq} Hz against {wanted['frequency']:g} Hz asked")
-    # Polarity is not refused here: `_build_bace` writes it before the pulse
-    # (2026-10-26), and the read-back puts in the file which edge armed.
+    # `Catalogue._build_bace` writes polarity before the pulse, so it is
+    # not refused here. Read-back records which edge arms the run.
     errors = state.get("errors", "")
     if errors and errors != "?":
         problems.append(f"the generator rejected a command: {errors}")
@@ -222,43 +208,43 @@ def _led_problems(state: dict[str, str], wanted: dict) -> list[str]:
 
 
 class ModuleError(ValueError):
-    """A module or parameter the catalogue refuses. The message starts with
-    the module's name and, where one parameter is at fault, that parameter's
-    name after it, so the console can attach it to the right field."""
+    """A module error identifies a refused module or parameter.
+
+    The message starts with the module name and, for a field error, the
+    parameter name. The console uses these names to attach the error."""
 
 
 # -- the shared interface ---------------------------------------------------
 @dataclass(frozen=True)
 class ModuleSpec:
-    """One catalogue entry as the pipeline and the routes see it."""
+    """A module specification describes one entry for the pipeline and routes."""
 
     name: str
     title: str
     kind: str
-    """`measurement` (touches the bus for a while), `observer` (a reading),
-    `utility` (the bench, a pause, a note)."""
+    """The kind distinguishes measurement bus jobs, observer readings and utilities."""
     status: str
-    """`built`, `partial` or `not wired` -- what the console shows on the card."""
+    """The status is `built`, `partial` or `not wired` on the console card."""
     relay: str | None
-    """`dc` or `transient` when the module needs the device on that side of
-    the relay; the executor draws a transition at every change."""
+    """The relay requirement is `dc` or `transient` when a module needs that side.
+
+    The executor marks a transition whenever the requirement changes."""
     provides_voc: bool
-    """True for the module whose light curve yields the V_oc a `bace` centres on."""
+    """The V_oc provider flag identifies a light curve used to centre `bace`."""
     needs_voc_param: str | None
-    """The bool parameter that, when set, makes a V_oc source mandatory."""
+    """The named boolean parameter requires a V_oc source when enabled."""
     led_params: tuple[str, ...]
-    """Parameters an illumination loop owns; a module inside one may not set them."""
+    """The illumination loop owns these parameters and forbids module overrides."""
     groups: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class VocSource:
-    """Where the V_oc a `bace` centres on came from.
+    """A V_oc source records its value and illumination.
 
-    `led_v` is the drive the value was measured at -- the number the coupling
-    invariant is checked against. `how` is `jv_bace`, `measure_dc` or
-    `typed`; only the last is not a measurement and the validator warns on it.
-    """
+    `led_v` is the drive level in V at which V_oc is measured and against which
+    coupling is checked. `how` is `jv_bace`, `measure_dc` or `typed`. Only `typed`
+    is not a measurement, so the validator warns on it."""
 
     value: float
     led_v: float
@@ -277,29 +263,24 @@ def _never() -> bool:
 
 @dataclass
 class RunContext:
-    """What a module needs from the run it is part of.
+    """The run context supplies bindings and callbacks to a module.
 
-    `led_v`/`led_low_v` are the illumination loop's binding (None outside
-    one); `voc` the V_oc source in scope, which `bace` replaces with the one
-    it actually centred on; `temperature_k` the context temperature a
-    temperature node settled at or an operator typed, with `temperature_how`
-    and `temperature_source` saying which -- the `how` and `source` of the
-    `Settled` it came from, so the file can tell a reading from a wish.
-    `sleep` is a no-op under `--fast`;
-    `abort` is the worker's flag. `resolved` seeds the recorder's readbacks
-    (the chain from the last read-back). `on_data` receives the full-
-    precision arrays at the end so the session can serve `/runs/{id}/data`;
-    `folders` collects every recorder folder the module wrote, which is how
-    the executor learns them. `wait_for_operator` is the worker's blocking
-    wait, handed in because the pause lives in the job, not in the module;
-    it is called as `wait_for_operator(detail, on_poll=callable)` and must
-    run `on_poll` every few hundred milliseconds while it blocks, which is
-    how the 331 is read live during a pause. `emit` delivers an event out of
-    band while the module is blocked in that wait, and `stop_mode` says
-    which stop was asked for (`worker.StopMode`, or None) so a settle can
-    tell an abort from an after_shot; the executor fills both from the job
-    when the factory left them unset.
-    """
+    `led_v` and `led_low_v` are illumination-loop bindings, or `None` outside a
+    loop. `voc` is the V_oc source in scope; `bace` replaces it with the source
+    it uses. `temperature_k` is the settled or typed temperature in K.
+    `temperature_how` and `temperature_source` carry the `Settled` provenance,
+    so a requested temperature is distinguishable from a reading.
+
+    `sleep` is a no-op under `--fast`; `abort` is the worker's flag. `resolved`
+    seeds the recorder's read-back values. `on_data` receives full arrays for
+    `/runs/{id}/data`. `folders` collects recorder folders for the executor.
+
+    `wait_for_operator(detail, on_poll=callable)` belongs to the job and blocks
+    while waiting for the operator. It must call `on_poll` every few hundred
+    milliseconds so the 331 remains readable during a pause. `emit` sends events
+    while that wait blocks. `stop_mode` identifies `worker.StopMode` or `None`,
+    so a settle distinguishes abort from `after_shot`. The executor supplies
+    `emit` and `stop_mode` from the job when the factory leaves them unset."""
 
     run_id: str
     node_path: str
@@ -321,11 +302,11 @@ class RunContext:
     stop_mode: Callable[[], str | None] | None = None
 
     def temperature(self) -> tuple[float | None, str, str]:
-        """`(kelvin, how, source)` for a module's metadata: the tree's binding
-        when a temperature node made one, the session's typed number
-        otherwise. The three travel together on purpose -- a folder named
-        `220K` reads the same whether the console settled there or a loop
-        merely asked, and only `how` separates them."""
+        """The temperature metadata returns `(kelvin, how, source)` together.
+
+        A temperature-node binding takes precedence over the session's typed value.
+        A folder such as `220K` cannot distinguish a requested setpoint from a
+        settled value. `how` records that distinction."""
         if self.temperature_k is not None:
             return self.temperature_k, self.temperature_how, self.temperature_source
         return (self.metadata.temperature_k, self.metadata.temperature_how,
@@ -340,8 +321,10 @@ RUN_CHOICES: dict[str, tuple[str, ...]] = {
     "output_polarity": ("auto", "NORM", "INV", "leave"),
     "trigger_sweep": ("AUTO", "TRIG"),
 }
-"""What `RunConfig.__post_init__` and the scope driver accept. The dataclass
-validates in code rather than in its annotations, so the catalogue says it."""
+"""The catalogue constraints match `RunConfig.__post_init__` and the scope driver.
+
+The dataclass validates these constraints in code rather than annotations,
+so the catalogue declares them explicitly."""
 
 RUN_UNITS: dict[str, str] = {
     "timebase_ns_per_div": "ns/div", "t0_int_s": "s", "t_int_width_s": "s",
@@ -362,9 +345,10 @@ RUN_GROUPS: dict[str, str] = {
                               "trigger_sweep", "calibrate_trigger")},
     **{f: "output" for f in ("output_polarity", "inverted_output")},
 }
-"""Every `RunConfig` field, by the group the card folds it under. A field
-added to `RunConfig` and not placed here is refused when the catalogue is
-built, so it cannot land on the card unlabelled."""
+"""The field groups place every `RunConfig` field under a console heading.
+
+Catalogue construction refuses an ungrouped field so it cannot appear on
+the card without a label."""
 
 SMU_UNITS: dict[str, str] = {
     "current_compliance_a": "A", "voltage_compliance_v": "V", "settle_jsc_ms": "ms",
@@ -408,10 +392,11 @@ VPRE_ON_VOC_SPEC = ParamSpec(
     doc="Pin the prebias relative to V_oc: vpre becomes an offset from the V_oc in "
         "scope (TDCF at V_oc is vpre_on_voc with vpre = 0). Only when vpre is not the "
         "swept axis; a swept vpre follows V_oc through centre_on_voc.")
-"""The design's inherited "vpre = V_oc + 0.000 V" when delay_ns or vcoll is
-the swept axis. The engine takes an absolute pinned prebias, so the offset
-is resolved in `_build_bace` from the same V_oc source `centre_on_voc` uses,
-under the same coupling check, once that V_oc is known."""
+"""The pinned V_pre offset is relative to V_oc when delay or V_coll is scanned.
+
+`Catalogue._build_bace` adds the offset to the V_oc source selected for
+`centre_on_voc`, under the same LED-level coupling check. The engine receives
+an absolute V_pre (`docs/service-contract.md`, section 5)."""
 
 
 def _regroup(specs: list[ParamSpec], groups: Mapping[str, str], cls: type) -> list[ParamSpec]:
@@ -439,12 +424,12 @@ def _smu_specs() -> list[ParamSpec]:
 
 _JV_NOT_A_PARAM: tuple[str, ...] = ("dark", "led_levels_v", "led_settle_s",
                                     "light_control")
-"""`JVConfig` fields that are never a form field on either J-V card.
+"""These `JVConfig` fields are excluded from the common J-V form.
 
-`light_control` is the module's identity, not a choice inside it: `jv` leaves
-the light alone and `jv_bace` manages it, and a form that let either be
-switched would be one module wearing two names. The other three belong to
-`jv_bace`, which declares them itself in `_jv_led_specs`."""
+`light_control` defines module identity: `jv` leaves illumination alone and
+`jv_bace` manages it. Making it editable would let the two names describe
+the same module. The other three fields belong only to `jv_bace`, which
+supplies them through `_jv_led_specs`."""
 
 
 def _jv_common_specs() -> list[ParamSpec]:
@@ -522,8 +507,8 @@ def _bace_specs(rig_config: RigConfig) -> list[ParamSpec]:
         ParamSpec("led_settle_max_s", "float", 60.0, unit="s", group="illumination",
                   minimum=0.0,
                   doc="The most time to wait for the power meter to read stable after "
-                      "DC -> pulse; past it the scan goes on with a warning. A 2 s fixed "
-                      "wait was seen not to be enough (2026-09-02)."),
+                      "DC -> pulse; past it the scan goes on with a warning. A fixed "
+                      "2 s wait is not enough on this bench."),
         ParamSpec("led_settle_tolerance", "float", 0.02, group="illumination",
                   minimum=0.0,
                   doc="How flat the 1918-C must read before the LED counts as "
@@ -541,28 +526,22 @@ def _bace_specs(rig_config: RigConfig) -> list[ParamSpec]:
 
 
 def _jv_specs() -> list[ParamSpec]:
-    """`jv` has no illumination parameters at all, and that is the module.
+    """The `jv` parameter list excludes illumination controls.
 
-    It sweeps under whatever light it finds, touching neither shutter nor
-    LED, and records what it read back. The light is set -- when it is set --
-    by a `light` step before it, or by the operator on the bench card. The
-    absence of `dark`, `led_*` and `led_settle_s` from this list is the whole
-    difference from `jv_bace`.
-    """
+    The module sweeps under the illumination present, touches neither LED nor
+    shutter, and records read-back. A preceding `light` node or a bench action
+    controls illumination. Unlike `jv_bace`, this form has no `dark`, LED-level
+    or `led_settle_s` parameters (`docs/service-contract.md`, section 5)."""
     sweep, acq = _jv_common_specs()
     return sweep + acq + _smu_specs()
 
 
 def _light_specs() -> list[ParamSpec]:
-    """The bench's two light switches as one node: the shutter, and the LED.
+    """The light node controls the shutter and LED independently.
 
-    Every value is a *request*; the read-back that follows is the answer, and
-    the node reports both. `leave` on either half means "do not touch this
-    one", so a node can move the shutter without disturbing a generator that
-    is already at its thermal steady state -- the operator instruction of
-    2026-09-02, which is why the shutter is the light switch and the
-    generator is not cycled.
-    """
+    Every value is a request; the following read-back reports the result. `leave`
+    on either half avoids touching it. The shutter can therefore move without
+    cycling a generator at thermal steady state."""
     return [
         ParamSpec("shutter", "enum", "leave", group="illumination",
                   choices=("open", "shut", "leave"),
@@ -590,8 +569,8 @@ def _light_specs() -> list[ParamSpec]:
                   minimum=0.0,
                   doc="The rate the 33220A chops the LED at, and the only "
                       "instrument this value reaches (`pulse` only -- the node "
-                      "itself still moves the shutter). 500 Hz is what the rig was "
-                      "found at (2026-08-31). It holds only until something else "
+                      "itself still moves the shutter). 500 Hz is the bench's "
+                      "operating rate. It holds only until something else "
                       "sets it: a `bace` writes its own frequency to both "
                       "generators, so this does not constrain the scan after it."),
         ParamSpec("duty_percent", "float", 50.0, unit="%", group="timing",
@@ -702,10 +681,9 @@ _TOML: dict[str, list[tuple[str, dict[str, str]]]] = {
     ],
     "jv_bace": [
         _SMU_MAP,
-        # The recipe's illumination level is the level jv_bace measures at by
-        # default -- both ends of the range -- so a bench click on jv_bace
-        # produces the V_oc the bench's bace card then needs, at the same
-        # level, without anyone retyping 1.020 in two places.
+        # Both ends of the `jv_bace` range use the recipe's LED level by default.
+        # This supplies the bench's `bace` card with V_oc at the same illumination
+        # without requiring duplicate level edits.
         ("run.toml [illumination]", {"illumination.level_v": "led_start_v",
                                      "illumination.low_level_v": "led_low_v"}),
         ("run.toml [illumination]", {"illumination.level_v": "led_stop_v"}),
@@ -716,13 +694,13 @@ _TOML: dict[str, list[tuple[str, dict[str, str]]]] = {
                                                   "led_low_v", "led_settle_s", "dark")}),
     ],
 }
-"""Which recipe table feeds which parameter, with the detail the console
-shows. `[jv]` is optional and is not read by `config.load_run`; its keys are
-checked here instead, because a typo that fell back to a default would be a
-J-V range nobody chose."""
+"""The recipe mapping connects TOML keys to module parameters and layer detail.
+
+`config.load_run` does not read the optional `[jv]` table. The catalogue
+checks its keys so a typo cannot silently select a default J-V range."""
 
 def recipe_keys(name: str) -> dict[str, list[str]]:
-    """Parameter -> the `run.toml` keys (`table.key`) that set it, for one module."""
+    """The recipe-key lookup returns `run.toml` keys by parameter for one module."""
     out: dict[str, list[str]] = {}
     for _detail, mapping in _TOML.get(name, []):
         for key, param in mapping.items():
@@ -733,20 +711,17 @@ def recipe_keys(name: str) -> dict[str, list[str]]:
 
 _JV_TABLE_KEYS: frozenset[str] = frozenset(
     k.split(".", 1)[1] for k in _TOML["jv_bace"][-1][1])
-"""Every key `[jv]` may carry: the jv_bace mapping's, which is a superset of
-`jv`'s."""
+"""The allowed `[jv]` keys cover the `jv_bace` mapping and its `jv` subset."""
 
 
 # -- the catalogue ---------------------------------------------------------------
 class Catalogue:
-    """The runnable modules, their parameters with provenance, and `build()`.
+    """The catalogue resolves module parameters and builds event generators.
 
-    `run_toml` is the recipe file's raw tables (`params.run_toml_layer`), so
-    provenance can name the table; `history` answers `last_used_params`,
-    `settle_history` and `shot_time_s` (the journal, or a fake in tests);
-    `sample` is the recipe's `[sample]` table, which becomes the session's
-    `RunMetadata` and is not a module parameter.
-    """
+    `run_toml` contains raw recipe tables from `params.run_toml_layer`, retaining
+    table names for layer detail. `history` supplies `last_used_params`,
+    `settle_history` and `shot_time_s`, through the journal or a test substitute.
+    `sample` supplies `[sample]` for session `RunMetadata`, outside module params."""
 
     def __init__(self, *, rig_config: RigConfig, run_toml: dict | None = None,
                  history: Any = None, sample: dict | None = None):
@@ -809,8 +784,8 @@ class Catalogue:
                                provides_voc=False, needs_voc_param=None, led_params=()),
         }
         self._edited: dict[str, dict[str, Any]] = {n: {} for n in MODULE_NAMES}
-        # A recipe value the form would refuse surfaces now, at startup, not
-        # on the first GET /modules an hour later.
+        # Invalid recipe values must fail at startup rather than on the
+        # first `GET /modules`.
         for name in MODULE_NAMES:
             self._layered(name, with_history=False)
 
@@ -833,25 +808,21 @@ class Catalogue:
         try:
             return self._specs[name]
         except KeyError:
-            # A name that used to be a module says so, and says what replaces
-            # it: a recipe saved through `/pipelines/save` is a file on disk
-            # and outlives the catalogue, so this is the message the operator
-            # gets when they open one from before the split.
+            # Unsupported names need replacement instructions. Saved recipes
+            # persist independently of the catalogue and require explicit edits.
             if name in RETIRED:
                 raise KeyError(f"{name} is no longer a module. It was "
                                f"{RETIRED[name]}") from None
             raise KeyError(name) from None
 
     def base_metadata(self, sample: Mapping[str, Any] | None = None) -> RunMetadata:
-        """The session's `RunMetadata` from `[sample]`; a module fills in the
-        LED level, the V_oc and the temperature it ran at.
+        """The session metadata supplies the device identity from `[sample]`.
 
-        `sample` overrides the block: a run passes **the copy it was queued
-        with** (`RunRecord.sample`), so an identity typed into the console
-        halfway through a four-hour sweep does not relabel the nodes it has
-        left to run. Without it, `RunQueued.sample` said one thing and the
-        folder names said another, inside one run.
-        """
+        A module adds its LED level, V_oc and temperature. `sample` overrides the
+        session block with the copy captured at queue time (`RunRecord.sample`).
+        Changing the session identity during a run must not relabel its remaining
+        nodes or contradict `RunQueued.sample` (`docs/service-contract.md`, section
+        3a)."""
         s = self.sample if sample is None else sample
         # The session's own number is typed -- in `[sample]` or in the console's
         # metadata field, which is the same slot. A temperature node replaces it
@@ -866,14 +837,15 @@ class Catalogue:
 
     # -- parameters -------------------------------------------------------
     def param_specs(self, name: str) -> tuple[ParamSpec, ...]:
-        """The module's parameter specs, in the order the card shows them."""
+        """The parameter specs follow the order displayed on the module card."""
         self.spec(name)
         return self._params[name]
 
     def param_set(self, name: str) -> ParamSet:
-        """A fresh `ParamSet`: default < run.toml < last-used < edited. Fresh
-        every call, so a resolver can add inherited/derived layers to its
-        copy without touching what the bench card shows."""
+        """The parameter set resolves default < `run.toml` < last used < edited.
+
+        Each call returns a separate copy, so inherited or derived bindings cannot
+        change the bench card (`docs/service-contract.md`, section 5)."""
         return self._layered(name, with_history=True)
 
     def _layered(self, name: str, *, with_history: bool) -> ParamSet:
@@ -888,10 +860,9 @@ class Catalogue:
         if with_history and self.history is not None:
             last = self.history.last_used_params(name)
             for key, value in (last or {}).items():
-                # One name at a time, and a name that no longer exists or a
-                # value the spec now refuses is skipped: the journal is a
-                # record of what ran, and a parameter renamed since must not
-                # make the module unlistable.
+                # Skip unknown journal parameters and values the spec refuses, one
+                # at a time. A record of a run must not make the module unlistable
+                # when its parameter names or accepted values differ.
                 if key not in ps:
                     continue
                 try:
@@ -903,9 +874,10 @@ class Catalogue:
         return ps
 
     def edit(self, name: str, values: Mapping[str, Any]) -> ParamSet:
-        """`PUT /modules/{m}/params`: set the edited layer, coerced, all or
-        nothing. A `None` value drops that parameter's edit so the layer
-        below shows again."""
+        """The catalogue edit coerces and applies the edited layer atomically.
+
+        `None` removes that parameter's edit and exposes the layer below
+        (`docs/service-contract.md`, section 5)."""
         if not isinstance(values, Mapping):
             raise ModuleError(f"{name}: expected a mapping of parameter -> value, "
                               f"got {type(values).__name__}")
@@ -924,7 +896,7 @@ class Catalogue:
         return ps
 
     def reset(self, name: str, param: str | None = None) -> None:
-        """Drop one parameter's edit, or the whole edited layer."""
+        """The reset removes one parameter edit or the whole edited layer."""
         self.spec(name)
         if param is None:
             self._edited[name] = {}
@@ -937,10 +909,10 @@ class Catalogue:
         return {s.name: s for s in self._params[name]}
 
     def _complete(self, name: str, params: Mapping[str, Any]) -> dict[str, Any]:
-        """Every parameter of `name`: `params` where given (coerced), the
-        catalogue's resolved value otherwise. Unknown names are refused --
-        a misspelt override that was quietly dropped would run the module
-        with a value the caller never saw."""
+        """Each parameter uses a coerced override or the catalogue's resolved value.
+
+        Unknown names are refused. Silently dropping a misspelt override would run
+        with a value the caller does not see."""
         specs = self._params_by_name(name)
         unknown = sorted(set(params) - set(specs))
         if unknown:
@@ -960,20 +932,21 @@ class Catalogue:
     # -- the wire ---------------------------------------------------------
     def as_wire(self, name: str, *, bench: dict | None = None,
                 session_voc: VocSource | None = None) -> dict:
-        """The `/modules` entry. `last` is None here; the session fills it
-        from the run registry. `bench` is the cached snapshot, read for what
-        is unavailable; `session_voc` the session's V_oc source."""
+        """The module response combines parameters, requirements and cached state.
+
+        The session fills `last` from its run registry; it is `None` here. `bench`
+        provides unavailable roles, and `session_voc` provides the session V_oc
+        source."""
         spec = self.spec(name)
         ps = self.param_set(name)
         p = ps.values()
         if name == "bace" and session_voc is not None and p.get("voc") is None \
                 and not p.get("measure_dc") and p.get("led_v") is not None \
                 and abs(float(session_voc.led_v) - float(p["led_v"])) <= VOC_LEVEL_TOLERANCE_V:
-            # The rule `pipeline._Resolver._voc` applies to a manual run,
-            # applied to the card too: the run will centre on the session's
-            # V_oc at this level, so the card says so -- value, source and
-            # provenance, and not editable -- instead of `default · null`.
-            # On this fresh copy only; the catalogue's own layers are untouched.
+            # Apply `pipeline._Resolver._voc` to the card's manual-run values.
+            # The session V_oc at this level is the run's source, so the card shows
+            # its value and derived layer as noneditable instead of a null default.
+            # Only this separate copy receives the binding.
             ps.set_layer(Source.DERIVED, {"voc": session_voc.value},
                          f"{session_voc.how} {session_voc.node_path} (this session)")
         return {"name": name, "title": spec.title, "status": spec.status,
@@ -985,9 +958,10 @@ class Catalogue:
 
     def needs(self, name: str, params: Mapping[str, Any], *, bench: dict | None = None,
               session_voc: VocSource | None = None) -> list[dict]:
-        """What the module cannot run without, as `{code, text}` -- the
-        card's "needs" line. Resource-shaped only: a V_oc source, a
-        console, an instrument. Geometry and level checks are the validator's."""
+        """The needs list reports required resources as `{code, text}` entries.
+
+        It names V_oc sources, consoles and instruments for the card's needs line.
+        Geometry and level checks belong to validation."""
         p = self._complete(name, params)
         unavailable: dict = dict((bench or {}).get("unavailable") or {})
         power = ((bench or {}).get("instruments") or {}).get("power") or {}
@@ -1021,10 +995,8 @@ class Catalogue:
                 missing("led", "a light curve needs the LED")
                 missing("shutter", "a light curve needs the shutter")
             else:
-                # Not a `missing`: `jv` runs perfectly well on a bench with
-                # neither, and refusing would make the one module that needs
-                # nothing the fussiest. It is the *label* that suffers, so
-                # the warning says exactly that and nothing more.
+                # Without shutter or LED read-back, `jv` can run but cannot label
+                # the illumination. Warn about the unknown label without blocking it.
                 blind = [r for r in ("shutter", "led") if r in unavailable]
                 if blind:
                     out.append({"code": "illumination",
@@ -1057,8 +1029,8 @@ class Catalogue:
                     text += ": " + str(unavailable["temperature"])
                 out.append({"code": "temperature", "text": text})
             elif bench and temperature.get("error"):
-                # The read itself failed: what answered at Start is not
-                # answering now -- the link, not the instrument behind it.
+                # A failed read means the console link is unavailable, even if it
+                # answers at Start. It does not establish an instrument fault.
                 out.append({"code": "temperature",
                             "text": "331 attached at Start, not answering now · "
                                     "pauses for a manual set"})
@@ -1070,7 +1042,8 @@ class Catalogue:
 
     # -- the cost model ------------------------------------------------------
     def shot_time(self) -> tuple[float, str]:
-        """`(t_shot, source)`: the journal's median shot interval or the default."""
+        """The shot-time estimate returns the journal median or default with its
+        source."""
         t = None
         if self.history is not None:
             try:
@@ -1082,8 +1055,10 @@ class Catalogue:
         return float(t), "journal"
 
     def estimate_s(self, name: str, params: Mapping[str, Any]) -> float:
-        """Seconds, per the contract's cost model; 0.0 when the parameters
-        do not make a runnable module (the validator says why)."""
+        """The module cost estimates seconds under the service cost model.
+
+        Unrunnable parameters give 0.0; validation explains the refusal
+        (`docs/service-contract.md`, section 7)."""
         return self._estimate(name, params)[0]
 
     def estimate_text(self, name: str, params: Mapping[str, Any]) -> str:
@@ -1111,9 +1086,8 @@ class Catalogue:
                 levels = self._jv_levels(p, None) if name == "jv_bace" else ()
             except (ModuleError, ValueError) as exc:
                 return 0.0, f"cannot estimate: {exc}"
-            # `jv` is one curve per direction: it does not set the light, so
-            # there is no dark-plus-levels plan to count, and no LED settle
-            # because nothing was changed to settle after.
+            # `jv` takes one curve per direction without changing illumination.
+            # There is no dark-plus-levels plan or LED settle to count.
             dark = bool(p["dark"]) if name == "jv_bace" else True
             n_curves = (int(dark) + len(levels)) * (2 if p["both_directions"] else 1)
             led_settle = float(p.get("led_settle_s", JVConfig().led_settle_s))
@@ -1146,9 +1120,10 @@ class Catalogue:
         return 0.0, "journal entry"
 
     def _jv_levels(self, p: Mapping[str, Any], ctx: RunContext | None) -> tuple[float, ...]:
-        """jv_bace's light levels: the inherited or typed `led_v` -> one level,
-        else the range, with the point count rounded as `SeriesConfig.levels`
-        rounds it (truncation dropped the last level often enough to matter)."""
+        """The `jv_bace` light levels use one `led_v` or the configured range.
+
+        An inherited or typed `led_v` selects one level. Otherwise the point count
+        is rounded as in `SeriesConfig.levels`; truncation can omit the last level."""
         led_v = ctx.led_v if (ctx is not None and ctx.led_v is not None) else p["led_v"]
         if led_v is not None:
             return (float(led_v),)
@@ -1163,10 +1138,10 @@ class Catalogue:
     # -- build ----------------------------------------------------------------
     def build(self, name: str, params: Mapping[str, Any], ctx: RunContext,
               rig: Rig) -> Iterator[E.Event]:
-        """The module's event generator, already wrapped in its recorder and
-        its router context. Everything refusable is refused here, before the
-        generator exists, so nothing has touched an instrument when a
-        `ModuleError` comes back."""
+        """The builder returns a module generator wrapped in its recorder and router.
+
+        Refusals precede generator creation, so a `ModuleError` reaches the caller
+        before any instrument access (`docs/service-contract.md`, section 5)."""
         self.spec(name)
         p = self._complete(name, params)
         builder = getattr(self, "_build_" + name)
@@ -1189,10 +1164,9 @@ class Catalogue:
             raise ModuleError(f"{name}: a light curve needs the LED source, and this "
                               "bench has none")
         smu_cfg = self._smu_config(name, p)
-        # `jv` leaves the light alone, so its `dark` and `led_settle_s` are
-        # never read; jv_bace always has at least one level (a range collapses
-        # to its start), so "nothing to measure" cannot arise there and
-        # run_jv's own refusal stays the only one.
+        # `jv` leaves illumination alone, so `dark` and `led_settle_s` are
+        # not read. `jv_bace` has at least one level, even for a collapsed
+        # range; `run_jv` handles the empty-measurement refusal itself.
         dark = bool(p["dark"]) if light else True
         try:
             cfg = JVConfig(start_v=p["start_v"], stop_v=p["stop_v"], step_v=p["step_v"],
@@ -1264,11 +1238,9 @@ class Catalogue:
         except IlluminationError as exc:
             raise ModuleError(f"{name}: led_v: {exc}") from None
         measure_dc = bool(p["measure_dc"])
-        # The Keithley is touched inside `if measure_dc:` and nowhere else in
-        # a bace run, so its configuration -- and the ceiling refusal in it --
-        # is read only there. Read unconditionally, a compliance over the
-        # ceiling refused a run that would never have sourced the SourceMeter,
-        # from a fold the card marks "not read" (`ui-fields.md`).
+        # A `bace` run uses the source-meter only when `measure_dc` is set.
+        # Its configuration and compliance ceiling apply only then. Checking
+        # unused compliance would block a run from a field marked not read.
         smu_cfg = self._smu_config(name, p) if measure_dc else None
         if measure_dc and rig.smu is None:
             raise ModuleError(f"{name}: measure_dc: this bench has no SourceMeter")
@@ -1277,14 +1249,11 @@ class Catalogue:
                               "the amplifier share the device node, and without the "
                               "relay both would be connected at once")
 
-        # The V_oc source, in the contract's order for a manual run
-        # (section 5): a value typed by hand, then the one in scope (the
-        # session's jv_bace, or the pipeline's), then measure_dc. In the
-        # pipeline the resolver has already picked one -- a schedule that
-        # chose a measurement clears `voc`, one that kept a typed value
-        # leaves `ctx.voc` unset -- so the two never both arrive; this order
-        # governs only a direct build() with both set, and there the typed
-        # number the operator just entered wins.
+        # Manual V_oc priority is typed `voc`, then `ctx.voc`, then
+        # `measure_dc` (`docs/service-contract.md`, section 5). The pipeline
+        # resolver selects first: measurements clear `voc`, and typed sources
+        # leave `ctx.voc` unset. Only a direct `Catalogue.build` call can
+        # supply both; the typed value wins there.
         source: VocSource | None = None
         if p["voc"] is not None:
             source = VocSource(value=float(p["voc"]), led_v=led_v, run_id=ctx.run_id,
@@ -1318,17 +1287,13 @@ class Catalogue:
             acc = _BaceData(run_cfg, rig_cfg)
             try:
                 if measure_dc:
-                    # V_oc under steady light, the way the intensity series
-                    # takes it: the 33220A at DC on the level the pulse will
-                    # have, the shutter open so light reaches the sample
-                    # (`Rig.park()` shut it before this job), and the device
-                    # given `led_settle_s` to reach its light steady state.
-                    # A Keithley reading the cell under the 500 Hz square
-                    # wave would integrate over on and off phases and report
-                    # a time average that is nobody's V_oc; with the shutter
-                    # shut it reports the dark one. Either centres the axis
-                    # on the wrong number, and the coupling check -- which
-                    # compares drive levels -- cannot tell.
+                    # V_oc requires steady illumination: the 33220A at DC at the pulse's
+                    # high level, the shutter open, and `led_settle_s` for the device.
+                    # `Rig.park()` shuts the shutter before the job. Under a 500 Hz
+                    # pulse, the Keithley averages light and dark phases; behind a shut
+                    # shutter, it reads dark V_oc. Either centres the axis incorrectly,
+                    # and the coupling check compares levels only, so it cannot detect
+                    # this.
                     _apply_smu_config(rig, smu_cfg)
                     dc_settings = drive.dc_settings()
                     rig.led.set_dc(dc_settings["offset"])
@@ -1347,29 +1312,21 @@ class Catalogue:
                                             how="measure_dc")
 
                 s = drive.pulse_settings()
-                # The edge the 81150A arms on has to be light off: the rising
-                # Sync edge under INV. Written here, not left to the bench
-                # card's warning, because a NORM left on the front panel
-                # (as on 2026-10-26) extracts during illumination and still
-                # integrates to a plausible charge. The Sync is not inverted
-                # with the waveform, and DC (the V_oc measurement above) is
-                # not affected.
+                # The 81150A must arm on light off: the rising Sync edge under INV.
+                # Enforce this before extraction. NORM extracts during illumination
+                # and can still yield plausible Q. Inverting the waveform does not
+                # invert Sync or affect the preceding DC V_oc measurement.
                 if run_cfg.external_trigger:
                     rig.led.set_polarity(run_cfg.trigger_slope_positive)
                 rig.led.set_pulse(s["high"], s["low"], frequency_hz=s["frequency"],
                                   duty_percent=s["duty"])
                 rig.led.enable_output(True)
-                # The 33220A is the master clock: its Sync arms the 81150A,
-                # whose Sync triggers the scope. Read it back (the real
-                # driver asks :OUTP? / FUNC:SHAP? / :FREQ? / OUTP:SYNC?)
-                # and refuse a generator that is off, in DC, at another
-                # frequency, or with its Sync off before the scan calibrates
-                # against a silent CHAN3. The first real service run
-                # (2026-09-02, session 115857) had nothing in its file
-                # saying whether either generator was on; the reading goes
-                # into the file either way. Before the settle below, so a
-                # generator that took nothing is refused at once and not
-                # after a minute spent watching a meter read stable dark.
+                # The 33220A Sync arms the 81150A, whose Sync triggers the scope.
+                # Read back `:OUTP?`, `FUNC:SHAP?`, `:FREQ?` and `OUTP:SYNC?` before
+                # calibration. Refuse output off, DC, a different frequency or Sync
+                # off rather than calibrate against silent CHAN3. Record the reading
+                # whether accepted or refused. Check before settling to avoid waiting
+                # for stable darkness from a generator that rejects its settings.
                 led_state = _read_led_state(rig.led)
                 yield E.InstrumentState({f"led_{k}": v for k, v in led_state.items()})
                 problems = _led_problems(led_state, s)
@@ -1377,12 +1334,10 @@ class Catalogue:
                     raise ModuleError(f"{name}: the 33220A is not driving the LED as "
                                       f"the recipe asks: {'; '.join(problems)}")
 
-                # Then the light: the shutter open, so the meter behind it
-                # sees the LED and the device is lit, as in the LabVIEW
-                # program, which keeps the light on; and the LED given
-                # until the meter reads stable, not a fixed led_settle_s.
-                # The shutter stays open: the scan's first shot unblocks it
-                # anyway and its finally shuts it.
+                # Open the shutter so the meter and device see the LED, matching
+                # the LabVIEW illumination sequence (`docs/service-contract.md`,
+                # section 5). Wait for stable power rather than `led_settle_s` alone.
+                # The shutter remains open for the scan; its cleanup shuts it.
                 rig.shutter.unblock()
                 yield from _settle_led(rig, ctx, settle_s=led_settle_s,
                                        max_s=led_settle_max_s,
@@ -1395,9 +1350,8 @@ class Catalogue:
                     assert_axis_centre(drive, voc_measured_at=voc_src.led_v)
                 scan = spec
                 if vpre_on_voc:
-                    # The pinned prebias as the engine wants it: absolute,
-                    # the offset the card shows added to the V_oc just
-                    # resolved (a jv_bace's, measure_dc's, or a typed one).
+                    # The engine requires absolute V_pre. Add the card's offset to
+                    # V_oc from `jv_bace`, `measure_dc` or a typed source.
                     scan = replace(spec, vpre=float(voc_src.value) + float(p["vpre"]))
 
                 meta = replace(ctx.metadata, led_drive_v=led_v, voc_v=voc,
@@ -1417,13 +1371,10 @@ class Catalogue:
                         acc.handle(ev)
                         yield ev
             finally:
-                # The LED is left pulsing on purpose: the shutter is the
-                # light switch (operator instruction, 2026-09-02), and a
-                # generator switched off here would have to be waited for
-                # again by the next module. run_transient_scan's finally
-                # shuts the shutter once the scan has started; this one
-                # covers a walk-away during the settle, when the shutter
-                # was opened above and the scan never began.
+                # Keep the LED pulsing to preserve thermal steady state; the shutter
+                # controls exposure. `run_transient_scan` shuts it on unwind after
+                # scan start. This cleanup also covers exit during the preceding
+                # settle, when the shutter is open but the scan has not started.
                 try:
                     rig.shutter.shut()
                 except Exception:
@@ -1456,15 +1407,15 @@ class Catalogue:
         return run()
 
     def _build_temperature(self, p: dict, ctx: RunContext, rig: Rig) -> Iterator[E.Event]:
-        """The same settle a temperature loop makes (`service.temperature`):
-        through the 331 console when the rig has one, else the pause. The
-        pause needs the context's `wait_for_operator`; with a controller the
-        hook is only reached after a timeout or a refusal, and a run that
-        has none then fails at that point rather than here. The settle reads
-        the context's `emit` and `stop_mode` (the executor fills them from
-        the job), so a pause here polls the console live and an abort
-        unwinds, as a loop's does. What it settles at is left on
-        `ctx.temperature_k`; the executor binds it for the nodes after."""
+        """The temperature builder uses the same settle helper as a temperature loop.
+
+        `temperature.settle` uses an attached 331 or pauses for the operator. A pause
+        requires `ctx.wait_for_operator`. With a controller, that callback is needed
+        only after timeout or refusal; a missing callback fails then, not at build.
+        The executor supplies `ctx.emit` and `ctx.stop_mode` from the job, enabling
+        live console polls during a pause and abort handling. The settled value
+        remains in `ctx.temperature_k` for following nodes
+        (`docs/service-contract.md`, section 7)."""
         if rig.temperature is None and ctx.wait_for_operator is None:
             raise ModuleError("temperature: the 331 is not wired, so this module waits "
                               "for an operator -- and the context has no "
@@ -1480,18 +1431,14 @@ class Catalogue:
         return run()
 
     def _build_light(self, p: dict, ctx: RunContext, rig: Rig) -> Iterator[E.Event]:
-        """Set the shutter and/or the LED, then say what the bench read back.
+        """The light builder controls the shutter and LED and reports read-back.
 
-        Both halves go through `rigs.apply_led` / `rigs.apply_shutter`, which
-        are the same functions the `set-led-*`, `led-off` and `shutter-*`
-        bench actions call: a `light` node in a pipeline and a click on the
-        bench card drive the LED through one implementation, and cannot come
-        to disagree about what `pulse` means.
+        `rigs.apply_led` and `rigs.apply_shutter` also implement the corresponding
+        bench actions, so a pipeline node and a bench action use the same controls.
 
-        Refusals are raised now, before the generator exists, so a node that
-        cannot run has touched nothing: no LED for a mode that needs one, no
-        shutter for a position, and `LedDrive`'s own rules on the levels.
-        """
+        Refusals precede generator creation and any instrument access. A requested
+        LED mode needs an LED, a shutter position needs a shutter, and the levels
+        must satisfy `LedDrive`."""
         shutter_ask, led_ask = str(p["shutter"]), str(p["led_mode"])
         if shutter_ask != "leave" and rig.shutter is None:
             raise ModuleError(f"light: shutter {shutter_ask}, and this bench has no "
@@ -1525,15 +1472,11 @@ class Catalogue:
             def set_shutter() -> None:
                 asked.update(apply_shutter(rig.shutter, shutter_ask == "open"))
 
-            # **The shutter closes first and opens last.** Both orders are the
-            # same order for the same reason: the sample must not see light
-            # nobody asked it to see. Closing first means the generator writes
-            # that follow happen behind a shut shutter, where the node's whole
-            # point may be to prepare a *dark* measurement -- an exposure
-            # during those writes can change the sample before it is measured.
-            # Opening last means the level is already set when light first
-            # reaches it, rather than the previous node's level arriving for
-            # the moment between the two calls.
+            # Shut the shutter before changing the generator and open it last.
+            # This prevents unrequested exposure from changing the sample before
+            # a dark measurement. Opening last ensures the requested level is
+            # set before light reaches the sample, avoiding a brief exposure at
+            # the preceding node's level.
             if shutter_ask == "shut":
                 set_shutter()
                 if led_ask != "leave":
@@ -1545,9 +1488,8 @@ class Catalogue:
                     set_shutter()
             if settle_s > 0:
                 ctx.sleep(settle_s)
-            # The read-back is the answer, and it is the same one `jv` labels
-            # its curve from -- so what this node says it did and what the
-            # next node records having found are one function's opinion.
+            # Use the same read-back as `jv` illumination labels, so this
+            # node's reported result agrees with the following curve's label.
             found = illumination_state(rig)
             yield E.InstrumentState({
                 "shutter": found["shutter"] or "?",
@@ -1555,9 +1497,8 @@ class Catalogue:
                                  else "light" if found["lit"] else "dark"),
                 "led_mode": found["led_mode"] or "?",
                 "led_level_v": found["led_level_v"],
-                # The output flag too, or `LiveState` overlays mode and
-                # level onto the *Start* snapshot's stale one and the rail
-                # shows the LED off through an illuminated sweep.
+                # Include the output flag. Otherwise `LiveState` overlays mode and
+                # level onto the stale Start flag, displaying off during illumination.
                 "led_output": found["led_output"],
             })
             yield E.Notice("info", "light: " + _light_summary(asked, found))
@@ -1590,10 +1531,10 @@ class Catalogue:
 
 
 def _light_summary(asked: dict, found: dict) -> str:
-    """What the node did, and what the bench then read. Both, always: the
-    request is what the operator asked for and the read-back is what the
-    instruments say, and `ui-rules` §6 wants the second rendered, never the
-    first dressed up as it."""
+    """The light result contains both the request and the instrument read-back.
+
+    The console must display the read-back as the result. A requested state is
+    not evidence that the instrument reached it."""
     parts = []
     if "mode" in asked:
         level = asked.get("level_v", asked.get("high_v"))
@@ -1611,10 +1552,10 @@ def _light_summary(asked: dict, found: dict) -> str:
 
 # -- the data endpoint's arrays ------------------------------------------
 class _BaceData:
-    """What `GET /runs/{id}/data` serves for a bace node, accumulated from the
-    events as they pass. Never read out of the recorder: its job is the files,
-    and a run that is aborted before the recorder flushes still has every
-    shot that completed here."""
+    """The transient data store collects full arrays from events for one node.
+
+    It serves `GET /runs/{id}/data` independently of the recorder. An abort
+    before recorder flush must still retain every completed shot in memory."""
 
     def __init__(self, run_cfg: RunConfig, rig_cfg: RigConfig):
         self.run_cfg, self.rig_cfg = run_cfg, rig_cfg
@@ -1663,10 +1604,12 @@ class _BaceData:
             self.finished = ev
 
     def _shot(self, ev: E.StepDone) -> dict:
-        """The last shot with its running integral over its own window -- the
-        LabVIEW "Integrated PhotoCurrent" plot. The window is the one the run
-        resolved for this shot (`StepDone.t0_int_record_s` .. `t1_int_record_s`,
-        pinned to the pulse), so the curve's last value is the shot's `q`."""
+        """The shot data includes a running Q integral over its integration window.
+
+        It matches the LabVIEW Integrated PhotoCurrent plot. The window uses this
+        shot's `StepDone.t0_int_record_s` and `StepDone.t1_int_record_s`, relative
+        to the pulse. The final integral equals the shot's Q
+        (`docs/service-contract.md`, section 6)."""
         dt = ev.light.dt
         t0 = ev.t0_int_record_s
         t1 = ev.t1_int_record_s
@@ -1705,19 +1648,14 @@ class _BaceData:
 
 
 def _bind_temperature(ctx: RunContext, rig: Rig) -> tuple[float | None, str, str]:
-    """The node's temperature triple, reading the controller when nobody
-    said one.
+    """The node temperature uses a binding or a controller reading.
 
-    `ctx.temperature()` is the tree's binding or the session's typed number.
-    Until 2026-09-04 every recipe typed 290, so a run on a bench sitting at
-    220 K was filed as `290 K · typed` -- a wrong number wearing an honest
-    label (`docs/history/naming-plan.md` §4). The recipes now type nothing, and a
-    bench with a 331 is asked once, when the node starts: `how = "read"`,
-    the source the same classifier the settle uses. Bound onto `ctx`, so the
-    executor's `NodeDone` says the same as the file. A bench with no
-    controller, or one that does not answer, stays *not recorded*, which
-    the console renders as such -- never a number nobody measured.
-    """
+    `ctx.temperature()` supplies a tree binding or the session's typed value.
+    Without either, the controller is read once at node start. The result uses
+    `how = "read"` and the same source classifier as settling. Binding it to
+    `ctx` keeps the executor's `NodeDone` consistent with the file. An absent or
+    unresponsive controller leaves temperature unrecorded rather than assigning
+    an unmeasured value (`docs/service-contract.md`, section 7)."""
     kelvin, how, source = ctx.temperature()
     if kelvin is not None or getattr(rig, "temperature", None) is None:
         return kelvin, how, source
@@ -1742,11 +1680,9 @@ class _JVData:
     def handle(self, ev: E.Event) -> None:
         if isinstance(ev, JVCurveDone):
             self.curves.append({
-                # `dark` is carried, not coerced: `bool(None)` is False, which
-                # would have the data endpoint report a curve nobody could read
-                # as a *known light* one. `illumination` says the same thing
-                # the file's own attribute says (`bace-jv/3`), so a reader of
-                # either does not have to know the tri-state convention.
+                # Preserve tri-state `dark`: `bool(None)` would label unknown
+                # illumination as light. `illumination` matches the HDF5 attribute
+                # so API and file readers need not infer this convention.
                 "label": ev.label, "dark": ev.dark, "led_level_v": ev.led_level_v,
                 "illumination": ("unknown" if ev.dark is None
                                  else "dark" if ev.dark else "light"),
@@ -1760,9 +1696,11 @@ class _JVData:
 
 
 def jsonable(value: Any) -> Any:
-    """The `on_data` dict as JSON: arrays to lists, numpy scalars to Python
-    ones, NaN and infinity to None (JSON has no spelling for them). Full
-    precision -- nothing is decimated here; that is the wire policy's call."""
+    """The JSON conversion preserves full precision for `on_data`.
+
+    Arrays become lists, NumPy scalars become Python values, and nonfinite values
+    become `None`, because JSON has no representation for them. Decimation
+    belongs to the wire policy."""
     if isinstance(value, np.ndarray):
         return jsonable(value.tolist())
     if isinstance(value, dict):
@@ -1779,32 +1717,27 @@ def jsonable(value: Any) -> Any:
 # -- helpers ----------------------------------------------------------------
 def _settle_led(rig: Rig, ctx: RunContext, *, settle_s: float, max_s: float,
                 tolerance: float) -> Iterator[E.Event]:
-    """Wait for the LED to reach its steady state after DC -> pulse, on the
-    power meter when the rig has one, on the clock otherwise.
+    """The LED settle waits for stable power after DC changes to pulse.
 
-    The operator watched a real run on 2026-09-02 and saw the fixed 2 s
-    `led_settle_s` was not enough after the 33220A switched from DC to
-    pulse: the LED's output was still moving when the scan began, and every
-    charge in the first steps was taken under an intensity that was not the
-    one recorded. The 1918-C behind the shutter sees exactly the light the
-    device does, so it is asked: `read_power()` every `LED_SETTLE_POLL_S`
-    until every reading of the last `LED_SETTLE_SPAN_S` agrees within
-    `tolerance` (spread over mean) and at least `settle_s` has passed. A
-    short window is blind to a slow drift -- three readings in 1.5 s
-    passed at 14:52 on the rig while the intensity went on to fall 18 %
-    over the next 40 s -- so the window is a span of time, not a count. A
-    meter that never agrees gives up at `max_s` with a warning and the scan
-    goes on -- a bace that never starts is worse than one that says its
-    light may not have been steady. Elapsed time is counted as polls times
-    `LED_SETTLE_POLL_S`, never on the wall clock, so `--fast` is instant
-    and a test can say when it settled.
+    A 2 s wait is insufficient on this bench: changing LED power during the
+    first points makes their Q correspond to illumination other than the recorded
+    level. The 1918-C behind the open shutter sees the device's illumination.
+    `read_power()` is polled every `LED_SETTLE_POLL_S`. Every reading over the
+    last `LED_SETTLE_SPAN_S` must agree within `tolerance` (spread over mean),
+    and at least `settle_s` must elapse.
 
-    A meter that raises is treated as absent -- one warning, then the fixed
-    wait -- because a dead console must not stop a scan that does not need
-    it. The stop flag is not polled here: an `after_shot` stop never cuts a
-    settle short (the README's rule, and the scan reports the stop before
-    its first step), and an `abort` closes the generator at its next yield.
-    """
+    Measured on this bench, three readings over 1.5 s can agree while intensity
+    falls 18 % over the following 40 s. The window spans time rather than a
+    reading count to reduce sensitivity to slow drift. At `max_s`, a warning
+    allows the scan to proceed with uncertain stability rather than wait forever.
+    Elapsed time is polls times `LED_SETTLE_POLL_S`, so `--fast` takes no wall
+    time and tests can determine the settle time.
+
+    A meter exception produces one warning and the configured wait without meter
+    feedback. A failed console must not block a scan that does not require it.
+    The stop flag is not polled here. `after_shot` keeps a settle intact; the
+    scan checks the stop before its first point. Abort closes the generator at
+    its next yield (`docs/service-contract.md`, section 2)."""
     meter = rig.power
     if meter is None:
         ctx.sleep(settle_s)
@@ -1814,10 +1747,9 @@ def _settle_led(rig: Rig, ctx: RunContext, *, settle_s: float, max_s: float,
     while True:
         ctx.sleep(LED_SETTLE_POLL_S)
         elapsed += LED_SETTLE_POLL_S
-        # `abort` means now: the session's sleep returns early on it and
-        # this is the next chance to act. `after_shot` is left alone -- a
-        # settle in progress is not a shot, and the scan's own check
-        # before its first step honours it without acquiring anything.
+        # Act on abort after the session's sleep returns early. Leave
+        # `after_shot` for the scan's check before its first point; a settle
+        # is not a shot and need not start an acquisition to honor the stop.
         if ctx.stop_mode is not None and ctx.stop_mode() == "abort":
             from .worker import AbortNow
             raise AbortNow("LED settle abandoned: abort requested")
@@ -1847,15 +1779,16 @@ _SPAN_POLLS = max(2, int(round(LED_SETTLE_SPAN_S / LED_SETTLE_POLL_S)))
 
 
 def _span_readings(readings: list[float]) -> list[float]:
-    """The readings of the last `LED_SETTLE_SPAN_S`, newest last."""
+    """The settle readings cover the last `LED_SETTLE_SPAN_S`, latest last."""
     return readings[-_SPAN_POLLS:]
 
 
 def _agree(readings: list[float], tolerance: float) -> bool:
-    """A full span of readings whose spread is within `tolerance` of
-    their mean. Fewer readings than the window is not agreement; a mean of
-    zero (the shutter shut, the LED dark) agrees only if every reading is
-    exactly zero, which a real meter never returns."""
+    """The stability check requires a full span within `tolerance` of its mean.
+
+    The spread is relative to the mean. A shorter span does not establish
+    stability. A zero mean agrees only if every reading is exactly zero, which
+    a real meter does not return."""
     if len(readings) < _SPAN_POLLS:
         return False
     mean = sum(readings) / len(readings)
@@ -1879,9 +1812,10 @@ def _jv_points(p: Mapping[str, Any]) -> np.ndarray:
 
 
 def _apply_smu_config(rig: Rig, cfg: SourceMeterConfig) -> None:
-    """Hand the run's compliance to a driver that takes one. The real
-    `Keithley2400` keeps a `SourceMeterConfig`; the simulated one has no such
-    knob and is left alone, which is what the contract says."""
+    """The run compliance is applied to drivers that accept a configuration.
+
+    The real `Keithley2400` stores a `SourceMeterConfig`. The simulator has no
+    configuration control and is left unchanged."""
     smu = rig.smu
     if smu is not None and isinstance(getattr(smu, "config", None), SourceMeterConfig):
         smu.config = cfg
