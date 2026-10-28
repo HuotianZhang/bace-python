@@ -1042,6 +1042,15 @@ class Validation:
                 "node_paths": list(self.node_paths)}
 
 
+def plan_verdict(plan_id: str, refusals: list[str]) -> Verdict:
+    """The `plan.envelope` refusal of a submission under a plan
+    (`service.plans`): every reason, so the agent can correct them together."""
+    return _v("invalid", "plan.envelope",
+              f"outside plan {plan_id}: " + "; ".join(refusals)
+              + ". A different run needs a plan a person approves.",
+              plan=plan_id, refusals=list(refusals))
+
+
 def validate(tree_or_obj, catalogue, *, bench: Mapping[str, Any] | None = None,
              history=None, session_voc=None, rig_config: RigConfig,
              power_available: bool | None = None,

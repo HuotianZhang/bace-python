@@ -182,7 +182,8 @@ def test_run_queued_is_the_line_the_queries_key_on():
     assert d["data"] == {"kind": "manual", "module": "bace",
                          "tree": {"kind": "module", "module": "bace"},
                          "params": {"n_loops": 20}, "name": "quick",
-                         "resolved": None, "folder": None, "sample": None}, (
+                         "resolved": None, "folder": None, "sample": None,
+                         "plan": None}, (
         "the experiment.events.RunQueued dataclass, every field, as the one event path writes it")
     json.dumps(d)
     assert run_queued(seq=1, ts=None, run_id="r", kind="pipeline", module=None,

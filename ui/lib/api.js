@@ -149,6 +149,14 @@ export function createApi({ base = '', fetch: fetchImpl = globalThis.fetch } = {
     /** The ring over HTTP, for a client without a socket. */
     events: (since = 0) => call('GET', '/events', undefined, { since }),
 
+    // -- plans -------------------------------------------------------------
+    /** Every plan of the session (docs/service-contract.md section 8b). */
+    plans: () => call('GET', '/plans'),
+    /** A person's approval, naming the fingerprint shown. */
+    approvePlan: (id, fingerprint) => call('POST', `/plans/${encodeURIComponent(id)}/approve`, { fingerprint }),
+    rejectPlan: (id, reason) => call('POST', `/plans/${encodeURIComponent(id)}/reject`, { reason: reason || '' }),
+    closePlan: (id, reason) => call('POST', `/plans/${encodeURIComponent(id)}/close`, { reason: reason || '' }),
+
     // -- the assistant -----------------------------------------------------
     assistantStatus: () => call('GET', '/assistant'),
     forgetConversation: (id) => call('DELETE', `/assistant/conversations/${id}`),

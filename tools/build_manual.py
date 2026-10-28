@@ -106,6 +106,7 @@ def parameters() -> str:
 
 def checks() -> str:
     from bace.service.pipeline import CHECK_DOCS
+    from bace.service.plans import PLAN_CHECK
     from bace.service.wire import SHOT_CHECKS
 
     out = ["# Checks and warnings", "",
@@ -125,6 +126,13 @@ def checks() -> str:
     for code, (level, when, remedy) in CHECK_DOCS.items():
         out.append("| " + " | ".join(_cell(c) for c in (
             f"`{code}`", f"`{level}`", when, remedy)) + " |")
+    code, level, when, remedy = PLAN_CHECK
+    out += ["", "## Under a plan", "",
+            "A run submitted under an approved plan is also checked against the "
+            "plan's envelope (`service/plans.py`).", "",
+            "| Check | Level | Reported when | Remedy |",
+            "|---|---|---|---|",
+            "| " + " | ".join(_cell(c) for c in (f"`{code}`", f"`{level}`", when, remedy)) + " |"]
     out += ["", "## Each shot", "",
             "Every shot is judged as it is processed. A warning marks the shot in the "
             "console and in the run file; the shot stays in the mean, and the operator "

@@ -92,19 +92,22 @@ RUN_KINDS: tuple[str, ...] = ("manual", "pipeline")
 def run_queued(*, seq: int, ts: float | None, run_id: str, kind: str,
                module: str | None, tree: dict | None, params: dict | None,
                name: str = "", folder: str | None = None,
-               resolved: dict | None = None, sample: dict | None = None) -> dict:
+               resolved: dict | None = None, sample: dict | None = None,
+               plan: str | None = None) -> dict:
     """Builds the same `RunQueued` envelope as the session event path.
 
     `experiment.events.RunQueued` makes script and test lines byte-exact
     with session lines. `kind` is `manual` or `pipeline`; `module` names a
     manual module and is `None` for a pipeline. `params` contains operator
     choices for `last_used_params`; `resolved` contains all executed
-    values. `sample` retains the queued identity. The dataclass refuses an
+    values. `sample` retains the queued identity; `plan` names the approved
+    plan a run was submitted under, if any. The dataclass refuses an
     invalid kind or a manual run without a module
     (docs/service-contract.md section 3, Journal).
     """
     event = RunQueued(kind=kind, module=module, tree=tree, params=params,
-                      resolved=resolved, name=name, folder=folder, sample=sample)
+                      resolved=resolved, name=name, folder=folder, sample=sample,
+                      plan=plan)
     return envelope_to_wire(Envelope(seq=int(seq), ts=time.time() if ts is None else float(ts),
                                      run_id=run_id, node_path="", event=event))
 
@@ -464,6 +467,8 @@ class _Run:
         Start read-back verdicts supersede submit-time checks.
         """
         self.sample: dict | None = None
+        self.plan: str | None = None
+        """The approved plan the run was submitted under (`service.plans`)."""
         self.nodes: dict[str, dict] = {}
         """Stores module `NodeDone` data reduced by `node_record`.
         This supplies run details and results grids across sessions.
@@ -494,6 +499,7 @@ class _Run:
                 self.folder = str(data["folder"])
             if isinstance(data.get("sample"), dict):
                 self.sample = dict(data["sample"])
+            self.plan = data.get("plan")
         elif kind == "NodeStarted":
             self._started[str(data.get("node_path") or line.get("node_path") or "")] = ts
         elif kind == "RunStateChanged":
@@ -631,6 +637,7 @@ class _Run:
         return {"run_id": self.run_id, "session_id": self.session_id, "kind": self.kind,
                 "name": self.name, "module": self.module,
                 "sample": dict(self.sample) if self.sample else None,
+                "plan": self.plan,
                 "tree_summary": _tree_summary(self.tree),
                 "node_count": _node_count(self.tree), "state": self.state,
                 "parked": self.parked, "queued_at": self.queued_at,
