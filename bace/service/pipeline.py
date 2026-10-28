@@ -1,45 +1,29 @@
-"""Pipelines: the tree, its schedule, the check catalogue and the cost model.
+"""Pipelines define trees, schedules, validation checks and cost estimates.
 
-Pure logic. Nothing here touches an instrument, a thread, a socket or a file:
-`validate` is the Dry run button, and a Dry run that could change the bench
-would not be one. The executor runs what this module produces and never
-re-derives structure from the tree, so every decision about *what happens in
-which order* is made exactly once, here, where it can be tested without a rig.
+This module touches no instrument, thread, socket or file. `validate` serves
+Dry run. The executor consumes the schedule without deriving structure again,
+so execution order is decided once and can be tested without a rig.
 
-Four things live here.
+`parse_tree` checks the tree shape and refuses unknown keys. A misspelt
+parameter must not silently select a default LED level while appearing
+correct in the console.
 
-**The tree** (`parse_tree`). What the console posts: loops over temperature,
-illumination and repeats, with module leaves. Shapes are checked on the way in
-and unknown keys are refused, for the same reason `config.load_run` refuses
-them: a misspelt `led_low_v` that fell back to a default would drive the LED
-at a level nobody chose, and the tree would look right on screen.
+`resolve` produces ordered steps with parameter layers. Illumination loops
+supply `Source.INHERITED` LED levels. A preceding `jv_bace` at the same level
+supplies `Source.DERIVED` V_oc. Relay transitions mark J-V and `bace`
+boundaries. These bindings let the console show the values execution uses,
+including a measured V_oc that overrides a typed value
+(`docs/service-contract.md`, section 7).
 
-**The schedule** (`resolve`). The tree flattened into ordered steps, each
-carrying the module's parameters *with provenance*. This is where the three
-bindings of the plan happen: an illumination loop's `led_v` enters every
-child as `Source.INHERITED`; a `jv_bace` earlier in the same illumination step
-becomes the `Source.DERIVED` V_oc of the `bace` after it; and each `jv_* <->
-bace` boundary is marked as a relay transition. They are bindings between
-*parameters*, made before anything runs, so the console can show the operator
-what the run will use and where each number came from -- the failure this
-prevents is the one `bace.params` describes: a V_oc typed an hour ago still
-shown as "edited" while the loop centres on a fresh measurement.
+`validate` reports at least one `Verdict` per stable check ID. `invalid` and
+`crit` block Start; other levels leave the choice to the operator. A verdict's
+`fix` names an explicit bench action and does not apply it. Checks use the
+engine's `Axis`, `ScanSpec`, `LedDrive`, `assert_axis_centre`, `pulse_levels`
+and `config.check_smu_limits` rules, so validation and execution agree.
 
-**The checks** (`validate`). A fixed catalogue with stable ids, one `Verdict`
-per id at least, so "16 checks, 15 ok, 1 warn" is a count the UI can render
-and an operator can scan. `invalid` and `crit` block Start; everything else
-states evidence and leaves the decision to the person at the bench. Nothing
-is corrected here: a `fix` in a verdict's data names a bench action the
-operator may click. The rules themselves are borrowed, not re-implemented --
-`Axis`, `ScanSpec`, `LedDrive`, `assert_axis_centre`, `pulse_levels` and
-`config.check_smu_limits` are asked to refuse, and their refusal becomes the
-verdict -- so a rule cannot be tightened in the engine and stay loose here.
-
-**The cost** (`estimate`). A sum of what is known. The settle time at a
-temperature comes from the journal's history of operator waits or it is
-`None`; it is never invented, because a made-up 20 minutes per temperature
-becomes a made-up finish time that someone plans an evening around.
-"""
+`estimate` sums available costs. Temperature settle times come from the
+journal or remain `None`. Invented waits would give an unsupported finish
+time."""
 from __future__ import annotations
 
 import math
@@ -63,31 +47,35 @@ from ..params import ParamError, ParamSet, ParamValue, Source
 LOOPS: tuple[str, ...] = ("temperature", "illumination", "repeat")
 
 VOC_PARAM = "voc"
-"""The module parameter a V_oc source fills (contract §5, the `bace` row)."""
+"""The V_oc source fills this module parameter.
+
+The `bace` mapping is defined in `docs/service-contract.md`, section 5."""
 
 TEMPERATURE_DEFAULTS: dict[str, float] = {"tolerance_k": 0.2, "hold_s": 60.0,
                                           "timeout_s": 1800.0}
-"""What a temperature loop uses for the keys it leaves out -- the values on
-the console's temperature card. Constants rather than a lookup into the
-catalogue's `temperature` module so the schedule of a tree does not depend on
-which modules the catalogue happens to list."""
+"""Temperature loops use these defaults for omitted settle parameters.
+
+They match the console's temperature card. Constants avoid a dependency on
+whether the catalogue lists the `temperature` module."""
 
 ILLUMINATION_SETTLE_S = 2.0
-"""The loop's own settle in the cost model when it does not say
-(`SeriesConfig.led_settle_s`, the original's "LED stab. time")."""
+"""The illumination loop uses this default settle time in seconds.
+
+It matches `SeriesConfig.led_settle_s`."""
 
 T_SHOT_DEFAULT_S = 0.8
-"""One light + dark shot when the journal has no bace run to measure it from."""
+"""The default shot cost applies when the journal has no measured interval."""
 
 SETTLE_KEY_DECIMALS = 1
-"""`Journal.settle_history()` keys setpoints rounded to 0.1 K."""
+"""The journal groups settle-history setpoints rounded to 0.1 K."""
 
 CHAIN_STALE_S = 600.0
 LONG_RUN_S = 8 * 3600.0
 STORE_SHOTS_BYTES = 2e9
 LED_MATCH_V = 1e-9
-"""The tolerance `assert_axis_centre` uses; two drive levels closer than this
-are the same illumination."""
+"""The LED matching tolerance is the one used by `assert_axis_centre`.
+
+Drive levels within it represent the same illumination."""
 
 CHECKS: tuple[str, ...] = (
     "tree.shape", "tree.owned-param", "light.undone-by-park", "voc.source", "voc.coupling", "led.levels",
@@ -96,6 +84,10 @@ CHECKS: tuple[str, ...] = (
     "chain.bias-polarity", "temperature.not-wired", "temperature.inside-illumination",
     "trigger.auto", "power.console", "intensity.factor", "cost.long", "chain.stale",
 )
+"""The check IDs follow the order reported by `validate`.
+
+The console keys checks by these stable strings. Renaming an ID can silently
+remove its display."""
 
 CHECK_DOCS: dict[str, tuple[str, str, str]] = {
     "tree.shape": (
@@ -219,32 +211,32 @@ CHECK_DOCS: dict[str, tuple[str, str, str]] = {
         "The trigger-chain read-back is older than 10 min. It is read again at Start.",
         "None."),
 }
-"""For each check: the most severe level it reports, when it reports it, and the
-remedy. The source of manual 4.2 (`tools/build_manual.py`)."""
+"""Each check lists its severity, condition and remedy.
+
+`tools/build_manual.py` uses this table to generate manual 4.2."""
 
 VOC_FLAGS: tuple[str, ...] = ("centre_on_voc", "vpre_on_voc")
-"""The `bace` parameters that make a V_oc source mandatory: a swept prebias
-centred on it, or a pinned prebias set as an offset from it (TDCF at V_oc,
-the design's inherited "vpre = V_oc + 0.000 V")."""
+"""These `bace` flags require a V_oc source.
+
+One centres a swept V_pre on V_oc; the other makes pinned V_pre an offset
+from V_oc (`docs/service-contract.md`, section 5)."""
 
 ADVISORY_NEEDS: frozenset[str] = frozenset({"voc", "power", "temperature", "illumination"})
-"""`Catalogue.needs` codes that are the V_oc source's business (`voc.source`
-reports it) or a warning, not a missing instrument -- except for the `power`
-module itself, whose instrument *is* the meter. `temperature` is advisory
-because a temperature node runs either way: through the 331 console, or as
-a pause for the operator (`temperature.not-wired` says which).
-`illumination` is a plain `jv` on a bench with no shutter or LED to read:
-the curve is recorded with its illumination unknown, and no other check
-says so, so `bench.instrument` reports it as a `warn`."""
-"""The catalogue, in the order `validate` reports it. Stable: the UI keys on
-these strings, and a renamed id is a check that silently stops showing."""
+"""The advisory needs do not usually mean a missing required instrument.
+
+`voc` belongs to `voc.source`. `power` is advisory except for the `power`
+module, which requires the meter. `temperature` can use the 331 or pause
+for the operator; `temperature.not-wired` describes that path. A `jv`
+without LED or shutter read-back can run but has unknown illumination.
+`bench.instrument` reports that as a warning because no other check does."""
 
 
 # -- the tree ---------------------------------------------------------------
 class TreeError(ValueError):
-    """A tree that cannot be executed as posted. `node_path` says where: the
-    structural key of the offending node (`temperature/illumination/bace`)
-    when no iteration exists yet, the iteration path once it does."""
+    """A tree error identifies a node that cannot execute as posted.
+
+    `node_path` is its structural key, such as `temperature/illumination/bace`,
+    before iteration, or its iteration path afterward."""
 
     def __init__(self, message: str, *, node_path: str = ""):
         super().__init__(message)
@@ -253,10 +245,11 @@ class TreeError(ValueError):
 
 @dataclass(frozen=True)
 class Module:
-    """A leaf: run `module` with `params` typed over the bench's ParamSet.
-    `key` is the structural position (`temperature/illumination/bace#2`), the
-    same for every iteration; `name` is the folder stem and is only read at
-    the root."""
+    """A module leaf applies `params` over the bench's `ParamSet`.
+
+    `key` identifies its structural position, such as
+    `temperature/illumination/bace#2`, across every iteration. `name` supplies
+    the folder stem and is read only at the root."""
 
     module: str
     params: dict[str, Any] = field(default_factory=dict)
@@ -276,10 +269,11 @@ class Module:
 
 @dataclass(frozen=True)
 class Loop:
-    """A loop over `values`, in the order given. `params` holds only the keys
-    the tree stated (`tolerance_k`/`hold_s`/`timeout_s`, or
-    `led_low_v`/`led_settle_s`); `resolve` fills the rest, so the wire form
-    can still tell a typed value from a default."""
+    """A loop visits `values` in the supplied order.
+
+    `params` contains only explicit `tolerance_k`, `hold_s`, `timeout_s`,
+    `led_low_v` or `led_settle_s` values. `resolve` fills omitted defaults,
+    preserving the distinction between typed and default values on the wire."""
 
     loop: str
     values: tuple
@@ -324,14 +318,14 @@ _MODULE_KEYS = {"kind", "module", "params", "label"}
 
 
 def range_values(start: float, stop: float, step: float) -> tuple[float, ...]:
-    """`start` to `stop` inclusive at spacing `step`, with a **rounded** point
-    count -- the rule `core.axis.Axis.values` uses. Truncation (the LabVIEW
-    `N = abs(a-b)/dV + 1`) drops the last level whenever floating point puts
-    the ratio just under the integer, which for 1.010 -> 1.030 step 0.005 is a
-    four-level loop that was written as five. Values are rounded to nine
-    decimals so `led=1.015V` is 1.015 and not 1.0149999999999999 on the
-    wire; the V_oc coupling tolerance is 1e-9, so nothing is lost.
-    """
+    """The range includes both endpoints with a rounded point count.
+
+    The count follows `core.axis.Axis.values`. Truncating `abs(a-b)/dV + 1`
+    can drop the last level when floating-point rounding puts the ratio below
+    an integer. For 1.010 to 1.030 V in 0.005 V steps, that gives four levels
+    instead of five. Values are rounded to nine decimals to avoid wire values
+    such as 1.0149999999999999 for 1.015 V. This preserves the 1e-9 V V_oc
+    coupling tolerance."""
     if start == stop:
         return (start,)
     if step <= 0:
@@ -357,9 +351,10 @@ def _number(obj: Mapping, key: str, where: str, *, minimum: float | None = None,
 
 
 def _sibling_tokens(children: Iterable[Mapping | Node]) -> list[str]:
-    """`bace`, `bace#2`, `bace#3` for duplicate siblings; loops are named by
-    their kind. The first keeps the bare name so a tree with no duplicates
-    has the paths the contract spells."""
+    """Sibling keys distinguish repeated modules with `#2`, `#3` and so on.
+
+    The first keeps its bare name. Loop keys use their kind, preserving the
+    paths in `docs/service-contract.md`, section 7, for trees without duplicates."""
     names = []
     for c in children:
         if isinstance(c, Mapping):
@@ -379,13 +374,12 @@ def _join(prefix: str, token: str) -> str:
 
 
 def parse_tree(obj: Mapping[str, Any]) -> Node:
-    """The posted tree as `Loop`/`Module` nodes, or `TreeError`.
+    """The parser converts a posted tree into `Loop` and `Module` nodes.
 
-    Shape only: module names and parameter values are the catalogue's to
-    judge, at `resolve`. Loop values from `start/stop/step` use the rounded
-    count; a loop needs at least one child; `name` is accepted at the root
-    only, where it becomes the folder stem.
-    """
+    Invalid shapes raise `TreeError`. The catalogue checks module names and
+    parameter values during `resolve`. Ranges use rounded point counts. Each
+    loop needs a child. Only the root accepts `name` as a folder stem
+    (`docs/service-contract.md`, section 7)."""
     if not isinstance(obj, Mapping):
         raise TreeError(f"the tree must be an object, not {type(obj).__name__}")
     return _parse_node(obj, key="", root=True)
@@ -510,7 +504,9 @@ def _loop_values(obj: Mapping[str, Any], loop: str, key: str) -> tuple:
 
 
 def iteration_token(loop: str, value: Any) -> str:
-    """`T=250K`, `led=1.020V`, `rep=2` -- the contract's spellings."""
+    """The iteration path uses `T=250K`, `led=1.020V` or `rep=2`.
+
+    The path format is defined in `docs/service-contract.md`, section 7."""
     if loop == "temperature":
         return f"T={value:g}K"
     if loop == "illumination":
@@ -519,7 +515,7 @@ def iteration_token(loop: str, value: Any) -> str:
 
 
 def walk(node: Node, *, ancestors: tuple[Loop, ...] = ()) -> Iterable[tuple[Node, tuple[Loop, ...]]]:
-    """Every node with the loops above it, depth first."""
+    """The tree walk yields each node and its ancestor loops in depth-first order."""
     yield node, ancestors
     if isinstance(node, Loop):
         for child in node.children:
@@ -529,10 +525,11 @@ def walk(node: Node, *, ancestors: tuple[Loop, ...] = ()) -> Iterable[tuple[Node
 # -- the schedule -----------------------------------------------------------
 @dataclass
 class Step:
-    """One line of the schedule. `params` is the module's full ParamSet as
-    resolved for this step, provenance included; `detail` carries what the
-    executor and the UI need beyond that (the V_oc source, the relay
-    transition, the loop's setpoint bookkeeping) as plain JSON-able values."""
+    """A schedule step carries one operation and its resolved parameter layers.
+
+    `params` is the full `ParamSet` for the step. `detail` holds the V_oc source,
+    relay transition and loop setpoint data as JSON-compatible values for the
+    executor and console."""
 
     node_path: str
     kind: str                          # "loop-enter" | "module" | "loop-exit"
@@ -546,7 +543,7 @@ class Step:
     detail: dict[str, Any] = field(default_factory=dict)
 
     def values(self) -> dict[str, Any]:
-        """Plain `{name: value}`, what `Catalogue.build` is handed."""
+        """The step values supply a plain `{name: value}` mapping to `Catalogue.build`."""
         return {n: pv.value for n, pv in self.params.items()}
 
     def as_wire(self) -> dict[str, Any]:
@@ -559,9 +556,10 @@ class Step:
 
 @dataclass
 class Schedule:
-    """What Dry run shows and what the executor runs: the steps in order, the
-    four counters of the design, and the module node paths (the addresses
-    `GET /runs/{id}/data?node=` accepts)."""
+    """The schedule supplies Dry run and execution with the same ordered steps.
+
+    It includes four counters and module node paths used by
+    `GET /runs/{id}/data?node=` (`docs/service-contract.md`, section 7)."""
 
     steps: list[Step]
     counters: dict[str, int]
@@ -592,8 +590,9 @@ def _jsonable(v: Any) -> Any:
 
 @dataclass
 class _Ctx:
-    """What the loops above a node have decided. Immutable per level: a child
-    gets a copy with its loop's contribution added, never the parent's own."""
+    """The loop context holds inherited decisions for one level.
+
+    A child gets a copy with its loop's contribution, leaving the parent intact."""
 
     led_v: float | None = None
     led_low_v: float | None = None
@@ -602,25 +601,25 @@ class _Ctx:
     in_temperature: bool = False
     temperature_k: float | None = None
     scopes: tuple[dict, ...] = field(default_factory=lambda: ({},))
-    """V_oc providers in scope, innermost last: `{led_v: (node_path, module)}`
-    per open loop iteration. A temperature iteration starts a fresh chain,
-    because a V_oc measured at 295 K says nothing about 250 K; illumination
-    and repeat iterations extend the chain, because a J-V taken at this
-    temperature before the loop is still the J-V for this temperature.
+    """V_oc providers are scoped by loop, with the innermost scope last.
 
-    A factory, not a literal `({},)`: the tuple is immutable but the dict
-    inside it is not, and a literal default would be one dict shared by
-    every resolve in the process -- a jv_bace registered while resolving one
-    tree would then serve as the V_oc source of a bace in the next."""
+    Each scope maps `{led_v: (node_path, module)}`. A temperature iteration
+    starts a separate chain because V_oc at 295 K does not describe 250 K.
+    Illumination and repeat iterations extend the chain, so a preceding J-V at
+    the same temperature remains available.
+
+    A factory creates the default. A literal `({},)` would share its mutable
+    dictionary across resolutions, letting a `jv_bace` in one tree supply V_oc
+    to another tree."""
 
 
 def temperature_automatic(bench: Mapping[str, Any] | None) -> bool | None:
-    """Whether a temperature node will settle through the 331 console, from
-    the bench snapshot: the controller attached (`wired`) and the console's
-    instrument answering (`connected` True). None before the first
-    read-back -- no snapshot, or the bench's stub with a controller attached
-    and `connected` still None -- when nothing is known and the schedule
-    assumes the pause (contract section 7)."""
+    """The temperature readiness check uses the bench's controller state.
+
+    An attached controller has `wired` true and must report `connected` true.
+    No snapshot or an attached controller without read-back gives `None`.
+    The schedule assumes an operator pause without evidence that it answers
+    (`docs/service-contract.md`, section 7)."""
     if not bench:
         return None
     t = (bench.get("instruments") or {}).get("temperature") or {}
@@ -637,8 +636,7 @@ class _Resolver:
         self.history = history
         automatic = temperature_automatic(bench)
         self.needs_operator = True if automatic is None else not automatic
-        """What a temperature step says on the Dry run: a pause unless the
-        bench read-back showed the 331 attached and answering."""
+        """The temperature step predicts a pause unless the 331 read-back answers."""
         self.steps: list[Step] = []
         self.last_relay: str | None = None
 
@@ -746,11 +744,9 @@ class _Resolver:
             "temperature_k": ctx.temperature_k,
             "in_illumination": ctx.in_illumination,
         }
-        # Which flags make a V_oc mandatory for this module: the spec's own
-        # (`centre_on_voc`) and the pinned-offset one, whichever it has.
-        # `voc_flags`: `centre_on_voc` counts only on a swept vpre and
-        # `vpre_on_voc` only on a pinned one; a stale flag behind the field
-        # the console hid is inert, not a demand for a V_oc.
+        # `voc_flags` reads each flag only for the applicable axis.
+        # `centre_on_voc` applies to swept V_pre and `vpre_on_voc` to pinned
+        # V_pre. A flag hidden by the console must not require a V_oc source.
         applies = dict(zip(VOC_FLAGS, voc_flags(ps.values())))
         flags = [n for n in (spec.needs_voc_param, *VOC_FLAGS)
                  if n and n in ps and applies.get(n, bool(ps.get(n).value))]
@@ -783,21 +779,16 @@ class _Resolver:
 
     def _voc(self, ps: ParamSet, path: str, ctx: _Ctx, led_v: float | None
              ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-        """Which V_oc this module will centre on, and why. Sets the `voc`
-        parameter's derived layer when the source is a measurement.
+        """The resolver selects the module's V_oc source and records why.
 
-        Order (contract section 5): a J-V in scope at this drive level beats
-        everything, because a measurement made inside the loop is the most
-        recent statement about the device (the `bace.params` doctrine,
-        derived over edited); then the module's own DC measurement; then a
-        value typed by hand, which the checks flag; then, outside any
-        illumination or temperature loop, the session's V_oc at the same
-        level. `measure_dc` comes before a typed value because when it is on
-        the run *will* measure, and a schedule that said "typed" would
-        describe a value the run ignores. A typed value passed over by a
-        measurement is kept in the source as `overrides`, so `voc.typed` can
-        say the number did not run rather than let it vanish from the wire.
-        """
+        A measured source supplies the derived layer of `voc`. Priority is a J-V in
+        scope at the same LED level, the module's DC measurement, a typed value,
+        then the session's V_oc at that level outside illumination and temperature
+        loops (`docs/service-contract.md`, section 7). A measurement in scope takes
+        precedence over an edited value. `measure_dc` precedes a typed value because
+        the run measures when enabled. A schedule labelled typed would describe a
+        value execution ignores. A typed value displaced by that measurement remains
+        in `overrides`, so `voc.typed` can explain that it does not run."""
         pv = ps.get(VOC_PARAM)
         typed = None
         if pv.value is not None and pv.source not in (Source.INHERITED, Source.DERIVED):
@@ -806,9 +797,8 @@ class _Resolver:
         if led_v is not None:
             hit = _lookup(ctx.scopes, led_v)
             if hit is not None:
-                # A jv_bace in scope taking over a typed value is the plain
-                # precedence the operator expects; the typed number is not
-                # recorded as overridden, because nothing warns about it.
+                # A `jv_bace` in scope takes precedence over a typed value.
+                # This expected binding does not warn or record an override.
                 src_path, src_module = hit
                 ps.set_layer(Source.DERIVED, {VOC_PARAM: None},
                              f"{src_module} {src_path}")
@@ -817,9 +807,8 @@ class _Resolver:
         if "measure_dc" in ps and bool(ps.get("measure_dc").value):
             src = {"how": "measure_dc", "node_path": path, "led_v": led_v, "value": None}
             if typed is not None:
-                # measure_dc and a typed voc on the same node: the run
-                # measures and the typed number never runs. Kept so
-                # voc.typed can say so rather than let it vanish.
+                # `measure_dc` overrides typed `voc` on the same node. Retain
+                # the typed value so `voc.typed` can explain why it does not run.
                 src["overrides"] = typed
             ps.set_layer(Source.DERIVED, {VOC_PARAM: None}, "measure_dc on this node")
             return (src, None)
@@ -839,9 +828,10 @@ class _Resolver:
 
 
 def _inherited(ps: ParamSet, ctx: _Ctx) -> dict[str, Any]:
-    """The illumination loop's binding, spelled for whichever LED parameters
-    this module has: a single `led_v`, a `led_start_v`/`led_stop_v` range
-    collapsed to one level, or a `led_levels_v` list of one."""
+    """The illumination binding uses the module's LED parameter format.
+
+    It supplies one `led_v`, collapses `led_start_v` and `led_stop_v` to one
+    level, or supplies one item in `led_levels_v`."""
     out: dict[str, Any] = {}
     for name in ("led_v", "led_start_v", "led_stop_v"):
         if name in ps:
@@ -856,9 +846,10 @@ def _inherited(ps: ParamSet, ctx: _Ctx) -> dict[str, Any]:
 
 
 def light_levels(values: Mapping[str, Any]) -> tuple[float, ...]:
-    """The drive levels a module illuminates at, from whichever spelling its
-    parameters use. Empty when it has none or the range is malformed (the
-    `led.levels` check reports that; here it just provides no V_oc)."""
+    """The drive-level lookup returns the module's illumination levels.
+
+    No levels or a malformed range gives an empty result and no V_oc source.
+    `led.levels` reports the malformed range."""
     try:
         if "led_levels_v" in values:
             return tuple(float(v) for v in values["led_levels_v"])
@@ -894,9 +885,10 @@ def _axis_of(values: Mapping[str, Any]) -> Axis:
 
 
 def _shots(ps: ParamSet) -> int:
-    """Shots a module takes, for the counters: loops x axis points. Zero for
-    a module without an axis, and zero for an axis the engine refuses (the
-    `axis.geometry` check reports why)."""
+    """The shot count is the loop count times the number of axis points.
+
+    Modules without an axis and refused axes give zero. `axis.geometry`
+    explains refused geometry."""
     if "axis_name" not in ps:
         return 0
     v = ps.values()
@@ -908,20 +900,21 @@ def _shots(ps: ParamSet) -> int:
 
 def resolve(tree: Node, catalogue, *, session_voc=None, history=None,
             bench: Mapping[str, Any] | None = None) -> Schedule:
-    """The tree as a flat schedule. Raises `TreeError` for a module the
-    catalogue does not know or a parameter it refuses, naming the node.
-    `bench` is the read-back, read for whether a temperature step pauses
-    (`needs_operator`) or settles through the 331; without it every
-    temperature step says it pauses."""
+    """The resolver turns a tree into a flat schedule.
+
+    An unknown module or refused parameter raises `TreeError` naming the node.
+    `bench` determines whether a temperature step needs an operator or settles
+    through the 331. Without a snapshot, all temperature steps assume a pause
+    (`docs/service-contract.md`, section 7)."""
     return _Resolver(catalogue, session_voc=session_voc, history=history,
                      bench=bench).run(tree)
 
 
 # -- the cost model -----------------------------------------------------------
 def settle_s(history, setpoint_k: float) -> float | None:
-    """Median of the operator's past settle times at this setpoint, or None.
-    Never a guess: `None` renders as "--" in the per-temperature table and
-    makes the total a lower bound."""
+    """The settle estimate returns the journal median for this setpoint or `None`.
+
+    An unknown time displays as two dashes and makes the total a lower bound."""
     if history is None:
         return None
     try:
@@ -943,7 +936,7 @@ def settle_s(history, setpoint_k: float) -> float | None:
 
 
 def shot_time(history) -> tuple[float, str]:
-    """`(seconds per shot, "journal" | "default")`."""
+    """The shot cost returns seconds per shot and a journal or default source."""
     if history is not None:
         try:
             t = history.shot_time_s("bace")
@@ -955,13 +948,13 @@ def shot_time(history) -> tuple[float, str]:
 
 
 def estimate(schedule: Schedule, history, *, now: float | None = None) -> dict[str, Any]:
-    """The cost dict of the contract.
+    """The cost estimate combines module, illumination and temperature waits.
 
-    `t_module` is each module step's `estimate_s` as the catalogue gave it;
-    an illumination level adds its settle; a temperature adds the journal's
-    settle at that setpoint (or nothing, and then the total is a lower bound)
-    plus `hold_s`. `now` is an argument so a test can pin `finish_at`.
-    """
+    `t_module` sums each step's `estimate_s` from the catalogue. Illumination
+    adds its settle. Temperature adds `hold_s` and the journal settle estimate.
+    A missing settle estimate contributes nothing and marks the total as a lower
+    bound. The clock argument makes `finish_at` reproducible in tests
+    (`docs/service-contract.md`, section 7)."""
     t_shot, t_shot_source = shot_time(history)
     measuring = 0.0
     waiting = 0.0
@@ -1053,13 +1046,12 @@ def validate(tree_or_obj, catalogue, *, bench: Mapping[str, Any] | None = None,
              history=None, session_voc=None, rig_config: RigConfig,
              power_available: bool | None = None,
              now: float | None = None) -> Validation:
-    """Every check in the catalogue, in order, on one tree.
+    """The validator reports every catalogue check in order for one tree.
 
-    `bench` is the `/bench` snapshot (or None before the first read-back:
-    the bench-side checks then say so as `info` rather than guessing);
-    `power_available` overrides the snapshot's view of the 1918-C console
-    when the caller has just asked it. Touches nothing.
-    """
+    `bench` is the `/bench` snapshot. Without read-back, bench checks report
+    `info` rather than guessing. `power_available` overrides the snapshot's meter
+    availability after a direct query. Validation touches no instrument
+    (`docs/service-contract.md`, section 7)."""
     when = time.time() if now is None else float(now)
     error: TreeError | None = None
     tree: Node | None = None
@@ -1106,8 +1098,9 @@ class _Facts:
         return [s for s in self.modules if s.relay == "transient"]
 
     def first_path(self, key: str) -> str:
-        """The first iteration's path for a structural key, so a verdict about
-        a tree node points at a place the schedule shows."""
+        """The path lookup maps a structural key to its first scheduled iteration.
+
+        Verdicts can therefore point to a node displayed in the schedule."""
         for s in (self.schedule.steps if self.schedule else ()):
             if s.detail.get("node_key") == key:
                 return s.node_path
@@ -1137,9 +1130,10 @@ def _skipped(code: str) -> list[Verdict]:
 
 
 def _grouped(code: str, level: str, failures: list[tuple[Step, str, dict]]) -> list[Verdict]:
-    """One verdict per *tree node*, not per iteration: a bad low level on a
-    bace inside 9 x 5 loops is one mistake, not forty-five lines. The first
-    iteration's path is the address; `data` counts the rest."""
+    """The grouped verdict reports each tree node once across its iterations.
+
+    A bad `bace` level inside 9 by 5 loops produces one error, not 45. The first
+    iteration's path identifies the node; `data` counts the other occurrences."""
     groups: dict[str, list[tuple[Step, str, dict]]] = {}
     for step, text, data in failures:
         groups.setdefault(step.detail.get("node_key", step.node_path), []).append((step, text, data))
@@ -1191,19 +1185,14 @@ def _c_owned_param(f: _Facts) -> list[Verdict]:
 
 
 def _c_light_undone_by_park(f: _Facts) -> list[Verdict]:
-    """A run that only sets the light sets nothing.
+    """A run containing only `light` is invalid because park undoes its effect.
 
-    Every run ends parked -- the executor's own `finally` and then the
-    worker's, outputs off and the shutter shut -- so a tree whose only module
-    is `light` hands the bench back exactly as dark as it found it, and the
-    operator watches a run succeed and change nothing. Inside a tree the node
-    is the point: the light it sets holds for the steps after it, and park at
-    the *end* of the run is the right place for the bench to end up.
-
-    The manual form of this is a bench action, which does not go through the
-    worker and is not parked after, so the remedy names the ones that do what
-    the node would have done.
-    """
+    The executor and worker park at run end: outputs off and shutter shut.
+    A lone light node therefore cannot leave the requested illumination on the
+    bench. Within a larger tree, its illumination holds for following steps and
+    park belongs at the end. The manual remedy is a bench action, which runs as
+    a worker job without automatic parking afterward
+    (`docs/service-contract.md`, sections 4 and 5)."""
     if f.schedule is None:
         return _skipped("light.undone-by-park")
     modules = [step.module for step in f.modules]
@@ -1271,8 +1260,8 @@ def _c_voc_coupling(f: _Facts) -> list[Verdict]:
                              low_level=float(s.values().get("led_low_v", 0.4)),
                              threshold_v=f.rig.led_threshold_v)
         except IlluminationError:
-            # The drive itself is refused (led.levels says so). The coupling
-            # question is still the same comparison, made directly.
+            # `led.levels` reports the refused drive. Coupling still compares
+            # the levels directly.
             drive = None
         if drive is not None:
             try:
@@ -1304,14 +1293,11 @@ def _c_led_levels(f: _Facts) -> list[Verdict]:
     thr = f.rig.led_threshold_v
     for s in f.modules:
         v = s.values()
-        # `jv_bace.led_v` is nullable: None means "sweep led_start_v to
-        # led_stop_v", so only a value is a single level; None falls
-        # through to the range below.
-        # A `light` node's levels matter only in the mode that reads them, and
-        # `_build_light` validates exactly that much. Every such node carries a
-        # non-null `led_v` (it has a default), so without this a shutter-only
-        # node was refused for an unused pulse low level sitting above the
-        # threshold — a check about a waveform the node never sends.
+        # A non-null `jv_bace` `led_v` selects one level; `None` selects
+        # `led_start_v` through `led_stop_v`.
+        # A `light` node uses only its active mode's levels, matching
+        # `Catalogue._build_light`. Its default `led_v` must not make a
+        # shutter-only node fail an unused pulse low-level threshold check.
         mode = str(v.get("led_mode", "")).lower() if s.module == "light" else None
         if mode in ("leave", "off"):
             continue
@@ -1369,12 +1355,9 @@ def _c_axis_geometry(f: _Facts) -> list[Verdict]:
     for s in f.modules:
         v = s.values()
         if "axis_name" not in v:
-            # A J-V sweep has geometry too, and until now nothing checked it:
-            # `step_v = 0` validated clean, was queued, and died at build time
-            # with `jv: step_v: step_v must be positive`. The estimate already
-            # said "cannot estimate" on the card while the button beside it
-            # stayed enabled. Same construction the builder makes, so the two
-            # cannot come to disagree about what is runnable.
+            # Validate J-V geometry with the builder's construction so Start
+            # cannot accept a sweep that fails at build time, such as zero
+            # `step_v`. The estimate and validation must agree on runnability.
             if "step_v" in v:
                 sweep = {k: v.get(k) for k in ("start_v", "stop_v", "step_v")}
                 try:
@@ -1384,12 +1367,9 @@ def _c_axis_geometry(f: _Facts) -> list[Verdict]:
                     failures.append((s, f"{s.module}: {exc}", sweep))
                     continue
                 levels = {k: v.get(k) for k in ("led_start_v", "led_stop_v", "led_step_v")}
-                # Only when the range is what runs. `_jv_levels` takes a
-                # non-null `led_v` -- typed, or inherited from an illumination
-                # loop -- as the single level and never looks at the range, so
-                # checking it there refuses a run over numbers nobody uses.
-                # (The same mistake this check was written to fix, one file
-                # over: validate what the builder reads, and nothing else.)
+                # Check the range only when it runs. `Catalogue._jv_levels` uses a
+                # non-null typed or inherited `led_v` as one level and ignores the
+                # range. Unused range values must not block that run.
                 if v.get("led_v") is None and float(v.get("led_step_v", 1.0)) <= 0 and \
                         float(v.get("led_start_v", 0.0)) != float(v.get("led_stop_v", 0.0)):
                     failures.append((s, f"{s.module}: led_step_v: must be positive for a "
@@ -1428,11 +1408,11 @@ def _c_axis_geometry(f: _Facts) -> list[Verdict]:
 
 
 def _c_bench_instrument(f: _Facts) -> list[Verdict]:
-    """Every module step's instruments are on this bench. `Catalogue.needs`
-    knows what each module cannot run without and what the last read-back
-    said is unavailable; without it a run on an unplugged Keithley was
-    accepted, queued and failed at preflight, when the Start button should
-    have said no."""
+    """The instrument check requires every module's instruments on the bench.
+
+    `Catalogue.needs` combines module requirements with unavailable roles from
+    the last read-back. An unplugged source-meter must block Start rather than
+    queue a run that fails at preflight."""
     if f.schedule is None:
         return _skipped("bench.instrument")
     needs = getattr(f.catalogue, "needs", None)
@@ -1475,10 +1455,9 @@ def _c_smu_ceiling(f: _Facts) -> list[Verdict]:
         v = s.values()
         if "smu_current_compliance_a" not in v and "smu_voltage_compliance_v" not in v:
             continue
-        # A bace node sources the SourceMeter only under `measure_dc`; its
-        # compliance is not read otherwise (`Catalogue._build_bace`), and a
-        # `crit` over a number the run never uses is the card's "not read"
-        # fold blocking Start.
+        # `Catalogue._build_bace` uses source-meter compliance only under
+        # `measure_dc`. An unused value must not block Start from a field
+        # marked not read.
         if s.module == "bace" and not bool(v.get("measure_dc", False)):
             continue
         cfg = SourceMeterConfig(
@@ -1509,7 +1488,7 @@ def _c_smu_ceiling(f: _Facts) -> list[Verdict]:
 
 
 def _live_sources(f: _Facts) -> tuple[list[str], list[str]]:
-    """(names reporting output ON, names whose state is unknown)."""
+    """The output groups separate reported live sources from unreadable sources."""
     live, unknown = [], []
     for name, label in (("bias", "81150A bias"), ("smu", "Keithley 2400")):
         state = f.instrument(name).get("output")
@@ -1582,12 +1561,10 @@ def _c_voc_typed(f: _Facts) -> list[Verdict]:
             continue
         over = src.get("overrides")
         if src["how"] != "typed":
-            # A jv_bace in scope taking over a typed value is the plain
-            # precedence the operator expects (the loop's measurement is
-            # the point), and stays quiet. `measure_dc` on the same node as
-            # a typed `voc` is the surprise: both were set by hand, the run
-            # measures and the typed number never runs, so it is said here
-            # rather than let vanish from the schedule.
+            # A `jv_bace` in scope takes precedence over a typed value without
+            # warning. `measure_dc` and typed `voc` on the same node are both
+            # explicit choices. The measurement runs, so report that the typed
+            # value is ignored rather than silently dropping it.
             if over and src["how"] == "measure_dc":
                 out.append((s, f"{s.module}.voc = {over['value']:g} V typed by hand "
                                f"({over.get('source', 'edited')}) is not used: measure_dc "
@@ -1623,14 +1600,14 @@ def _c_chain_led_polarity(f: _Facts) -> list[Verdict]:
     fix = item.get("fix") or "set-33220a-pol-inv"
     if value.startswith("INV"):
         return [_v("ok", "chain.led-polarity", "33220A :OUTP:POL INV", value=value)]
-    # `warn` when a transient in this tree uses the Sync edge, `info` when
-    # none does (a J-V-only tree does not care what the 33220A rests at).
-    # The bench card (rigs.chain) always warns because it describes the
-    # bench, not a tree; the contract records the difference.
+    # Warn when a transient uses the Sync edge; otherwise report info.
+    # A J-V-only tree does not depend on 33220A polarity. `Bench.chain`
+    # always warns because it describes the bench independently of a tree
+    # (`docs/service-contract.md`, sections 4 and 7).
     transient = bool(f.transients)
     if transient and all(bool(s.values().get("external_trigger", True)) for s in f.transients):
-        # Every bace run writes it before it pulses (`_build_bace`, 2026-10-26),
-        # as the recipe's output_polarity does for the 81150A.
+        # `Catalogue._build_bace` writes LED polarity before pulsing,
+        # as `output_polarity` controls the 81150A polarity.
         return [_v("info", "chain.led-polarity",
                    f"33220A :OUTP:POL reads {value}; each bace run writes it at start "
                    "(INV when it arms on the rising Sync edge, which is then light off)",
@@ -1721,16 +1698,15 @@ def _temperature_loops(f: _Facts) -> list[tuple[Loop, tuple[Loop, ...]]]:
 
 
 def _c_temperature_not_wired(f: _Facts) -> list[Verdict]:
-    """Which path every temperature node of this tree takes. `ok` when the
-    read-back showed the 331 console attached and its instrument answering
-    (the node settles through it); `warn` when there is no controller (the
-    run pauses at each temperature for a manual set), when the console is
-    named but was silent at start-up, when it answered at start-up and does
-    not now (the read raised: start the console), when it is up with the
-    instrument silent behind it, or when a controller is attached and not
-    read back yet -- each pauses, and the text says which. The run makes
-    the same decision at the node from a fresh read, so a console that
-    answers again by then settles after all."""
+    """The temperature check describes each temperature node's settle path.
+
+    An attached, answering 331 gives `ok` and settles automatically. `warn`
+    means an operator pause: no controller, a silent console, a failed read from
+    a console that answers at startup, a console with a silent instrument, or an
+    attached controller without a read-back. The verdict names the condition.
+    Each node reads again at execution, so an available controller can settle
+    automatically even when validation predicts a pause
+    (`docs/service-contract.md`, section 7)."""
     if f.tree is None:
         return _skipped("temperature.not-wired")
     loops = _temperature_loops(f)
@@ -1743,9 +1719,8 @@ def _c_temperature_not_wired(f: _Facts) -> list[Verdict]:
     console = f.rig.temperature_console
     path = f.first_path(loops[0][0].key)
     t = f.instrument("temperature")
-    # Where the 331 is, in words a verdict can end with. An empty `console` is
-    # the normal case now -- this process owns the instrument -- so it must
-    # never be rendered as a blank URL.
+    # Name the 331 in the verdict. An empty `console` means this
+    # process owns it, so displaying a blank URL would hide the source.
     at = console or f.rig.temperature_address or "no address"
     data: dict[str, Any] = {"setpoints": setpoints, "console": console, "at": at,
                             "wired": bool(t.get("wired", False)) if f.bench else None,
@@ -1885,10 +1860,10 @@ def _c_intensity_factor(f: _Facts) -> list[Verdict]:
     n = _reads_intensity(f)
     if not n:
         return [_v("ok", "intensity.factor", "no intensity is read")]
-    # No module carries a calibration factor: the original's "Factor" is not
-    # recoverable from the binaries (`SeriesConfig.intensity_factor_mw_cm2_per_w`
-    # says so), so the service records watts at the meter and says so here
-    # rather than pretending to look for a number nothing can supply.
+    # No module supplies a calibration factor. The LabVIEW calibration
+    # is unavailable, so the service records power in W at the meter
+    # rather than unsupported irradiance at the sample
+    # (`docs/service-contract.md`, section 7).
     return [_v("info", "intensity.factor",
                "no calibration factor: intensity is recorded in watts at the meter, "
                f"not as irradiance at the sample ({n} reader{'s' if n != 1 else ''})",
