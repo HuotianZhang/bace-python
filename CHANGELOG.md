@@ -4,6 +4,11 @@ Dated, newest first. Details and evidence are in `docs/`.
 
 ## 2026-10-28
 
+- The manual's Part II, principle: what the extracted charge is, the
+  transient and its timing, the measurement chain with an uncertainty
+  budget, and the tests that show Q complete and n a bulk density. The
+  glossary gains the terms they use.
+
 - **`BACE.pyw`, one double-click.** It starts the service without a
   terminal, logging to `runs/logs/`, and opens the console in a window of its
   own; a service already running is reused. Closing the console leaves the
