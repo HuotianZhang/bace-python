@@ -4,6 +4,11 @@ Dated, newest first. Details and evidence are in `docs/`.
 
 ## 2026-10-28
 
+- The assistant answers with any OpenAI-compatible model as well as Claude:
+  OpenAI, DeepSeek, Qwen, Kimi, GLM, or a model on this PC through Ollama,
+  which needs no key. Provider, address and model are chosen in the panel's
+  settings; `openai` 3.40 joins the `service` extra.
+
 - **The console's assistant.** The `ask` chip in the bar opens a panel where
   the physics, the chain, a parameter's value and the console's controls can
   be asked about in plain language. A Claude model reads the bench, the

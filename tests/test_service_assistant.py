@@ -1,8 +1,9 @@
 """The console's assistant against a scripted model.
 
-No request leaves the machine: `assistant.client` is replaced by a fake whose
-`beta.messages.stream` plays back prepared turns and records what it was
-sent. What is asserted is the loop around the model -- the tools run against
+No request leaves the machine: `providers.make` hands the route a real
+provider built on a fake client, which plays back prepared turns and records
+what it was sent -- `beta.messages.stream` for Claude, `chat.completions` for
+an OpenAI-compatible endpoint. What is asserted is the loop around the model -- the tools run against
 a real `--sim --fast` session, their results go back in the same request
 shape, a failed turn leaves the history as it was -- and the wire the console
 reads.
@@ -16,9 +17,10 @@ import pytest
 
 pytest.importorskip("fastapi")
 pytest.importorskip("anthropic", minversion="2.3")
+pytest.importorskip("openai", minversion="3.40")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from bace.service import assistant  # noqa: E402
+from bace.service import assistant, providers  # noqa: E402
 from bace.service.app import create_app  # noqa: E402
 
 from test_service_api import make_session  # noqa: E402
@@ -76,12 +78,11 @@ class FakeClient:
 
 @pytest.fixture
 def fake(monkeypatch):
-    holder = {}
-
     def use(*responses):
-        holder["client"] = FakeClient(*responses)
-        monkeypatch.setattr(assistant, "client", lambda key: holder["client"])
-        return holder["client"]
+        client = FakeClient(*responses)
+        monkeypatch.setattr(providers, "make", lambda kind, **kw: providers.Anthropic(
+            kw["key"], kw.get("model"), client=client))
+        return client
     return use
 
 
@@ -92,9 +93,9 @@ def service(tmp_path):
         yield client, session
 
 
-def ask(client, text, conversation=None, key="sk-test"):
-    body = {"text": text, **({"conversation": conversation} if conversation else {})}
-    r = client.post("/assistant/chat", json=body, headers={"X-Anthropic-Key": key})
+def ask(client, text, conversation=None, key="sk-test", **settings):
+    body = {"text": text, **({"conversation": conversation} if conversation else {}), **settings}
+    r = client.post("/assistant/chat", json=body, headers={"X-API-Key": key})
     assert r.status_code == 200, r.text
     return [json.loads(line) for line in r.text.splitlines() if line]
 
@@ -116,7 +117,7 @@ def test_a_tool_call_reads_the_session_and_the_answer_streams(service, fake):
     assert "instruments" in json.loads(result["content"])
     # What every request is made with.
     sent = model.sent[0]
-    assert sent["model"] == assistant.MODEL and sent["fallbacks"] == "default"
+    assert sent["model"] == providers.CLAUDE_MODEL and sent["fallbacks"] == "default"
     assert all(t["eager_input_streaming"] for t in sent["tools"])
     assert "thinking" not in sent and "temperature" not in sent
 
@@ -223,3 +224,97 @@ def test_forgetting_a_conversation(service, fake):
     cid = ask(client, "first")[0]["id"]
     assert client.delete(f"/assistant/conversations/{cid}").json() == {"forgotten": cid}
     assert client.delete(f"/assistant/conversations/{cid}").status_code == 404
+
+
+def test_a_question_with_another_model_starts_a_new_conversation(service, fake):
+    client, _ = service
+    fake(turn(text("one")), turn(text("two")))
+    cid = ask(client, "first")[0]["id"]
+    assert ask(client, "second", conversation=cid, model="claude-haiku-5-5")[0]["id"] != cid
+
+
+def test_the_settings_a_provider_cannot_use_are_refused(service):
+    client, _ = service
+    post = lambda body, key="k": client.post("/assistant/chat", json={"text": "hi", **body},  # noqa: E731
+                                             headers={"X-API-Key": key} if key else {})
+    r = post({"provider": "openai", "model": "m", "base_url": "http://api.example.com/v1"})
+    assert r.status_code == 422 and "https://" in r.json()["error"]
+    assert post({"provider": "openai", "base_url": "https://api.example.com/v1"}).status_code == 422
+    r = post({"provider": "openai", "model": "m", "base_url": "https://api.example.com/v1"}, key="")
+    assert r.status_code == 401
+    # A model on this machine needs no key.
+    assert providers.make("openai", key="", model="qwen", base_url="http://127.0.0.1:11434/v1")
+
+
+# -- an OpenAI-compatible endpoint ---------------------------------------------------------
+def chunk(content=None, calls=(), finish=None):
+    delta = SimpleNamespace(content=content, tool_calls=[
+        SimpleNamespace(index=i, id=cid, function=SimpleNamespace(name=name, arguments=args))
+        for i, cid, name, args in calls] or None)
+    return SimpleNamespace(choices=[SimpleNamespace(delta=delta, finish_reason=finish)], usage=None)
+
+
+class FakeOpenAI:
+    def __init__(self, *streams):
+        self.streams = list(streams)
+        self.sent = []
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    async def _create(self, **kw):
+        self.sent.append({**kw, "messages": list(kw["messages"])})
+        chunks = self.streams.pop(0)
+
+        async def stream():
+            for c in chunks:
+                yield c
+        return stream()
+
+
+@pytest.fixture
+def fake_openai(monkeypatch):
+    def use(*streams):
+        client = FakeOpenAI(*streams)
+        monkeypatch.setattr(providers, "make", lambda kind, **kw: providers.OpenAICompatible(
+            kw["key"], kw["model"], kw["base_url"], client=client))
+        return client
+    return use
+
+
+OPENAI = {"provider": "openai", "model": "deepseek-chat", "base_url": "https://api.example.com/v1"}
+
+
+def test_an_openai_compatible_tool_call_arrives_in_pieces_and_goes_back_as_tool_messages(service, fake_openai):
+    client, _ = service
+    model = fake_openai(
+        [chunk("Reading "), chunk(calls=[(0, "call_a", "get_mod", '{"na')]),
+         chunk(calls=[(0, None, "ule", 'me": "bace"}')]), chunk(finish="tool_calls")],
+        [chunk("200 averages."), chunk(finish="stop")])
+    frames = ask(client, "why 200?", **OPENAI)
+    assert {"type": "tool", "name": "get_module", "input": {"name": "bace"}} in frames
+    assert frames[-1]["type"] == "done" and frames[-1]["model"] == "deepseek-chat"
+    first, second = model.sent
+    assert first["messages"][0]["role"] == "system" and first["model"] == "deepseek-chat"
+    assert first["tools"][0]["type"] == "function" and "parameters" in first["tools"][0]["function"]
+    roles = [m["role"] for m in second["messages"]]
+    assert roles == ["system", "user", "assistant", "tool"]
+    said = second["messages"][2]
+    assert said["content"] == "Reading " and said["tool_calls"][0]["function"] == \
+        {"name": "get_module", "arguments": '{"name": "bace"}'}
+    assert second["messages"][3]["tool_call_id"] == "call_a"
+    assert "instruments" not in second["messages"][3]["content"] and '"bace"' in second["messages"][3]["content"]
+
+
+def test_arguments_that_are_not_json_are_not_run(service, fake_openai):
+    client, _ = service
+    model = fake_openai([chunk(calls=[(0, "call_a", "get_run", '{"run_id": ')]), chunk(finish="tool_calls")],
+                        [chunk("sorry"), chunk(finish="stop")])
+    frames = ask(client, "?", **OPENAI)
+    assert {"type": "tool_result", "name": "get_run", "ok": False,
+            "text": "the arguments were not JSON"} in frames
+    assert "INVALID_JSON" in model.sent[1]["messages"][3]["content"]
+
+
+def test_a_length_stop_from_an_openai_compatible_endpoint_is_an_error(service, fake_openai):
+    client, _ = service
+    fake_openai([chunk("half an ans"), chunk(finish="length")])
+    assert "ran out of room" in ask(client, "?", **OPENAI)[-1]["message"]

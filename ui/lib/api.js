@@ -136,12 +136,13 @@ export function createApi({ base = '', fetch: fetchImpl = globalThis.fetch } = {
      * each frame, and the promise settles when the stream ends. The key is
      * the asker's and goes in a header, never in the URL.
      */
-    ask: async ({ text, conversation, key, onFrame, signal }) => {
+    ask: async ({ text, conversation, key, provider = 'anthropic', model, base_url, onFrame, signal }) => {
       const path = '/assistant/chat';
       const response = await fetchImpl(root + path, {
         method: 'POST', signal,
-        headers: { 'Content-Type': 'application/json', 'X-Anthropic-Key': key },
-        body: JSON.stringify({ text, ...(conversation ? { conversation } : {}) }),
+        headers: { 'Content-Type': 'application/json', ...(key ? { 'X-API-Key': key } : {}) },
+        body: JSON.stringify({ text, provider, ...(conversation ? { conversation } : {}),
+                               ...(model ? { model } : {}), ...(base_url ? { base_url } : {}) }),
       });
       if (!response.ok) {
         const body = await response.json().catch(() => null);

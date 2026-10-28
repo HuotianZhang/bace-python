@@ -58,7 +58,7 @@ from starlette.routing import Mount
 
 from ..params import ParamError
 from .modules import SAMPLE_KEYS, ModuleError, jsonable
-from . import assistant, pipeline
+from . import assistant, pipeline, providers
 from .pipeline import TreeError
 from .rigs import ACTIONS, BenchActionRefused
 from .session import (Busy, Conflict, DataUnavailable, NodeRequired, NotPaused, Session,
@@ -130,6 +130,9 @@ class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     text: str = Field(min_length=1)
     conversation: str | None = None
+    provider: Literal["anthropic", "openai"] = "anthropic"
+    model: str | None = None
+    base_url: str | None = None
 
 
 # -- errors to status codes --------------------------------------------------------
@@ -751,15 +754,18 @@ def create_app(session: Session, *, ui_dir: str | None = None,
 
     @app.post("/assistant/chat")
     async def assistant_chat(body: ChatRequest,
-                             key: str | None = Header(default=None, alias="X-Anthropic-Key")):
+                             key: str | None = Header(default=None, alias="X-API-Key")):
         """One question, answered as NDJSON frames; the key is the asker's own and is not kept."""
-        if not key:
-            return _error(401, "the assistant needs your Anthropic API key", param="X-Anthropic-Key")
         try:
-            assistant.sdk()
-        except assistant.AssistantUnavailable as exc:
+            provider = providers.make(body.provider, key=key or "", model=body.model,
+                                      base_url=body.base_url)
+        except providers.NoKey as exc:
+            return _error(401, str(exc), param="X-API-Key")
+        except providers.BadSetting as exc:
+            return _error(422, str(exc))
+        except providers.Unavailable as exc:
             return _error(503, str(exc))
-        frames = assistant.chat(session, conversations, key=key, text=body.text,
+        frames = assistant.chat(session, conversations, provider, text=body.text,
                                 conversation_id=body.conversation)
         try:
             first = await frames.__anext__()

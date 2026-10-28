@@ -6,18 +6,64 @@
 // bar's `ask` chip, beside every tab. In this version the model reads and
 // never acts, so nothing here confirms anything.
 //
-// The key is the asker's own. It goes to the service on each question in a
-// header and is kept in this browser only when they tick "remember"; the
-// service never stores it. A console with no key, or a service without the
-// SDK, works exactly as before — the panel says what is missing and nothing
-// else changes.
+// The model is the asker's choice: Claude, or any OpenAI-compatible endpoint
+// (DeepSeek, Qwen, Kimi, GLM, OpenAI, a local Ollama). So is the key. It goes
+// to the service on each question in a header and is kept in this browser
+// only when they tick "remember"; the service never stores it. A console with
+// no key, or a service without the SDKs, works exactly as before — the panel
+// says what is missing and nothing else changes.
 //
 // Pure parts first (`splitLines`, `applyFrame`, `blocks`, `inline`,
-// `toolLabel`), tested in `tests/assistant.test.mjs`; the DOM after them.
+// `toolLabel`, `missing`, `isLocal`), tested in `tests/assistant.test.mjs`;
+// the DOM after them.
 
-import { h, fill } from './dom.js';
+import { h, fill, keyed } from './dom.js';
 
-export const KEY_STORE = 'bace.assistant.key';
+export const SETTINGS_STORE = 'bace.assistant.settings';
+export const KEYS_STORE = 'bace.assistant.keys';
+
+/**
+ * Where the OpenAI-compatible providers answer. Starting points to pick from,
+ * not a list the service checks: the address stays editable, and the model is
+ * always typed, because each provider renames its models more often than this
+ * file would be edited.
+ */
+export const PRESETS = [
+  { name: 'OpenAI', base_url: 'https://api.openai.com/v1' },
+  { name: 'DeepSeek', base_url: 'https://api.deepseek.com' },
+  { name: 'Qwen · DashScope', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+  { name: 'Kimi · Moonshot', base_url: 'https://api.moonshot.cn/v1' },
+  { name: 'GLM · Zhipu', base_url: 'https://open.bigmodel.cn/api/paas/v4' },
+  { name: 'Ollama on this PC', base_url: 'http://localhost:11434/v1' },
+];
+
+export const DEFAULT_SETTINGS = { provider: 'anthropic', base_url: '', model: '' };
+
+/** A model served from this machine, which takes no key. */
+export function isLocal(url) {
+  try {
+    const host = new URL(url).hostname;
+    return host === 'localhost' || host.endsWith('.localhost') || host === '127.0.0.1' || host === '[::1]';
+  } catch {
+    return false;
+  }
+}
+
+/** What is still needed before a question can be sent, as a phrase, or null. */
+export function missing(settings, key) {
+  if (settings.provider === 'openai') {
+    if (!settings.base_url) return 'the API address';
+    if (!settings.model) return 'the model name';
+    if (!key && !isLocal(settings.base_url)) return 'an API key';
+    return null;
+  }
+  return key ? null : 'an Anthropic API key';
+}
+
+/** Which stored key goes with these settings: one per provider address. */
+export function keySlot(settings) {
+  return settings.provider === 'openai' ? settings.base_url : 'anthropic';
+}
 
 export const EXAMPLES = [
   'What does BACE measure, and why is the dark reference taken from 0 V?',
@@ -214,15 +260,27 @@ function itemEl(item) {
     }) : null);
 }
 
-function readKey() {
-  try { return localStorage.getItem(KEY_STORE) || ''; } catch { return ''; }
+function readJson(name, fallback) {
+  try { return JSON.parse(localStorage.getItem(name)) || fallback; } catch { return fallback; }
 }
 
-function writeKey(key) {
-  try {
-    if (key) localStorage.setItem(KEY_STORE, key);
-    else localStorage.removeItem(KEY_STORE);
-  } catch { /* storage blocked: the key lives for this page only */ }
+function writeJson(name, value) {
+  try { localStorage.setItem(name, JSON.stringify(value)); } catch { /* storage blocked: this page only */ }
+}
+
+function storedKey(settings) {
+  return readJson(KEYS_STORE, {})[keySlot(settings)] || '';
+}
+
+function storeKey(settings, key) {
+  const keys = readJson(KEYS_STORE, {});
+  if (key) keys[keySlot(settings)] = key;
+  else delete keys[keySlot(settings)];
+  writeJson(KEYS_STORE, keys);
+}
+
+function hostOf(url) {
+  try { return new URL(url).host; } catch { return url; }
 }
 
 /**
@@ -230,8 +288,13 @@ function writeKey(key) {
  * can say so.
  */
 export function createAssistantPanel({ api, onChange = () => {} }) {
-  let state = { open: false, status: null, key: readKey(), conversation: null,
-                items: [], busy: false, editingKey: false };
+  const settings = { ...DEFAULT_SETTINGS, ...readJson(SETTINGS_STORE, {}) };
+  let state = { open: false, status: null, settings, key: storedKey(settings), conversation: null,
+                items: [], busy: false, editing: false };
+  // The settings form edits `draft`; `formVersion` rebuilds it, which only a
+  // change of provider or preset needs — typing must not lose the caret.
+  let draft = null;
+  let formVersion = 0;
   let controller = null;
 
   const el = h('aside.assistant', { hidden: true, 'aria-label': 'assistant' });
@@ -256,41 +319,48 @@ export function createAssistantPanel({ api, onChange = () => {} }) {
     draw();
   }
 
-  function needsKey() {
-    return !state.key || state.editingKey;
+  function providerStatus() {
+    const all = state.status && state.status.providers;
+    return all ? all[state.settings.provider] : null;
+  }
+
+  function modelLabel() {
+    const s = state.settings;
+    if (s.provider === 'openai') return s.model ? `${s.model} · ${hostOf(s.base_url)}` : '';
+    return s.model || (state.status && state.status.model) || '';
+  }
+
+  function editing() {
+    return state.editing || Boolean(missing(state.settings, state.key));
+  }
+
+  // A key belongs to the address it was typed or loaded for (`keyFrom`), so
+  // that moving the form to another provider never carries one across.
+  function freshDraft() {
+    return { ...state.settings, key: state.key, keyFrom: keySlot(state.settings),
+             remember: Boolean(storedKey(state.settings)) };
+  }
+
+  function openForm() {
+    draft = freshDraft();
+    formVersion += 1;
+    set({ editing: true });
   }
 
   function draw() {
     el.hidden = !state.open;
-    const status = state.status;
     fill(headEl,
       h('span.as-title', 'assistant'),
-      h('span.as-model', { text: status && status.model ? status.model : '' }),
+      h('span.as-model', { text: modelLabel() }),
       h('span.spacer'),
-      state.key && !state.editingKey ? h('button.as-link', { text: 'key', title: 'change or forget the API key', onclick: () => set({ editingKey: true }) }) : null,
+      !editing() ? h('button.as-link', { text: 'settings', title: 'model, address and key', onclick: openForm }) : null,
       state.items.length ? h('button.as-link', { text: 'new', title: 'start a new conversation', onclick: reset }) : null,
       h('button.as-link', { text: '✕', title: 'close', onclick: () => toggle(false) }));
 
-    if (status && !status.available) {
-      fill(noteEl, h('p', { text: `Not available on this service: ${status.reason}` }));
-    } else if (needsKey()) {
-      const keyInput = h('input', { type: 'password', placeholder: 'sk-ant-…', autocomplete: 'off', value: state.key });
-      const remember = h('input', { type: 'checkbox', checked: Boolean(readKey()) });
-      const use = () => {
-        const key = keyInput.value.trim();
-        writeKey(remember.checked ? key : '');
-        set({ key, editingKey: false });
-        input.focus();
-      };
-      keyInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') use(); });
-      fill(noteEl,
-        h('p', 'The assistant runs on your own Anthropic API key. It goes to this service with each question and on to the Anthropic API; the service does not keep it, and this browser keeps it only if you tick the box.'),
-        h('div.as-key', keyInput, h('button', { text: 'use', onclick: use })),
-        h('label.as-remember', remember, ' remember on this computer'),
-        state.key ? h('button.as-link', { text: 'forget the key', onclick: () => { writeKey(''); set({ key: '', editingKey: true }); } }) : null);
-    } else {
-      fill(noteEl);
-    }
+    const ps = providerStatus();
+    if (editing() && !draft) draft = freshDraft();
+    keyed(noteEl, JSON.stringify([editing(), formVersion, ps, Boolean(state.status)]),
+      () => (editing() ? form() : []));
 
     const near = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
     fill(logEl, state.items.length
@@ -300,31 +370,112 @@ export function createAssistantPanel({ api, onChange = () => {} }) {
         EXAMPLES.map((q) => h('button.as-example', { text: q, onclick: () => send(q) }))));
     if (near) logEl.scrollTop = logEl.scrollHeight;
 
-    const ready = status && status.available && !needsKey();
+    const ready = Boolean(ps && ps.available) && !editing();
     input.disabled = !ready;
-    sendBtn.disabled = !ready;
+    sendBtn.disabled = !ready && !state.busy;
     sendBtn.textContent = state.busy ? 'stop' : 'ask';
+  }
+
+  /** The settings, edited in `draft` and applied by `use`. */
+  function form() {
+    const d = draft;
+    const all = state.status && state.status.providers;
+    const ps = all ? all[d.provider] : null;
+    const rebuild = (patch) => { Object.assign(draft, patch); formVersion += 1; draw(); };
+    // Somewhere else to send the key: take the one stored for there, or none.
+    const moveTo = (patch) => {
+      const next = { ...d, ...patch };
+      const key = storedKey(next);
+      rebuild({ ...patch, key, keyFrom: keySlot(next), remember: Boolean(key) });
+    };
+    const field = (label, control) => h('label.as-field', h('span', label), control);
+    const provider = h('select', { onchange: (e) => moveTo({ provider: e.target.value, model: '' }) },
+      h('option', { value: 'anthropic', text: 'Claude · Anthropic', selected: d.provider === 'anthropic' }),
+      h('option', { value: 'openai', text: 'OpenAI-compatible', selected: d.provider === 'openai' }));
+    const local = d.provider === 'openai' && isLocal(d.base_url);
+    const keyInput = h('input', {
+      type: 'password', autocomplete: 'off', value: d.key || '',
+      placeholder: d.provider === 'anthropic' ? 'sk-ant-…' : local ? 'not needed for a model on this PC' : 'API key',
+      oninput: (e) => { d.key = e.target.value.trim(); d.keyFrom = keySlot(d); },
+    });
+    const model = h('input', {
+      value: d.model || '', autocomplete: 'off',
+      placeholder: d.provider === 'anthropic' ? (state.status && state.status.model) || 'claude-opus-5-5'
+        : 'as the provider spells it, e.g. deepseek-chat',
+      oninput: (e) => { d.model = e.target.value.trim(); },
+    });
+    const remember = h('input', { type: 'checkbox', checked: d.remember,
+                                  onchange: (e) => { d.remember = e.target.checked; } });
+    const rows = [
+      ps && !ps.available ? h('p.as-warn', { text: `Not available on this service: ${ps.reason}` }) : null,
+      h('p', { text: `Runs on your own ${d.provider === 'anthropic' ? 'Anthropic' : 'provider'} key. It goes to this service with each question and on to that API; the service does not keep it, and this browser keeps it only if you tick the box.` }),
+      field('provider', provider),
+    ];
+    if (d.provider === 'openai') {
+      const preset = h('select', { onchange: (e) => e.target.value && moveTo({ base_url: e.target.value }) },
+        h('option', { value: '', text: 'choose …' }),
+        PRESETS.map((p) => h('option', { value: p.base_url, text: p.name, selected: p.base_url === d.base_url })));
+      rows.push(field('preset', preset),
+        field('address', h('input', { value: d.base_url || '', placeholder: 'https://…/v1', autocomplete: 'off',
+                                      oninput: (e) => {
+                                        d.base_url = e.target.value.trim();
+                                        if (d.key && keySlot(d) !== d.keyFrom) {
+                                          d.key = '';
+                                          keyInput.value = '';
+                                          d.remember = false;
+                                          remember.checked = false;
+                                        }
+                                      } })));
+    }
+    rows.push(field('model', model), field('key', keyInput),
+      h('label.as-remember', remember, ' remember the key on this computer'));
+    const problem = h('p.as-warn');
+    const use = () => {
+      const next = { provider: d.provider, base_url: d.provider === 'openai' ? d.base_url : '', model: d.model };
+      // The last guard: a key typed for one address is never sent to another.
+      if (d.key && d.keyFrom !== keySlot(next)) {
+        problem.textContent = 'The key was entered for another address: enter it again.';
+        return;
+      }
+      const why = missing(next, d.key);
+      if (why) { problem.textContent = `Still needed: ${why}.`; return; }
+      writeJson(SETTINGS_STORE, next);
+      storeKey(next, d.remember ? d.key : '');
+      const changed = JSON.stringify(next) !== JSON.stringify(state.settings);
+      draft = null;
+      set({ settings: next, key: d.key, editing: false, ...(changed ? { conversation: null } : {}) });
+      input.focus();
+    };
+    const canCancel = state.editing && !missing(state.settings, state.key);
+    rows.push(h('div.as-actions', h('button', { text: 'use', onclick: use }),
+      canCancel ? h('button.as-link', { text: 'cancel', onclick: () => { draft = null; set({ editing: false }); } }) : null,
+      storedKey(d) ? h('button.as-link', { text: 'forget the stored key',
+                                           onclick: () => { storeKey(d, ''); rebuild({ key: '', remember: false }); } }) : null),
+    problem);
+    return rows;
   }
 
   async function send(text) {
     text = String(text || '').trim();
-    if (!text || state.busy || needsKey()) return;
+    if (!text || state.busy || editing()) return;
     input.value = '';
     controller = new AbortController();
     set({ busy: true, items: [...state.items, { role: 'user', text }, { role: 'assistant', text: '', tools: [] }] });
+    const s = state.settings;
     try {
       await api.ask({
         text, conversation: state.conversation, key: state.key, signal: controller.signal,
+        provider: s.provider, model: s.model || null, base_url: s.provider === 'openai' ? s.base_url : null,
         onFrame: (frame) => {
           state = applyFrame(state, frame);
-          if (frame.type === 'error' && frame.status === 401) state = { ...state, editingKey: true };
+          if (frame.type === 'error' && frame.status === 401) state = { ...state, editing: true };
           draw();
         },
       });
     } catch (error) {
       const message = error.name === 'AbortError' ? 'stopped' : (error.text || error.message);
       state = applyFrame(state, { type: 'error', message });
-      if (error.status === 401) state = { ...state, editingKey: true };
+      if (error.status === 401 || error.status === 422) state = { ...state, editing: true };
     }
     // A stream that ended without saying so (the service went away) still ends the turn.
     if (state.busy) state = applyFrame(state, { type: 'error', message: 'the answer was cut off' });
@@ -349,7 +500,8 @@ export function createAssistantPanel({ api, onChange = () => {} }) {
       try {
         set({ status: await api.assistantStatus() });
       } catch (error) {
-        set({ status: { available: false, reason: error.text || error.message } });
+        const down = { available: false, reason: error.text || error.message };
+        set({ status: { available: false, providers: { anthropic: down, openai: down } } });
       }
     }
     if (open) input.focus();

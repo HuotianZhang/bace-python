@@ -1508,3 +1508,14 @@ button.chip.ask.on { background: #fff; border-color: #fff; color: var(--ink); }
   background: var(--accent); color: #fff; font-size: 12px;
 }
 .assistant button.as-send:disabled { background: var(--rule); cursor: default; }
+.assistant .as-field { display: grid; grid-template-columns: 64px 1fr; align-items: center; gap: 8px; margin: 0 0 6px; }
+.assistant .as-field > span { font-size: 11px; color: var(--grey); }
+.assistant .as-field input, .assistant .as-field select {
+  min-width: 0; padding: 4px 6px; border: 1px solid var(--rule); background: var(--paper);
+  font-family: var(--font-num); font-size: 12px; color: var(--ink);
+}
+.assistant .as-field input:focus, .assistant .as-field select:focus { border-color: var(--accent); outline: none; }
+.assistant .as-actions { display: flex; align-items: baseline; gap: 12px; margin-top: 8px; }
+.assistant .as-actions > button:first-child { padding: 4px 12px; border: 0; background: var(--ink); color: #fff; cursor: pointer; font-size: 12px; }
+.assistant .as-warn { color: var(--warn); }
+.assistant .as-warn:empty { display: none; }
