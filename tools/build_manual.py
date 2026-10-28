@@ -16,13 +16,17 @@ The book is every chapter of `docs/manual/` in order, as one HTML file with a
 contents page and a print stylesheet, for printing or PDF export from a
 browser. It converts the subset of Markdown the manual uses: headings to
 level 3, paragraphs, tables, flat bulleted or numbered lists, fenced and
-space-indented code blocks, inline code, emphasis and links. Anything else
+space-indented code blocks, inline code, emphasis, links, and figures: a line
+holding only `![caption](img/name.png)`, whose image is embedded in the book
+so that it stays one file. Anything else
 comes out as text; keep the manual to that subset.
 """
 from __future__ import annotations
 
 import argparse
+import base64
 import html
+import mimetypes
 import os
 import re
 import sys
@@ -224,6 +228,21 @@ def _link(label: str, target: str, links: dict[str, str]) -> str:
     return label
 
 
+def figures(text: str) -> list[str]:
+    """The image paths of a chapter's figure lines, relative to `docs/manual/`."""
+    return re.findall(r"^!\[[^\]]*\]\(([^)\s]+)\)\s*$", text, flags=re.M)
+
+
+def _figure(caption: str, path: str, links: dict[str, str]) -> str:
+    """A figure with its image embedded as a data URL."""
+    full = os.path.join(MANUAL, path)
+    kind = mimetypes.guess_type(full)[0] or "application/octet-stream"
+    with open(full, "rb") as fh:
+        data = base64.b64encode(fh.read()).decode("ascii")
+    return (f'<figure><img src="data:{kind};base64,{data}" alt="{html.escape(caption)}">'
+            f"<figcaption>{_inline(caption, links)}</figcaption></figure>")
+
+
 def _cells(row: str) -> list[str]:
     row = row.strip()
     if row.startswith("|"):
@@ -265,6 +284,12 @@ def markdown(text: str, stem: str, links: dict[str, str], number: str) -> str:
             while block and not block[-1].strip():
                 block.pop()
             out.append(f"<pre>{html.escape(chr(10).join(block))}</pre>")
+            continue
+        m = re.match(r"^!\[([^\]]*)\]\(([^)\s]+)\)\s*$", line)
+        if m:
+            flush()
+            out.append(_figure(m.group(1), m.group(2), links))
+            i += 1
             continue
         m = re.match(r"^(#{1,3}) (.*)$", line)
         if m:
@@ -347,6 +372,9 @@ a { color: inherit; }
 .title { margin: 18vh 0 0; }
 .title h1 { border: 0; font-size: 34px; margin: 0; }
 .title p { color: var(--grey); }
+figure { margin: 12px 0 20px; }
+figure img { display: block; max-width: 100%; height: auto; border: 1px solid var(--rule); }
+figcaption { color: var(--grey); font-size: 13px; margin-top: 6px; }
 nav ol { list-style: none; padding: 0; }
 nav li.part { margin-top: 14px; font-weight: 600; }
 nav a { text-decoration: none; }
