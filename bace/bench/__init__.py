@@ -1,4 +1,4 @@
-"""Bench check: exercise the port against the real rig and write a report.
+"""Exercise the bench instruments and write a staged check report.
 
     python -m bace.bench --help
 """
