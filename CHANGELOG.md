@@ -4,6 +4,11 @@ Dated, newest first. Details and evidence are in `docs/`.
 
 ## 2026-10-28
 
+- The docstrings and comments of `bace/experiment/` follow `docs/style.md`.
+  The first sentence of each run parameter's docstring is its help line in
+  the console and in manual 4.1: it says what the parameter does, on which
+  instrument, and its unit.
+
 - The docstrings and comments of `bace/core/`, `bace/storage/`, `params.py`
   and `config.py` follow `docs/style.md`: units, contracts and reasons, the
   LabVIEW compatibility kept as a constraint, no history.

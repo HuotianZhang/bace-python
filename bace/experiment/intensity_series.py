@@ -1,34 +1,19 @@
-"""The intensity series — the wrapper, and the only place a mistake reaches the sample.
+"""The intensity series couples DC characterisation to transient scans.
 
-For each LED drive level: measure V_oc, J_sc and J_sat on the SourceMeter under
-steady illumination, switch the LED to its pulsed mode at the *same* level, and
-run a transient scan whose prebias axis is centred on the V_oc just measured.
-That last dependency is the whole reason this layer exists — V_oc moves with
-illumination, so the axis cannot be built until the light is on and the
-SourceMeter has read it.
+At each LED level it measures V_oc, J_sc and J_sat under steady illumination,
+then pulses the LED at the same level and scans about that V_oc. V_oc depends
+on illumination, so the axis requires the DC result before it can be built.
 
-Three things here can damage hardware or silently ruin data, and each is guarded
-rather than documented:
+The source meter and bias amplifier share the device node. `Router` refuses
+to move while either source reports an enabled output; this module does not
+write relay lines directly. `bace.core.illumination.assert_axis_centre` checks
+that the DC drive level equals the pulse high level. An axis centred on V_oc
+with DC measurement disabled is refused before instrument access.
 
-1. **The relay.** The SourceMeter and the x4 amplifier share the device node.
-   Every move goes through `Router`, which refuses while either source reports
-   its output enabled, and this module never touches a relay line directly.
-2. **The coupling invariant.** The DC level used for V_oc and the pulse high
-   level used for the transient must be the same number. `core.illumination`
-   holds the check; this module feeds it the level it actually measured at, not
-   the level it intended to.
-3. **A stale V_oc.** An axis centred on V_oc with the DC measurement switched
-   off would centre on nothing. That is refused before the first instrument is
-   touched, not discovered at step 40.
-
-Events from the nested transient runs are forwarded unchanged, so one consumer
-sees the whole series as a single stream.
-
-The LED generator is never switched off here: the unwind shuts the shutter,
-which is the light switch on this rig, and leaves the 33220A as it was set
-(operator instruction, 2026-09-02 -- a generator that is cycled loses its
-thermal steady state and the next run waits for it again). Only a rig with no
-shutter, which this series cannot run on anyway, would still switch it off.
+Nested transient events pass through unchanged as one event stream. Cleanup
+disables the sources before moving the relay and shuts the shutter. The LED
+keeps running: cycling its generator loses thermal steady state and requires
+another settle. A rig without a shutter cannot run this series.
 """
 from __future__ import annotations
 
@@ -52,19 +37,25 @@ class SeriesError(RuntimeError):
 
 @dataclass(frozen=True)
 class SeriesConfig:
-    """The illumination sweep that wraps the transient measurement."""
+    """The series configuration defines LED levels and DC characterisation."""
 
     led_start_v: float = 1.020
     led_stop_v: float = 1.020
     led_step_v: float = 0.020
     led_low_v: float = 0.4
-    """The 33220A pulse low level. Must be below the LED's turn-on threshold, so
-    the dark half of the cycle really is dark; `LedDrive` refuses otherwise."""
+    """The 33220A pulse low level driving the LED, in V.
+
+    It must stay below the LED turn-on threshold so the dark phase contains no
+    light. `LedDrive` refuses a level at or above that threshold.
+    """
 
     led_settle_s: float = 2.0
-    """The original's 'LED stab. time', which had its own panel control — a hint
-    that it matters. The device must reach its light steady state before V_oc is
-    read, or the axis is centred on a transient."""
+    """How long the run waits after changing the 33220A LED drive mode before DC or transient measurements, in s.
+
+    It applies before both DC and transient measurements. The device must reach
+    its illuminated steady state before V_oc is read; a short wait centres the
+    axis on a transient voltage.
+    """
 
     measure_dc: bool = True
     v_sat: float = -1.0
@@ -72,16 +63,20 @@ class SeriesConfig:
     pixel_area_cm2: float = 0.0
 
     intensity_factor_mw_cm2_per_w: float = 0.0
-    """Converts the meter's watts into the irradiance at the sample, which
-    depends on the beam splitter ratio and the illuminated area. The original
-    had a 'Factor' control for this and its value is not recoverable from the
-    binaries, so 0 means 'unknown' and the intensity column is written as NaN
-    rather than as a number that looks calibrated and is not."""
+    """Converts the power meter's W to irradiance at the sample using the beam splitter ratio and illuminated area, in mW/cm² per W.
+
+    It depends on the beam splitter ratio and illuminated area. Zero denotes
+    an unknown calibration and writes `NaN` in the intensity column. A nonzero
+    uncalibrated value would label an unsupported irradiance as measured.
+    """
 
     read_intensity: bool = True
     intensity_samples: int = 0
-    """0 reads a single value; >1 asks the meter for mean and sample std over
-    that many samples, taken on its own clock."""
+    """Zero or one reads a single power value; larger counts request the 1918-C's mean and sample standard deviation over that many meter-clock samples.
+
+    Zero or one reads a single value. A count above one requests the mean and
+    sample standard deviation over that many meter samples.
+    """
 
     def levels(self) -> np.ndarray:
         if self.led_start_v == self.led_stop_v:
@@ -107,7 +102,7 @@ class SeriesStarted(Event):
 class IlluminationSet(Event):
     index: int
     level_v: float
-    mode: str                       # "dc" or "pulse"
+    mode: str                       # `dc` or `pulse`
 
 
 @dataclass(frozen=True)
@@ -120,7 +115,11 @@ class IntensityMeasured(Event):
 
 @dataclass(frozen=True)
 class SeriesPointDone(Event):
-    """One illumination level, complete."""
+    """The series point contains the results at one LED level.
+
+    `level_v`, `voc` and `vcoll` are in V, `delay_ns` in ns, Q arrays in C and
+    `intensity_w` in W. `dc` and `intensity_w` are absent when not measured.
+    """
 
     index: int
     level_v: float
@@ -146,11 +145,10 @@ Sleep = Callable[[float], None]
 
 # -- preflight ------------------------------------------------------------
 def preflight(rig: Rig, series: SeriesConfig, spec: ScanSpec) -> list[str]:
-    """Everything that can be checked before an instrument is touched.
+    """Preflight returns configuration problems without instrument access.
 
-    Returns the list of problems. Called by `run_intensity_series` before it
-    does anything, because a series is an hours-long run and finding out at
-    step 40 that the axis was never centred is the expensive way to learn it.
+    `run_intensity_series` calls it before starting: a missing source, unsafe
+    routing or an undefined V_oc axis must fail before a long run begins.
     """
     problems: list[str] = []
     if rig.smu is None:
@@ -181,7 +179,12 @@ def run_intensity_series(rig: Rig, series: SeriesConfig, spec: ScanSpec,
                          run: RunConfig = RunConfig(), *,
                          abort: AbortCheck | None = None,
                          sleep: Sleep = time.sleep) -> Iterator[Event]:
-    """Sweep illumination, characterise, and run a transient scan at each level."""
+    """The series run yields DC results and a transient scan at each LED level.
+
+    V_oc is measured under the same drive level as the shots. Invalid
+    configuration raises `SeriesError` before instrument access. Cleanup attempts
+    to disable both sources, shut the shutter and park the router on every exit.
+    """
     problems = preflight(rig, series, spec)
     if problems:
         raise SeriesError("cannot start the series:\n  - " + "\n  - ".join(problems))
@@ -207,11 +210,10 @@ def run_intensity_series(rig: Rig, series: SeriesConfig, spec: ScanSpec,
                              threshold_v=rig.config.led_threshold_v)
 
             # -- steady illumination, DC characterisation ------------------
-            # The shutter is opened for it: an LED that is on is not light
-            # at the sample, and a V_oc read with the shutter shut (as the
-            # transient's park leaves it) is the dark V_oc wearing the
-            # level's name. Shut again before the transient, which opens
-            # it per shot for the light trace only.
+            # The DC measurement needs light at the sample, not just an enabled
+            # LED. A shut shutter gives a dark voltage under an illuminated label.
+            # The shutter closes before the transient scan, which opens it for
+            # each light trace.
             rig.led.set_dc(drive.dc_settings()["offset"])
             rig.led.enable_output(True)
             rig.shutter.unblock()
@@ -235,7 +237,7 @@ def run_intensity_series(rig: Rig, series: SeriesConfig, spec: ScanSpec,
 
             voc = dc.voc if dc is not None else None
             if spec.axis.centre_on_voc:
-                # The guard that catches a V_oc measured at a different drive.
+                # V_oc must correspond to the same LED drive as the shots.
                 assert_axis_centre(drive, voc_measured_at=level)
 
             # -- pulsed illumination, transient scan -----------------------
@@ -273,9 +275,9 @@ def run_intensity_series(rig: Rig, series: SeriesConfig, spec: ScanSpec,
         yield SeriesFinished(points=tuple(points),
                              elapsed_s=time.monotonic() - started)
     finally:
-        # Runs on completion, abort, exception and walk-away. Order matters:
-        # the sources come down before anything else, because the relay
-        # interlock will refuse to act while one is live.
+        # Cleanup covers completion, abort, exception and generator close.
+        # Sources must be disabled before relay motion; the interlock refuses
+        # to move while either source is enabled.
         for dev in (rig.bias, rig.smu):
             if dev is not None:
                 try:
@@ -287,9 +289,9 @@ def run_intensity_series(rig: Rig, series: SeriesConfig, spec: ScanSpec,
         except Exception:
             pass
         if rig.led is not None and rig.shutter is None:
-            # Only where there is no shutter to make the dark. With one, the
-            # LED keeps its mode and its thermal steady state for whatever
-            # runs next; the shutter just shut is what makes the bench dark.
+            # Without a shutter, disabling the LED is the only way to remove
+            # light. With a shutter, the LED keeps its mode and thermal steady
+            # state for the next module.
             try:
                 rig.led.off()
             except Exception:
@@ -302,7 +304,12 @@ def run_intensity_series(rig: Rig, series: SeriesConfig, spec: ScanSpec,
 
 
 def _read_intensity(rig: Rig, series: SeriesConfig, level: float):
-    """Read the meter, and report a bad reading rather than hiding it."""
+    """The intensity read yields meter power in W with its trust flag.
+
+    A failed read emits a warning and returns `None`. Saturated, overrange or
+    wrong-unit readings remain in the event stream with a warning because using
+    them for normalisation biases the result.
+    """
     watts = std = None
     try:
         if series.intensity_samples > 1:

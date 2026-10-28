@@ -1,15 +1,14 @@
-"""The event stream a run emits.
+"""Run events carry measurements and progress to independent consumers.
 
-One stream, many listeners. HDF5 storage, the legacy `.dat` writer, the live
-UI and the log are all just consumers of this sequence; adding another touches
-no existing code. That is the whole reason the run is a generator of typed
-events rather than a function that returns a result and writes files on the
-side.
+HDF5 storage, the LabVIEW-compatible `.dat` writer, the console and the log
+consume the same typed stream. A generator permits those consumers to handle
+results without making the measurement write files or return one final result.
+The `.dat` output matches LabVIEW files byte for byte, as
+`tests/test_storage.py` checks.
 
-Events are frozen dataclasses with no methods and no instrument references, so
-a consumer can hold on to one, queue it, or serialise it without worrying about
-what the hardware is doing afterwards. Arrays are the exception: they are
-handed over by reference and must not be mutated by a consumer.
+Events are frozen dataclasses without instrument references. Consumers can
+retain, queue or serialise them independently of hardware state. Arrays pass
+by reference and must not be mutated by consumers.
 """
 from __future__ import annotations
 
@@ -24,7 +23,7 @@ from ..drivers.protocols import DCPoint, Trace
 
 @dataclass(frozen=True)
 class Event:
-    """Base class, for typing and isinstance dispatch only."""
+    """The event base class supports typing and `isinstance` dispatch."""
 
 
 @dataclass(frozen=True)
@@ -38,7 +37,7 @@ class RunStarted(Event):
 
 @dataclass(frozen=True)
 class DCMeasured(Event):
-    """SourceMeter characterisation at the illumination in force."""
+    """The DC event contains source-meter results at `led_drive_v`, in V."""
 
     led_drive_v: float
     dc: DCPoint
@@ -46,7 +45,7 @@ class DCMeasured(Event):
 
 @dataclass(frozen=True)
 class AxisResolved(Event):
-    """The axis after V_oc has been folded in — the moment the run becomes concrete."""
+    """The resolved axis contains point values after V_oc centring."""
 
     axis: Axis
     values: np.ndarray
@@ -55,18 +54,15 @@ class AxisResolved(Event):
 
 @dataclass(frozen=True)
 class InstrumentState(Event):
-    """What the instruments actually report once setup has run.
+    """The instrument state contains setup read-backs beside the requested settings.
 
-    The config a run is *given* is not the same thing as the state it *ran in*.
-    `output_polarity = "leave"` is the clearest case: the recipe deliberately
-    says "do not touch it", so the recipe alone cannot tell a later reader which
-    convention the data was taken under -- only the instrument can. Anything
-    resolved at setup rather than declared in the recipe belongs here, and the
-    recorder writes it beside the config so every file still carries its own
-    conventions.
+    A run's settings do not fully describe its instrument state. With
+    `output_polarity = "leave"`, only the instrument can supply the polarity.
+    The recorder stores these resolved conventions beside the configuration so
+    each file identifies its own measurement conditions.
 
-    Values are strings because this is a readback, not a setting: `?` for an
-    instrument that would not answer is more honest than a plausible float.
+    Values are strings because an unread instrument returns `?`; a numeric
+    placeholder would look like a measurement.
     """
 
     values: dict[str, str] = field(default_factory=dict)
@@ -83,17 +79,18 @@ class StepStarted(Event):
 
 @dataclass(frozen=True)
 class StepPhase(Event):
-    """Where inside one shot the run is: `phase` is the segment that is
-    starting (`levels`, `light settle`, `acquire light`, `dark levels`,
-    `dark settle`, `acquire dark`, `process`), `k` its 1-based place among
-    the `of` segments this shot has. `dark levels` is absent when the dark
-    reference is `same` (nothing is rewritten, nothing settles), so `of` is
-    6 then and 7 otherwise.
+    """The shot phase identifies the segment starting within one shot.
 
-    Between `StepStarted` and `StepDone` a shot is up to a second of
-    instrument calls, and a card that shows only "shot 12 in flight" cannot
-    tell a slow settle from a hung acquisition. This says which. Per-shot
-    noise for a log: the service sends it live and journals none of it.
+    `phase` names the segment: `levels`, `light settle`, `acquire light`,
+    `dark levels`, `dark settle`, `acquire dark` or `process`. `k` is its
+    one-based position among `of` segments. A dark trace taken first also writes
+    dark levels; its following light segment is `light levels`. With
+    `dark_reference = "same"` and the light trace first, `dark levels` is absent:
+    there are six segments instead of seven.
+
+    Instrument calls within a shot can take a second or more. Phase events let
+    the console distinguish settling from a stalled acquisition. The service
+    streams them live and omits them from the journal to avoid repetitive entries.
     """
 
     index: int
@@ -104,13 +101,13 @@ class StepPhase(Event):
 
 @dataclass(frozen=True)
 class StepDone(Event):
-    """One shot, fully processed.
+    """The completed shot contains traces, Q and running statistics at one point.
 
-    `light` and `dark` are currents in amps as the digitizer returned them;
-    `photo` is `light - dark` after baseline correction; `q` is the charge for
-    this single shot. `q_mean`/`q_std` are the running statistics over the
-    loops completed so far at this axis position, so a consumer can plot error
-    bars that tighten as the run proceeds.
+    `light` and `dark` contain currents in A as returned by the digitiser.
+    `photo` is light minus dark after baseline correction. `photo_averaged` is
+    its running mean over loops at this point. `q` is this shot's Q in C;
+    `q_mean` and `q_std` are its running mean and sample standard deviation over
+    acquired loops at this point. These support error bars during acquisition.
     """
 
     index: int
@@ -131,18 +128,23 @@ class StepDone(Event):
     sync_dark: Trace | None = None
     t0_int_record_s: float | None = None
     t1_int_record_s: float | None = None
-    """The integration window `q` was taken over, in record time (from the
-    first sample). Pinned to the pulse, so it differs from shot to shot along
-    a delay axis; stored with the run so the file can say what its own charge
-    integrated."""
+    """The integration bounds locate Q in seconds from the first record sample.
+
+    They follow field arrival and therefore vary along a delay axis. Storing
+    them with each shot makes the charge's integration interval explicit.
+    """
     dark_first: bool = False
-    """Whether this shot took its dark trace before its light trace
-    (`RunConfig.alternate_order`, on even loops)."""
-    """The trigger channel's trace out of the same record as `light` and
-    `dark`, in volts (2026-09-05). What the edge the scope fired on looked
-    like: smeared, the jitter is between the sync and the scope's trigger;
-    sharp beside a smeared displacement spike, it is between the sync and the
-    81150A's pulse. None on a rig whose digitiser cannot fetch it."""
+    """The order flag marks a dark trace acquired before its light trace.
+
+    `RunConfig.alternate_order` requests this on even loops.
+    """
+    """The Sync traces record the trigger channel in V beside each current trace.
+
+    They come from the same records as `light` and `dark`. A smeared Sync edge
+    indicates jitter between Sync and the digitiser trigger; a sharp Sync edge
+    beside a smeared displacement spike places it between Sync and the 81150A
+    pulse. The traces are `None` when the digitiser cannot fetch them.
+    """
 
 
 @dataclass(frozen=True)
@@ -159,15 +161,13 @@ class Progress(Event):
     elapsed_s: float
     eta_s: float | None
     node_path: str = ""
-    """Which node this progress describes. `""` is the run itself.
+    """The progress path identifies the node whose counter is reported.
 
-    A pipeline executor emits its own `Progress(node_path="T=250K")` for a
-    loop node -- `done`/`total` counting that loop's children -- while the
-    `Envelope` around every event carries the node_path of the *leaf* being
-    executed. So the console's three counters on three time scales (shot,
-    point, loop) come from three Progress events with three node_paths, not
-    from one event that tries to say everything, and a consumer that only
-    wants the run's own progress filters on `node_path == ""`.
+    An empty `node_path` denotes the run itself. A pipeline executor also emits
+    `Progress` for a loop node, with `done` and `total` counting its children.
+    The surrounding `Envelope.node_path` identifies the executing leaf instead.
+    The console's shot, point and loop counters therefore use separate events
+    and paths. Consumers of run-only progress filter on `node_path == ""`.
     """
 
 
@@ -177,8 +177,8 @@ class RunFinished(Event):
     values: np.ndarray
     q_mean: np.ndarray
     q_std: np.ndarray
-    q_all: np.ndarray            # (n_loops, n_steps)
-    photo_averaged: np.ndarray   # (n_steps, n_samples)
+    q_all: np.ndarray            # `(n_loops, n_steps)`
+    photo_averaged: np.ndarray   # `(n_steps, n_samples)`
     dt: float
     elapsed_s: float
 
@@ -198,32 +198,30 @@ class RunFailed(Event):
 
 @dataclass(frozen=True)
 class Notice(Event):
-    """Something a human should see but that does not stop the run."""
+    """A notice carries information or a warning without stopping the run."""
 
     level: Literal["info", "warning"]
     text: str
 
 
-# -- the service vocabulary ---------------------------------------------------
-# Defined here, beside the run events, and not assembled in the service: the
-# hierarchy labels and the envelope are part of what an event *is*, and the
-# recorder, the journal and the console all read the same fields. A service
-# that invented its own wrapper would be a second vocabulary to keep in step.
+# -- Service event vocabulary -------------------------------------------------
+# Hierarchy labels and envelopes belong with the events because recorders,
+# the journal and the console share those fields. A separate service wrapper
+# would require keeping two event vocabularies consistent.
 
 @dataclass(frozen=True)
 class Envelope:
-    """What every event is wrapped in on the wire.
+    """The envelope identifies an event on the service stream.
 
-    `seq` is monotonic per service session -- a client that sees a gap knows
-    it missed something and re-syncs rather than guessing. `ts` is unix
-    seconds. `node_path` is the position in the pipeline tree, such as
-    "T=250K/led=1.020V/bace"; a manual run is a one-node pipeline, so its
-    events carry the module name ("bace"), and `""` is reserved for
-    session-level events -- a bench action, a verdict before Start -- whose
-    `run_id` is None. `run_id` is otherwise the run the event belongs to.
+    `seq` increases within each service session. A gap tells a client to
+    resynchronise. `ts` is Unix time in s. `node_path` locates a pipeline node,
+    such as `T=250K/led=1.020V/bace`. A manual run uses its module name, such as
+    `bace`. An empty path is reserved for session events outside a run, such as
+    a bench action or a verdict before Start; their `run_id` is `None`.
+    Otherwise `run_id` identifies the containing run.
 
-    Not an `Event` itself: it wraps one, and `wire.envelope_to_wire` is what
-    turns the pair into JSON.
+    An envelope wraps an `Event` rather than inheriting it.
+    `bace.experiment.wire.envelope_to_wire` converts the pair to a JSON frame.
     """
 
     seq: int
@@ -235,11 +233,12 @@ class Envelope:
 
 @dataclass(frozen=True)
 class NeedsOperator(Event):
-    """The executor has stopped and is waiting for a person: `what` names the
-    action ("set temperature"), `detail` carries the target. Emitted at a
-    temperature node while the 331 is not wired in, so a tree with manual
-    temperatures still runs end to end; the API does not change when the node
-    is automated, the event just stops appearing."""
+    """The operator request pauses the executor for a manual action.
+
+    `what` names the action, such as setting temperature, and `detail` gives
+    the target. Temperature nodes emit it when automatic control is unavailable,
+    so manual temperature pipelines can run end to end through the same API.
+    """
 
     what: str
     node_path: str
@@ -248,9 +247,11 @@ class NeedsOperator(Event):
 
 @dataclass(frozen=True)
 class OperatorResumed(Event):
-    """A person answered a `NeedsOperator`: `note` is what they typed,
-    `detail` what they reported (the temperature they reached, say). The pair
-    brackets the pause in the journal."""
+    """The operator response records the answer to `NeedsOperator`.
+
+    `note` contains entered text and `detail` contains reported values, such as
+    the achieved temperature. The two events bracket the pause in the journal.
+    """
 
     node_path: str
     note: str
@@ -259,9 +260,11 @@ class OperatorResumed(Event):
 
 @dataclass(frozen=True)
 class NodeStarted(Event):
-    """A pipeline node begins. `kind` is the node type ("temperature",
-    "illumination", "repeat", "bace", "jv", ...), `label` its human form
-    ("T=250K")."""
+    """The node-start event identifies a pipeline node.
+
+    `kind` is its type, such as `temperature`, `illumination`, `repeat`, `bace`
+    or `jv`. `label` is the console label, such as `T=250K`.
+    """
 
     node_path: str
     kind: str
@@ -270,9 +273,11 @@ class NodeStarted(Event):
 
 @dataclass(frozen=True)
 class NodeDone(Event):
-    """A pipeline node ended: `outcome` is "ok", "aborted", "failed" or
-    "skipped", and `detail` carries what the node produced that the tree
-    still needs (the V_oc a sibling `bace` centres on)."""
+    """The node outcome reports `ok`, `aborted`, `failed` or `skipped`.
+
+    `detail` carries results needed elsewhere in the tree, such as V_oc for a
+    sibling `bace` axis.
+    """
 
     node_path: str
     outcome: str
@@ -281,21 +286,23 @@ class NodeDone(Event):
 
 @dataclass(frozen=True)
 class RunQueued(Event):
-    """A run was accepted onto the worker's queue: `kind` is "manual" (one
-    module node) or "pipeline"; `module` the module name for a manual run,
-    None for a pipeline; `tree` what was posted; `params` what the operator
-    chose for the module -- the edited layer and last-used values carried
-    forward, never the V_oc -- which is what the journal hands back as
-    last-used next session; `resolved` every value the module runs with;
-    `folder` the pipeline's parent folder when there is one; `sample` the
-    `[sample]` block the run was queued under -- `sample`, `material`,
-    `pixel`, `operator`, `comment` -- which is the run's identity and
-    travels with it rather than only in the session header, because a
-    journal file is resumed by a second process started in the same second
-    and a header is a property of the file, not of the runs in it
-    (`docs/history/naming-plan.md` rule 1). A fact about the queue, not something a
-    run emits, so the recorders never see it; it lives here so the wire has
-    one vocabulary and the service assembles none of it."""
+    """The queue event records an accepted manual run or pipeline.
+
+    `kind` is `manual` for one module node or `pipeline` for a tree. `module`
+    names the manual module and is `None` for a pipeline. `tree` contains the
+    submitted tree. `params` holds operator choices from the edited layer and
+    the last-used layer, excluding V_oc; the journal supplies these to the next
+    session's last-used layer. `resolved` contains every effective module value.
+    `folder` is the pipeline parent folder when present.
+
+    `sample` copies the queued run's `[sample]` fields: `sample`, `material`,
+    `pixel`, `operator` and `comment`. Identity travels with each run because a
+    journal can be resumed by another process started in the same second. A
+    session header identifies the file and cannot identify all runs within it.
+
+    The service journal records this queue event; measurement recorders do not
+    receive it. Keeping it here preserves one event vocabulary.
+    """
 
     kind: str
     module: str | None
@@ -317,9 +324,12 @@ class RunQueued(Event):
 
 @dataclass(frozen=True)
 class RunStateChanged(Event):
-    """The worker's state machine moved: `state` is "queued", "running",
-    "stopping", "paused", "done", "aborted" or "failed"; `reason` says why
-    ("operator", "after_shot", an exception's text)."""
+    """The worker transition reports a state and its reason.
+
+    `state` is `queued`, `running`, `stopping`, `paused`, `done`, `aborted` or
+    `failed`. `reason` names the trigger, such as `operator`, `after_shot` or
+    an exception message.
+    """
 
     state: str
     reason: str
@@ -327,12 +337,13 @@ class RunStateChanged(Event):
 
 @dataclass(frozen=True)
 class BenchAction(Event):
-    """An explicit, single-click change to the bench outside any run --
-    `POST /bench/actions/{name}`: set the 33220A polarity, park, move the
-    relay. `args` is what was asked, `result` the readback afterwards, `by`
-    who asked ("operator", "pipeline"). Every bench change that is not part
-    of a run is one of these, which is what lets the journal show it as a
-    "by hand" entry."""
+    """The bench action records an explicit change outside a run.
+
+    `POST /bench/actions/{name}` requests actions such as setting 33220A polarity,
+    parking or moving the relay. `args` holds the request, `result` the read-back
+    and `by` the actor, such as `operator` or `pipeline`. The journal uses this
+    event to distinguish manual bench changes from run operations.
+    """
 
     name: str
     args: dict
@@ -342,20 +353,18 @@ class BenchAction(Event):
 
 @dataclass(frozen=True)
 class Verdict(Event):
-    """One line of a pre-flight or monitoring verdict, in three tiers.
+    """The verdict reports one validation or monitoring result with evidence.
 
-    `crit` is **hardware safety only** -- two sources into the device node, a
-    compliance above the bench ceiling -- and is the only level that blocks
-    Start. `warn` **states evidence** ("the 33220A is NORM, so the Sync edge
-    means light on") and never blocks: the operator decides what it means.
-    `ok`/`info` are readbacks. `invalid` is a tree that cannot be executed at
-    all (a `bace` with no V_oc source), refused at validate -- there is
-    nothing to start, which is different from a safety block. **Nothing is
-    auto-corrected** by any tier: a fix is an explicit `BenchAction` the
-    operator clicks, so the journal shows who changed what and when.
+    `crit` is reserved for hardware safety, such as two sources on the device
+    node or compliance above the bench ceiling. It is the only safety level that
+    blocks Start. `warn` states evidence and leaves the decision to the operator.
+    `ok` and `info` report read-backs. `invalid` rejects a tree that cannot execute,
+    such as a `bace` node without a V_oc source; there is no runnable tree.
 
-    `code` is stable, for the UI to key on; `text` is for people; `data` is
-    the evidence (the readbacks the verdict was made from).
+    No level changes settings automatically. A correction requires an explicit
+    `BenchAction`, so the journal records the actor and the change. `code` is a
+    stable console key, `text` is the explanation and `data` holds the read-backs
+    that support it.
     """
 
     level: Literal["ok", "info", "warn", "crit", "invalid"]
@@ -367,27 +376,33 @@ class Verdict(Event):
 
 @dataclass(frozen=True)
 class PowerReading(Event):
-    """One reading from the 1918-C, taken by the power monitor beside a run
-    (the meter is on a beam splitter). `trustworthy` is the meter's own
-    saturated / overrange / wrong-units verdict, carried rather than
-    filtered; `source` is the console URL, or "simulated"."""
+    """The power reading reports 1918-C optical power from the beam splitter.
+
+    `watts` is in W. `trustworthy` carries the meter's saturation, overrange and
+    wrong-unit checks without filtering out readings. `source` is the meter
+    console URL or `simulated`.
+    """
 
     watts: float
     trustworthy: bool
     wavelength_nm: float | None
     source: str
     averaged: bool | None = None
-    """True when the meter was averaging (DC-continuous, 5 Hz analog filter),
-    so the number is the time average of a pulsed LED -- half the DC level
-    at 50 % duty -- and not one instant of it. None when the driver cannot
-    say (a console that has no filter route)."""
+    """The averaging flag identifies time-averaged power from the meter.
+
+    `True` denotes DC-continuous mode with the 5 Hz analog filter. At 50 % duty
+    the reading is half the LED DC power (manual 1.2). `None` means the driver
+    cannot report the filter state, such as a console without a filter route.
+    """
 
 
 @dataclass(frozen=True)
 class TemperatureRead(Event):
-    """One temperature, from the 331 console or typed by an operator
-    (`source = "operator"`). `in_band` is None when there is no setpoint to
-    be in band of."""
+    """The temperature event reports a 331 or operator reading in K.
+
+    `source = "operator"` identifies a typed reading. `in_band` is `None` without
+    a setpoint.
+    """
 
     kelvin: float
     setpoint_k: float | None
@@ -397,21 +412,16 @@ class TemperatureRead(Event):
 
 @dataclass(frozen=True)
 class SampleNamed(Event):
-    """The session's `[sample]` block was set from outside the file it was
-    opened with -- `PUT /session/sample`, which is the console's identity
-    field. A session-level event: `run_id` is None and `node_path` is "".
+    """The sample event records a session identity change from `PUT /session/sample`.
 
-    `before` and `after` are the whole block either side, `changed` the keys
-    that actually moved.
+    It is a session event: `run_id` is `None` and `node_path` is empty. `before`
+    and `after` contain the whole block; `changed` lists the modified keys.
 
-    **It applies to runs queued after it and to no others.** Every run takes
-    its own copy of the block when it is queued (`RunQueued.sample`, and the
-    `RunMetadata` its files are written from), so a run already going keeps
-    the identity it started under rather than being relabelled halfway. That
-    is the reason this is an event at all: a journal that has to be read
-    years later must be able to say which runs in a file were measured under
-    which name, and a block that simply changed would leave no trace of ever
-    having been anything else.
+    The change applies only to runs queued after the event. Each run copies
+    `RunQueued.sample` at queue time and uses it for `RunMetadata` in its files.
+    A running or queued measurement therefore keeps its identity. Recording the
+    change lets the journal associate each run with its sample even when one
+    session file contains several identities.
     """
 
     before: dict
