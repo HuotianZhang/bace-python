@@ -40,7 +40,7 @@ class BiasRouter:
                  settle_s: float = 0.1):
         if module_nr == 0:
             raise RoutingError(
-                "module 0 is the shutter (measured on the rig 2026-09-01: "
+                "module 0 is the shutter (measured on this bench: "
                 "setting it high is what makes photocurrent appear, while the "
                 "device stays connected either way), not the relay. "
                 "The relay is module 1 "
