@@ -68,6 +68,21 @@ DOCS: dict[str, tuple[str, str]] = {
     "console": ("ui/README.md", "the console's parts, file by file"),
     "service-contract": ("docs/service-contract.md", "every endpoint, the event frames, the checks; long"),
     "changelog": ("CHANGELOG.md", "what changed, newest first"),
+    "manual-1.1": ("docs/manual/1.1-overview.md", "manual: the measurement in one page"),
+    "manual-1.2": ("docs/manual/1.2-bench.md", "manual: the instruments, signal paths and timing"),
+    "manual-1.3": ("docs/manual/1.3-first-measurement.md", "manual: starting the service and a first measurement"),
+    "manual-1.4": ("docs/manual/1.4-results.md", "manual: reading a result and its checks"),
+    "manual-1.5": ("docs/manual/1.5-troubleshooting.md", "manual: symptoms, causes and remedies"),
+    "manual-2.1": ("docs/manual/2.1-extraction.md", "manual: what the extracted charge is, and the dark reference"),
+    "manual-2.2": ("docs/manual/2.2-transient.md", "manual: the transient, the timing and the integration window"),
+    "manual-2.3": ("docs/manual/2.3-signal.md", "manual: the measurement chain and the uncertainty budget"),
+    "manual-2.4": ("docs/manual/2.4-validity.md", "manual: tests for a complete Q and a bulk density"),
+    "manual-3.1": ("docs/manual/3.1-architecture.md", "manual: the packages and one run end to end"),
+    "manual-3.2": ("docs/manual/3.2-correspondence.md", "manual: each step from physics to SCPI to code"),
+    "manual-3.3": ("docs/manual/3.3-data.md", "manual: the files the bench writes"),
+    "manual-3.4": ("docs/manual/3.4-extending.md", "manual: adding a module, instrument, check or tool"),
+    "manual-3.5": ("docs/manual/3.5-testing.md", "manual: the test suite and the bench check-out"),
+    "manual-4.4": ("docs/manual/4.4-glossary.md", "manual: one name, symbol and unit per term"),
 }
 
 SYSTEM = """\
@@ -81,7 +96,7 @@ the console.
 The bench: an Agilent 33220A drives the LED (the light); an Agilent 81150A \
 switches the device bias between the prebias V_pre (normally V_oc) and the \
 collection voltage, and triggers the shot; an Agilent/Keysight DSO9054H \
-records the current across 50 ohm; a Keithley 2400 measures V_oc, J_sc and \
+records the current across a 5.192 ohm sense resistor; a Keithley 2400 measures V_oc, J_sc and \
 J-V; a Lake Shore 331 holds the cryostat temperature; a Newport 1918-C reads \
 the light power; a shutter and a relay sit in the light and signal paths. Each \
 shot takes a light trace and a dark reference trace; Q is the integral of \
@@ -101,9 +116,11 @@ How to work:
 - Read before you answer about the bench: use the tools rather than \
 assuming. Name what you read ("the read-back says ...", "run 20261027_080417-001 \
 ...").
-- For physics and method, read the `principle` document; for how the console \
-behaves, `ui-rules` or `console`; for the bench as measured, `notes`. Say when \
-something is not in them.
+- Read the manual first: Part I (`manual-1.x`) for operation, Part II \
+(`manual-2.x`) for the physics and the error budget, Part III (`manual-3.x`) \
+for the code, `manual-4.4` for terms. `principle` gives the literature; \
+`ui-rules` and `console` the console's behaviour; `notes` the bench as \
+measured. Name the chapter you read, and say when something is not in them.
 - You cannot change anything in this version: no parameter edit, no run, no \
 instrument action. When an action is needed, say exactly where to click and \
 what to type, and what the bench will do.
