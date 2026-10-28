@@ -20,6 +20,7 @@ web font. Open them in a browser.
 | file | what it is |
 |---|---|
 | `notes.md` | The rig as measured, defects only the hardware found, deliberate deviations from the LabVIEW original, open and closed questions, and the claims that measurement overturned. |
+| `bace-principle.md` | What BACE measures, from the papers that introduced it, and which part of the code does each step. |
 | `bench-checkout.md` | Bringing the real bench up in stages with `python -m bace.bench`. |
 | `service-contract.md` | What `bace/service/` implements: package layout, concurrency and stop semantics, every endpoint, the wire and journal payload policy, the pipeline tree schema, the check catalogue, the cost model. Where it and the code disagree, fix one and say so. |
 | `integration-window.md` | The integration window is measured from the field's arrival at the device. The arithmetic, and how to read files written before it. |
@@ -61,6 +62,6 @@ web font. Open them in a browser.
 | file | what it is |
 |---|---|
 | `analysis/2026-09-06/README.md` | The scope averager defect, and the 220–295 K sweep. |
-| `analysis/2026-09-06/spike-lag-and-dark-charge.md` | The spike-lag warning traced to the extracted charge, and Q split into photogenerated and injected parts by the shutter-shut control. |
+| `analysis/2026-09-06/spike-lag-and-dark-charge.md` | The spike-lag warning traced to the extracted charge, and the shutter-shut control. Its split of Q into photogenerated and injected parts is withdrawn (correction in §3). |
 | `analysis/2026-10-26/scope-window/README.md` | Record length, baseline, integration window and settle times, from a null run and interleaved runs on the rig. |
 | `analysis/*.png` | Working figures from the same days that no write-up references: J–V curves and J–V(T), kinetics with the shutter open and shut, ln Q against V_pre, the shutter-shut control, V_oc against intensity. |

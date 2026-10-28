@@ -2,6 +2,12 @@
 
 Dated, newest first. Details and evidence are in `docs/`.
 
+## 2026-10-28
+
+- `docs/bace-principle.md`: what BACE measures, from the papers that
+  introduced it. The 2026-09-06 split of Q into photogenerated and injected
+  parts is withdrawn; at V_oc the two are not additive.
+
 ## 2026-10-27
 
 - **The record was too short and the baseline read part of the signal.** At

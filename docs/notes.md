@@ -170,6 +170,10 @@ Kept because the reasoning failed the same way twice.
 - **"An open circuit rails at the voltage compliance."** It does not: sourcing
   0 A into an open circuit is a degenerate loop. A small forward bias is the
   decisive probe.
+- **"Most of Q at V_oc is injected, not photogenerated."** From a shutter-shut
+  run at the same V_oc (`analysis/2026-09-06/spike-lag-and-dark-charge.md` §3).
+  At V_oc light and bias set the same density; the two runs are not additive
+  parts. `bace-principle.md`.
 - **A test that mocked the driver hid a real crash.** Mocking the thing that
   constructs the defect is how it reached the bench. The driver tests now wire
   the real driver and the real recording layer against a fake pyvisa resource.
