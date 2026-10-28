@@ -90,7 +90,7 @@ MODULE_NAMES: tuple[str, ...] = ("jv", "jv_bace", "bace", "light", "power",
                                  "temperature", "park", "wait", "note")
 
 RETIRED: dict[str, str] = {
-    "jv_dark": "split on 2026-09-03 because it did two jobs: it swept the "
+    "jv_dark": "split into two because it did two jobs: it swept the "
                "SourceMeter *and* made the bench dark. Use a `light` node with "
                "`shutter = shut` before a `jv`, which is exactly what it did; "
                "or `jv` on its own to sweep under the light as it is found.",
@@ -507,8 +507,8 @@ def _bace_specs(rig_config: RigConfig) -> list[ParamSpec]:
         ParamSpec("led_settle_max_s", "float", 60.0, unit="s", group="illumination",
                   minimum=0.0,
                   doc="The most time to wait for the power meter to read stable after "
-                      "DC -> pulse; past it the scan goes on with a warning. A 2 s fixed "
-                      "wait was seen not to be enough (2026-09-02)."),
+                      "DC -> pulse; past it the scan goes on with a warning. A fixed "
+                      "2 s wait is not enough on this bench."),
         ParamSpec("led_settle_tolerance", "float", 0.02, group="illumination",
                   minimum=0.0,
                   doc="How flat the 1918-C must read before the LED counts as "
@@ -569,8 +569,8 @@ def _light_specs() -> list[ParamSpec]:
                   minimum=0.0,
                   doc="The rate the 33220A chops the LED at, and the only "
                       "instrument this value reaches (`pulse` only -- the node "
-                      "itself still moves the shutter). 500 Hz is what the rig was "
-                      "found at (2026-08-31). It holds only until something else "
+                      "itself still moves the shutter). 500 Hz is the bench's "
+                      "operating rate. It holds only until something else "
                       "sets it: a `bace` writes its own frequency to both "
                       "generators, so this does not constrain the scan after it."),
         ParamSpec("duty_percent", "float", 50.0, unit="%", group="timing",

@@ -63,7 +63,7 @@ export default {
       const axis = sweptAxis(state);
       keyed(shot, axis, () => [
         h('div.ch', h('span.cn', 'one shot · three scales'),
-          h('span.cs', 'timing measured 2026-09-01 · swept · ', h('span.accent', { text: axis }))),
+          h('span.cs', 'timing measured on this bench · swept · ', h('span.accent', { text: axis }))),
         h('div.cb', shotSvg(axis)),
       ]);
 

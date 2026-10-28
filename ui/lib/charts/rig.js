@@ -170,7 +170,7 @@ export function shotMarkup(axis = 'vpre') {
 
   // C · the edges · zero = 81150A Sync
   const XC = (ns) => 90 + (ns + 480) / 780 * 890;
-  s += t(8, 384, 'C · the edges · −480 … +300 ns · zero = 81150A Sync = scope trigger · measured 2026-09-01', { f: `600 11px ${FS}`, c: K });
+  s += t(8, 384, 'C · the edges · −480 … +300 ns · zero = 81150A Sync = scope trigger · measured on this bench', { f: `600 11px ${FS}`, c: K });
   s += rect(90, 390, 890, 170, W, { s: L });
   s += t(8, 409, 'LED drive', { f: `600 10px ${FS}`, c: K }); s += t(8, 433, 'SYNC · CH3', { f: `600 10px ${FS}`, c: K }); s += t(8, 463, 'bias', { f: `600 10px ${FS}`, c: K }); s += t(8, 493, 'light at sample', { f: `600 10px ${FS}`, c: K }); s += t(8, 530, 'photocurrent', { f: `600 10px ${FS}`, c: K });
   [-380, 0, 60, 122].forEach((v) => { s += line(XC(v), 392, XC(v), 558, LL, 1); });
