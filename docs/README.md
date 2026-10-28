@@ -1,69 +1,68 @@
 # Documentation
 
-Four kinds, in four places.
-
-- **`docs/` itself** — current documents. Wrong here is a defect; fix it in
-  place.
-- **`figures/`** — evidence pages, one measurement each. Where a later
-  measurement overturned one, the page carries a dated correction and the
-  claim is listed in `notes.md`.
-- **`history/`** — accurate for their date, not for today. Kept for the
-  reasoning.
-- **`analysis/`** — one day's data worked through: the write-up, its figures
-  and tables. Accurate for their date, like `history/`.
-
-The figure pages are single HTML files with no external dependencies beyond a
-web font. Open them in a browser.
+The manual explains the bench. The current documents describe tools and
+interfaces. Records retain measurements, analysis and design decisions.
+Paths in this index are relative to `docs/`.
 
 ## Current
 
-| file | what it is |
+| File | Purpose |
 |---|---|
-| `manual/` | The bench manual, in four parts: operation, principle, maintenance, reference. `manual/README.md` lists the chapters. |
-| `style.md` | How every text in the repository is written: register, quantities, comments, the console, review. |
-| `notes.md` | The rig as measured, defects only the hardware found, deliberate deviations from the LabVIEW original, open and closed questions, and the claims that measurement overturned. |
-| `bace-principle.md` | What BACE measures, from the papers that introduced it, and which part of the code does each step. |
-| `bench-checkout.md` | Bringing the real bench up in stages with `python -m bace.bench`. |
-| `service-contract.md` | What `bace/service/` implements: package layout, concurrency and stop semantics, every endpoint, the wire and journal payload policy, the pipeline tree schema, the check catalogue, the cost model. Where it and the code disagree, fix one and say so. |
-| `integration-window.md` | The integration window is measured from the field's arrival at the device. The arithmetic, and how to read files written before it. |
-| `ui-rules.md` | What a screen must say: significant figures, the two zeros that mean *not recorded* and *not calibrated*, colour with a job, the three time scales, provenance on screen, the ten segments of one shot. |
-| `ui-plan.md` | How `ui/` is built: the four structural decisions and the milestones M0–M6. `../ui/README.md` says what each file is. |
-| `ui-fields.md` | Which parameters sit above the fold on each bench card, and why. |
-| `bace-console-round3.html` | The console design the service contract was derived from. Self-contained. |
-| `design/` | The design project the mockups were made in. `design/README.md`. |
+| `manual/` | Bench manual: operation, principle, maintenance and reference. `manual/README.md` lists the chapters. |
+| `style.md` | Register, quantities, comments, console text and review. |
+| `bace-principle.md` | Literature references and their correspondence with the code and manual. |
+| `bench-checkout.md` | Staged bench checks with `python -m bace.bench`. |
+| `service-contract.md` | Package layout, concurrency, routes, events, journal, pipeline schema, checks and cost model. |
+| `integration-window.md` | Field-relative window arithmetic and reading older files. |
+| `ui-rules.md` | Console rendering rules: numbers, colours, provenance, charts, shot phases and controls. |
+| `ui-fields.md` | Visible fields, conditional fields and folded groups on module cards and node forms. |
+
+## Records
+
+| File | Purpose |
+|---|---|
+| `notes.md` | Records the rig as measured and the claims measurement overturned. |
+| `ui-plan.md` | The record of how the console was built. It stays in `docs/`. `../ui/README.md` describes the implementation. |
+| `bace-console-round3.html` | Self-contained console design. |
+| `design/` | Design sources and mockups; `design/README.md` describes them. |
+| `history/` | Handover, plans and reviews. These are records, not specifications of the current code. |
+| `analysis/` | Measurement write-ups, figures and tables. |
 
 ## Figures
 
-| file | what it is |
+The evidence pages open in a browser. They have no external dependency except
+a web font. Corrections on the pages qualify their claims.
+
+| File | Content |
 |---|---|
-| `figures/bace-wrapup.html` | The port closing out: the four comparison runs charted. |
-| `figures/bace-drift.html` | The reference itself was drifting: the port reproduces the LabVIEW engine, and the earlier 4× gap was the sample. |
-| `figures/bace-timing.html` | The trigger chain in time: five edges, the 502 ns optical path, where the delay axis' zero is. |
-| `figures/bace-polarity.html` | The four `output_polarity` × `invert_polarity` combinations. |
-| `figures/bace-polarity-raw.html` | The same four as raw light and dark traces. |
-| `figures/bace-delay-scan-1.html` | The first delay scan. |
-| `figures/bace-delay-scan-2.html` | The second, and the baseline-correction trap it exposed. |
-| `figures/bace-chain.html` | The instrument chain: what is wired to what. |
-| `figures/bace-anatomy.html` | What one BACE run does, step by step. |
-| `figures/bace-architecture.html` | The module layout and why the dependencies point the way they do. |
+| `figures/bace-wrapup.html` | Four comparison runs. |
+| `figures/bace-drift.html` | Device drift in the LabVIEW and service comparisons. |
+| `figures/bace-timing.html` | Trigger chain, five edges, 502 ns optical path and delay zero. |
+| `figures/bace-polarity.html` | Four `output_polarity` × `invert_polarity` combinations. |
+| `figures/bace-polarity-raw.html` | Raw light and dark traces for those combinations. |
+| `figures/bace-delay-scan-1.html` | Delay-scan data. |
+| `figures/bace-delay-scan-2.html` | Delay-scan data and baseline correction. |
+| `figures/bace-chain.html` | Instrument wiring. |
+| `figures/bace-anatomy.html` | Measurement sequence. |
+| `figures/bace-architecture.html` | Modules and dependency direction. |
 
 ## History
 
-| file | what it is |
+| File | Content |
 |---|---|
-| `history/HANDOVER-2026-09-02.md` | The day the port matched LabVIEW: what was proved, what was fixed, the raw numbers. |
-| `history/bace-status.html` | The running record through 31 August 2026. |
-| `history/port-plan.html` | The original plan, before any of it was built. |
-| `history/service-plan.md` | The plan the service was built from. The contract supersedes it. |
-| `history/ui-kickoff.md` | The brief the console was built from. |
-| `history/ux-screening.md` | A review of the measurement flow from the operator's side, 2026-09-05, and what it changed. |
-| `history/naming-plan.md` | How run folders and records carry sample identity. Rule 1 is built; the rest is record. |
+| `history/HANDOVER-2026-09-02.md` | Bench comparison, changes and raw values. |
+| `history/bace-status.html` | Development status record. |
+| `history/port-plan.html` | LabVIEW conversion plan. |
+| `history/service-plan.md` | Service plan; `service-contract.md` describes the implementation. |
+| `history/ui-kickoff.md` | Console brief. |
+| `history/ux-screening.md` | Operator-flow review. |
+| `history/naming-plan.md` | Sample identity and run naming plan. |
 
 ## Analysis
 
-| file | what it is |
+| File | Content |
 |---|---|
-| `analysis/2026-09-06/README.md` | The scope averager defect, and the 220–295 K sweep. |
-| `analysis/2026-09-06/spike-lag-and-dark-charge.md` | The spike-lag warning traced to the extracted charge, and the shutter-shut control. Its split of Q into photogenerated and injected parts is withdrawn (correction in §3). |
-| `analysis/2026-10-26/scope-window/README.md` | Record length, baseline, integration window and settle times, from a null run and interleaved runs on the rig. |
-| `analysis/*.png` | Working figures from the same days that no write-up references: J–V curves and J–V(T), kinetics with the shutter open and shut, ln Q against V_pre, the shutter-shut control, V_oc against intensity. |
+| `analysis/2026-09-06/README.md` | Digitiser averaging and the 220–295 K sweep. |
+| `analysis/2026-09-06/spike-lag-and-dark-charge.md` | Spike lag and the shutter-shut control. Its correction in §3 rejects the split of Q into photogenerated and injected parts. |
+| `analysis/2026-10-26/scope-window/README.md` | Record length, baseline, integration window and settle times from null and interleaved runs. |
+| `analysis/` | Also holds working J–V, J–V(T), kinetics, ln Q against V_pre, shutter-shut and V_oc against intensity plots without a write-up reference. |
