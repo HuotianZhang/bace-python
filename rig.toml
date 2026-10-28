@@ -5,10 +5,13 @@
 # (manual 1.2, 3.3).
 
 [electrical]
-sense_resistor_ohm = 5.192      # R_s = 5.192 Ω, device to CHAN2. Q scales as 1/R_s;
-                                # an error here rescales every Q (manual 2.3).
-pulse_amp = 4.0                 # Bias amplifier gain, 4 V/V; only the bias path passes
-                                # through it, not measured current (manual 1.2).
+sense_resistor_ohm = 5.192      # R_s, the current chain's conversion factor in V/A:
+                                # 5.192 for the present sample-holder amplifier.
+                                # Q scales as 1/R_s; an error here rescales every Q
+                                # (manual 2.3).
+pulse_amp = 4.0                 # Gain of the bias amplifier on the sample holder,
+                                # 4 V/V; the 81150A levels are divided by it
+                                # (manual 1.2).
 probe_attenuation = 1.0
 trigger_offset_s = 47.1e-9      # Field latency: 47.1 ns after trigger + :PULS:DEL1. A
                                 # 49-point delay fit gives a 1.5 ns residual (manual
