@@ -1,15 +1,8 @@
-"""Site configuration and safety limits for the 331.
+"""Define connection settings and cryostat safety limits for the Lake Shore 331.
 
-Vendored from the `TemperatureController` console project, with its console
-specifics dropped: this copy has no log directory and creates nothing at
-import, because the service owns those decisions (`bace/service/journal.py`).
-What is kept is the part that is about *this cryostat* rather than about that
-program -- the 350 K ceiling above all.
-
-Every limit here is enforced in this process, never in the browser or the UI:
-a stale tab or a second window must not be able to bypass them.  Values are
-deliberately boring Python so they can be reviewed at a glance.
-"""
+The 350 K ceiling and other limits are enforced in the owning process so a
+stale console page or second window cannot bypass them. Import creates no
+files; the service owns journal paths through `bace.service.journal`."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -17,7 +10,7 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class Limits:
-    """Hard bounds for this cryostat."""
+    """Define temperature, heater and watchdog limits for this cryostat."""
 
     #: Refuse any setpoint above this.  Set for the current cryostat.
     max_setpoint_k: float = 350.0
@@ -27,24 +20,21 @@ class Limits:
     #: deliberate, confirmed action, never automatic.
     allow_automatic_range_increase: bool = False
 
-    #: Consecutive bad RDGST?/HTRST? polls before the watchdog cuts the heater.
+    #: Consecutive bad `RDGST?` or `HTRST?` polls before heater disable.
     max_consecutive_faults: int = 3
 
-    #: Ramp rates the instrument itself accepts (manual: RAMP).
+    #: Ramp-rate limits accepted by the instrument's `RAMP` command, in K/min.
     min_ramp_k_per_min: float = 0.1
     max_ramp_k_per_min: float = 100.0
 
 
 @dataclass(frozen=True)
 class Connection:
-    """How to reach the instrument.
+    """Define the instrument address and polling settings.
 
-    This 331 is set to IEEE-488 address 7.  (The manual's factory default is
-    12, so that is what a fresh instrument would answer on; ours is not fresh.)
-    The address is shown on the front panel under the Interface key.  It comes
-    from `[temperature] address` in rig.toml; change the board index there if
-    the GPIB card is not board 0.
-    """
+    This bench uses IEEE-488 address 7; the factory address is 12. The front
+    panel's Interface key shows the address. `[temperature] address` in
+    `rig.toml` also selects the GPIB board index."""
 
     resource: str = "GPIB0::7::INSTR"
     timeout_ms: int = 3000
@@ -64,14 +54,13 @@ class Settings:
     connection: Connection = field(default_factory=Connection)
     polling: Polling = field(default_factory=Polling)
 
-    #: Which control loop to drive.  Loop 1 is the main loop and the heater
-    #: output; Loop 2 is the analog voltage output.  This is a choice, not
-    #: something to infer from the instrument - both loops can be active at
-    #: once, and writing to the wrong one fails silently.
+    #: Select the driven control loop: 1 controls the main heater; 2 controls
+    #: analog voltage output. Both can be active. Selecting the wrong loop
+    #: can silently leave the intended heater unchanged.
     control_loop: int = 1
 
-    #: Sensor the experiment cares about.  The *control* input is not set here:
-    #: it is read back from the instrument's own CSET configuration.
+    #: Select the sensor read by the experiment. The control input comes from
+    #: instrument `CSET` read-back rather than this setting.
     display_input: str = "A"
 
 

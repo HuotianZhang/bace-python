@@ -1,18 +1,13 @@
-"""Bridge to 32-bit-only instrument DLLs from a 64-bit service.
+"""Bridge a 64-bit service to instrument DLLs loaded by a 32-bit helper.
 
-Two of the rig's instruments are reached through vendor DLLs that exist only as
-32-bit builds — Deditec's `delib.dll` (the shutter) and Newport's `usbdll.dll`
-(the 1918-C power meter). A 32-bit Python cannot be the answer: SciPy stopped
-publishing win32 wheels at Python 3.10, so the measurement core could not be
-installed there.
+A bench installation can provide only a 32-bit DLL. The measurement core
+uses a 64-bit environment for SciPy; the helper loads the DLL independently.
+The service exchanges JSON lines with it over `127.0.0.1`. Shutter writes
+and buffered power reads are low-rate operations, so instrument settling
+dominates their round-trip time on this bench.
 
-So the service stays 64-bit and the DLLs live in a small 32-bit helper process:
-
-    64-bit service  --(JSON lines over 127.0.0.1)-->  32-bit helper  --> DLLs
-
-Both devices are low-rate — a shutter toggle and a buffered power read — so the
-round trip costs nothing measurable next to instrument settling times.
-"""
+Matching 64-bit DELIB and Newport installations can use direct drivers;
+the bridge is required only for DLLs that cannot load in the service."""
 from .client import BridgeClient, BridgeError
 
 __all__ = ["BridgeClient", "BridgeError"]

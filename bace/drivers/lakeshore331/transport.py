@@ -1,18 +1,8 @@
-"""Byte pipes to the instrument: a real GPIB session, or the simulator.
+"""Provide real GPIB and simulated transports for the Lake Shore 331.
 
-VENDORED, 2026-09-03, from the 331 console project
-(D:/TemperatureController, console/ls331/), unchanged. It is the device
-truth; when this file and that project disagree, they have drifted and one
-of them is wrong. "The console" in the prose below means whichever program
-owns the GPIB session -- in this repository that is the BACE service, and
-`controller.DirectTemperatureController` is the owner.
-
-Both classes expose the same two methods, so nothing above this layer knows
-which one it has.  Neither class enforces single-caller access - that is the
-bus owner's job (see instrument.py's module docstring) - but both take an
-internal lock so an accidental second caller fails loudly rather than
-silently interleaving with a reply.
-"""
+Both expose the same exchange interface. The bus owner must enforce one
+caller. Internal locks keep each exchange intact, preventing commands and
+replies from interleaving when the transport has concurrent callers."""
 from __future__ import annotations
 
 import logging
@@ -27,15 +17,14 @@ log = logging.getLogger(__name__)
 
 
 class TransportError(RuntimeError):
-    """The session could not be opened, or a message could not be exchanged."""
+    """Report a session-open or message-exchange failure."""
 
 
 class VisaTransport:
-    """PyVISA session to the 331 over IEEE-488.
+    """Exchange messages with the 331 through PyVISA over IEEE-488.
 
-    Requires a vendor VISA layer (NI-488.2 or Keysight IO Libraries) - the pure
-    Python ``pyvisa-py`` backend cannot drive a GPIB board on Windows.
-    """
+    Windows GPIB requires a vendor VISA layer such as NI-488.2 or Keysight
+    IO Libraries. The pure Python `pyvisa-py` backend cannot drive the board."""
 
     def __init__(self, connection: Connection) -> None:
         try:
@@ -60,8 +49,7 @@ class VisaTransport:
         self._inst.read_termination = connection.read_termination
         self._inst.write_termination = connection.write_termination
 
-        # The manual is explicit: "The Model 331 IEEE-488 Interface requires
-        # that repeat addressing be enabled on the bus controller."
+        # The Model 331 requires repeat addressing on the IEEE-488 controller.
         if hasattr(self._inst, "enable_repeat_addressing"):
             try:
                 self._inst.enable_repeat_addressing = True
@@ -89,13 +77,9 @@ class VisaTransport:
             return reply.strip()
 
     def close(self) -> None:
-        # Only the session. `pyvisa.ResourceManager()` hands every caller in
-        # the process the same cached instance, so closing it here closed the
-        # bench harness's and the service's scope, generator and Keithley
-        # sessions along with the 331 -- pass 2 of `bace.bench` reported all
-        # four "not reachable" two seconds after identifying them
-        # (2026-09-04). The console this was vendored from owned the only
-        # ResourceManager in its process; here it never does.
+        # Close only this session. `pyvisa.ResourceManager` is shared within the
+        # process; closing it also closes the bench's scope, generators and source
+        # meter. This transport does not own those sessions.
         try:
             self._inst.close()
         except Exception:  # pragma: no cover
@@ -103,7 +87,7 @@ class VisaTransport:
 
 
 class SimulatedTransport:
-    """The simulator dressed as a transport."""
+    """Expose the Model 331 simulator through the transport interface."""
 
     def __init__(self, simulator: Optional[Model331Simulator] = None) -> None:
         self.simulator = simulator if simulator is not None else Model331Simulator()
@@ -127,12 +111,10 @@ class SimulatedTransport:
 
 def open_transport(connection: Connection, simulated: bool = False,
                    simulate_loop: int = 1):
-    """Open the real instrument, or the simulator when ``simulated`` is set.
+    """Return a real GPIB transport or a simulated transport.
 
-    ``simulate_loop`` chooses which heater the simulated instrument reports:
-    1 for the current-source output (Off/Low/Medium/High), 2 for the analog
-    voltage output (Off/On).
-    """
+    `simulated` selects the model. `simulate_loop` chooses control loop 1
+    for the current-source heater or 2 for the analog heater."""
     if simulated:
         log.info("using the simulator (loop %d); no instrument will be contacted",
                  simulate_loop)

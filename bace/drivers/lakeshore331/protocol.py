@@ -1,35 +1,24 @@
-"""Wire-level protocol for the Lake Shore Model 331.
+"""Build commands and parse replies for the Lake Shore Model 331.
 
-VENDORED, 2026-09-03, from the 331 console project
-(D:/TemperatureController, console/ls331/), unchanged. It is the device
-truth; when this file and that project disagree, they have drifted and one
-of them is wrong. "The console" in the prose below means whichever program
-owns the GPIB session -- in this repository that is the BACE service, and
-`controller.DirectTemperatureController` is the owner.
-
-This module performs no I/O.  It builds command strings and parses instrument
-replies into typed values, which is what makes the whole command layer testable
-without a cryostat attached.
-
-Reference: Model 331 user's manual, chapter 6 (Remote Operation).
-"""
+This module performs no I/O, so command validation and reply parsing can be
+tested without a cryostat. The owning driver serialises all exchanges:
+the instrument replies only to its last query."""
 from __future__ import annotations
 
 import enum
 from dataclasses import dataclass
 from typing import Sequence, Tuple
 
-#: Manual 6.1.1 - default terminator is CR/LF.
+#: The instrument's default terminator is CR/LF.
 TERMINATOR = "\r\n"
 
-#: Manual 6.1.2.4 - "The total communication string must not exceed 64
-#: characters in length."  Also: only one query per communication, and the
-#: instrument replies only to the *last* query it received.
+#: The instrument accepts at most 64 characters per communication and one
+#: query. It replies only to the last query received.
 MAX_MESSAGE_CHARS = 64
 
 
 class ProtocolError(ValueError):
-    """A reply could not be parsed, or a message would violate the protocol."""
+    """Report an invalid reply or a message that breaches protocol limits."""
 
 
 # --------------------------------------------------------------------------
@@ -37,7 +26,7 @@ class ProtocolError(ValueError):
 # --------------------------------------------------------------------------
 
 class Units(enum.IntEnum):
-    """CSET <units>."""
+    """Represent the `CSET` temperature-unit codes."""
 
     KELVIN = 1
     CELSIUS = 2
@@ -45,19 +34,18 @@ class Units(enum.IntEnum):
 
 
 class HeaterDisplay(enum.IntEnum):
-    """CSET <current/power> - how the front panel shows heater output."""
+    """Represent the `CSET` current or power heater-display codes."""
 
     CURRENT = 1
     POWER = 2
 
 
 class HeaterRange(enum.IntEnum):
-    """RANGE.
+    """Represent the `RANGE` settings for the main heater.
 
-    Wattages are the manual's headline figures for a 50 ohm heater; the actual
-    full-scale power scales with heater resistance (25 W at 25 ohm, 10 W at
-    10 ohm on High).  See :func:`full_scale_watts`.
-    """
+    Full-scale power depends on resistance: high range gives 50 W at
+    50 ohm, 25 W at 25 ohm and 10 W at 10 ohm. `full_scale_watts` applies
+    the current-source scaling."""
 
     OFF = 0
     LOW = 1
@@ -66,7 +54,7 @@ class HeaterRange(enum.IntEnum):
 
 
 class ControlMode(enum.IntEnum):
-    """CMODE."""
+    """Represent the `CMODE` control modes."""
 
     MANUAL_PID = 1
     ZONE = 2
@@ -77,7 +65,7 @@ class ControlMode(enum.IntEnum):
 
 
 class AnalogMode(enum.IntEnum):
-    """ANALOG <mode>.  LOOP means the analog output is driving Loop 2."""
+    """Represent `ANALOG` modes; `LOOP` drives control loop 2."""
 
     OFF = 0
     INPUT = 1
@@ -86,7 +74,7 @@ class AnalogMode(enum.IntEnum):
 
 
 class HeaterFault(enum.IntEnum):
-    """HTRST?."""
+    """Represent `HTRST?` heater fault codes."""
 
     OK = 0
     OPEN_LOAD = 1
@@ -94,13 +82,13 @@ class HeaterFault(enum.IntEnum):
 
 
 class TuningState(enum.IntEnum):
-    """TUNEST?."""
+    """Represent `TUNEST?` autotune state codes."""
 
     IDLE = 0
     TUNING = 1
 
 
-#: Manual 4.13, "Loop 1 Full Scale Heater Power at Typical Resistance".
+#: Full-scale heater power in W at the tabulated resistances in ohm.
 _FULL_SCALE_W = {
     10.0: {HeaterRange.OFF: 0.0, HeaterRange.LOW: 0.100, HeaterRange.MEDIUM: 1.0, HeaterRange.HIGH: 10.0},
     25.0: {HeaterRange.OFF: 0.0, HeaterRange.LOW: 0.250, HeaterRange.MEDIUM: 2.5, HeaterRange.HIGH: 25.0},
@@ -109,11 +97,10 @@ _FULL_SCALE_W = {
 
 
 def full_scale_watts(rng: HeaterRange, heater_ohms: float = 50.0) -> float:
-    """Full-scale Loop 1 heater power for a range, given the heater resistance.
+    """Return full-scale heater power in W for resistance `heater_ohms` in ohm.
 
-    The manual only tabulates 10, 25 and 50 ohm; anything else is scaled from
-    the 50 ohm column, which is exact for a current-source output.
-    """
+    The instrument tables cover 10, 25 and 50 ohm. Other resistances scale
+    from the 50 ohm column, as required for a current-source heater output."""
     table = _FULL_SCALE_W.get(float(heater_ohms))
     if table is not None:
         return table[HeaterRange(rng)]
@@ -136,7 +123,7 @@ READING_STATUS_FLAGS: Sequence[Tuple[int, str]] = (
 
 @dataclass(frozen=True)
 class ReadingStatus:
-    """Decoded RDGST? response."""
+    """Hold a decoded `RDGST?` sensor status."""
 
     raw: int
 
@@ -158,12 +145,10 @@ class ReadingStatus:
 
 @dataclass(frozen=True)
 class LoopConfig:
-    """CSET? <loop> - how a control loop is wired up.
+    """Hold a `CSET?` reply describing control-loop wiring.
 
-    The console reads this; it never writes it.  Loop wiring belongs to the
-    front panel, so that what the instrument is doing and what the screen says
-    cannot drift apart.
-    """
+    The console reads this configuration but never writes it. Wiring stays
+    on the front panel so the display describes the actual instrument."""
 
     loop: int
     input_channel: str
@@ -174,11 +159,9 @@ class LoopConfig:
 
 @dataclass(frozen=True)
 class AnalogConfig:
-    """ANALOG? - the analog voltage output.
+    """Hold an `ANALOG?` reply describing the analog voltage output.
 
-    ``mode is AnalogMode.LOOP`` means the analog output is driving Loop 2 as a
-    control output, i.e. it is the heater.
-    """
+    `mode is AnalogMode.LOOP` identifies control loop 2's heater output."""
 
     bipolar: bool
     mode: AnalogMode
@@ -194,11 +177,9 @@ class AnalogConfig:
 # --------------------------------------------------------------------------
 
 def check_message(message: str) -> str:
-    """Validate a message against the documented limits, then return it.
+    """Return a validated message with at most 64 characters and one query.
 
-    Enforces the 64-character cap and the one-query-per-communication rule so a
-    malformed command is caught here rather than as a silent timeout.
-    """
+    Reject malformed commands before they can produce an unexplained timeout."""
     if len(message) + len(TERMINATOR) > MAX_MESSAGE_CHARS:
         raise ProtocolError(
             "message is %d characters with terminators, limit is %d: %r"
@@ -210,13 +191,13 @@ def check_message(message: str) -> str:
 
 
 def fmt_number(value: float, decimals: int = 3) -> str:
-    """Format a number the way the instrument's parameter fields expect."""
+    """Return a number formatted for an instrument parameter field."""
     return ("%+.*f" % (decimals, value))
 
 
 # --------------------------------------------------------------------------
 # Reply parsing.  Parse leniently: strip whitespace, tolerate leading '+' and
-# varying field widths rather than assuming a fixed column layout.
+# varying field widths rather than assuming one column layout.
 # --------------------------------------------------------------------------
 
 def parse_float(reply: str) -> float:
@@ -283,17 +264,11 @@ def parse_analog(reply: str) -> AnalogConfig:
 # --------------------------------------------------------------------------
 
 def validate_pid(p: float, i: float, d: float) -> None:
-    """Check PID values against the instrument's documented ranges.
+    """Validate PID values against instrument limits.
 
-    Zero is allowed for I and D: it is how the 331 expresses "integral off" and
-    "derivative off", the manual's own tuning procedure starts there, and a real
-    instrument was found holding I = 0.  Refusing it would mean the console
-    could not write back the values it had just read.
-
-    P must be greater than zero - manual 2.6.1: "The Proportional term, also
-    called gain, must have a value greater than zero for the control loop to
-    operate."
-    """
+    Zero I or D disables the respective term. The bench instrument accepts
+    I = 0; refusing it prevents writing back valid read-back settings.
+    P must exceed zero for the control loop to operate."""
     if not 0.1 <= p <= 1000:
         raise ValueError("P must be between 0.1 and 1000, got %g" % p)
     if not 0 <= i <= 1000:

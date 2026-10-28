@@ -1,13 +1,10 @@
-"""Wire format for the 32-bit bridge: one JSON object per line, UTF-8.
+"""Encode bridge requests and replies as one UTF-8 JSON object per line.
 
-Request   {"id": int, "target": str, "method": str, "args": {...}}
-Response  {"id": int, "ok": true,  "result": ...}
-          {"id": int, "ok": false, "error": str, "type": str}
-
-Deliberately boring: no pickling, no eval, no dynamic import. The helper
-dispatches to an explicit table of methods, so a stray connection cannot make it
-do anything the rig would not.
-"""
+Requests contain `id`, `target`, `method` and `args`. Replies echo `id`
+and return `ok` with `result`, or `ok=False` with `error` and `type`.
+The helper dispatches only explicitly listed methods. It does not unpickle,
+evaluate code or import modules from a request, limiting a stray connection
+to the exposed instrument operations."""
 from __future__ import annotations
 
 import json

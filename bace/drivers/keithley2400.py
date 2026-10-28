@@ -1,34 +1,21 @@
-"""Keithley 2400 SourceMeter — V_oc, J_sc, J_sat, the J–V sweep, and the panel.
+"""The Keithley 2400 measures DC quantities and supplies the console panel.
 
-Confirmed on the bench: `KEITHLEY INSTRUMENTS INC.,MODEL 2400,4473504,C34 Sep 21
-2016` at `GPIB0::24::INSTR`. A plain 2400, so 200 V / 1 A / 20 W envelope — not
-a 2401 or 2440.
+The bench instrument is a Model 2400 at `GPIB0::24::INSTR`, serial 4473504,
+firmware C34, with a 200 V, 1 A, 20 W envelope. The relay connects it to the
+device separately from the bias amplifier. `output_enabled` supplies the
+relay interlock in `bace.drivers.routing`.
 
-The measurement routine below is `measJsc,Voc.vi` command for command, with one
-deliberate change and one correction, both called out where they happen. This
-instrument sits on the far side of the relay from the amplifier, so
-`output_enabled` is a real interlock input, not decoration: `drivers.routing`
-reads it before it will move the relay.
+The DC sequence follows the LabVIEW `measJsc,Voc.vi` commands with compliance
+set before output enable and voltage compliance used while sourcing current.
+Returned current keeps the instrument sign: negative at 0 V under light.
+The LabVIEW `positive jSC?` control does not affect its command sequence;
+this driver also leaves sign conversion to analysis.
 
-Sign convention: the current returned at 0 V is whatever the instrument reads,
-which for an illuminated cell is negative. The original had a `positive jSC?`
-control for flipping it, but that control appears in no block diagram — it was
-displayed and saved and never read — so nothing here flips anything. Sign
-handling is the analysis's business.
-
-**The panel** (`PanelSetup`, `apply_panel`, `read_panel`, 2026-09-07) is the
-one thing here that is not from the original: the instrument driven by hand,
-configured once and then read many times, for the console's SMU panel. It has
-to be separate from the three routines above precisely because each of those
-opens with `*RST` — correctly, since each is a measurement with its own state
-— and a panel built out of them would drop the output between every reading.
-The two directions of that separation are both load-bearing: `_prepare` clears
-the panel, so a measurement leaves the instrument in none of the state a panel
-put there and the panel knows; and the panel senses **both** quantities
-(`:SENS:FUNC 'VOLT:DC','CURR:DC'`), which is the one place in this driver
-where the V element of a `:READ?` is a measurement rather than the setpoint
-`sweep_points` deliberately files.
-"""
+The panel configures once and reads repeatedly. DC routines reset before
+each measurement to clear state from interrupted runs; using them for panel
+reads drops the output between readings. `_prepare` clears the panel state.
+The panel senses both V and A, so its voltage element is measured. The
+current-only sweep instead records the source setpoint as voltage."""
 from __future__ import annotations
 
 import math
@@ -47,156 +34,139 @@ class SourceMeterError(RuntimeError):
 
 @dataclass(frozen=True)
 class SourceMeterConfig:
-    """Limits and timing. The three settle times are separate controls on the
-    original's panel (`Settle Time Jsc/Voc/Jsat (ms)`) because they genuinely
-    differ: V_oc on a slow cell settles far more slowly than J_sc."""
+    """Define source-meter limits and timing.
+
+    The three DC settle times differ because V_oc on a slow device settles
+    more slowly than short-circuit current."""
 
     current_compliance_a: float = 0.05
     """The most current the 2400 will pass while it sources voltage
-    (`:SENS:CURR:PROT:LEV`); it clamps there rather than going higher. Sized
-    for the pixel, not the instrument — a 2400 will happily deliver 1 A into a
-    small cell."""
+    (`:SENS:CURR:PROT:LEV`); it clamps there rather than going higher.
+    The limit protects the device; the 2400 can deliver 1 A into a small cell."""
 
     voltage_compliance_v: float = 2.0
-    """The most voltage the 2400 will put across the device while it sources
-    current (`:SENS:VOLT:PROT:LEV`). With 0 A sourced — the V_oc reading — this
-    is what stops the output swinging to the rail if a contact opens."""
+    """The most voltage in V the 2400 will put across the device while it sources
+    current (`:SENS:VOLT:PROT:LEV`).
+    At 0 A for V_oc, this bounds voltage if a contact opens."""
 
     settle_jsc_ms: float = 500.0
-    """How long the 2400 holds 0 V before reading the current, for J_sc.
-    Too short and the number is the cell's RC, not its steady state."""
+    """How long, in ms, the 2400 holds 0 V before reading the current, for J_sc.
+    A shorter wait can measure the device's RC response instead of steady state."""
 
     settle_voc_ms: float = 500.0
-    """How long the 2400 holds 0 A before reading the voltage, for V_oc.
-    The longest of the three on a slow cell -- and the one that matters most,
-    because this V_oc is what a `bace` scan centres its axis on."""
+    """How long, in ms, the 2400 holds 0 A before reading the voltage, for V_oc.
+    A slow device needs the longest wait here. V_oc centres the scan axis."""
 
     settle_jsat_ms: float = 500.0
-    """How long the 2400 holds `v_sat` before reading the current, for J_sat."""
+    """How long, in ms, the 2400 holds `v_sat` before reading the current, for J_sat."""
 
     nplc: float = 1.0
     """How long the 2400 integrates each reading, in **power-line cycles**
     (`:SENS:*:NPLC`).
-    1 NPLC is 20 ms on 50 Hz mains and rejects mains hum by integrating over a
-    whole cycle; below 1 the reading gets faster and noisier, above 1 slower
-    and quieter. It multiplies the whole sweep: `points x (settle + averaging x
-    NPLC / 50 Hz)`."""
+
+    At 50 Hz, 1 NPLC is 20 ms and rejects mains hum over one full cycle.
+    Lower values are faster and noisier; higher values are slower and quieter.
+    Integration time scales with point count, averaging and `nplc`; the full
+    budget includes auto-zero apertures in `Keithley2400.sweep_budget_s`."""
 
     averaging: int = 1
     """How many readings the 2400 averages into each point (`:AVER:COUN`, with
-    a repeating filter). 1 switches the filter off. Costs NPLC per extra
-    reading, so it multiplies the sweep time with `nplc`."""
+    a repeating filter).
+    A value of 1 disables the filter. Each extra reading adds integration time,
+    so averaging multiplies the sweep duration together with `nplc`."""
 
     terminals: str = "FRON"          # FRON or REAR
     """Which set of terminals on the 2400 is live (`:ROUT:TERM`): `FRON` the
-    front panel, `REAR` the back. **A physical fact about how the rig is
-    cabled, not a preference** -- set to the side the sample is actually
-    wired to, or the sweep reads an open circuit."""
+    front panel, `REAR` the back.
+    `FRON` is the front panel; `REAR` is the back. This must match device wiring,
+    or the source meter reads an open circuit."""
 
     four_wire: bool = False
     """Kelvin sensing (`:SYST:RSEN ON`): the 2400 measures voltage on a
     separate pair of leads, so the reading excludes the drop down the current
-    leads. Needs four wires to the sample; with only two connected, turning
-    this on reads nothing. Off is the two-wire default this rig uses."""
+    leads.
+    Separate voltage leads exclude the current-lead drop. Four wires are required;
+    enabling it with two wires gives no reading. This bench uses two-wire sensing."""
 
 
 PANEL_FUNCTIONS: tuple[str, ...] = ("voltage", "current")
-"""What the panel can source. The 2400 sources one of the two and senses the
-other -- and, with `:FUNC:CONC ON`, senses both at once, which is what its own
-display shows and what a panel needs."""
+"""List the source functions accepted by the panel.
+The 2400 sources one quantity and can sense both V and A simultaneously
+with `:FUNC:CONC ON`, as required for the panel display."""
 
 PANEL_STATIC: tuple[str, ...] = ("function", "terminals", "four_wire")
-"""The three panel fields that are not changed under a live output.
+"""List panel fields that require output off before a change.
 
-Not a rule invented here. `:ROUT:TERM` throws a physical switch inside the
-instrument and `:SYST:RSEN` decides which pair of leads is the voltmeter, so
-both are a change of *wiring*; and swinging the source between volts and amps
-with the output on takes the device through whatever the transition happens to
-be. Everything else -- the level, either compliance, the integration time, the
-filter, the source range -- is what the 2400's own knob and keys change with
-the output on, so the panel changes those live too."""
+`:ROUT:TERM` moves an internal switch; `:SYST:RSEN` selects voltage leads.
+Both change wiring. Changing source function with output on also exposes
+the device to a transition between voltage and current control. Level,
+compliance, integration, filter and range can change with output on, as
+on the instrument's front panel."""
 
 
 NPLC_LIMITS = (0.01, 10.0)
 AVERAGING_LIMITS = (1, 100)
-"""What `PanelSetup` accepts, named because the budget ceiling below is
-derived from them and the two must not drift apart."""
+"""Bound accepted `PanelSetup` values and the maximum read budget.
+Sharing these limits prevents validation and shutdown timing from differing."""
 
 
 def panel_budget_for(nplc: float, averaging: int) -> float:
-    """How long one `read_panel` under *these* settings can take, with room.
+    """Return a conservative panel-read budget in s for the requested settings.
 
-    A free function because the number is wanted for a setup that is not
-    applied yet: the console sizes the wait for a source change on the
-    settings the change is *asking* for, and merging them onto the panel the
-    instrument holds is the job's own work, on the worker, afterwards.
-
-    `sweep_budget_s`'s model for a single point with no settle, and for the
-    same measured reason: an averaged reading is **four** apertures, because
-    `:FUNC:CONC ON` measures voltage and current and the 2400 auto-zeroes
-    each. NPLC 10 with a 100-deep filter -- both legal, both accepted -- is
-    `100 x 4 x 10 / 50 Hz` = 80 s of integration, and the 15 + 2x around it is
-    the margin `sweep_budget_s` explains: NI-488 rounds a GPIB timeout up to
-    the next of 10/30/100/300 s, and a budget that lands just under one of
-    those is a read cut off mid-integration.
-    """
+    The console needs this before the worker applies or merges a setup.
+    An averaged reading uses four apertures: concurrent voltage and current
+    senses, each with auto-zero. At 50 Hz, NPLC 10 and 100 readings take
+    80 s. The margin is 15 s plus twice the integration time, as in
+    `Keithley2400.sweep_budget_s`. On this bench NI-488 rounds timeouts up
+    to 10, 30, 100 or 300 s; a budget near a boundary can cut off a read."""
     return 15.0 + 2.0 * max(1, int(averaging)) * 4.0 * float(nplc) / 50.0
 
 
 PANEL_BUDGET_MAX_S = panel_budget_for(NPLC_LIMITS[1], AVERAGING_LIMITS[1])
-"""The longest read this panel will ever accept -- NPLC 10 with a 100-deep
-filter, both legal on a 2400.
+"""Bound the longest accepted panel read in s: NPLC 10 and 100 readings.
 
-Wanted where the caller cannot know which setup the worker is inside. Shutdown
-is the case: it sizes its wait before it can see what a source change already
-in flight is about to apply, and a wait sized on the panel that change is
-*replacing* ends with the worker killed mid-read and the queued output-off
-never run. A ceiling costs nothing there, because the wait is a bound and not
-a sleep -- the worker finishing early ends it."""
+Shutdown cannot know the setup an active worker is applying. A wait based
+on the preceding setup can kill that worker mid-read before queued output
+disable runs. The maximum is a deadline, not a sleep; early completion ends
+the wait immediately."""
 
 
 @dataclass(frozen=True)
 class PanelSetup:
-    """One state of the front panel: what is sourced, at what level, inside
-    what limits.
+    """Define a panel source function, level and limits.
 
-    `SourceMeterConfig` beside it is the bench's *measurement* configuration --
-    three settle times, one per DC quantity, because a routine is sequencing
-    them. This is the panel's: no settle, because nobody is sequencing
-    anything, and a `function` and a `level`, because on a panel those are the
-    two controls there are.
-    """
+    `SourceMeterConfig` sequences three DC quantities with separate settle
+    times. The panel holds one source state and uses the instrument delay."""
 
     function: str = "voltage"
-    """`voltage` sources volts and the current is the measurement; `current`
-    the other way round. Sourcing 0 A is the open-circuit voltage and sourcing
-    0 V the short-circuit current -- the same two points `measure_voc` and
-    `measure_jsc` take, by hand and without filing anything."""
+    """Select voltage or current sourcing.
+    `voltage` sources V and measures A; `current` sources A and measures V.
+    At 0 A the reading is V_oc; at 0 V it is short-circuit current, as in
+    `Keithley2400.measure_voc` and `Keithley2400.measure_jsc`."""
 
     level: float = 0.0
-    """Volts or amps, per `function`. The knob."""
+    """Set the source level in V or A according to `function`."""
 
     current_compliance_a: float = 0.05
     voltage_compliance_v: float = 2.0
-    """Both are sent whichever is sourced: which one bites depends on the
-    function, and a panel whose function the operator can swap would otherwise
-    carry the other one's stale limit into the swap."""
+    """Send both compliance limits for either source function.
+    The active limit depends on `function`; setting both prevents a function
+    change from activating a stale limit."""
 
     nplc: float = 1.0
     averaging: int = 1
     terminals: str = "FRON"
     four_wire: bool = False
-    """As `SourceMeterConfig`. The 2400's range is 0.01 to 10 NPLC and 1 to 100
-    readings in the filter, and this refuses outside it rather than letting the
-    instrument refuse into a log nobody reads."""
+    """Use the limits and wiring described by `SourceMeterConfig`.
+    The panel accepts 0.01 to 10 NPLC and 1 to 100 filter readings. Rejecting
+    other values here prevents instrument errors from being missed in a log."""
 
     source_range: float | None = None
-    """The source range to hold, or None for the instrument's own autorange.
+    """Hold a source range in V or A, or use autorange for `None`.
 
-    Fixed is what a sweep wants (`sweep_points` picks one for the whole curve
-    so no range change lands mid-curve, output on). Auto is what a front panel
-    opens on and what this defaults to: the operator is about to move the level
-    by decades, and a fixed range would clip rather than follow."""
+    `Keithley2400.sweep_points` holds one range to avoid changes with output
+    on. The panel defaults to autorange so large level changes can be followed
+    without clipping at a manually held range."""
 
     def __post_init__(self) -> None:
         if self.function not in PANEL_FUNCTIONS:
@@ -222,22 +192,24 @@ class PanelSetup:
 
     @property
     def unit(self) -> str:
-        """The unit `level` is in: `V` sourcing volts, `A` sourcing amps."""
+        """Return `V` for voltage sourcing or `A` for current sourcing."""
         return "V" if self.function == "voltage" else "A"
 
     @property
     def limit(self) -> float:
-        """The compliance that bites in this function -- amps while volts are
-        sourced, volts while amps are."""
+        """Return active current compliance in A or voltage compliance in V.
+
+        Voltage sourcing uses current compliance; current sourcing uses voltage
+        compliance."""
         return (self.current_compliance_a if self.function == "voltage"
                 else self.voltage_compliance_v)
 
     @classmethod
     def from_config(cls, config: SourceMeterConfig, **over) -> "PanelSetup":
-        """The panel a bench opens on: `rig.toml` and `run.toml`'s limits and
-        timing, sourcing 0 V. Nothing is invented -- every field the two
-        dataclasses share comes across, and the two the panel adds
-        (`function`, `level`) open at the safest pair there is."""
+        """Build panel settings from configured limits, timing and wiring.
+
+        Shared fields come from `SourceMeterConfig`. Source function and level
+        default to voltage at 0 V unless the caller overrides them."""
         return cls(current_compliance_a=config.current_compliance_a,
                    voltage_compliance_v=config.voltage_compliance_v,
                    nplc=config.nplc, averaging=config.averaging,
@@ -247,11 +219,11 @@ class PanelSetup:
 
 @dataclass(frozen=True)
 class PanelReading:
-    """One panel reading: both senses, and the compliance annunciator.
+    """Hold measured voltage in V, current in A and the compliance state.
 
-    `compliance` is the 2400's own `Cmpl` light (`:SENS:…:PROT:TRIP?`), not a
-    comparison made here -- the instrument knows it is clamping and a reading
-    taken at the limit is the source's limit, not the device's answer."""
+    `compliance` comes from the instrument's `:SENS:...:PROT:TRIP?` status.
+    A clamped reading reflects a source limit rather than the free device
+    response."""
 
     volts: float
     amps: float
@@ -261,15 +233,15 @@ class PanelReading:
 
     @property
     def ohms(self) -> float | None:
-        """V/I, or None at zero current. Not `:SENS:FUNC 'RES'` -- that would
-        put the instrument in its own resistance mode; this is the division
-        the front panel's MATH does, and it says nothing at 0 A rather than
-        dividing by it."""
+        """Return V/I in ohm, or `None` at 0 A.
+
+        This mirrors front-panel MATH without entering the instrument's separate
+        resistance measurement mode."""
         return None if self.amps == 0.0 else self.volts / self.amps
 
 
 class Keithley2400:
-    """One SMU session. Not thread-safe."""
+    """Control one source-meter VISA session without concurrent access."""
 
     def __init__(self, resource, *, config: SourceMeterConfig = SourceMeterConfig(),
                  timeout_ms: int = 20000):
@@ -279,7 +251,7 @@ class Keithley2400:
         self._output = False
         self._panel: PanelSetup | None = None
         self.read_retries = 0
-        """How many `:READ?` replies were not numbers and were asked again."""
+        """Count nonnumeric `:READ?` replies that trigger another measurement."""
 
     # -- identity ---------------------------------------------------------
     def identify(self) -> str:
@@ -311,49 +283,35 @@ class Keithley2400:
         return self._output
 
     def read_output(self) -> bool | None:
-        """`:OUTP?` from the instrument; the cached `output_enabled` follows it.
+        """Query `:OUTP?`, return a boolean or `None`, and update `output_enabled`.
 
-        Not a protocol member. The router's interlock reads the cached flag,
-        and the service refreshes it here before a relay move and at every
-        read-back, so a SourceMeter left ON by hand is seen rather than
-        remembered as off."""
+        The service refreshes the router's cached interlock flag before relay
+        moves and read-back. This detects output enabled outside this driver."""
         on = on_off(ask(self._io, ":OUTP?"))
         if on is not None:
             self._output = on
         return on
 
     # -- the front panel --------------------------------------------------
-    # Configure once, read many: the instrument holds a source and the caller
-    # asks it for numbers, which is what the 2400's own front panel does and
-    # what none of the routines below can do. They each open with `*RST` --
-    # correctly, because each is a measurement with its own state -- and that
-    # reset is why a panel cannot be built out of them: it would drop the
-    # output between every reading.
+    # The panel holds a source state between reads. Measurement routines
+    # start with `*RST` to establish their own state; using them for panel
+    # reads drops the output each time.
     @property
     def panel(self) -> PanelSetup | None:
-        """The panel state the instrument is in, or None when it is in none.
+        """Return the applied `PanelSetup`, or `None` if no panel state is valid.
 
-        `_prepare` clears it, so the first `measure_dc` or sweep after a panel
-        session leaves the instrument in none of the state the panel put there
-        and the panel knows. A panel that went on reading across a run would
-        be reading a source somebody else configured."""
+        `_prepare` clears it before a DC measurement or sweep so a panel cannot
+        keep reading a source configured by another routine."""
         return self._panel
 
     def apply_panel(self, setup: PanelSetup) -> PanelSetup:
-        """Put the instrument into `setup` and leave it there.
+        """Send changed panel settings and return `None`.
 
-        The **first** call configures from `*RST`, which is also what makes
-        the output off; from then on only what moved is written, with the
-        output wherever it is. That is the whole difference between a panel
-        and a measurement: `_prepare`'s reset is deliberately not used here.
-
-        `SourceMeterError` when a `PANEL_STATIC` field is changed under a live
-        output -- the caller switches the output off, changes it and switches
-        it back on, which is the sequence the instrument's own keys enforce --
-        and when the output is live with **no** panel applied, which is the
-        instrument somebody else left driving. The first call has to `*RST`
-        and that would drop their output without saying so; refusing says it.
-        """
+        The first application resets with `*RST` and leaves output off. Later
+        applications write changed fields while preserving output state.
+        `PANEL_STATIC` changes require output off. A live output with no valid
+        panel state also raises `SourceMeterError`: resetting it would silently
+        drop a source this driver does not own."""
         was = self._panel
         if was is None and self._output:
             raise SourceMeterError(
@@ -373,69 +331,54 @@ class Keithley2400:
             else:
                 self._panel_write(was, setup)
         except Exception:                                    # noqa: BLE001
-            # A partial write: the level may have landed and the compliance
-            # behind it failed, so the instrument is in neither `was` nor
-            # `setup` and this driver cannot say which. Leaving `_panel` on the
-            # old setup would have it report a source at a level it is no
-            # longer at -- under-reporting a live one, since the level is
-            # written before the limits. `None` is what "in a state this
-            # driver did not configure" already means everywhere else here:
-            # the panel reads unapplied, the output cannot be switched on, and
-            # applying again is a `*RST` back to a known instrument.
+            # A partial write can leave the source in neither `was` nor `setup`.
+            # Keeping the preceding panel state can under-report a live level.
+            # `None` marks the state unknown, prevents enabling output and makes the
+            # next application reset to a known state.
             self._panel = None
             raise
         self._panel = setup
         return setup
 
     def _panel_cold(self, setup: PanelSetup) -> None:
-        """From whatever the instrument was in, into the panel."""
+        """Reset and send the full panel configuration; return `None`."""
         self._io.write("*RST")
         self._output = False
         self._io.write("*CLS;")
-        # Both senses at once. Sourcing volts, the current is the measurement
-        # and the voltage is the evidence the source is holding it -- and this
-        # is the one place in this driver where the V element *is* a
-        # measurement, because `:SENS:FUNC` asks for it. (`sweep_points` does
-        # the opposite on purpose: only current is sensed there, so it files
-        # the setpoint for V rather than the element the 2400 fills in.)
+        # Both voltage and current are sensed for the panel. Voltage confirms
+        # that the source holds its level. `sweep_points` senses only current
+        # and records the voltage setpoint instead.
         self._io.write(":FUNC:CONC ON;")
         self._io.write(":SENS:FUNC 'VOLT:DC','CURR:DC';")
-        # ASCII, because `read_panel` parses the reply as text. `*RST` has
-        # just made it ASCII anyway; said out loud so the parse's assumption
-        # is written down beside it rather than inherited.
+        # Explicit ASCII format matches the text parser in `read_panel`,
+        # independently of the reset default.
         self._io.write(":FORM ASC;:FORM:ELEM VOLT,CURR;")
         self._io.write(":TRAC:FEED:CONT NEV;")
         self._io.write(":RES:MODE MAN;")
         self._io.write(":TRIG:COUN 1;")
         self._io.write(f":ROUT:TERM {setup.terminals};")
         self._io.write(f":SYST:RSEN {'ON' if setup.four_wire else 'OFF'};")
-        # `:SOUR:DEL:AUTO` is left as `*RST` leaves it -- on. A sweep times its
-        # own settle because the curve's points have to be comparable; a panel
-        # reading is asked for one at a time and the instrument's own delay is
-        # the right one.
+        # The panel retains the reset's automatic source delay for single reads.
+        # A sweep instead sets an explicit settle time to make points comparable.
         self._panel_write(None, setup)
 
     def _panel_write(self, was: PanelSetup | None, setup: PanelSetup) -> None:
-        """Write what moved between `was` and `setup`; `was` None writes all
-        of it. Only what moved, so a level typed twice a second does not
-        re-send a compliance and a filter with it."""
+        """Send fields changed between `was` and `setup`; return `None`.
+
+        `was=None` sends all fields. Avoiding unchanged writes lets frequent
+        level adjustments leave compliance and filters undisturbed."""
         def moved(*names: str) -> bool:
             return was is None or any(getattr(was, n) != getattr(setup, n) for n in names)
 
         mode = "VOLT" if setup.function == "voltage" else "CURR"
 
-        # A compliance that is being **tightened** is written before the level,
-        # a loosened one after it. One request can do both -- 0 V on a 50 mA
-        # limit to 5 V on a 1 mA limit is a plausible click -- and with the
-        # output live the two commands are separate writes on the bus. Level
-        # first, the device sees 5 V at up to the old 50 mA for as long as the
-        # next write takes; that is a real amount of charge through a cell
-        # somebody is measuring. Tightening first cannot hurt: the instrument
-        # clamps at the new limit while it is still at the old level.
+        # Tighter compliance precedes a level change; looser compliance follows.
+        # For example, 0 V at 50 mA to 5 V at 1 mA must not expose the device to
+        # 5 V at 50 mA during the next bus write. Tightening first clamps at
+        # 1 mA while still at 0 V.
         #
-        # The rule is "whichever change narrows what the device may see goes
-        # first", which is also why a *loosened* compliance waits: it must not
-        # widen the limit while the level is still the old, higher one.
+        # Loosening waits so a lower requested level takes effect before a
+        # higher limit can pass charge at the preceding level.
         tighter: list[str] = []
         looser: list[str] = []
         for name, command in (
@@ -445,8 +388,8 @@ class Keithley2400:
                  f":SENS:VOLT:PROT:LEV {setup.voltage_compliance_v:g};")):
             if not moved(name):
                 continue
-            # `was is None` is the cold path, where the output is off and the
-            # order cannot matter -- before the level is the safe default.
+            # `was is None` means output is off; compliance before level remains
+            # the safe default.
             widening = was is not None and getattr(setup, name) > getattr(was, name)
             (looser if widening else tighter).append(command)
 
@@ -480,25 +423,20 @@ class Keithley2400:
             self._io.write(f":SYST:RSEN {'ON' if setup.four_wire else 'OFF'};")
 
     def read_panel(self) -> PanelReading:
-        """One reading: both senses, and the compliance annunciator.
+        """Send `:READ?` and return V, A and the active compliance status.
 
-        **The output has to be on.** With it off a `:READ?` still triggers and
-        still answers -- with the source disconnected inside the instrument,
-        so near-zero volts and near-zero amps, which looks exactly like a
-        measurement of a device that is not there. The 2400 shows dashes in
-        that state; this raises rather than writing the same lie in numbers.
-        """
+        Output must be on. With output off the 2400 still triggers and replies,
+        but its internally disconnected source gives near-zero V and A. This
+        can resemble an absent device; the front panel shows dashes. The method
+        raises rather than recording those values as measurements."""
         panel = self._panel
         if panel is None:
             raise SourceMeterError("the panel is not applied to this instrument")
         if not self._output:
             raise SourceMeterError("the output is OFF: there is nothing to read")
-        # The session's own timeout is sized for a bench's ordinary traffic
-        # and this one read can legally take 80 s (`panel_budget_s`), so it
-        # is raised for the query and put back -- exactly what `sweep_points`
-        # does with `sweep_budget_s`, and for the same reason: a read cut off
-        # at the VISA layer is indistinguishable from an instrument that has
-        # stopped answering.
+        # A panel read can take 80 s at valid settings (`panel_budget_s`).
+        # Raise the session timeout for this query and restore it afterwards,
+        # so a valid integration is not mistaken for an unresponsive instrument.
         budget_ms = int(self.panel_budget_s() * 1000)
         old_timeout = getattr(self._io, "timeout", None)
         raise_it = old_timeout is not None and budget_ms > old_timeout
@@ -506,8 +444,7 @@ class Keithley2400:
             self._io.timeout = budget_ms
         try:
             raw = self._read()
-            # Which limit can bite is decided by what is being sourced, so
-            # only that one is asked for: the other's TRIP is meaningless.
+            # Only the protection status opposite the sourced quantity is meaningful.
             node = "CURR" if panel.function == "voltage" else "VOLT"
             tripped = on_off(ask(self._io, f":SENS:{node}:PROT:TRIP?"))
         finally:
@@ -518,13 +455,12 @@ class Keithley2400:
                             level=panel.level)
 
     def _read(self) -> list[float]:
-        """`:READ?` as numbers, asked again once if the reply is not numbers.
+        """Query `:READ?` and return numbers, retrying one nonnumeric reply.
 
-        On 2026-10-26 a dark J-V failed one second in on `)1*088301A)08`:
-        `+1.088301E-08` with bits 1 and 2 dropped from the non-digit
-        characters -- a GPIB line, not the instrument. A second `:READ?`
-        measures again at the same level, so retrying costs one point's time
-        and nothing else; a second bad reply raises, naming both."""
+        On this bench, a GPIB reply can contain `)1*088301A)08` in place of
+        `+1.088301E-08`, with bits 1 and 2 absent from nondigit characters.
+        A second query measures at the same level and costs one reading's time.
+        A second bad reply raises and includes both replies for diagnosis."""
         replies = []
         for _ in range(2):
             raw = str(self._io.query(":READ?")).strip()
@@ -540,10 +476,10 @@ class Keithley2400:
 
     # -- the three DC quantities -----------------------------------------
     def _prepare(self) -> None:
-        """`*RST` clears compliance, ranges and mode, so everything that
-        matters has to be re-sent after it. The original resets before each of
-        the three measurements; kept, because it also clears any state a
-        previous aborted run left behind."""
+        """Reset and restore measurement wiring and averaging; return `None`.
+
+        `*RST` clears compliance, ranges and mode, including state retained
+        from an interrupted run. Required settings must follow every reset."""
         self._io.write("*RST")
         self._output = False
         # The reset has just undone every panel command, so the panel is no
@@ -551,8 +487,8 @@ class Keithley2400:
         # source this routine is about to configure for itself.
         self._panel = None
         self._io.write(f":ROUT:TERM {self.config.terminals};")
-        # After the reset, or it is the reset's two-wire that measures: until
-        # 2026-09-05 this was sent once in `default_setup` and undone here.
+        # Reset selects two-wire sensing. Send the configured sense mode after
+        # it so four-wire measurements use the separate voltage leads.
         self._io.write(f":SYST:RSEN {'ON' if self.config.four_wire else 'OFF'};")
         if self.config.averaging > 1:
             self._io.write(f":AVER ON;:AVER:COUN {int(self.config.averaging)};"
@@ -568,9 +504,8 @@ class Keithley2400:
         self._io.write(f":SENS:CURR:PROT:LEV {self.config.current_compliance_a:g};")
         self._io.write(f":SENS:CURR:NPLC {self.config.nplc:g};")
         self._io.write(":FORM:ELEM CURR;")
-        # DEVIATION: the original enabled the output and only then set the
-        # compliance. Between those two commands the SMU sits at whatever *RST
-        # left, which is not the limit anyone chose. Compliance first here.
+        # Compliance must precede output enable. Otherwise the device sees the
+        # reset's limit between enable and the next command.
         self.enable_output(True)
         time.sleep(settle_ms / 1000.0)
         value = self._read()[0]
@@ -582,10 +517,8 @@ class Keithley2400:
         self._io.write(":SOUR:FUNC:MODE CURR;")
         self._io.write(f":SOUR:CURR:LEV {level_a:g};")
         self._io.write(":SENS:FUNC 'VOLT:DC';")
-        # CORRECTION: the recovered routine sets a *current* protection here,
-        # which does nothing while the instrument is sourcing current. Sourcing
-        # 0 A, the limit that matters is the voltage compliance -- it is what
-        # bounds the output if a contact opens mid-measurement.
+        # Current sourcing requires voltage compliance; current protection does
+        # not bound it. At 0 A this limits output voltage if a contact opens.
         self._io.write(f":SENS:VOLT:PROT:LEV {self.config.voltage_compliance_v:g};")
         self._io.write(f":SENS:VOLT:NPLC {self.config.nplc:g};")
         self._io.write(":FORM:ELEM VOLT;")
@@ -596,27 +529,33 @@ class Keithley2400:
         return value
 
     def measure_jsc(self, settle_ms: float | None = None) -> float:
-        """Current at 0 V. Negative under illumination."""
+        """Source 0 V, settle, read current in A and disable output.
+
+        `settle_ms` is in ms. Current is negative under illumination."""
         return self._source_voltage_measure_current(
             0.0, self.config.settle_jsc_ms if settle_ms is None else settle_ms)
 
     def measure_voc(self, settle_ms: float | None = None) -> float:
-        """Voltage at 0 A."""
+        """Source 0 A, settle, return V_oc in V and disable output.
+
+        `settle_ms` is in ms."""
         return self._source_current_measure_voltage(
             0.0, self.config.settle_voc_ms if settle_ms is None else settle_ms)
 
     def measure_jsat(self, v_sat: float, settle_ms: float | None = None) -> float:
-        """Current at the saturation bias (`Vcoll corresponding to Jsat` on the
-        original's panel) — the reverse bias where extraction is complete."""
+        """Source `v_sat` in V and return saturation current in A after settling.
+
+        The reverse voltage must complete extraction. `settle_ms` is in ms.
+        Output is disabled after the read."""
         return self._source_voltage_measure_current(
             v_sat, self.config.settle_jsat_ms if settle_ms is None else settle_ms)
 
     def measure_dc(self, *, v_sat: float, settle_s: float | None = None) -> DCPoint:
-        """All three, in the original's order: J_sc, V_oc, J_sat.
+        """Measure short-circuit current, V_oc and saturation current in that order.
 
-        `settle_s`, if given, overrides all three configured settle times —
-        useful for a fast dry run, not for real data.
-        """
+        Return `DCPoint` with voltages in V and currents in A. `v_sat` is in V.
+        `settle_s`, in s, overrides all three configured waits. Real data needs
+        the per-quantity waits; a short override is for simulation checks."""
         ms = None if settle_s is None else settle_s * 1000.0
         jsc = self.measure_jsc(ms)
         voc = self.measure_voc(ms)
@@ -626,57 +565,36 @@ class Keithley2400:
     # -- J-V sweep --------------------------------------------------------
     def sweep_points(self, start_v: float, stop_v: float, points: int, *,
                      settle_s: float = 0.0):
-        """A linear voltage sweep, one point at a time: source, settle, read,
-        yield `(v, i)`. The J-V experiment consumes this so a curve is on the
-        screen and on disk as it is measured, not after the last point.
+        """Source each voltage, settle, read current and yield `(V, A)` pairs.
 
-        Until 2026-09-04 the sweep was the 2400's own (`:SOUR:VOLT:MODE SWE`,
-        one `:READ?` for every point), which blocked the bus for the whole
-        curve -- 30 s for 36 points, a minute for 71 -- with nothing to show,
-        nothing saved if it failed, and a stop that could not land until it
-        was over. Point by point costs the GPIB round trips, some 30 ms a
-        point against 0.8 s of measuring, and buys the stream, the partial
-        file, and an abort that lands between two points.
+        `start_v` and `stop_v` are in V; `settle_s` is in s. Each yielded point
+        lets the J-V experiment display and save partial data and stop between
+        points. On this bench GPIB round trips cost about 30 ms per point
+        against 0.8 s of measurement; an instrument sweep occupies the bus for
+        about 30 s at 36 points or one minute at 71 points.
 
-        Two things the instrument's sweep did that the first point-by-point
-        version lost, both back since 2026-09-05 (curves came out rougher):
+        One source range covers both ends, as with the instrument sweep's
+        `BEST` setting. Autoranging a voltage source through +/-0.2 V can change
+        range with output on, causing a glitch and a change in source behaviour.
+        The range is therefore set before output enable. `:SOUR:DEL` times each
+        settle inside the trigger model, independent of host and storage delays.
+        It also disables automatic source delay.
 
-        * **One source range for the whole curve.** The 2400's sweep ranges
-          `BEST` -- the lowest range that holds every point. A fixed source
-          after `*RST` auto-ranges instead, so a curve through +-0.2 V
-          changed range mid-sweep, output on, with the glitch and the change
-          of source character that brings. `:SOUR:VOLT:RANG` is set from
-          the two ends before the output comes on.
-        * **The settle is the instrument's.** `:SOUR:DEL` inside the trigger
-          model, as the sweep had it, not a `time.sleep` on the host: every
-          point gets exactly `settle_s` between the step and the first
-          aperture, whatever the GPIB turn-around, the stream and the
-          recorder's rewrite add between two points. It also switches the
-          2400's auto delay off, which the reset had left on top.
+        Voltage in the yielded pair is the sent setpoint. Only current is sensed:
+        on this bench `:SENS:FUNC?` answers `CURR:DC`. With the `REP` filter and
+        current autorange, the unsensed voltage element can lag by 0.09 V,
+        closing about 17 % of the gap per point and returning to the setpoint
+        at each current range change. Treating it as measured voltage adds
+        0.09 V kinks near 1 V and lowers maximum-power voltage, maximum power
+        and fill factor by 10 to 15 % on this bench.
 
-        **The voltage yielded is the setpoint, not the instrument's V
-        element** (2026-09-05). Only current is sensed here -- `:SENS:FUNC?`
-        on the bench answers `"CURR:DC"` alone -- so the 2400 is not
-        measuring voltage, and what it puts in the V element of a `:READ?`
-        is not one: on the rig it lagged the setpoint by up to 0.09 V with
-        an exponential memory across points (about 17 % of the gap closed
-        per point) and snapped back to the exact setpoint at every current
-        range change -- with the filter confirmed `REP`, autorange on. Filed
-        as the curve's voltage it put 0.09 V kinks near 1 V wherever the
-        current changed range and pulled V_mpp, P_max and FF down by ten to
-        fifteen percent (runs 20260904_234336 and 20260905_1108xx against
-        the instrument-sweep run 20260904_220109). Two-wire, the setpoint
-        *is* the best estimate of the device's voltage -- 0.02 % plus 0.6 mV
-        of source accuracy against a sub-millivolt lead drop -- and it is
-        what the 2400's own sweep filed for every curve before 2026-09-04.
-        So `:FORM:ELEM CURR` asks for the one thing measured, and the point
-        is `(level sourced, current read)`. Four-wire would be the moment
-        to sense voltage for real; that is not this rig.
+        For two-wire operation the source setpoint estimates device voltage
+        within source accuracy, 0.02 % plus 0.6 mV, against sub-millivolt lead
+        drop on this bench. Four-wire operation requires actual voltage sensing.
+        `:FORM:ELEM CURR` requests only the measured quantity.
 
-        Used by the J-V experiment, not by the transient one, so it is not
-        part of the `SourceMeter` protocol -- the transient layer must not
-        be able to start a sweep by accident.
-        """
+        This J-V operation stays outside `SourceMeter` so transient routines
+        cannot start a sweep through that interface."""
         if points < 2:
             raise ValueError("a sweep needs at least two points")
         self._prepare()
@@ -713,8 +631,8 @@ class Keithley2400:
                 self._io.write(f":SOUR:VOLT:LEV {level};")
                 # `:READ?` steps to the level, waits `:SOUR:DEL`, integrates.
                 raw = self._read()
-                # The level as the instrument received it, not linspace's
-                # 0.49999999999999994 -- the point's voltage is what was sourced.
+                # The yielded voltage matches the formatted level sent, including
+                # rounding of `numpy.linspace` values such as 0.49999999999999994.
                 yield float(level), float(raw[0])
         finally:
             self.last_sweep_s = time.monotonic() - started
@@ -724,48 +642,34 @@ class Keithley2400:
 
     def sweep(self, start_v: float, stop_v: float, points: int, *,
               settle_s: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
-        """`sweep_points`, collected: (V, I) as arrays."""
+        """Collect `sweep_points` and return voltage in V and current in A as arrays."""
         got = list(self.sweep_points(start_v, stop_v, points, settle_s=settle_s))
         return (np.array([v for v, _ in got], dtype=float),
                 np.array([i for _, i in got], dtype=float))
 
     def sweep_budget_s(self, points: int, settle_s: float = 0.0) -> float:
-        """How long `points` of a sweep take, with room: the VISA budget
-        `sweep_points` gives each of its reads (`points=1`), and the
-        whole-curve number a caller can plan on.
+        """Return a conservative sweep timeout in s for `points` and `settle_s`.
 
-        Each averaged reading is *four* apertures, not one: `:FUNC:CONC ON`
-        measures voltage and current, and the 2400 auto-zeroes each. So a
-        point is `settle + averaging x 4 x NPLC / 50 Hz`, and the rig agrees:
-        0.83 s per point at NPLC 1, averaging 10, 50 ms delay (2026-09-04,
-        36-point sweeps in 30 s; 71-point in 57 s on 2026-09-02). The model
-        this replaced counted one aperture, which put a 36-point budget at
-        28 s -- and NI-488 has no 28 s: it rounds a GPIB timeout up to the
-        next of 10, 30, 100, 300 s, so three sweeps of ~30 s passed under
-        the 30 s it became and the fourth, a moment longer, did not (run
-        20260904_214634-024). Twice the model plus 15 s, so a sweep has to
-        be badly wrong before it is cut off; the worst case is a run that
-        waits a little longer for an instrument that is not answering.
-        """
+        Concurrent V and A senses each auto-zero, giving four apertures per
+        averaged reading. The model is settle + averaging * 4 * NPLC / 50 Hz.
+        Bench timings are 0.83 s per point at NPLC 1, averaging 10 and 50 ms
+        delay: 36 points in 30 s and 71 in 57 s.
+
+        On this bench NI-488 rounds timeouts up to 10, 30, 100 or 300 s. A
+        28 s budget becomes 30 s and can cut off a slightly longer sweep.
+        Twice the model plus 15 s leaves margin; an unresponsive instrument
+        can therefore take longer to time out. `sweep_points` uses `points=1`
+        for each read; callers can budget the whole curve."""
         per_point_s = (settle_s
                        + max(1, int(self.config.averaging)) * 4.0 * self.config.nplc / 50.0)
         return 15.0 + 2.0 * points * per_point_s
 
     def panel_budget_s(self) -> float:
-        """How long one `read_panel` can take, with room.
+        """Return the panel-read timeout in s for the applied or default settings.
 
-        `sweep_budget_s`'s model for a single point with no settle, and for
-        the same measured reason: an averaged reading is **four** apertures,
-        because `:FUNC:CONC ON` measures voltage and current and the 2400
-        auto-zeroes each.
-
-        It matters here because the panel accepts what a panel should --
-        NPLC 10 and a 100-deep filter are both legal on this instrument --
-        and that pair is `100 x 4 x 10 / 50 Hz` = **80 s** of integration.
-        A caller waiting a flat 30 s on it is telling the operator that a
-        perfectly healthy read failed, and a VISA session left at 20 s cuts
-        the read off before the instrument has finished it.
-        """
+        `panel_budget_for` allows four apertures for concurrent V and A senses
+        with auto-zero. NPLC 10 with 100 readings is valid and takes 80 s at
+        50 Hz. A 20 s or 30 s timeout interrupts a healthy read."""
         panel = self._panel
         return panel_budget_for(
             panel.nplc if panel is not None else self.config.nplc,

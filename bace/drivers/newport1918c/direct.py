@@ -1,26 +1,13 @@
-r"""The 1918-C opened by this process: the service holds the USB handle.
+"""Read the Newport 1918-C through the service's own USB session.
 
-This is the default path. The alternative, `console.ConsolePowerMeter`, needs
-the meter's console (`D:\1918cPowerMeter`) to be running, and on this rig
-nobody starts it -- so the intensity a run recorded was whatever "no console"
-degrades to, which is nothing. The driver moved in instead (`meter.py`,
-vendored from that project, written against a real 1918-C v2.1.7 SN10259) and
-this class wraps it in the `PowerMeter` protocol the experiment code expects.
+`DirectPowerMeter` wraps `meter.PowerMeter` in the experiment's `PowerMeter`
+interface. The low-level driver serialises exchanges and the service
+serialises monitor reads against runs. Exactly one process holds the USB
+handle. A separate console must use the console adapter instead; opening a
+second owner produces a device-not-found error that can resemble a cable fault.
 
-**Only one process can hold the USB device.** That has not changed -- it moved
-inside, like the 331's GPIB session. `meter.PowerMeter` serialises every
-exchange on its own lock, and `service.rigs._POWER_LOCK` serialises the
-monitor against a run. What still cannot happen is the console being started
-beside the service: whichever opens first gets the handle and the other gets
-a bare "no Newport device found" that reads like a cable problem. `open()`
-below says so when it fails, because that sentence is the whole difference
-between a five-minute and a two-hour diagnosis.
-
-The measured facts about this instrument are in `meter.py`'s docstrings, not
-repeated here -- the 32/64-bit DLL choice, the command echo, the `\r`
-terminator, `PM:DS:INT` in milliseconds, `PM:DS:BUFFER 0`, and `PM:PWS?`
-carrying the saturation bits that `PM:P?` does not.
-"""
+`meter` handles bench firmware v2.1.7, SN10259: DLL bitness, command echo,
+CR termination, `PM:DS:INT` in ms, store wrap and `PM:PWS?` status bits."""
 from __future__ import annotations
 
 from .console import WATTS, PowerMeterError, Reading
@@ -29,29 +16,29 @@ __all__ = ["DirectPowerMeter", "AVERAGING_DIGITAL_SAMPLES", "ANALOG_FILTER_5HZ",
            "MODE_DC_CONTINUOUS"]
 
 MODE_DC_CONTINUOUS = 0
-"""`PM:MODE 0`. The other seven (`meter.MODE_NAMES`) are for pulse energy,
-peak-to-peak and RMS work, and every one of them shows a 500 Hz LED as
-something other than its power."""
+"""Select DC-continuous power with `PM:MODE 0`.
+
+The other seven modes in `meter.MODE_NAMES` measure pulse energy,
+peak-to-peak or RMS quantities rather than mean power of a 500 Hz LED."""
 
 ANALOG_FILTER_5HZ = 4
-"""`PM:ANALOGFILTER 4`: the slowest of the four, and the only one that turns
-a 500 Hz square wave into its mean rather than tracking it -- 1 kHz (3) still
-follows the edges."""
+"""Select the 5 Hz analog filter with `PM:ANALOGFILTER 4`.
+
+It is the slowest filter and averages a 500 Hz square wave on this bench.
+The 1 kHz filter, code 3, still follows the edges."""
 
 AVERAGING_DIGITAL_SAMPLES = 100
-"""`PM:DIGITALFILTER` default: a light smoothing on top of the analog filter,
-short enough that the LED settle in `service.modules` still sees the
-intensity move within its 0.5 s poll. `[power_meter] digital_filter` in
-rig.toml overrides it; the analog filter is what does the averaging."""
+"""Set light digital smoothing above the analog averaging filter.
+
+The response stays fast enough for the service's 0.5 s LED-settle poll.
+`[power_meter] digital_filter` in `rig.toml` overrides this count."""
 
 
 class DirectPowerMeter:
-    """`PowerMeter` backed by this process's own USB session.
+    """Implement power measurement through this process's USB session.
 
-    Construction opens the device and identifies it, so a meter that exists
-    is one that answered. `last` keeps the most recent reading for the bench
-    read-back, the same way the console client does.
-    """
+    Construction opens and identifies the meter. Failure raises; `last`
+    caches the most recent reading for bench read-back."""
 
     def __init__(self, *, dll: str | None = None, simulate: bool = False,
                  wavelength_nm: float | None = None):
@@ -73,23 +60,22 @@ class DirectPowerMeter:
         self.info: dict = dict(getattr(self._meter, "info", {}) or {})
         self.last: Reading | None = None
         self.averaged: bool | None = None
-        """Whether the meter is averaging (`set_averaging`), as read back
-        from the instrument after the write. Every `Reading` carries it."""
+        """Record whether mode and filter read-back confirm averaging.
+
+        `set_averaging` updates this state and each `Reading` carries it."""
         self.averaging: dict = {}
-        """The settings behind `averaged`, for the bench check and `/bench`:
-        `mode`, `mode_name`, `filter`, `analog_filter`, `digital_filter`."""
+        """Hold mode and filter read-back for bench checks.
+
+        Fields describe mode, filter selection, analog bandwidth and digital count."""
         self.wavelength_nm: float | None = None
-        """The wavelength the meter reports holding, kept because every
-        `Reading` carries it and `rigs.power_reading` falls back to it. The
-        console client got it free in each `/api/reading`; here it has to be
-        read back and remembered, or a watt reading arrives with no way to
-        know which responsivity produced it."""
-        # Past this point the exclusive USB handle is ours, so anything that
-        # raises has to give it back: a constructor that throws leaves the
-        # caller no object to close it with, and the device would stay held
-        # for the life of the process. `set_wavelength` really does raise --
-        # the driver refuses a value outside the head's calibrated range
-        # rather than extrapolating.
+        """Keep wavelength read-back in nm for each `Reading`.
+
+        Power depends on responsivity at that wavelength.
+        `bace.service.rigs.power_reading` uses this cached value when a
+        reading does not carry its own."""
+        # The exclusive USB handle is open. Any configuration failure must close
+        # it because a failed constructor gives the caller no object to close.
+        # Wavelength validation can raise outside the detector calibration range.
         try:
             if wavelength_nm is not None:
                 self.set_wavelength(wavelength_nm)
@@ -101,21 +87,16 @@ class DirectPowerMeter:
 
     @property
     def source(self) -> str:
-        """Where a reading came from, for `PowerReading.source`: `usb` when
-        this process holds the device, `simulated` when it is the driver's
-        own stand-in.
+        """Return `usb` or `simulated` for the reading's source.
 
-        Never a URL -- that is the console client's answer, and
-        `service.rigs.power_reading` asks for this first. Never `simulated`
-        for a real meter either: a simulated number rendered as a measured
-        one is the failure the field exists to prevent.
-        """
+        `bace.service.rigs.power_reading` uses this before considering a console
+        URL. A real meter must not be labelled simulated, or a simulation
+        presented as measured."""
         return "simulated" if self.info.get("simulated") else "usb"
 
     # -- liveness ---------------------------------------------------------
     def available(self) -> bool:
-        """True when the meter answers a reading. The console client asks the
-        console the same question; the bench uses one call for both."""
+        """Request a reading and return whether the meter answers."""
         try:
             self.read()
         except Exception:                                   # noqa: BLE001
@@ -124,13 +105,11 @@ class DirectPowerMeter:
 
     # -- configuration ----------------------------------------------------
     def set_wavelength(self, nm: float) -> None:
-        """Responsivity is wavelength dependent, and the driver refuses a
-        value outside the head's calibrated range rather than extrapolating
-        into a confident wrong number.
+        """Send the wavelength in nm and cache instrument read-back; return `None`.
 
-        What is remembered is what the meter *reports* after the write, not
-        what was asked for: the instrument rounds to whole nanometres.
-        """
+        Responsivity depends on wavelength. Values outside detector calibration
+        are refused to avoid extrapolation. The meter rounds to whole nm on
+        this bench, so read-back determines the cached value."""
         from .meter import MeterError
         try:
             answered = self._meter.set_wavelength(float(nm))
@@ -140,7 +119,9 @@ class DirectPowerMeter:
         self.wavelength_nm = float(got) if got is not None else float(nm)
 
     def _read_wavelength(self) -> None:
-        """Whatever the meter was left holding, for a caller that set none."""
+        """Query and cache the held wavelength in nm when no value is requested.
+
+        A missing read-back does not make the meter unusable."""
         try:
             got = self._meter.settings().get("wavelength")
         except Exception:                                   # noqa: BLE001
@@ -149,9 +130,10 @@ class DirectPowerMeter:
             self.wavelength_nm = float(got)
 
     def set_units_watts(self) -> None:
-        """A meter left in amps or dBm returns a perfectly plausible number
-        that is wrong, and nothing downstream can tell. Set, then verified on
-        the next `read`, whose status word carries the units back."""
+        """Send `PM:UNITS` and return `None`; `read` verifies W from status.
+
+        A meter in A or dBm gives plausible values that downstream analysis
+        cannot recognise as the wrong unit."""
         from .meter import MeterError
         try:
             self._meter.set_units(WATTS)
@@ -160,29 +142,20 @@ class DirectPowerMeter:
 
     def set_averaging(self, on: bool = True, *,
                       digital_samples: int = AVERAGING_DIGITAL_SAMPLES) -> dict:
-        """Make a reading the **time average** of the light, which is the only
-        number that is a power when the LED is pulsed.
+        """Set DC-continuous mode and optional filtering; return confirmed filter state.
 
-        The rig pulses the LED at 500 Hz, 50 % duty. A 1918-C in any mode
-        but DC-continuous -- or in DC-continuous with no filter, which is how
-        a meter comes up and how its front panel leaves it -- samples the
-        square wave at one instant and shows whichever phase it landed in:
-        the full level, nothing, or a flicker between the two. The operator
-        watched exactly that on the rig (2026-09-05). With `PM:MODE 0` and
-        the analog 5 Hz filter the meter integrates over a hundred cycles
-        and reads the mean, which at 50 % duty is half the DC level -- the
-        number the intensity series and the LED settle want, and the one the
-        rail should show.
+        On this bench a 500 Hz LED at 50 % duty reads full level, zero or a
+        flicker when sampled without filtering, including in DC-continuous mode.
+        Other modes measure pulse energy, peak-to-peak or RMS quantities.
+        `PM:MODE 0` with the analog 5 Hz filter averages about a hundred cycles
+        on this bench. At 50 % duty the mean is half the DC power
+        (manual 1.2, `docs/manual/1.2-bench.md`).
+        The mean supports intensity scans and LED settling.
 
-        `on=False` puts the meter back to DC-continuous with no filter, for a
-        measurement that wants the instantaneous value. Either way the mode
-        is written -- a meter someone left in *pulse* or *RMS* on the front
-        panel is wrong under both.
-
-        What is remembered is what the meter *reports* after the writes, not
-        what was asked for, and `averaged` is True only if the mode is 0 and
-        the analog 5 Hz filter is engaged in the filter selection.
-        """
+        `on=False` selects DC-continuous without filtering for instantaneous
+        readings. Mode is written in both cases to override front-panel pulse
+        or RMS settings. Read-back confirms the mode and filter; `averaged` is
+        true only for mode 0 with the 5 Hz analog filter selected."""
         from .meter import MeterError
         digital = max(0, int(digital_samples))
         try:
@@ -237,11 +210,11 @@ class DirectPowerMeter:
         return self.read().watts
 
     def read_statistics(self, n: int, *, interval_ms: int = 10) -> tuple[float, float]:
-        """Mean and standard deviation of `n` samples taken on the *meter's*
-        clock, via its data store -- a polled loop over USB cannot give a
-        deterministic rate. A short capture is refused rather than averaged:
-        a partial capture is a rate the meter did not keep, and that must not
-        survive into a published number."""
+        """Capture `n` samples and return mean and sample standard deviation in W.
+
+        `interval_ms` is in ms. Sampling uses the meter clock; USB polling
+        cannot guarantee a rate. Reject a short capture rather than average
+        data taken at an unconfirmed rate."""
         from .meter import MeterError
         n = max(2, int(n))
         try:

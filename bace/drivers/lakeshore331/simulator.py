@@ -1,26 +1,10 @@
-"""A Model 331 that exists only in software.
+"""Simulate a Model 331 behind the instrument transport interface.
 
-VENDORED, 2026-09-03, from the 331 console project
-(D:/TemperatureController, console/ls331/), unchanged. It is the device
-truth; when this file and that project disagree, they have drifted and one
-of them is wrong. "The console" in the prose below means whichever program
-owns the GPIB session -- in this repository that is the BACE service, and
-`controller.DirectTemperatureController` is the owner.
-
-The simulator speaks the same command language as the real instrument, so it
-sits behind the same transport interface and exercises the same parsers.  That
-is the point: the whole console can be built and demonstrated without being in
-front of the cryostat, and the write path can be tested including its refusals.
-
-The thermal model is a deliberately simple first-order one:
-
-    C dT/dt = P_heater - G (T - T_sink)
-
-with constant heat capacity C and link conductance G.  Real cryostats have
-strongly temperature-dependent C and G, so treat the dynamics as plausible
-rather than predictive - it is here to drive a user interface, not to replace
-a tuning run.
-"""
+The simulator accepts the real command language and exercises the same
+parsers and safety refusals. Its thermal model is C dT/dt = P - G(T - T_sink)
+with constant heat capacity and conductance. Real cryostats have strongly
+temperature-dependent values, so the dynamics exercise the console and do
+not replace a tuning run."""
 from __future__ import annotations
 
 import time
@@ -38,7 +22,7 @@ _DEFAULT_TIME_CONSTANT_S = 2000.0
 
 @dataclass
 class ThermalModel:
-    """Sample stage bolted to a cold sink, with a heater."""
+    """Model a heated sample stage coupled to a cold sink."""
 
     temperature_k: float = 295.0
     sink_k: float = 77.0
@@ -47,13 +31,12 @@ class ThermalModel:
 
     @classmethod
     def for_heater(cls, max_watts: float, sink_k: float = 77.0, start_k: float = 295.0):
-        """A stage a heater of ``max_watts`` can actually drive.
+        """Build a stage model for `max_watts` in W with temperatures in K.
 
-        The link is sized so full power settles near
-        :data:`_DEFAULT_MAX_REACHABLE_K`, and the heat capacity so the time
-        constant is about half an hour either way - which keeps a 1 W analog
-        output and a 50 W current source feeling like the same cryostat.
-        """
+        Conductance makes full power approach `_DEFAULT_MAX_REACHABLE_K`.
+        Heat capacity sets about a half-hour time constant for both the 1 W
+        analog heater and 50 W current-source heater, keeping simulations
+        comparable across configurations."""
         link = max_watts / max(1.0, _DEFAULT_MAX_REACHABLE_K - sink_k)
         return cls(
             temperature_k=start_k,
@@ -91,21 +74,12 @@ class _Loop:
 
 
 class Model331Simulator:
-    """Accepts 331 command strings and returns 331-shaped replies.
+    """Accept Model 331 commands and return simulated instrument replies.
 
-    ``control_loop`` decides which heater the simulated instrument reports:
-
-    * ``1`` - the ordinary current-source heater output, with the Off / Low /
-      Medium / High ranges.  This is the default because it is the usual
-      configuration.
-    * ``2`` - the analog voltage output driving the heater, which the 331
-      offers only as Off or On.
-
-    The console reads this back from the instrument rather than being told, so
-    running the simulator on one setting and the instrument on the other is
-    safe - but the page will look different, which is worth knowing when
-    something appears to be missing.
-    """
+    `control_loop=1` models the current-source heater with off, low, medium
+    and high ranges. `control_loop=2` models analog output with off and on.
+    Discovery reads the chosen configuration, so the console adapts its
+    controls to the simulated hardware."""
 
     def __init__(
         self,
@@ -156,7 +130,7 @@ class Model331Simulator:
         return p.full_scale_watts(self.heater_range, self.heater_ohms)
 
     def advance(self) -> None:
-        """Step the model forward to the current clock time."""
+        """Advance the thermal and control model to the current clock time."""
         now = self.clock()
         dt = now - self._last_t
         if dt <= 0:

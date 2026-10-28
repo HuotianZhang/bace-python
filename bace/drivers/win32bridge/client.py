@@ -1,4 +1,4 @@
-"""Client side of the 32-bit bridge, used from the 64-bit service."""
+"""Send synchronous requests from the 64-bit service to the 32-bit helper."""
 from __future__ import annotations
 
 import socket
@@ -9,15 +9,14 @@ from .protocol import DEFAULT_HOST, DEFAULT_PORT, decode, encode
 
 
 class BridgeError(RuntimeError):
-    """Raised for transport failures and for errors reported by the helper."""
+    """Report a transport failure or an error returned by the helper."""
 
 
 class BridgeClient:
-    """Synchronous request/response over a single localhost connection.
+    """Exchange requests and replies over one localhost connection.
 
-    Thread-safe: calls are serialised, so the acquisition loop and a UI poll can
-    share one client without interleaving replies.
-    """
+    A lock serialises calls so an acquisition loop and console poll can
+    share the client without interleaving replies."""
 
     def __init__(self, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT,
                  timeout: float = 5.0):

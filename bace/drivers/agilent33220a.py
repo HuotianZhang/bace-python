@@ -1,32 +1,18 @@
-"""Agilent 33220A — the LED drive.
+"""The Agilent 33220A drives the LED.
 
-At `GPIB0::15::INSTR`. This is the generator `BACE_Mehrdad.vi` talks to inline,
-with no channel index — which is how it was told apart from the 81150A, whose
-every command in its driver library carries one (`:VOLT%d:HIGH`, `:FUNC%d`).
-The recovered strings, verbatim:
+The LabVIEW command sequence uses no channel index: `FUNC:SHAP DC` and
+`:VOLT:OFFS` for DC; `FUNC:SHAP PULSE`, `:FREQ`, `:VOLT:HIGH`, `:VOLT:LOW`
+and `FUNC:PULS:DCYC` for pulses; `:OUTP` for output control.
 
-    FUNC:SHAP DC;        :VOLT:OFFS <level>
-    FUNC:SHAP PULSE;     :FREQ <f>;:VOLT:HIGH <hi>;:VOLT:LOW <lo>
-                         FUNC:PULS:DCYC <duty>
-    :OUTP <0|1>
+`read_state` queries the output, shape, levels, offset, frequency, polarity
+and Sync output. Sync arms the 81150A. Disabling it on the front panel leaves
+a scan measuring noise without another indication of the missing stimulus.
 
-Read back, not recovered from the VI (`read_state`): `:OUTP?`, `FUNC:SHAP?`,
-`:VOLT:HIGH?`, `:VOLT:LOW?`, `:VOLT:OFFS?`, `:FREQ?`, `:OUTP:POL?` and
-`OUTP:SYNC?` -- the last because the Sync connector is what arms the 81150A,
-and a front panel with Sync switched off (it has its own key) runs a scan
-that measures noise with no other symptom.
-
-Two modes are used within one intensity point and **the level must be the same
-number in both** — DC for the V_oc measurement, then the identical value as the
-pulse high level for the transient. `core.illumination` owns that invariant and
-refuses a mismatch; this driver deliberately does not decide anything about
-levels, it just sends them.
-
-Note what is *not* here: the LED sees a fixed-gain amplifier after this
-generator, and the low level is chosen below the LED's turn-on threshold so the
-diode is fully off rather than dim. Both are physics, and both live in
-`core.illumination`.
-"""
+The DC level for V_oc and the pulse high level at one point must match.
+`bace.core.illumination.LedDrive` enforces this constraint; the driver sends
+the supplied levels. The LED has an amplifier of constant gain after this
+generator. The pulse low level must be below the LED turn-on threshold so
+the LED switches off fully (manual 3.2, `docs/manual/3.2-correspondence.md`)."""
 from __future__ import annotations
 
 from typing import Any
@@ -34,9 +20,10 @@ from typing import Any
 from .readback import ask, number, on_off, word
 
 SHAPES: dict[str, str] = {"PULS": "PULSE", "DC": "DC"}
-"""`FUNC:SHAP?` replies that map onto this driver's two modes. Any other
-shape (SIN, SQU, RAMP, ...) is reported as the instrument spelt it: it is not
-a mode this driver would have set, which is exactly what a read-back is for."""
+"""Map shape read-back to the two supported modes.
+
+Other shapes, including `SIN`, `SQU` and `RAMP`, retain the instrument's
+spelling so read-back exposes settings this driver does not select."""
 
 
 class LedSourceError(RuntimeError):
@@ -44,7 +31,7 @@ class LedSourceError(RuntimeError):
 
 
 class Agilent33220A:
-    """One 33220A session. Not thread-safe."""
+    """Control one 33220A session without concurrent access."""
 
     def __init__(self, resource, *, timeout_ms: int = 5000):
         self._io = resource
@@ -71,7 +58,9 @@ class Agilent33220A:
 
     # -- the two modes ----------------------------------------------------
     def set_dc(self, level_v: float) -> None:
-        """Steady illumination, for the V_oc / J_sc / J_sat measurement."""
+        """Send `FUNC:SHAP DC` and `:VOLT:OFFS` with `level_v` in V.
+
+        The output provides steady light for DC measurements. Return `None`."""
         self._io.write("FUNC:SHAP DC;")
         self._io.write(f":VOLT:OFFS {level_v:g};")
         self._mode = "DC"
@@ -79,22 +68,17 @@ class Agilent33220A:
 
     def set_pulse(self, high_v: float, low_v: float, *, frequency_hz: float = 1000.0,
                   duty_percent: float = 50.0) -> None:
-        """On/off square wave for the transient.
+        """Send the pulse shape, frequency in Hz, levels in V and duty in percent.
 
-        `high_v` must equal the level used for the DC V_oc measurement at this
-        intensity point; `low_v` must sit below the LED's turn-on threshold.
-        Neither is checked here — `core.illumination.LedDrive` does that, at the
-        point where both numbers are known together.
-        """
+        `high_v` must match the DC level for V_oc at this point. `low_v` must be
+        below the LED turn-on threshold. `bace.core.illumination.LedDrive` checks
+        these constraints. Return `None`."""
         self._io.write("FUNC:SHAP PULSE;")
-        # Hold the DUTY CYCLE, not the width, when the period changes. Without
-        # this the generator answers a frequency change with
-        #   -221,"Settings conflict; pulse width decreased due to period"
-        # because the width it was holding no longer fits — seen on the rig at
-        # 2026-08-31, going from 500 Hz to 1 kHz. Harmless here, since the duty
-        # cycle is set immediately afterwards and redefines the width, but a
-        # settings conflict that is always present is a settings conflict nobody
-        # reads, and the next real one would be lost in it.
+        # Holding duty cycle avoids error -221, "Settings conflict; pulse width
+        # decreased due to period", when increasing frequency from 500 Hz to 1 kHz
+        # on this bench. A held width no longer fits the shorter period. Setting
+        # duty afterwards resolves the width, but repeated harmless queue entries
+        # can hide a real settings conflict.
         self._io.write("FUNC:PULS:HOLD DCYC;")
         self._io.write(f":FREQ {frequency_hz:g};")
         self._io.write(f":VOLT:HIGH {high_v:g};")
@@ -104,7 +88,9 @@ class Agilent33220A:
         self._level = float(high_v)
 
     def apply(self, drive) -> None:
-        """Take a `core.illumination.LedDrive` and set the pulse it describes."""
+        """Send pulse settings from `bace.core.illumination.LedDrive`; return `None`.
+
+        Levels are in V, frequency in Hz and duty in percent."""
         s = drive.pulse_settings()
         self.set_pulse(s["high"], s["low"], frequency_hz=s["frequency"],
                        duty_percent=s["duty"])
@@ -114,33 +100,25 @@ class Agilent33220A:
 
     # -- output polarity --------------------------------------------------
     def set_polarity(self, inverted: bool) -> None:
-        """`:OUTP:POL INV` or `NORM`. The setting the whole experiment hangs on.
+        """Send `:OUTP:POL INV` or `NORM` and return `None`.
 
-        Inverting the waveform flips which half of the cycle the LED is lit for,
-        **and leaves the Sync alone** -- 33220A User's Guide p.67: "When a
-        waveform is inverted, the Sync signal associated with the waveform is
-        not inverted." The 81150A arms on the Sync's rising edge, so INV is what
-        makes that edge mean *light off*. With NORM it means light on, and the
-        extraction happens in the middle of carrier generation while still
-        producing a transient that integrates to a plausible charge.
+        Inversion changes the LED phase but leaves Sync unchanged. With `INV`,
+        the Sync rising edge arms the 81150A at light off (manual 3.2,
+        `docs/manual/3.2-correspondence.md`). With `NORM`, extraction occurs during
+        carrier generation and can still give a plausible Q.
 
-        The offset is not inverted either, so the DC mode used for the V_oc
-        measurement is unaffected -- one setting buys both halves.
-
-        Nothing in this package set this until 2026-09-01: the run inherited
-        whatever the last session left on the front panel, and no output
-        recorded which it had been.
-        """
+        The DC offset is also unchanged by inversion on this bench, so the V_oc
+        measurement keeps its drive level. Explicit configuration avoids relying
+        on the front-panel state."""
         self._io.write(f":OUTP:POL {'INV' if inverted else 'NORM'};")
         self._polarity = "INV" if inverted else "NORM"
 
     def polarity(self) -> str:
-        """`INV`, `NORM` or `?`, from the instrument.
+        """Query `:OUTP:POL?` and return `INV`, `NORM` or `?`.
 
-        `?` for a query that fails, on the `LedSource` contract: a readback
-        that raises inside a run's unwind would mask the exception already
-        propagating, and a plausible default would be a lie in the file.
-        """
+        A failed query returns `?` under the `LedSource` contract. Raising during
+        cleanup can mask the pending exception; a default polarity can put false
+        information in the file."""
         try:
             reply = str(self._io.query(":OUTP:POL?")).strip().upper()
         except Exception:
@@ -148,7 +126,7 @@ class Agilent33220A:
         return reply or "?"
 
     def off(self) -> None:
-        """Dark: output disabled, not merely a low level."""
+        """Disable LED output with `:OUTP 0` and return `None`."""
         self.enable_output(False)
         self._mode = "OFF"
 
@@ -166,17 +144,18 @@ class Agilent33220A:
 
     @property
     def mode(self) -> str:
-        """OFF, DC or PULSE — read by the illumination guard when it checks that
-        V_oc was measured under the same drive the transient will use."""
+        """Return the cached `OFF`, `DC` or `PULSE` mode.
+
+        The illumination guard uses it to check that V_oc and the light trace
+        use the same drive."""
         return self._mode
 
     # -- read-back, for the service's bench card --------------------------
-    # Not protocol members; the service reaches for them with `getattr`. The
-    # levels were checked by nobody until 2026-09-01 (tools/scan.py), and a
-    # generator keeps whatever the previous session left: these are how the
-    # bench card compares what the LED is driven at with what the recipe asks.
+    # The service calls these methods through `getattr`. Read-back compares
+    # instrument settings with the requested settings because the generator
+    # retains front-panel state across sessions.
     def read_output(self) -> bool | None:
-        """`:OUTP?`, and the cached flag `output_enabled` follows it."""
+        """Query `:OUTP?`, return a boolean or `None`, and update `output_enabled`."""
         on = on_off(ask(self._io, ":OUTP?"))
         if on is not None:
             self._output = on
@@ -185,14 +164,12 @@ class Agilent33220A:
         return on
 
     def read_state(self) -> dict[str, Any]:
-        """`output`, `polarity`, `mode` (OFF / DC / PULSE, or the shape as the
-        instrument spelt it), `shape`, `high_v`, `low_v`, `offset_v`,
-        `frequency_hz`, `sync_output` -- from the instrument, None/`?` where
-        it would not answer. `mode` is OFF whenever the output reads off,
-        whatever shape the generator holds: a waveform nobody can see is
-        dark. `sync_output` is `OUTP:SYNC?`: the Sync connector arms the
-        81150A, which triggers the scope, so with it off a bace measures
-        noise and nothing else in the chain says why."""
+        """Query and return the LED generator state.
+
+        Levels and offset are in V; frequency is in Hz. Missing replies give
+        `None` or `?`. `mode` is `OFF` if output is disabled; otherwise it is
+        `DC`, `PULSE` or the reported shape. `OUTP:SYNC?` checks the connector
+        that arms the 81150A: disabling Sync leaves the scan measuring noise."""
         on = self.read_output()
         shape = word(ask(self._io, "FUNC:SHAP?"), tuple(SHAPES))
         mode = "?" if shape == "?" else SHAPES.get(shape, shape)

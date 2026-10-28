@@ -1,37 +1,16 @@
-"""Newport 1918-C optical power meter — through the console that owns it.
+"""Read the Newport 1918-C through its owning console's HTTP API.
 
-**Only one process can hold the USB device.** The 1918-C console in
-`D:\\1918cPowerMeter` is that process on this rig, so the default backend here
-is an HTTP client to its localhost API rather than a second driver fighting for
-the handle. Opening the meter directly while the console is running fails, and
-it fails in the confusing way — a bare "no Newport device found" that looks like
-a cable problem.
+Only one process can hold the USB device. When the console holds it, direct
+opening fails with a device-not-found error that can resemble a cable fault.
+This adapter sends requests to the console's acquisition thread.
 
-This module deliberately contains **no transport code**. The measured facts
-about this instrument live in `newport1918c.py` in that project, written against
-a real 1918-C v2.1.7 (SN10259), and several of them are the kind that only
-appear on hardware:
-
-* the driver package installs both 32- and 64-bit `usbdll.dll`, and the build
-  matching the interpreter has to be picked deliberately — so, contrary to the
-  earlier plan here, **the meter does not need the 32-bit bridge**; only
-  `delib.dll` does;
-* the meter **echoes the command back** before its reply, so a naive query
-  returns the command;
-* the line terminator is `\\r`, not `\\r\\n`;
-* `PM:DS:INT` is in **milliseconds** on this firmware, not the 0.1 ms a widely
-  copied driver claims;
-* `PM:DS:BUFFER 0` is needed or the store wraps and you get a rolling window
-  instead of one capture;
-* `PM:PWS?` carries a status bitfield with saturation and overrange — and
-  silently clipped data is the classic way to ruin a long log, so it is what
-  gets read, not `PM:P?`;
-* `PM:UNITS` must be checked: a meter left in amps or dBm returns a perfectly
-  plausible wrong number.
-
-Duplicating any of that here would create a second copy to drift. Use the
-console.
-"""
+Bench behaviour on firmware v2.1.7, SN10259: the meter echoes commands before
+replies and uses a CR terminator. `PM:DS:INT` uses ms, rather than the 0.1 ms
+claimed by some drivers. `PM:DS:BUFFER 0` prevents store wrap. `PM:PWS?`
+returns saturation and overrange status; `PM:UNITS` must be checked because
+A or dBm can appear as plausible power values. Both 32-bit and 64-bit USB
+DLLs are available; a matching build permits direct access without a bridge.
+The low-level implementation is `bace.drivers.newport1918c.meter`."""
 from __future__ import annotations
 
 import json
@@ -49,7 +28,7 @@ class PowerMeterError(RuntimeError):
 
 @dataclass(frozen=True)
 class Reading:
-    """One reading and what the meter said about it."""
+    """Hold optical power in W and the meter status reported with it."""
 
     watts: float
     saturated: bool
@@ -57,11 +36,11 @@ class Reading:
     units: int | None
     wavelength_nm: float | None
     averaged: bool | None = None
-    """Whether the meter was averaging when this was read -- DC-continuous
-    mode with its 5 Hz analog filter on (`set_averaging`). A pulsed LED read
-    without it is one instant of a square wave; with it, the time average,
-    which at 50 % duty is half the DC level. None when the driver could not
-    say (the console path, until that console answers `/api/filter`)."""
+    """Report whether DC-continuous mode and the 5 Hz filter are enabled.
+
+    Without the filter a pulsed LED reading samples a phase; with it, the
+    reading is the mean, half the DC level at 50 % duty. `None` means the
+    adapter cannot confirm filtering, including a console without `/api/filter`."""
 
     @property
     def trustworthy(self) -> bool:
@@ -69,12 +48,10 @@ class Reading:
 
 
 class ConsolePowerMeter:
-    """`PowerMeter` backed by the 1918-C console's HTTP API.
+    """Implement `bace.drivers.protocols.PowerMeter` through the owning console.
 
-    Satisfies `drivers.protocols.PowerMeter`. Every call goes to the console's
-    acquisition thread, so it never collides with the console's own polling or
-    with a second measurement script.
-    """
+    Requests run on its acquisition thread so polling and other scripts
+    cannot interleave USB commands with replies."""
 
     def __init__(self, base_url: str = DEFAULT_CONSOLE, *, timeout_s: float = 10.0,
                  strict: bool = False):
@@ -102,11 +79,8 @@ class ConsolePowerMeter:
             with urllib.request.urlopen(req, timeout=self.timeout_s) as r:
                 return json.loads(r.read().decode())
         except urllib.error.HTTPError as exc:
-            # HTTPError is a *subclass* of URLError, so it has to be caught
-            # first. Until 2026-09-01 it was not, and every rejected request --
-            # a wrong body key, a value the meter refused -- was reported as
-            # "cannot reach the console", which is the one thing it proves is
-            # false. The console answered; it said no.
+            # `HTTPError` subclasses `URLError` and must be caught first.
+            # A rejected request proves the console answers; it is reachable.
             try:
                 detail = exc.read().decode("utf-8", "replace").strip()
             except Exception:                                   # noqa: BLE001
@@ -130,7 +104,7 @@ class ConsolePowerMeter:
             raise PowerMeterError(f"console returned non-JSON from {path}") from exc
 
     def available(self) -> bool:
-        """True if the console answers. Cheap enough to call at rig setup."""
+        """Request `/api/state` and return whether the console answers."""
         try:
             self._get("/api/state")
             return True
@@ -139,31 +113,25 @@ class ConsolePowerMeter:
 
     # -- configuration ----------------------------------------------------
     def set_wavelength(self, nm: float) -> None:
-        """The console refuses wavelengths outside the head's calibrated range,
-        because outside it the responsivity is an extrapolation and the meter
-        returns a confident, wrong number."""
+        """Send `/api/wavelength` in nm and return `None`.
+
+        The console rejects wavelengths outside the detector calibration range;
+        extrapolated responsivity can give a plausible wrong power."""
         self._post("/api/wavelength", {"nm": float(nm)})
 
     def set_units_watts(self) -> None:
-        # The console's key is "code", not "units" -- it does
-        # `int(body.get("code"))`, so {"units": 2} arrived as int(None) and came
-        # back as HTTP 400. Found on the rig 2026-09-01; nothing had ever called
-        # this against the real console before.
+        # The console requires the `code` key. A `units` key leaves `code` absent
+        # and the integer conversion produces HTTP 400 on this bench.
         self._post("/api/units", {"code": WATTS})
 
     def set_averaging(self, on: bool = True, *, digital_samples: int = 100) -> bool:
-        """Ask the console to put the meter in DC-continuous mode with the
-        analog 5 Hz filter (and `digital_samples` of digital filter) so a
-        pulsed LED reads as its time average -- the same setting
-        `DirectPowerMeter.set_averaging` writes itself.
+        """Request DC-continuous mode and a 5 Hz filter; return whether it succeeds.
 
-        The console's `/api/filter` route is assumed, not verified against
-        that project (which this repository cannot see): a console that has
-        no such route answers 404, and that is reported as *False*, never
-        raised -- an escape hatch that cannot average is still a meter. The
-        caller says so once; `averaged` stays None so no reading claims what
-        was not set.
-        """
+        `digital_samples` sets digital smoothing. Filtering makes pulsed light
+        read as mean power. This matches `direct.DirectPowerMeter.set_averaging`.
+        The console's `/api/filter` route is not verified here. A console without
+        it gives 404, reported as `False`; `averaged` stays `None` so readings
+        do not claim a setting that cannot be confirmed."""
         body = {"filter": 3 if on else 0, "analogFilter": 4 if on else 0,
                 "digitalFilter": int(digital_samples) if on else 0, "mode": 0}
         try:
@@ -192,24 +160,18 @@ class ConsolePowerMeter:
         return r
 
     def read_power(self) -> float:
-        """W. Satisfies the protocol.
+        """Request `/api/reading` and return power in W.
 
-        A saturated or overrange reading is still returned rather than raising,
-        because one bad intensity sample should not abort an hour of transients
-        — but `last` carries the status and the experiment layer turns it into a
-        visible notice. Construct with `strict=True` to raise instead.
-        """
+        Saturation and overrange remain in `last` for a visible run notice;
+        one bad sample need not abort transients. `strict=True` raises instead."""
         return self.read().watts
 
     def read_statistics(self, n: int, *, interval_ms: int = 10) -> tuple[float, float]:
-        """(mean, sample std) over `n` samples, in W.
+        """Request a store capture and return mean and sample standard deviation in W.
 
-        Sampling runs on the meter's own clock via its data store, which is the
-        point: a polled loop cannot give a deterministic rate over USB. The
-        console returns how many samples it actually collected, and a short
-        capture raises — a silently short average is exactly the error that
-        survives into a published number.
-        """
+        `n` is the sample count. The meter clock sets the rate; USB polling
+        cannot guarantee it. A short capture raises so it cannot silently
+        become an average with the wrong count."""
         n = max(2, int(n))
         d = self._post("/api/capture", {"size": n, "intervalMs": int(interval_ms)})
         collected = int(d.get("collected", 0))
