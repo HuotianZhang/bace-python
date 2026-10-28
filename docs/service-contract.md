@@ -52,6 +52,8 @@ bace/service/
                   (HTTP, no VISA, run beside a run).
   live.py         what the running step implies about the instruments, folded
                   from the run's events, overlaid on /bench as `inferred`.
+  assistant.py    the console's assistant: a Claude conversation over read-only
+                  tools on the session (§8a). Imports `anthropic` lazily.
   app.py          create_app(session) -> FastAPI. Routes, WS, static mount.
 ```
 
@@ -1246,6 +1248,30 @@ watchdog rides on reads, so suppressing reads for hours would have suppressed
 it too. The worker feeds it from its own sleeps (§7), which is a fault check
 and not a reading — no `TemperatureRead` is emitted from there, because a
 number taken mid-run is not the cryostat the shot around it was measured at.
+
+---
+
+## 8a. `/assistant` — the console's assistant
+
+A conversation with a Claude model that reads the bench and explains it. It
+changes nothing: its tools are `get_session`, `get_bench`, `list_modules`,
+`get_module`, `list_runs`, `get_run`, `get_events`, `get_monitors`,
+`dry_run` (`Session.validate_tree(remember=False)`, so `/pipelines/last` is
+untouched) and `read_doc` over a fixed list of the project's documents and the
+session's `run.toml` and `rig.toml`.
+
+| route | answers |
+|---|---|
+| `GET /assistant` | `{available, model, sdk, docs}`, or `{available: false, reason}` without `anthropic` 2.3 or later |
+| `POST /assistant/chat {"text", "conversation"?}` | NDJSON frames: `conversation {id}`, then `text {text}`, `tool {name, input}` and `tool_result {name, ok, text?}` in order, then `done {stop_reason, usage, model}` or `error {message, status}`. 401 without the key header, 503 without the SDK, 409 while the same conversation is still answering |
+| `DELETE /assistant/conversations/{id}` | forgets one history; 404 when there is none |
+
+The API key is the asker's: header `X-Anthropic-Key` on each `POST`, used
+for that request and not stored, journaled or logged. Histories are kept in
+memory, the newest 32, so an assistant turn goes back exactly as it came; a
+turn that fails or is abandoned leaves the history as it was. The model is
+`claude-opus-5-5` unless `BACE_ASSISTANT_MODEL` says otherwise, at effort
+`medium`, with the API's server-side fallback on a refusal.
 
 ---
 

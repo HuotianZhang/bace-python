@@ -11,7 +11,10 @@ dependencies = ["numpy>=1.24", "scipy>=1.10", "h5py>=3.8"]
 
 [project.optional-dependencies]
 rig = ["pyvisa>=1.13", "pyvisa-py>=0.7"]
-service = ["fastapi>=0.110", "uvicorn>=0.29", "websockets>=12"]
+# `anthropic` is the console's assistant (`bace/service/assistant.py`). The
+# service runs without it, and the assistant says what is missing; 2.3 is the
+# first release the request shape was checked against.
+service = ["fastapi>=0.110", "uvicorn>=0.29", "websockets>=12", "anthropic>=2.3"]
 # The lab PC runs the service on the real rig, so it needs both: `pip install -e .[lab]`.
 lab = ["bace[rig,service]"]
 # `httpx2` is Starlette's TestClient transport, so `tests/test_service_api.py`

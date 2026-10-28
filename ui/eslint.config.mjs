@@ -24,7 +24,7 @@ export default [{
       'window', 'document', 'location', 'localStorage', 'console',
       'requestAnimationFrame', 'queueMicrotask', 'setTimeout', 'clearTimeout',
       'fetch', 'WebSocket', 'URL', 'Blob', 'getComputedStyle', 'ResizeObserver',
-      'XMLSerializer', 'Node', 'SVGElement', 'globalThis',
+      'XMLSerializer', 'Node', 'SVGElement', 'globalThis', 'TextDecoder', 'AbortController',
       // node, in `tests/` and `lib/replay.js`
       'process',
     ].map((name) => [name, 'readonly'])),

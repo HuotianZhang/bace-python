@@ -33,6 +33,8 @@ python -m bace.service --sim --fast --port 8900 --ui ui/
 
 then open `http://127.0.0.1:8900/`. `--fast` makes every settle instantaneous
 and is refused without `--sim`. `--seed N` varies the simulated device.
+The `ask` chip in the bar opens the assistant, which explains the bench and
+the console; it runs on the asker's own Anthropic API key.
 
 **Real bench** — bring the instruments up in stages before running anything
 that drives a sample. `docs/bench-checkout.md` walks each stage; the harness

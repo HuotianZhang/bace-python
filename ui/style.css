@@ -1433,3 +1433,78 @@ table.qgrid td { padding: 0; }
 .pw-chart[hidden] { display: none; }
 .pw-chart .chart-svg { max-height: 210px; }
 .pw-chart .chart-readout { min-height: 13px; }
+
+/* -- the assistant: a panel beside every tab, from the bar's `ask` chip ----
+   Over the view rather than beside it, so opening it moves nothing the
+   operator is reading; the rail and the strip stay where they were. */
+button.chip.ask { background: none; cursor: pointer; font: inherit; font-family: var(--font-num); font-size: 11px; }
+button.chip.ask:hover { border-color: #fff; color: #fff; }
+button.chip.ask.on { background: #fff; border-color: #fff; color: var(--ink); }
+.assistant {
+  position: fixed; top: var(--tabs-height); right: 0; bottom: 0; width: 460px; z-index: 30;
+  display: flex; flex-direction: column;
+  background: var(--paper); border-left: 1px solid var(--rule);
+  box-shadow: -6px 0 18px rgba(0,0,0,.08);
+}
+.assistant[hidden] { display: none; }
+.assistant .as-head {
+  display: flex; align-items: baseline; gap: 10px; padding: 8px 12px;
+  border-bottom: 1px solid var(--rule); background: var(--fill);
+}
+.assistant .as-title { font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase; color: var(--grey); }
+.assistant .as-model { font-family: var(--font-num); font-size: 11px; color: var(--grey); }
+.assistant .spacer { flex: 1 1 auto; }
+.assistant button.as-link {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  font-family: var(--font-num); font-weight: 400; font-size: 11px; color: var(--grey);
+}
+.assistant button.as-link:hover { color: var(--ink); }
+.assistant .as-note:empty { display: none; }
+.assistant .as-note { padding: 10px 12px; border-bottom: 1px solid var(--rule); font-size: 12px; }
+.assistant .as-note p { margin: 0 0 8px; color: var(--grey); }
+.assistant .as-key { display: flex; gap: 6px; }
+.assistant .as-key input {
+  flex: 1 1 auto; padding: 4px 6px; border: 1px solid var(--rule);
+  font-family: var(--font-num); font-size: 12px;
+}
+.assistant .as-key input:focus { border-color: var(--accent); outline: none; }
+.assistant .as-remember { display: block; margin-top: 6px; font-size: 11px; color: var(--grey); }
+.assistant .as-log { flex: 1 1 auto; overflow-y: auto; padding: 12px; }
+.assistant .as-empty p { color: var(--grey); margin: 0 0 10px; }
+.assistant button.as-example {
+  display: block; width: 100%; margin: 0 0 6px; padding: 6px 8px; text-align: left; cursor: pointer;
+  background: none; border: 1px solid var(--rule);
+  font-family: var(--font-body); font-weight: 400; font-size: 12px; color: var(--ink);
+}
+.assistant button.as-example:hover { border-color: var(--ink); }
+.assistant .as-q {
+  margin: 0 0 10px auto; max-width: 85%; width: fit-content; padding: 6px 9px;
+  background: var(--fill); white-space: pre-wrap;
+}
+.assistant .as-a { margin: 0 0 14px; }
+.assistant .as-a p { margin: 0 0 8px; }
+.assistant .as-a h3, .assistant .as-a h4, .assistant .as-a h5, .assistant .as-a h6 { margin: 10px 0 4px; font-size: 13px; }
+.assistant .as-a ul, .assistant .as-a ol { margin: 0 0 8px; padding-left: 18px; }
+.assistant .as-a pre { margin: 0 0 8px; padding: 6px 8px; background: var(--grid); font-size: 11px; overflow-x: auto; }
+.assistant .as-a code { font-size: 12px; }
+.assistant .as-table { overflow-x: auto; margin: 0 0 8px; }
+.assistant .as-a table { border-collapse: collapse; font-size: 12px; }
+.assistant .as-a th, .assistant .as-a td { border-bottom: 1px solid var(--rule); padding: 3px 8px 3px 0; text-align: left; vertical-align: top; }
+.assistant .as-a th { font-weight: 600; color: var(--grey); }
+.assistant .as-tools { margin: 0 0 6px; }
+.assistant .as-tool { font-family: var(--font-num); font-size: 11px; color: var(--grey); }
+.assistant .as-tool.bad { color: var(--warn); }
+.assistant .as-wait { font-size: 12px; color: var(--grey); }
+.assistant .as-err { font-size: 12px; color: var(--alert); }
+.assistant .as-usage { font-family: var(--font-num); font-size: 10px; color: var(--grey); opacity: .8; }
+.assistant .as-composer { display: flex; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--rule); }
+.assistant .as-composer textarea {
+  flex: 1 1 auto; resize: none; padding: 6px; border: 1px solid var(--rule);
+  font-family: var(--font-body); font-size: 13px;
+}
+.assistant .as-composer textarea:focus { border-color: var(--accent); outline: none; }
+.assistant button.as-send {
+  align-self: flex-end; padding: 6px 12px; border: 0; cursor: pointer;
+  background: var(--accent); color: #fff; font-size: 12px;
+}
+.assistant button.as-send:disabled { background: var(--rule); cursor: default; }

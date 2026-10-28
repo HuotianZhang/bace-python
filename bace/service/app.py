@@ -47,9 +47,9 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
-from fastapi import Body, FastAPI, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, Header, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.routing import APIRoute, APIWebSocketRoute
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
@@ -58,7 +58,7 @@ from starlette.routing import Mount
 
 from ..params import ParamError
 from .modules import SAMPLE_KEYS, ModuleError, jsonable
-from . import pipeline
+from . import assistant, pipeline
 from .pipeline import TreeError
 from .rigs import ACTIONS, BenchActionRefused
 from .session import (Busy, Conflict, DataUnavailable, NodeRequired, NotPaused, Session,
@@ -124,6 +124,12 @@ class BenchSaveRequest(BaseModel):
 class MonitorRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     interval_s: float = 1.0
+
+
+class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(min_length=1)
+    conversation: str | None = None
 
 
 # -- errors to status codes --------------------------------------------------------
@@ -735,6 +741,44 @@ def create_app(session: Session, *, ui_dir: str | None = None,
         """The observers running beside the bench."""
         return {"monitors": session.monitors()}
 
+    # -- /assistant --------------------------------------------------------------------
+    conversations = assistant.Conversations()
+
+    @app.get("/assistant")
+    async def assistant_status():
+        """Whether the assistant can run here, the model, and the documents it reads."""
+        return assistant.status()
+
+    @app.post("/assistant/chat")
+    async def assistant_chat(body: ChatRequest,
+                             key: str | None = Header(default=None, alias="X-Anthropic-Key")):
+        """One question, answered as NDJSON frames; the key is the asker's own and is not kept."""
+        if not key:
+            return _error(401, "the assistant needs your Anthropic API key", param="X-Anthropic-Key")
+        try:
+            assistant.sdk()
+        except assistant.AssistantUnavailable as exc:
+            return _error(503, str(exc))
+        frames = assistant.chat(session, conversations, key=key, text=body.text,
+                                conversation_id=body.conversation)
+        try:
+            first = await frames.__anext__()
+        except assistant.Busy as exc:
+            return _error(409, str(exc))
+
+        async def lines():
+            yield json.dumps(first) + "\n"
+            async for frame in frames:
+                yield json.dumps(jsonable(frame), ensure_ascii=False, default=str) + "\n"
+        return StreamingResponse(lines(), media_type="application/x-ndjson")
+
+    @app.delete("/assistant/conversations/{conversation_id}")
+    async def assistant_forget(conversation_id: str):
+        """Drop one conversation's history; 404 when there is none."""
+        if not conversations.forget(conversation_id):
+            return _error(404, f"no conversation {conversation_id}")
+        return {"forgotten": conversation_id}
+
     if ui_dir is not None:
         app.mount("/ui", StaticFiles(directory=ui_dir, html=True), name="ui")
     return app
@@ -758,4 +802,4 @@ def _route_index(app: FastAPI) -> list[dict]:
 
 
 __all__ = ["create_app", "RunRequest", "StopRequest", "ResumeRequest", "TreeRequest",
-           "MonitorRequest"]
+           "MonitorRequest", "ChatRequest"]

@@ -763,10 +763,15 @@ class Session:
                 "bench": self.bench_snapshot()}
 
     # -- runs -------------------------------------------------------------------
-    def validate_tree(self, tree_obj: Mapping[str, Any], *, name: str = "") -> Validation:
-        """The Dry run: every check against the cached read-back; touches nothing."""
+    def validate_tree(self, tree_obj: Mapping[str, Any], *, name: str = "",
+                      remember: bool = True) -> Validation:
+        """The Dry run: every check against the cached read-back; touches nothing.
+
+        `remember=False` leaves `last_validated` alone: the assistant's Dry
+        runs are its own, and must not replace the tree the pipeline tab
+        reopens."""
         v, _voc = self._validate(tree_obj)
-        if v.schedule is not None:
+        if remember and v.schedule is not None:
             self.last_validated = {"tree": v.schedule.tree.as_wire(), "name": name,
                                    "validated_at": time.time(), "valid": v.valid}
         return v

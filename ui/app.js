@@ -17,6 +17,7 @@ import { renderPowerPanel, svgFileOf, DEFAULT_UI as POWER_DEFAULTS } from './lib
 import { renderTitle, liveRunId } from './lib/title.js';
 import { renderIdentity, identityModel } from './lib/identity.js';
 import { createBenchWatch } from './lib/watch.js';
+import { createAssistantPanel } from './lib/assistant.js';
 
 import bench from './views/bench.js';
 import pipeline from './views/pipeline.js';
@@ -59,9 +60,16 @@ const viewEl = h('main.view');
 const stripEl = h('div.strip');
 const barEl = h('footer.stream-bar');
 
+// The assistant hangs beside every tab, from the bar's `ask` chip
+// (`lib/assistant.js`).
+let askOpen = false;
+const assistant = createAssistantPanel({
+  api, onChange: (open) => { askOpen = open; renderChips(store.getState()); },
+});
+
 document.getElementById('app').replaceChildren(
   h('div.bar', h('span.wordmark', 'bace'), tabsEl, h('span.spacer'), chipsEl),
-  identEl, railEl, powerEl, monitorEl, viewEl, stripEl, barEl);
+  identEl, railEl, powerEl, monitorEl, viewEl, stripEl, barEl, assistant.el);
 
 let mounted = null;
 let mountedRoute = null;
@@ -117,7 +125,7 @@ function renderChips(state) {
   const ident = identityModel(state);
   const model = [ident.chip, ident.unnamed, ident.hazards.length, identOpen,
                  session.mode, session.fast, currentRun(state) ? runLabel(state) : null,
-                 state.queue.length, state.benchState];
+                 state.queue.length, state.benchState, askOpen];
   keyed(chipsEl, JSON.stringify(model), () => [
     // The identity is a control, not a label. It said `no sample named` for
     // as long as the console has existed and gave the operator nowhere to go
@@ -134,6 +142,11 @@ function renderChips(state) {
     currentRun(state) ? h('span.chip.m', { text: runLabel(state) }) : null,
     state.queue.length ? h('span.chip', { text: `queue ${state.queue.length}` }) : null,
     h('span', { class: 'chip state ' + (state.benchState || 'idle'), text: state.benchState || 'idle' }),
+    h('button', {
+      class: 'chip ask' + (askOpen ? ' on' : ''), text: 'ask',
+      title: 'the assistant: the physics, the bench and the console, explained',
+      'aria-expanded': askOpen ? 'true' : 'false', onclick: () => assistant.toggle(),
+    }),
   ]);
 }
 
