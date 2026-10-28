@@ -3,6 +3,8 @@
 // there is no base URL to configure, no CORS and no proxy — `base` exists only
 // so a test or a second window can point somewhere else.
 
+import { splitLines } from './assistant.js';
+
 export class ApiError extends Error {
   constructor(status, body, request) {
     super(`${request} -> ${status}`);
@@ -125,6 +127,38 @@ export function createApi({ base = '', fetch: fetchImpl = globalThis.fetch } = {
 
     /** The ring over HTTP, for a client without a socket. */
     events: (since = 0) => call('GET', '/events', undefined, { since }),
+
+    // -- the assistant -----------------------------------------------------
+    assistantStatus: () => call('GET', '/assistant'),
+    forgetConversation: (id) => call('DELETE', `/assistant/conversations/${id}`),
+    /**
+     * One question. The answer is NDJSON, read as it arrives: `onFrame` gets
+     * each frame, and the promise settles when the stream ends. The key is
+     * the asker's and goes in a header, never in the URL.
+     */
+    ask: async ({ text, conversation, key, onFrame, signal }) => {
+      const path = '/assistant/chat';
+      const response = await fetchImpl(root + path, {
+        method: 'POST', signal,
+        headers: { 'Content-Type': 'application/json', 'X-Anthropic-Key': key },
+        body: JSON.stringify({ text, ...(conversation ? { conversation } : {}) }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new ApiError(response.status, body, `POST ${path}`);
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let rest = '';
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const out = splitLines(rest + decoder.decode(value, { stream: true }));
+        rest = out.rest;
+        out.frames.forEach(onFrame);
+      }
+      splitLines(`${rest}${decoder.decode()}\n`).frames.forEach(onFrame);
+    },
   };
 }
 

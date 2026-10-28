@@ -4,6 +4,13 @@ Dated, newest first. Details and evidence are in `docs/`.
 
 ## 2026-10-28
 
+- **The console's assistant.** The `ask` chip in the bar opens a panel where
+  the physics, the chain, a parameter's value and the console's controls can
+  be asked about in plain language. A Claude model reads the bench, the
+  modules with each value's layer, the runs, the event ring and the project's
+  documents, and in this version changes nothing. It runs on the asker's own
+  Anthropic API key, which the service does not keep. `anthropic` 2.3 joins
+  the `service` extra; without it the console works as before.
 - `docs/bace-principle.md`: what BACE measures, from the papers that
   introduced it. The 2026-09-06 split of Q into photogenerated and injected
   parts is withdrawn; at V_oc the two are not additive.
