@@ -139,6 +139,7 @@ def test_the_service_core_imports_without_fastapi_or_pyvisa() -> None:
         "import bace.service.pipeline, bace.service.modules, bace.service.journal\n"
         "import bace.service.worker, bace.service.executor, bace.service.session\n"
         "import bace.service.rigs, bace.service.monitors, bace.service.wire\n"
+        "import bace.service.plans\n"
         "loaded = sorted(m for m in sys.modules if m.split('.')[0] in "
         "('fastapi', 'uvicorn', 'starlette', 'pyvisa') and sys.modules[m] is not None)\n"
         "print('loaded', loaded)\n"

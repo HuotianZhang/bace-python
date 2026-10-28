@@ -15,6 +15,7 @@ import { renderTitle, liveRunId } from './lib/title.js';
 import { renderIdentity, identityModel } from './lib/identity.js';
 import { createBenchWatch } from './lib/watch.js';
 import { createAssistantPanel } from './lib/assistant.js';
+import { createPlansPanel } from './lib/plans.js';
 
 import bench from './views/bench.js';
 import pipeline from './views/pipeline.js';
@@ -30,7 +31,7 @@ const store = createStore({ schedule: (fn) => requestAnimationFrame(fn) });
 const stream = createStream({
   // Each connection calls `syncPower` to restore the requested monitor state and
   // merge the service's trace.
-  onHello: (frame) => { store.applyHello(frame); syncPower(); },
+  onHello: (frame) => { store.applyHello(frame); syncPower(); plansPanel.refresh(); },
   onFrame: (frame, meta) => { store.applyFrame(frame); afterFrame(frame, meta || {}); },
   onStatus: (status) => store.applyConnection(status),
   onSessionChange: ({ from, to }) => {
@@ -59,9 +60,16 @@ const assistant = createAssistantPanel({
   api, onChange: (open) => { askOpen = open; renderChips(store.getState()); },
 });
 
+// The plans an agent proposed wait here for a person's decision.
+let plansOpen = false;
+let plansPending = 0;
+const plansPanel = createPlansPanel({
+  api, onChange: ({ open, pending }) => { plansOpen = open; plansPending = pending; renderChips(store.getState()); },
+});
+
 document.getElementById('app').replaceChildren(
   h('div.bar', h('span.wordmark', 'bace'), tabsEl, h('span.spacer'), chipsEl),
-  identEl, railEl, powerEl, monitorEl, viewEl, stripEl, barEl, assistant.el);
+  identEl, railEl, powerEl, monitorEl, viewEl, stripEl, barEl, assistant.el, plansPanel.el);
 
 let mounted = null;
 let mountedRoute = null;
@@ -110,7 +118,7 @@ function renderChips(state) {
   const ident = identityModel(state);
   const model = [ident.chip, ident.unnamed, ident.hazards.length, identOpen,
                  session.mode, session.fast, currentRun(state) ? runLabel(state) : null,
-                 state.queue.length, state.benchState, askOpen, quitArmed];
+                 state.queue.length, state.benchState, askOpen, quitArmed, plansOpen, plansPending];
   keyed(chipsEl, JSON.stringify(model), () => [
     // The identity text opens its editor so an unnamed sample has a visible remedy.
     h('button', {
@@ -129,6 +137,12 @@ function renderChips(state) {
       class: 'chip ask' + (askOpen ? ' on' : ''), text: 'ask',
       title: 'the assistant: the physics, the bench and the console, explained',
       'aria-expanded': askOpen ? 'true' : 'false', onclick: () => assistant.toggle(),
+    }),
+    h('button', {
+      class: 'chip plans' + (plansPending ? ' bad' : '') + (plansOpen ? ' on' : ''),
+      text: plansPending ? `plans ${plansPending}` : 'plans',
+      title: 'experiment plans an agent may run once a person approves them',
+      'aria-expanded': plansOpen ? 'true' : 'false', onclick: () => plansPanel.toggle(),
     }),
     h('button', {
       class: 'chip quit' + (quitArmed ? ' armed' : ''),
@@ -638,6 +652,10 @@ function afterFrame(frame, { replay = false } = {}) {
     const state = store.getState();
     const active = state.activeRunId && state.runs[state.activeRunId];
     if (active && !active.axis) hydrate(state.activeRunId, active.node_path);
+  }
+  if (frame.type === 'PlanProposed' || frame.type === 'PlanDecided'
+      || (frame.type === 'RunQueued' && frame.data && frame.data.plan)) {
+    plansPanel.refresh();
   }
   watch.frame(frame);
 }

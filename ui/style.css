@@ -1440,6 +1440,41 @@ table.qgrid td { padding: 0; }
 button.chip.ask { background: none; cursor: pointer; font: inherit; font-family: var(--font-num); font-size: 11px; }
 button.chip.ask:hover { border-color: #fff; color: #fff; }
 button.chip.ask.on { background: #fff; border-color: #fff; color: var(--ink); }
+button.chip.plans { background: none; cursor: pointer; font: inherit; font-family: var(--font-num); font-size: 11px; }
+button.chip.plans:hover { border-color: #fff; color: #fff; }
+button.chip.plans.on { background: #fff; border-color: #fff; color: var(--ink); }
+/* The plan panel sits where the assistant does; a plan's approval covers
+   exactly what the card shows, so the envelope is a table, not a summary. */
+.plans {
+  position: fixed; top: var(--tabs-height); right: 0; bottom: 0; width: 460px; z-index: 31;
+  display: flex; flex-direction: column;
+  background: var(--paper); border-left: 1px solid var(--rule);
+  box-shadow: -6px 0 18px rgba(0,0,0,.08);
+}
+.plans[hidden] { display: none; }
+.plans .as-head {
+  display: flex; align-items: baseline; gap: 10px; padding: 8px 12px;
+  border-bottom: 1px solid var(--rule); background: var(--fill);
+}
+.plans .as-title { font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase; color: var(--grey); }
+.plans .spacer { flex: 1 1 auto; }
+.plans button.as-link { background: none; border: 0; padding: 0; cursor: pointer; font-family: var(--font-num); font-size: 11px; color: var(--grey); }
+.plans .as-note:empty { display: none; }
+.plans .as-note { padding: 10px 12px; border-bottom: 1px solid var(--rule); font-size: 12px; color: var(--grey); }
+.plans .as-note p { margin: 0; }
+.plans .pl-list { flex: 1 1 auto; overflow-y: auto; padding: 12px; }
+.pl-card { border: 1px solid var(--rule); padding: 10px 12px; margin-bottom: 12px; }
+.pl-card.pl-rejected, .pl-card.pl-closed { opacity: .6; }
+.pl-title { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; }
+.pl-state { font-family: var(--font-num); font-size: 11px; font-weight: 400; color: var(--grey); }
+.pl-goal { margin: 6px 0 8px; }
+.pl-env { width: 100%; border-collapse: collapse; font-size: 12px; }
+.pl-env th, .pl-env td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--rule); }
+.pl-env th { font-size: 10px; color: var(--grey); font-weight: 600; }
+.pl-caps, .pl-fp { font-family: var(--font-num); font-size: 11px; color: var(--grey); margin: 8px 0 0; }
+.pl-actions { display: flex; gap: 8px; margin-top: 10px; }
+.pl-actions button { cursor: pointer; font: inherit; font-size: 12px; padding: 3px 10px; border: 1px solid var(--rule); background: var(--paper); }
+.pl-actions button.armed { background: var(--warn); border-color: var(--warn); color: #fff; }
 button.chip.quit { background: none; cursor: pointer; font: inherit; font-family: var(--font-num); font-size: 11px; }
 button.chip.quit:hover { border-color: #fff; color: #fff; }
 button.chip.quit.armed { background: var(--warn); border-color: var(--warn); color: #fff; }

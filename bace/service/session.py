@@ -73,6 +73,7 @@ from .modules import Catalogue, RunContext, VocSource, coerce_sample, jsonable
 from .monitors import (MAX_INTERVAL_S, MIN_INTERVAL_S, TEMPERATURE_MONITOR_S,
                        PowerMonitor, TemperatureMonitor)
 from .pipeline import VOC_PARAM, Module, Schedule, Step, Validation
+from .plans import PlanBook
 from .rigs import ACTIONS, Bench, BenchActionRefused, Unavailable, action_before
 from .wire import STEPDONE_ARRAYS, ephemeral_frame, is_ephemeral, make_envelope, payloads
 from .worker import TERMINAL, Blocked, Job, RunWorker, StopMode
@@ -255,6 +256,9 @@ class RunRecord:
     """Retains the run's queued `[sample]` identity independently of the session.
     Each run carries its own identity (docs/service-contract.md section 6).
     """
+    plan: str | None = None
+    """The approved plan the run was submitted under, or None for a run a
+    person started (`service.plans`)."""
     node_results: dict[str, dict] = field(default_factory=dict)
     """Reduces module results from journal payloads with the journal's reducers.
     `RunFinished`, `JVFinished` and `StepDone` feed the same `journal.node_record`
@@ -338,7 +342,7 @@ class RunRecord:
             "params_as_executed": self.params_as_executed,
             "node_outcomes": jsonable(self.node_outcomes),
             "verdicts": list(self.verdicts), "chain_at_start": self.chain_at_start,
-            "sample": dict(self.sample), "nodes": self.nodes_wire(),
+            "sample": dict(self.sample), "plan": self.plan, "nodes": self.nodes_wire(),
             "folder": self.folder, "folders": self.all_folders(), "error": self.error,
             "queued_at": self.queued_at, "started_at": self.started_at,
             "finished_at": self.finished_at, "kept": self.kept,
@@ -515,6 +519,7 @@ class Session:
             "sample": dict(sample_table or {})})
         self.catalogue = Catalogue(rig_config=rig_config, run_toml=self.run_toml,
                                    history=self.journal, sample=sample_table)
+        self.plans = PlanBook(self.session_id)
         self._sample_file: dict = dict(self.catalogue.sample)
         """Retains the startup `[sample]` layer for `set_sample` resets.
         A null restores that layer, like a parameter reset, without requiring
@@ -755,18 +760,28 @@ class Session:
         return self.pipeline_folder(tree_obj, name) + "_YYYYMMDD_HHMMSS"
 
     def submit(self, tree_obj: Mapping[str, Any], name: str = "",
-               kind: str | None = None) -> tuple[str, Validation]:
+               kind: str | None = None, plan: str | None = None) -> tuple[str, Validation]:
         """Validates and queues a tree, returning its run ID and validation.
 
         `kind` is `manual` for one module or `pipeline`; `None` infers it from
         the root. Manual runs record directly under `out`, as `tools/scan.py`
         does. Pipeline modules record under `<out>/<stem>_<stamp>/`
         (docs/service-contract.md section 6).
+
+        `plan` names an approved plan the tree must fit. A tree outside the
+        plan's envelope, or a plan that is not open, refuses the run with the
+        check `plan.envelope` (docs/service-contract.md section 8b).
         """
         if self._closed:
             raise Conflict("the session is closed")
         name = str(name or "")
         v, voc_at_submit = self._validate(tree_obj)
+        cost_s = float(v.cost.get("total_s") or 0.0)
+        if plan is not None and v.schedule is not None:
+            refusals = self.plans.check(plan, v.schedule.tree, cost_s)
+            if refusals:
+                v.checks.append(pipeline.plan_verdict(plan, refusals))
+                v.valid = False
         if v.schedule is not None:
             self.last_validated = {"tree": v.schedule.tree.as_wire(), "name": name,
                                    "validated_at": time.time(), "valid": v.valid}
@@ -806,7 +821,7 @@ class Session:
                             schedule=v.schedule, module=module, out_folder=out_folder,
                             folder=folder, counters=dict(v.counters), cost=dict(v.cost),
                             queued_at=queued_at, session_voc=voc_at_submit,
-                            sample=dict(self.catalogue.sample),
+                            sample=dict(self.catalogue.sample), plan=plan,
                             live=LiveState(self.rig_config))
             rec.params_as_executed = {
                 s.node_path: {n: pv.as_dict() for n, pv in s.params.items()}
@@ -834,11 +849,13 @@ class Session:
                 raise Conflict(f"cannot queue {run_id}: {exc}") from None
             self._records[run_id] = rec
             self._jobs[run_id] = job
+            if plan is not None:
+                self.plans.charge(plan, run_id, cost_s)
             # One event path preserves shared sequence, journal and fan-out.
             self._ingest(run_id, "", E.RunQueued(
                 kind=kind, module=module, tree=rec.tree, params=jsonable(params),
                 resolved=jsonable(resolved), name=name, folder=folder,
-                sample=dict(rec.sample)), queued_at, None)
+                sample=dict(rec.sample), plan=plan), queued_at, None)
             self._ingest(run_id, "", E.RunStateChanged("queued", "submitted"), time.time(), None)
             # Journal submit-time flags such as `trigger.auto`, `intensity.factor`
             # and `temperature.not-wired` for file-backed results too. `_apply`
@@ -847,6 +864,32 @@ class Session:
                 if check.level != "ok":
                     self._ingest(run_id, check.node_path, check, time.time(), None)
         return run_id, v
+
+    # -- plans ------------------------------------------------------------------
+    def propose_plan(self, data: Mapping[str, Any]) -> dict:
+        """Records a proposed plan and journals it; nothing runs until a person
+        approves it. Raises `plans.PlanError` for a plan that cannot be accepted."""
+        with self._lock:
+            plan = self.plans.propose(data, catalogue=self.catalogue)
+        wire = plan.as_wire()
+        self._dispatch(None, E.PlanProposed(plan=wire), node_path="")
+        return wire
+
+    def decide_plan(self, plan_id: str, decision: str, *, fingerprint: str = "",
+                    reason: str = "") -> dict:
+        """Approves, rejects or closes a plan and journals the decision with
+        the fingerprint it applied to. Unknown plan: `KeyError`."""
+        with self._lock:
+            plan = self.plans.decide(plan_id, decision, fingerprint_seen=fingerprint,
+                                     reason=reason)
+        self._dispatch(None, E.PlanDecided(plan_id=plan.plan_id, decision=decision,
+                                           fingerprint=plan.fingerprint,
+                                           reason=plan.reason), node_path="")
+        return plan.as_wire()
+
+    def plans_wire(self) -> list[dict]:
+        with self._lock:
+            return [p.as_wire() for p in self.plans.all()]
 
     def _make_run(self, rec: RunRecord) -> Callable[[Job], Any]:
         def make(job: Job):

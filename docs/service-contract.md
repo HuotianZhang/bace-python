@@ -46,6 +46,8 @@ bace/service/
                   on the session (§8a).
   providers.py    the assistant's vendors: Claude, and OpenAI-compatible
                   endpoints. Imports `anthropic` and `openai` lazily.
+  plans.py        experiment plans: the envelope, approval by fingerprint, and
+                  the check of a submission under a plan (§8b).
   app.py          create_app(session) -> FastAPI. Routes, WS, static mount.
 ```
 
@@ -1165,6 +1167,50 @@ request or `BACE_ASSISTANT_MODEL` says otherwise, at effort `medium`, with the
 API's server-side fallback on a refusal for the models that take it.
 
 ---
+
+## 8b. `/plans`; experiment plans
+
+An agent runs experiments only inside a plan a person approved
+(`service/plans.py`). A plan has a title, a goal and an envelope:
+
+```json
+{"title": "V_coll saturation", "goal": "Q against V_coll at V_oc",
+ "envelope": {
+   "modules": {"bace": {"vcoll": {"min": -4, "max": -0.5}, "n_loops": {"max": 10}},
+               "jv_bace": {}},
+   "loops": {"illumination": {"levels_v": {"min": 1.0, "max": 1.03}}},
+   "max_runs": 3, "max_total_s": 3600, "expires_s": 14400}}
+```
+
+| Envelope key | Meaning |
+|---|---|
+| `modules` | The modules a tree may contain, each with the parameters a module node may set and their bounds. A bound is `{"min": a, "max": b}` (either side optional, inclusive; a list value must lie within it element by element) or `{"choices": [...]}`. `{}` allows the module with nothing set. |
+| `loops` | The loops a tree may contain: `values_k` for `temperature`, `levels_v` for `illumination`, `count` for `repeat`, and any loop parameter (`hold_s`, `led_low_v`, …) the tree sets. |
+| `max_runs`, `max_total_s` | Caps on the submissions under the plan and on the sum of their cost estimates (section 7). |
+| `expires_s` | How long the approval lasts, at most 7 days. |
+
+The envelope bounds what the submitted tree states. A parameter the tree does
+not set takes its value from its layers (run.toml, last used, the operator's
+edits), which the agent cannot change.
+
+| Route | |
+|---|---|
+| `GET /plans` | Every plan of the session: state (`proposed`, `approved`, `rejected`, `closed`), fingerprint, runs, `spent_s`, `expires_at`, and `open` (whether a submission would be accepted now). |
+| `POST /plans` | Proposes a plan; 201 with the plan, 422 when the envelope names an unknown module or parameter or a malformed bound. Journals `PlanProposed`. |
+| `GET /plans/{id}` | One plan; 404 when unknown. |
+| `POST /plans/{id}/approve` | `{"fingerprint": "…"}`: approves a proposed plan. A fingerprint other than the plan's is a 409, so an approval covers exactly the plan shown. Journals `PlanDecided` with the fingerprint. The console's plan card is the place for it; the MCP endpoint does not offer it. |
+| `POST /plans/{id}/reject`, `/close` | `{"reason": "…"}`: rejects a proposed plan, or closes an approved one. Journaled. |
+
+`POST /runs` and `POST /pipelines` take an optional `"plan": "<id>"`. A run
+submitted under a plan is refused with the check `plan.envelope` (`invalid`,
+422, every reason listed in `data.refusals`) when the plan is not approved,
+has expired, has used its runs or its time, or when the tree lies outside the
+envelope. Otherwise it is validated and queued like any run: every check of
+section 7, the interlocks and park apply. `RunQueued.plan` and the run record's
+`plan` name the plan; a run a person starts has `plan: null` and no envelope.
+
+Plans are held in the session's memory: a restart forgets them, so no
+approval outlives the process it was given to.
 
 ## 9. CLI (`__main__.py`)
 

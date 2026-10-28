@@ -48,6 +48,7 @@ from starlette.routing import Mount
 from ..params import ParamError
 from .modules import SAMPLE_KEYS, ModuleError, jsonable
 from . import assistant, pipeline, providers
+from .plans import PlanConflict, PlanError
 from .pipeline import TreeError
 from .rigs import ACTIONS, BenchActionRefused
 from .session import (Busy, Conflict, DataUnavailable, NodeRequired, NotPaused, Session,
@@ -83,6 +84,7 @@ class RunRequest(BaseModel):
     module: str
     params: dict[str, Any] = Field(default_factory=dict)
     name: str = ""
+    plan: str | None = None
 
 
 class StopRequest(BaseModel):
@@ -122,6 +124,24 @@ class TreeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     tree: dict[str, Any]
     name: str = ""
+    plan: str | None = None
+
+
+class PlanRequest(BaseModel):
+    """A proposed plan: title, goal and envelope (`docs/service-contract.md`, 8b)."""
+
+    model_config = ConfigDict(extra="forbid")
+    title: str
+    goal: str
+    envelope: dict[str, Any]
+
+
+class DecisionRequest(BaseModel):
+    """A decision on a plan. Approval names the fingerprint the person saw."""
+
+    model_config = ConfigDict(extra="forbid")
+    fingerprint: str = ""
+    reason: str = ""
 
 
 class BenchSaveRequest(BaseModel):
@@ -561,7 +581,7 @@ def create_app(session: Session, *, ui_dir: str | None = None,
 
         The contract is `docs/service-contract.md`, section 6."""
         tree = tree_for_module(body.module, body.params, body.name)
-        run_id, v = session.submit(tree, name=body.name, kind="manual")
+        run_id, v = session.submit(tree, name=body.name, kind="manual", plan=body.plan)
         rec = session.run_record(run_id)
         w = v.as_wire()
         return {"run_id": run_id, "state": rec["state"], "position": rec["position"],
@@ -705,7 +725,7 @@ def create_app(session: Session, *, ui_dir: str | None = None,
                 await run_in_threadpool(session.bench_read)
             except Busy:
                 pass
-        run_id, v = session.submit(body.tree, name=body.name)
+        run_id, v = session.submit(body.tree, name=body.name, plan=body.plan)
         rec = session.run_record(run_id)
         w = v.as_wire()
         return {"run_id": run_id, "state": rec["state"], "position": rec["position"],
@@ -815,6 +835,56 @@ def create_app(session: Session, *, ui_dir: str | None = None,
 
         The contract is `docs/service-contract.md`, section 8."""
         return {"monitors": session.monitors()}
+
+    # -- /plans -------------------------------------------------------------------------
+    @app.get("/plans")
+    async def plans():
+        """Every plan of the session, with its state and what it has spent."""
+        return {"plans": session.plans_wire()}
+
+    @app.post("/plans", status_code=201)
+    async def propose_plan(body: PlanRequest):
+        """Records a proposed plan; nothing runs under it until a person approves it."""
+        try:
+            return session.propose_plan(body.model_dump())
+        except PlanError as exc:
+            return _error(422, str(exc))
+
+    @app.get("/plans/{plan_id}")
+    async def plan(plan_id: str):
+        """One plan."""
+        for p in session.plans_wire():
+            if p["plan_id"] == plan_id:
+                return p
+        return _error(404, f"no plan {plan_id}")
+
+    async def _decide(plan_id: str, decision: str, body: DecisionRequest | None):
+        body = body or DecisionRequest()
+        try:
+            return session.decide_plan(plan_id, decision, fingerprint=body.fingerprint,
+                                       reason=body.reason)
+        except KeyError:
+            return _error(404, f"no plan {plan_id}")
+        except PlanConflict as exc:
+            return _error(409, str(exc))
+        except PlanError as exc:
+            return _error(422, str(exc))
+
+    @app.post("/plans/{plan_id}/approve")
+    async def approve_plan(plan_id: str, body: DecisionRequest | None = Body(default=None)):
+        """A person's approval of the plan with the fingerprint shown. The console's
+        plan card is the place for it; the MCP endpoint does not offer it."""
+        return await _decide(plan_id, "approve", body)
+
+    @app.post("/plans/{plan_id}/reject")
+    async def reject_plan(plan_id: str, body: DecisionRequest | None = Body(default=None)):
+        """Rejects a proposed plan."""
+        return await _decide(plan_id, "reject", body)
+
+    @app.post("/plans/{plan_id}/close")
+    async def close_plan(plan_id: str, body: DecisionRequest | None = Body(default=None)):
+        """Closes an approved plan: nothing more is accepted under it."""
+        return await _decide(plan_id, "close", body)
 
     # -- /assistant --------------------------------------------------------------------
     conversations = assistant.Conversations()

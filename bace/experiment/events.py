@@ -312,6 +312,7 @@ class RunQueued(Event):
     name: str = ""
     folder: str | None = None
     sample: dict | None = None
+    plan: str | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in ("manual", "pipeline"):
@@ -427,3 +428,28 @@ class SampleNamed(Event):
     before: dict
     after: dict
     changed: list
+
+
+@dataclass(frozen=True)
+class PlanProposed(Event):
+    """A plan was proposed: its id, title, goal, envelope and fingerprint.
+
+    A session event (`run_id` is `None`). The plan cannot be run until a
+    person approves it (`PlanDecided`); see `service.plans`.
+    """
+
+    plan: dict
+
+
+@dataclass(frozen=True)
+class PlanDecided(Event):
+    """A plan was approved, rejected or closed.
+
+    `fingerprint` is the one the decision applied to, so the journal shows
+    which plan, exactly, a person approved. A session event.
+    """
+
+    plan_id: str
+    decision: str
+    fingerprint: str
+    reason: str = ""
