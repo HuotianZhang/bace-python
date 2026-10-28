@@ -1,92 +1,61 @@
-"""The session journal: one append-only JSONL file, and the queries it answers.
+"""Appends session events to JSONL and reconstructs runs and query history.
 
-`<out>/journal/<session_id>.jsonl`, one JSON object per line, each line a
-wire envelope under the journal payload policy (`service.wire`). The first
-line is `SessionStarted` with the header the session was opened with -- mode,
-config paths, the code fingerprint -- so a file read months later says what
-produced it.
+`<out>/journal/<session_id>.jsonl` contains one wire envelope per line under
+`service.wire`'s journal payload policy. `SessionStarted` is the first line,
+with mode, configuration paths and code fingerprint identifying the source
+(docs/service-contract.md section 3, Journal).
 
-**Append-only, flushed after every line, never rewritten.** A run that dies
-with the process still leaves every line up to the last event on disk, and a
-file that is only ever appended to can be replayed for failure recovery
-later without the format changing now. Nothing here truncates: a `Journal`
-opened on a file that already exists continues it, does not write a second
-`SessionStarted`, and picks its `seq` up from the last line.
+Every line is flushed. The file is append-only and never rewritten or
+truncated. Process failure leaves the flushed event prefix for replay.
+Opening an existing file continues it without a second `SessionStarted`
+and resumes `seq` from the last line.
 
-**What the queries key on.** The history queries reconstruct runs from these
-lines and nothing else, so the session must journal them for every run:
+Queries depend on these events for every run:
 
-- `RunQueued` -- the `experiment.events.RunQueued` dataclass, sent by the
-  session down its one event path like every other frame (`run_queued()`
-  here builds the same line for a test or a script): `data = {kind, module,
-  tree, params, resolved, name, folder}`. It is the only line that knows
-  which module a manual run is and what parameters it was given. `params`
-  is what the operator chose (the edited layer, and last-used values carried
-  forward) and is what `last_used_params` hands back; `resolved` is every
-  value the module ran with, for the record. The two are separate because a
-  journal that fed every resolved default back as "last-used" would, after
-  one run, show the whole card as last-used and hide a recipe edit behind it
-  for twenty sessions. `sample` is the `[sample]` block the run was queued
-  under -- its identity, per run rather than only in the header
-  (`docs/history/naming-plan.md` rule 1): `Journal` resumes an existing file and
-  writes `SessionStarted` only when it did not, so two processes started in
-  the same second share a file and the second one's device would otherwise
-  be attributed to the first's. `run_index` exposes it on every row.
-- `RunStateChanged` -- `data = {state, reason}`, on every transition. The
-  terminal state (`done`, `stopped`, `aborted`, `failed`, `blocked`,
-  `cancelled`) is what `run_index` reports and what `last_used_params`
-  filters on; the `parked` transition that follows it is noted but never
-  replaces it.
-- `NeedsOperator` / `OperatorResumed` -- the pair that brackets a pause;
-  `settle_history` pairs a `NeedsOperator(what="temperature")` with the
-  next `OperatorResumed` carrying the same `run_id` and `node_path`.
-- `Verdict` with code `temperature.settled` -- a node the 331 console
-  settled on its own; `settle_history` reads `data.setpoint_k` and
-  `data.settle_s` off it, so the cost model learns from automated runs as
-  it does from the operator's pauses.
-- `NodeDone` -- `detail.folder`, `detail.summary` and, for a module node,
-  `detail.kept`/`detail.requested` feed the run index. A pipeline's counts
-  are the sum over its module nodes, the same sum the session's run record
-  makes, so `GET /runs` and `GET /runs/{id}` cannot disagree about a run.
-  Each module node is also kept whole (`nodes[<path>]`, the shape
-  `node_record()` builds: module, outcome, counts, the V_oc it centred on,
-  its LED level and the temperature triple, its folder, and what it
-  measured -- a transient's axis with `q_mean`/`q_std` per point from its
-  `RunFinished`, a J-V's curves reduced to their metrics from `JVFinished`,
-  and how many of its shots carried an intensity or a digitiser verdict) so
-  a run from an earlier session can still answer `GET /runs/{id}` -- the
-  pipeline tab's grey V_oc grid is the *previous* run's, that record died
-  with the process that made it, and the results tab draws its grid from
-  these without opening a single HDF5.
-- `Progress` with `node_path == ""` -- the run's own progress. A loop's
-  `Progress` carries the loop's path and counts iterations, not shots, and
-  is not folded into the counts.
-- `StepDone`, `RunFinished`, `RunAborted`, `RunFailed`, `JVCurveDone`,
-  `JVFinished` -- timing and the outcome text.
+- `RunQueued` identifies kind, module, tree, parameters, name and folder.
+  The session uses its single event path; `run_queued` builds the same
+  envelope for scripts and tests. `params` contains edited and carried
+  last-used choices for `last_used_params`. `resolved` records every
+  executed value. Feeding resolved defaults back as last-used would mask
+  later recipe edits. `sample` carries per-run identity because resuming a
+  journal retains its header. Processes starting in the same second can
+  share a file, so the header alone cannot identify each run's device.
+  `run_index` exposes the per-run sample.
+- `RunStateChanged` records every transition. `run_index` reports the
+  terminal state, which `last_used_params` filters on. The following
+  `parked` records park completion without replacing that terminal state.
+- `NeedsOperator` and `OperatorResumed` bracket a pause with matching
+  `run_id` and `node_path`. `settle_history` learns from temperature pauses.
+- A `temperature.settled` verdict supplies `data.setpoint_k` and
+  `data.settle_s`, giving automatic settle durations to the same cost model.
+- `NodeDone` supplies folder, summary and module counts. Pipeline counts
+  sum module nodes in both journal and registry, keeping `GET /runs` and
+  `GET /runs/{id}` consistent. `node_record` retains module outcomes, V_oc,
+  LED level, temperature provenance, folders and reduced measurements.
+  Transients retain axes and per-point Q statistics; J-V retains curve
+  metrics. Shot counts retain intensity availability and digitiser flags.
+  Another session can serve run and results grids without opening HDF5.
+- `Progress` with empty `node_path` counts module shots. Loop progress
+  counts iterations and must not replace those counts.
+- `StepDone`, `RunFinished`, `RunAborted`, `RunFailed`, `JVCurveDone` and
+  `JVFinished` supply timing and outcome text.
 
-**Reading.** Every query reads this session's file first and then older
-`<out>/journal/*.jsonl` newest first, at most `MAX_HISTORY_FILES` in all.
-Session ids are `YYYYMMDD_HHMMSS`, so sorting by name is sorting by time. A
-line that does not parse is skipped: the last line of a session that died
-mid-write is torn by construction, and a torn line in a file from last week
-must not take this session's history queries down with it.
+Queries visit this file first, then other journal files newest first, up to
+`MAX_HISTORY_FILES` total. Session IDs use `YYYYMMDD_HHMMSS`, so name order
+matches time order. Unparseable lines are skipped: a process can stop during
+a write, and a torn line must not disable queries.
 
-**Parsed once.** This session's file is folded line by line as `append`
-writes it, and an older file is parsed once and kept, keyed on its size and
-modification time -- a query is then a walk over objects in memory, not a
-re-read of twenty files. The Dry run resolves the canonical tree's ninety
-module steps and asks for last-used parameters at each; re-parsing a
-week's journals ninety times per click was seconds on the event loop after
-one long run, and grew with every session.
+`append` folds this file incrementally. Other files are parsed once and
+cached by size and modification time. Queries then walk memory rather than
+re-parsing files for every node in a Dry run. The canonical 90-module
+schedule asks for parameters at every node; repeated parsing would block
+the event loop and scale with session count.
 
-**Which files teach the cost model.** `shot_time_s` and `settle_history`
-read only files whose `SessionStarted` header says the same `mode` and
-`fast` as this session: a `--sim --fast` session measures a shot in a
-millisecond and settles a "cryostat" in the time a click takes, and the lab
-PC's Dry run must not learn either. A file with no header (nothing says
-where it came from) is read. `last_used_params` and `run_index` read
-everything: what the operator typed on the sim console is still what they
-typed.
+`shot_time_s` and `settle_history` accept only headers matching this
+session's `mode` and `fast`. Simulated fast timing must not teach the real
+bench cost model. Headerless files remain eligible because their bench
+cannot be classified. `last_used_params` and `run_index` read every mode:
+operator choices and run records remain useful across bench modes.
 """
 from __future__ import annotations
 
@@ -104,16 +73,18 @@ from ..experiment.wire import envelope_to_wire
 
 JOURNAL_DIR = "journal"
 MAX_HISTORY_FILES = 20
-"""How many session files a history query reads, this one included. Twenty
-sessions is weeks of bench time; beyond that the memory spent on history
-nobody asks for is not worth it."""
+"""Limits a history query to 20 session files, including this file.
+This bounds cache memory while retaining weeks of typical bench use
+(docs/service-contract.md section 3, Journal).
+"""
 
 TERMINAL_STATES: frozenset[str] = frozenset(
     {"done", "stopped", "aborted", "failed", "blocked", "cancelled"})
 COMPLETED_STATES: frozenset[str] = frozenset({"done", "stopped"})
-"""States in which what ran is worth remembering: a run that finished or
-was stopped after a shot ran with the parameters it was given. An aborted,
-failed or blocked run may have run with none of them."""
+"""Selects completed and after-shot-stopped runs for last-used parameters.
+These runs execute their supplied parameters. An aborted, failed or
+blocked run may execute none of them.
+"""
 
 RUN_KINDS: tuple[str, ...] = ("manual", "pipeline")
 
@@ -122,15 +93,15 @@ def run_queued(*, seq: int, ts: float | None, run_id: str, kind: str,
                module: str | None, tree: dict | None, params: dict | None,
                name: str = "", folder: str | None = None,
                resolved: dict | None = None, sample: dict | None = None) -> dict:
-    """The `RunQueued` line as the session writes it: the
-    `experiment.events.RunQueued` dataclass in a wire envelope, so a line
-    built here for a test or a script is byte-for-byte what the one event
-    path produces. `kind` is "manual" (one module node) or "pipeline";
-    `module` is the module name for a manual run and None for a pipeline;
-    `params` is what the operator chose for the module (what
-    `last_used_params` hands back next session); `resolved` is every value
-    it will run with; `sample` the `[sample]` block it was queued under.
-    The dataclass refuses a bad `kind` and a manual run with no module.
+    """Builds the same `RunQueued` envelope as the session event path.
+
+    `experiment.events.RunQueued` makes script and test lines byte-exact
+    with session lines. `kind` is `manual` or `pipeline`; `module` names a
+    manual module and is `None` for a pipeline. `params` contains operator
+    choices for `last_used_params`; `resolved` contains all executed
+    values. `sample` retains the queued identity. The dataclass refuses an
+    invalid kind or a manual run without a module
+    (docs/service-contract.md section 3, Journal).
     """
     event = RunQueued(kind=kind, module=module, tree=tree, params=params,
                       resolved=resolved, name=name, folder=folder, sample=sample)
@@ -139,12 +110,12 @@ def run_queued(*, seq: int, ts: float | None, run_id: str, kind: str,
 
 
 class Journal:
-    """One session's append-only log, plus the history queries over all of them.
+    """Owns an append-only session journal and queries session files.
 
-    `append` may be called from any thread; a lock serialises the write, the
-    flush and the fold into this session's parsed history. The queries walk
-    the parsed files under the same lock, so a line appended on the worker
-    thread cannot change a dict a query on the loop thread is iterating.
+    `append` accepts calls from any thread. One lock serialises write,
+    flush and incremental folding. Queries walk parsed records under that
+    same lock, so a worker append cannot mutate a dictionary being read
+    on the event-loop thread.
     """
 
     def __init__(self, out: str, session_id: str, *, header: dict):
@@ -158,10 +129,11 @@ class Journal:
         self._lock = threading.RLock()
         self.mode = str(header.get("mode", "")) or None
         self.fast = bool(header.get("fast", False))
-        """This session's bench, for the cost-model queries' file filter."""
+        """Identifies this session's bench for cost-model file filtering."""
         self.seq = 0
-        """The last `seq` written. 0 after a fresh open (the SessionStarted
-        line); the session's own counter starts above it."""
+        """Records the last written `seq`, starting at 0 for `SessionStarted`.
+        The session counter starts above this value when a file is resumed.
+        """
         self.lines_written = 0
         self._own = _Parsed(self.session_id)
         self._cache: dict[str, tuple[tuple[int, int], _Parsed]] = {}
@@ -187,13 +159,13 @@ class Journal:
 
     # -- writing ----------------------------------------------------------
     def append(self, envelope: dict) -> None:
-        """Write one line and flush it. `envelope` is a wire payload
-        (`service.wire.journal_payload`) or a `run_queued()` dict.
+        """Writes and flushes one wire envelope as a JSON line.
 
-        `allow_nan=False`: the payload policy has already turned every NaN
-        into null, so a NaN reaching here is a bug in a caller, and a bare
-        `NaN` token in the file would be a line no browser and no strict
-        parser could read back.
+        `envelope` follows `service.wire.journal_payload` or comes from
+        `run_queued`. `allow_nan=False` enforces strict JSON: payload conversion
+        must turn NaN into null. A remaining NaN is a caller error and must
+        not produce an unreadable journal line
+        (docs/service-contract.md section 3, Journal).
         """
         if not isinstance(envelope, dict) or not isinstance(envelope.get("type"), str):
             raise TypeError("a journal line is a dict with a string 'type'; got "
@@ -208,8 +180,8 @@ class Journal:
             if isinstance(seq, int) and not isinstance(seq, bool):
                 self.seq = seq
             self.lines_written += 1
-            # Folded from the same dict that was written, so a query made
-            # a moment later sees this line without the file being re-read.
+            # Folding the written dictionary exposes the line to queries
+            # immediately without re-reading the file.
             self._own.apply(json.loads(text))
 
     def close(self) -> None:
@@ -226,8 +198,10 @@ class Journal:
 
     # -- the queries ------------------------------------------------------
     def last_used_params(self, module: str) -> dict | None:
-        """The `params` of the most recent `RunQueued` for `module` whose run
-        reached `done` or `stopped`; None when no session has one."""
+        """Returns the latest chosen parameters for a `done` or `stopped` module.
+
+        Returns `None` when no queried session has an eligible run.
+        """
         with self._lock:
             for parsed in self._history():
                 for run in reversed(parsed.runs):
@@ -237,8 +211,10 @@ class Journal:
         return None
 
     def run_index(self, session: str = "this") -> list[dict]:
-        """One summary per run, newest first. `session` is "this", "all", or
-        a session id."""
+        """Returns one summary per run, newest first.
+
+        `session` selects `this`, `all` or a session ID.
+        """
         out: list[dict] = []
         with self._lock:
             for parsed in self._history(session):
@@ -246,11 +222,12 @@ class Journal:
         return out
 
     def run_record(self, run_id: str) -> dict | None:
-        """One run's record from the journal -- its summary plus `tree` and
-        `nodes` -- from whichever session file holds it; None when no file
-        does. What `GET /runs/{id}` answers for a run this process never
-        held: the run ids carry the session id, so the file is found first
-        and the twenty-file history walked only when it is not there."""
+        """Returns a run's summary, tree and nodes from its journal, or `None`.
+
+        This serves `GET /runs/{id}` for runs outside the session registry.
+        The run ID identifies its session file. The bounded history search
+        is needed only if that file cannot supply the record.
+        """
         session = run_id.rsplit("-", 1)[0] if "-" in run_id else "all"
         with self._lock:
             for which in (session, "all"):
@@ -263,18 +240,17 @@ class Journal:
         return None
 
     def settle_history(self) -> dict[float, list[float]]:
-        """Seconds each temperature took to settle, keyed by setpoint
-        rounded to 0.1 K: between `NeedsOperator(what="temperature")` and
-        the `OperatorResumed` that answered it, the same for a
-        `temperature timeout` pause plus the `elapsed_s` the console had
-        already taken before it (what the executor's own ETA learns from
-        that node, so the Dry run and the run agree), and the `settle_s` of
-        every `temperature.settled` verdict the 331 console produced. A
-        refused setpoint's pause is not a settle and teaches nothing. Order
-        inside a list is not significant; the cost model takes the median.
-        A pause that was never answered contributes nothing; a session on
-        another kind of bench (see the module docstring) contributes nothing
-        either."""
+        """Returns settle durations in seconds by setpoint rounded to 0.1 K.
+
+        Matched temperature pauses contribute resume time minus pause time.
+        A `temperature timeout` pause also includes prior `elapsed_s`, matching
+        the executor's ETA. Automatic `temperature.settled` verdicts contribute
+        `settle_s` (docs/service-contract.md section 7).
+
+        Refused setpoints and unanswered pauses teach no settle duration.
+        Files from another bench mode are excluded. List order is irrelevant:
+        the cost model takes the median.
+        """
         out: dict[float, list[float]] = {}
         with self._lock:
             for parsed in self._history():
@@ -285,15 +261,14 @@ class Journal:
         return out
 
     def shot_time_s(self, module: str = "bace") -> float | None:
-        """Median seconds between consecutive `StepDone` of the last run of
-        `module` that reached `done` or `stopped`, or None.
+        """Returns median shot seconds from the latest eligible module run.
 
-        Matched on the leaf of each `StepDone`'s node path, so a pipeline's
-        `T=250K/led=1.020V/bace` counts as much as a manual `bace`; gaps are
-        taken within one node only, so the J-V between two bace nodes never
-        looks like a slow shot. A run with a single shot has no interval and
-        the search moves on to the run before it. Runs from another kind of
-        bench are skipped.
+        Eligible runs end `done` or `stopped`. Consecutive `StepDone` intervals
+        match the node-path leaf, so pipeline and manual modules both count.
+        Intervals stay within one node; an intervening J-V cannot inflate a
+        transient shot time. A single-shot run supplies no interval, so the
+        search continues. Other bench modes are excluded. Returns `None`
+        without an eligible interval.
         """
         with self._lock:
             for parsed in self._history():
@@ -337,9 +312,11 @@ class Journal:
         return ordered[:MAX_HISTORY_FILES]
 
     def _history(self, session: str = "all") -> Iterable["_Parsed"]:
-        """The parsed files a query walks, this session's first. This
-        session's is the object `append` folds into; an older file is parsed
-        on first sight and kept until its size or mtime changes."""
+        """Returns cached parsed files with this session first.
+
+        `append` updates this session's object. Other files are parsed on
+        first use and re-parsed only when size or modification time changes.
+        """
         for path in self._files(session):
             if path == self.path:
                 yield self._own
@@ -361,8 +338,7 @@ class Journal:
             parsed.apply(line)
         with self._lock:
             self._cache[path] = (stamp, parsed)
-            # Bounded: a query lists at most MAX_HISTORY_FILES, so anything
-            # beyond that in the cache is a file that fell off the end.
+            # Files beyond the `MAX_HISTORY_FILES` query limit need no cache.
             for old in [p for p in self._cache if p not in set(self._files("all"))]:
                 self._cache.pop(old, None)
         return parsed
@@ -390,13 +366,12 @@ def _read(path: str) -> list[dict]:
 
 
 def _leaf(node_path: str) -> str:
-    """`T=250K/led=1.020V/bace#2` -> `bace`."""
+    """Extracts `bace` from a node path such as `T=250K/led=1.020V/bace#2`."""
     return node_path.rsplit("/", 1)[-1].split("#", 1)[0]
 
 
 class _Parsed:
-    """One session file, folded: its header, its runs in order of first
-    appearance, and its settle pairs."""
+    """Folds a session file into its header, ordered runs and settle pairs."""
 
     def __init__(self, session_id: str):
         self.session_id = session_id
@@ -417,9 +392,8 @@ class _Parsed:
             detail = data.get("detail") or {}
             setpoint = detail.get("setpoint_k")
             ts = line.get("ts")
-            # The console's own time before a timeout pause counts: the
-            # operator's wait alone would say the settle was shorter than
-            # the run measured it.
+            # Prior automatic-settle time belongs to a timeout pause's total.
+            # Counting only operator wait would underestimate measured settle.
             try:
                 before = max(0.0, float(detail.get("elapsed_s") or 0.0))
             except (TypeError, ValueError):
@@ -434,8 +408,7 @@ class _Parsed:
                 t0, setpoint = hit
                 self.settle.setdefault(round(setpoint, 1), []).append(float(ts) - t0)
         elif kind == "Verdict" and data.get("code") == "temperature.settled":
-            # The 331 console's own settle: the second source of the cost
-            # model's per-temperature time, beside the operator's pauses.
+            # Automatic and operator settle durations feed the same cost model.
             inner = data.get("data") or {}
             try:
                 setpoint, settle = float(inner["setpoint_k"]), float(inner["settle_s"])
@@ -461,7 +434,7 @@ class _Parsed:
 
 
 class _Run:
-    """One run, folded from its lines in file order."""
+    """Reconstructs one run from journal lines in file order."""
 
     def __init__(self, run_id: str, session_id: str):
         self.run_id = run_id
@@ -487,18 +460,20 @@ class _Run:
         self.error: str | None = None
         self.step_ts: dict[str, list[float]] = {}
         self.verdicts: list[dict] = []
-        """Every verdict but `ok` this run's lines carried -- the submit-time
-        checks and the Start re-read -- one per (code, node_path)."""
+        """Retains non-`ok` verdicts once per `code` and `node_path`.
+        Start read-back verdicts supersede submit-time checks.
+        """
         self.sample: dict | None = None
         self.nodes: dict[str, dict] = {}
-        """Each module node's `NodeDone`, reduced by `node_record()`: what
-        the pipeline tab's V_oc grid, the results tab and `GET /runs/{id}`
-        need from a run of another session."""
+        """Stores module `NodeDone` data reduced by `node_record`.
+        This supplies run details and results grids across sessions.
+        """
         self._started: dict[str, float | None] = {}
         self._results: dict[str, dict] = {}
-        """Per node path, what the node measured before its `NodeDone`:
-        `RunFinished`'s axis and per-point statistics, `JVFinished`'s
-        reduced curves, and the counts folded from its `StepDone` lines."""
+        """Collects node measurements before `NodeDone`, keyed by node path.
+        It retains transient axes and Q statistics, reduced J-V curves and
+        `StepDone` counts.
+        """
         self._last_voc: float | None = None
         self.voc_min: float | None = None
         self.voc_max: float | None = None
@@ -560,10 +535,9 @@ class _Run:
         elif kind == "LoopDone":
             self._result(line).update(loop_result(data))
         elif kind == "Verdict":
-            # Every level but `ok`: `info` is `trigger.auto`, which the results
-            # tab says beside a charge near zero. One entry per (code, node),
-            # the newest winning -- the Start re-read replaces the submit-time
-            # copy, exactly as the registry's record does.
+            # `info`, including `trigger.auto`, matters when judging Q near zero.
+            # Keep one entry per code and node, with Start read-back replacing
+            # submit-time checks, just as in the session registry.
             if data.get("level") in ("info", "warn", "crit", "invalid"):
                 entry = {"level": data.get("level"), "code": data.get("code"),
                          "text": data.get("text"),
@@ -577,12 +551,9 @@ class _Run:
                     self.verdicts.append(entry)
         elif kind == "JVCurveDone":
             metrics = data.get("metrics") or {}
-            # `dark is False`, not `not dark`. On the wire the field is
-            # three-valued since the `jv`/`light` split, and `None` -- nobody
-            # could read whether light reached the sample -- is falsy. Counting
-            # such a curve as light writes its interpolated V_oc into the
-            # *persisted* summary, so `/runs` would advertise a noise crossing
-            # as a measurement for as long as the journal lives.
+            # Only `dark is False` confirms light. Falsy `None` means unknown
+            # illumination. Its crossing can be dark noise and must not enter
+            # the persisted V_oc summary as a light measurement.
             if (data.get("dark") is False and isinstance(metrics, dict)
                     and metrics.get("voc") is not None):
                 voc = float(metrics["voc"])
@@ -620,9 +591,10 @@ class _Run:
         return self._results.setdefault(str(line.get("node_path") or ""), {})
 
     def _voc_text(self) -> str:
-        """` · V_oc 0.906 V` for one light curve; the range over the levels
-        (` · V_oc 1.0269 … 1.0479 V`) when there were several, because the
-        session log's jv_bace line is the sweep, not its last point."""
+        """Formats V_oc for one light curve or the range across several levels.
+
+        A `jv_bace` summary describes the sweep rather than only its last point.
+        """
         if self._last_voc is None:
             return ""
         if self.light_curves > 1 and self.voc_min != self.voc_max:
@@ -630,8 +602,7 @@ class _Run:
         return f" · V_oc {self._last_voc:.3f} V"
 
     def record(self) -> dict:
-        """`summary()` plus the tree and the per-node reductions: what
-        `GET /runs/{id}` serves for a run from the journal."""
+        """Returns `summary` with tree and node reductions for `GET /runs/{id}`."""
         return {**self.summary(), "tree": self.tree, "nodes": dict(self.nodes),
                 "verdicts": list(self.verdicts)}
 
@@ -639,9 +610,8 @@ class _Run:
         kept, requested = self.kept, self.requested
         text = self.outcome_text
         if self.kind == "pipeline":
-            # The session's run record sums its module nodes; the same sum
-            # here, so the two endpoints agree, and a pipeline's text counts
-            # module runs rather than repeating the last module's line.
+            # Summing module nodes matches the session registry's counts.
+            # Pipeline text counts module runs, rather than only the last module.
             if self.node_requested is not None:
                 kept, requested = self.node_kept, self.node_requested
             total = _module_runs(self.tree)
@@ -675,23 +645,22 @@ class _Run:
 # -- the node record: one shape from both sources ---------------------------
 NODE_RESULT_KEYS: tuple[str, ...] = ("axis", "values", "q_mean", "q_std", "curves",
                                      "shots", "intensity_recorded", "shots_flagged")
-"""What `node_record` takes from a node's measurement beside its `NodeDone`."""
+"""Selects measurement keys that `node_record` adds to `NodeDone` data."""
 
 
 def node_record(node_path: str, outcome: Any, detail: dict, result: dict | None, *,
                 started_at: float | None, finished_at: float | None) -> dict:
-    """One module node, reduced: the shape `nodes[<path>]` has in
-    `GET /runs/{id}` **whichever process answers** -- this one from its
-    `RunRecord`, or a later one from the journal file. Built here, once, so
-    the two cannot drift: the results tab draws its grid from these and
-    must not have to know which side of a restart a run is on.
+    """Builds one module's `nodes[<path>]` record for `GET /runs/{id}`.
 
-    `detail` is the `NodeDone`'s; `result` is what the node measured before
-    it (`finished_result`, `jv_result`, `count_shot`). Only the scalars a
-    grid or a list needs: a transient's per-point `q_mean`/`q_std` over its
-    axis `values`, never a trace; a J-V's curves as their metrics, never a
-    sweep. Both are 1-D and small; `GET /runs/{id}/data` has the rest while
-    the run is in memory, the HDF5 has it forever.
+    The registry and journal use this shape, so results grids need no
+    process-specific interpretation. `detail` comes from `NodeDone`;
+    `result` holds prior measurements from `finished_result`, `jv_result`
+    and `count_shot` (docs/service-contract.md section 6).
+
+    Small one-dimensional results comprise transient axis values and
+    per-point `q_mean` and `q_std`, or J-V curve metrics. Traces and sweep
+    arrays are omitted. `GET /runs/{id}/data` supplies full arrays while
+    the run is in memory; HDF5 retains them on disk.
     """
     voc = detail.get("voc")
     out = {
@@ -702,9 +671,8 @@ def node_record(node_path: str, outcome: Any, detail: dict, result: dict | None,
         "voc_how": voc.get("how") if isinstance(voc, dict) else None,
         "voc_led_v": voc.get("led_v") if isinstance(voc, dict) else None,
         "led_v": detail.get("led_v"), "temperature_k": detail.get("temperature_k"),
-        # Beside the number, as `voc_how` sits beside the V_oc: a node
-        # recorded at 220 K is worth knowing whether the console settled
-        # there, a loop only asked, or somebody typed it into `[sample]`.
+        # Temperature provenance distinguishes a settled reading, a requested
+        # setpoint and a typed value, even when the numbers agree.
         "temperature_how": detail.get("temperature_how"),
         "temperature_source": detail.get("temperature_source"),
         "offset_corrected": detail.get("offset_corrected"),
@@ -717,8 +685,8 @@ def node_record(node_path: str, outcome: Any, detail: dict, result: dict | None,
         out[key] = (result or {}).get(key)
     running = (result or {}).get("running")
     if out["q_mean"] is None and isinstance(running, dict) and running:
-        # No LoopDone ever came: the per-point running statistics of the
-        # last shot at each point, over the points reached.
+        # Without `LoopDone`, retain the latest running statistics at each
+        # point reached before the stop.
         n = max(running)
         out["q_mean"] = [_num(running[i][0]) if i in running else None for i in range(1, n + 1)]
         out["q_std"] = [_num(running[i][1]) if i in running else None for i in range(1, n + 1)]
@@ -730,23 +698,27 @@ def _num(value: Any) -> float | None:
 
 
 def axis_result(data: dict) -> dict:
-    """`AxisResolved`: the axis and its values, before a single shot -- so a
-    node stopped inside its first loop still says what it was sweeping."""
+    """Retains `AxisResolved` values before any shot completes.
+
+    A stop within the first loop must still identify the scanned axis.
+    """
     return {"axis": data.get("axis"), "values": _floats(data.get("values"))}
 
 
 def loop_result(data: dict) -> dict:
-    """`LoopDone`: the service's mean and σ over every point so far. The
-    newest wins, and `RunFinished` replaces it when the node completes --
-    so a node that was stopped after its third loop carries the statistics
-    of three loops, which is what "kept as it is" means (R2·3)."""
+    """Retains the latest `LoopDone` mean and standard deviation per point.
+
+    `RunFinished` supersedes this at completion. A stopped node therefore
+    keeps statistics over its completed loops.
+    """
     return {"q_mean": _floats(data.get("q_mean")), "q_std": _floats(data.get("q_std"))}
 
 
 def finished_result(data: dict) -> dict:
-    """The per-point statistics of a `RunFinished`, as the journal keeps
-    them: the axis, its values, and `q_mean`/`q_std` per point. `q_all`
-    and the traces stay where they are."""
+    """Retains `RunFinished` axis values and per-point Q statistics.
+
+    `q_all` and traces remain outside this reduced node result.
+    """
     return {"axis": data.get("axis"), "values": _floats(data.get("values")),
             "q_mean": _floats(data.get("q_mean")), "q_std": _floats(data.get("q_std"))}
 
@@ -755,17 +727,21 @@ JV_CURVE_KEYS: tuple[str, ...] = ("label", "dark", "led_level_v", "direction", "
 
 
 def jv_result(data: dict) -> dict:
-    """A `JVFinished`'s curves reduced to their labels and metrics -- the
-    interpolated numbers, which `ui-rules` §6 says to label derived. The
-    whole list, replacing the one `add_curve` built as they arrived."""
+    """Reduces `JVFinished` curves to labels and interpolated metrics.
+
+    The full list replaces incremental `add_curve` results. The console
+    labels these metrics derived, as docs/ui-rules.md section 6 requires.
+    """
     return {"curves": [_curve(c) for c in data.get("curves") or [] if isinstance(c, dict)]}
 
 
 def add_curve(result: dict, data: dict) -> None:
-    """One `JVCurveDone`, reduced, onto the node's list. A stop asked for
-    `after_shot` is honoured between curves and the node ends without a
-    `JVFinished`, so a J-V that kept one curve of two must still say so --
-    the same reason a stopped transient keeps its `LoopDone`."""
+    """Appends one reduced `JVCurveDone` to the node's curve list.
+
+    `after_shot` acts between curves, so a stopped J-V may have no
+    `JVFinished`. Its completed curves remain available, just as a
+    stopped transient retains `LoopDone` statistics.
+    """
     result.setdefault("curves", []).append(_curve(data))
 
 
@@ -776,15 +752,14 @@ def _curve(curve: dict) -> dict:
 
 
 def count_shot(result: dict, data: dict) -> None:
-    """Fold one `StepDone` into a node's counts: how many shots there were,
-    how many carried an intensity reading (the power meter answered) and
-    how many carried a digitiser verdict that was not `ok` -- the two
-    absences and the one failure R2·3's summary strip states outright."""
+    """Counts a shot, its intensity reading and any non-`ok` digitiser verdict.
+
+    The summary distinguishes missing intensity from a flagged shot.
+    """
     result["shots"] = int(result.get("shots") or 0) + 1
-    # The running mean and σ *at this point, including this shot* -- the
-    # service's own, carried on every StepDone -- so a node stopped inside
-    # its first loop, before any LoopDone, still has a number per point it
-    # reached. A later LoopDone or RunFinished replaces the whole array.
+    # `StepDone` statistics include this shot at this point. Retaining
+    # them gives partial first loops per-point results before `LoopDone`.
+    # `LoopDone` or `RunFinished` replaces the array.
     step = data.get("step")
     if isinstance(step, int) and not isinstance(step, bool) and step >= 1:
         running = result.setdefault("running", {})
@@ -814,10 +789,12 @@ def _int(value: Any, fallback: int | None) -> int | None:
 
 
 def finished_text(data: dict, kept: int | None, requested: int | None) -> str:
-    """A finished scan in one line, in nC: the mean and its standard error
-    over loops (`sem`), which is what the next decision turns on -- not the
-    scatter of one loop, which is what `q_std` is. `data` is `RunFinished`'s
-    fields; the run list and the node summary both print this."""
+    """Formats Q and its standard error over loops in nC.
+
+    Standard error (`sem`) describes precision of the mean, while `q_std`
+    is loop scatter. `data` holds `RunFinished` fields. Both run list and
+    node summary use this text.
+    """
     tail = f" · {kept}/{requested}" if kept is not None and requested is not None else ""
     def nc(key: str) -> np.ndarray:
         values = data.get(key)
@@ -848,8 +825,10 @@ _LOOP_HEAD = {"temperature": "T", "illumination": "led", "repeat": "rep"}
 
 
 def _tree_summary(tree: Any) -> str:
-    """`T×9/led×5/jv_bace+bace` for the canonical tree; the module name for
-    a manual run. Descriptive only, never parsed."""
+    """Summarises a tree, such as `T×9/led×5/jv_bace+bace`.
+
+    A manual run uses its module name. The text is never parsed.
+    """
     if not isinstance(tree, dict):
         return ""
     kind = tree.get("kind")
@@ -890,8 +869,10 @@ def _node_count(tree: Any) -> int:
 
 
 def _module_runs(tree: Any) -> int | None:
-    """Module executions in a tree: every leaf times the counts of the loops
-    above it. None when a loop's count is not readable."""
+    """Counts module executions as leaves times enclosing loop counts.
+
+    Returns `None` if a loop count cannot be read.
+    """
     if not isinstance(tree, dict):
         return None
     if tree.get("kind") == "module":

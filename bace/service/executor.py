@@ -1,96 +1,63 @@
-"""The executor: one worker job that walks a schedule and applies the three bindings.
+"""Executes a resolved schedule as one worker job and applies its bindings.
 
-`run_pipeline` is a synchronous generator, run as one `Job` on the worker
-thread, that takes the flat schedule `pipeline.resolve` produced and executes
-it step by step: `loop-enter` and `loop-exit` steps become `NodeStarted`,
-`Progress` and `NodeDone` events about the loop; `module` steps become
-`catalogue.build(...)` and every event the module yields, forwarded unchanged.
-It never re-derives structure from the tree -- what runs, in which order, was
-decided once in `pipeline.py`, where it can be tested without a rig, and the
-Dry run the operator saw is the schedule this walks.
+`run_pipeline` is a synchronous generator. It walks the flat schedule from
+`pipeline.resolve`; tree structure and execution order are resolved there,
+so execution follows the Dry run. Loop steps emit `NodeStarted`, `Progress`
+and `NodeDone`. Module steps call `catalogue.build` and forward its events
+unchanged (docs/service-contract.md section 7).
 
-**The three bindings** (the plan, "The pipeline executor -- the only new logic", docs/history/service-plan.md;
-contract section 7). The pipeline resolved them between *parameters*; this
-is where they meet the instruments:
+Three bindings connect resolved parameters to instruments:
 
-1. **An illumination loop owns `led_v`.** Entering an illumination iteration
-   sets `led_v`/`led_low_v` on the context every module inside it is built
-   with (`RunContext.led_v`), and the module builder drives the 33220A from
-   that -- `jv_bace` measures one light curve at it, `bace` pulses at it. The
-   loop touches no instrument itself: the LED is set by the module that needs
-   it, so a loop that ends with no module inside never leaves the LED on.
-2. **`jv_bace` -> V_oc -> `bace` at the same `led_v`.** Every light
-   `JVCurveDone` a providing module yields is kept as a `VocSource` keyed by
-   the drive it was measured at; a later `bace` in scope gets that source as
-   `RunContext.voc` when its own `led_v` matches to 1e-9 V, and the builder
-   centres the prebias axis on it. The schedule says which provider serves
-   which `bace` (`Step.detail["voc"]`); this file supplies the number, which
-   only exists once the curve has been measured. `on_voc` is called with each
-   new source so the session can update the bench's V_oc rail.
-3. **A relay transition at every `jv_* <-> bace` boundary.** `run_jv` runs
-   inside `router.dc()` and `bace` inside `router.transient()`, both from
-   the module builder; the interlock in the router is the guard. The schedule
-   marks each transition, and this file announces it with a `Notice` so the
-   log shows "relay sourcemeter -> amplifier" where it happened.
+1. An illumination loop owns `led_v` and `led_low_v` in every descendant's
+   `RunContext`. Module builders drive the 33220A at those levels:
+   `jv_bace` measures a light curve and `bace` pulses. The loop performs no
+   instrument writes, so an empty loop cannot leave the LED on.
+2. A light `JVCurveDone` supplies a `VocSource` keyed by LED level. The
+   schedule identifies the provider in `Step.detail["voc"]`; execution
+   supplies its measured value when the receiving `bace` level matches
+   within 1e-9 V. The builder centres V_pre on that V_oc. `on_voc` publishes
+   each source to the session. Missing or mismatched sources are refused
+   before instrument writes, preventing plausible data centred on V_oc
+   from a different illumination.
+3. Module builders run J-V inside `router.dc` and `bace` inside
+   `router.transient`. The router enforces the relay interlock. Scheduled
+   transitions emit a `Notice`, making each relay boundary visible.
 
-The failure the bindings prevent is the one the plan names: a V_oc typed an
-hour ago at another intensity, or a bace that pulsed the LED at the card's
-level while the loop said another, producing a full set of plausible files
-centred on the wrong number. Here the V_oc handed to a bace is always the one
-measured at the drive it is about to pulse, or nothing -- and nothing is a
-refusal from the builder, before an instrument is touched.
+`service.temperature.settle` serves temperature loops and modules. With a
+controller it writes the setpoint, polls through `RunContext.sleep`, emits
+readings and requires `hold_s` inside the band. Refusal, timeout or silence
+falls back to `NeedsOperator`. Without a controller the worker waits in
+`Job.wait_for_operator`. The `emit` hook delivers readings during the pause,
+when the operator needs them. Without a hook, readings are buffered and
+yielded after resume. The last reading or operator's `temperature_k`
+labels descendant folders and metadata. `temperature_how` and
+`temperature_source` distinguish a settled reading, unconfirmed setpoint
+and typed value even when the folder names match. Settle time feeds ETA.
 
-**A temperature iteration settles or pauses** (`service.temperature.settle`,
-shared with the `temperature` module). With the 331 console attached
-(`Rig.temperature`) the setpoint is written, the console polled every
-`TEMPERATURE_POLL_S` through `RunContext.sleep`, each reading yielded as a
-`TemperatureRead`, and the node is done once the reading has held inside the
-band for `hold_s`; a refusal from the console, a timeout or a silent
-instrument falls back to the pause. Without a controller the node pauses as
-it always did: `NeedsOperator` goes out, the worker thread blocks in
-`Job.wait_for_operator` (handing each console reading to the `emit` hook
-*while* it waits -- the reading is for the person watching the cryostat
-settle, and a reading delivered after they have decided it settled is
-history), and the resume's `temperature_k` becomes the context temperature of
-the subtree. Either way the temperature the subtree is measured at -- the
-last reading, or the operator's number -- goes into the folder names and the
-metadata of everything measured below the node -- with the `how` and `source`
-that say which it was (`RunMetadata.temperature_how`/`temperature_source`; a
-folder called `220K` reads the same whether the console settled there, a loop
-only asked and nothing answered, or a person typed it) -- and the settle it
-took feeds the ETA. Without an `emit` hook (a script, a test) the readings
-taken during a pause are yielded after the resume instead. A `temperature`
-*module* binds the same way for the nodes after it, and for the rest of the
-run rather than the rest of one iteration: the cryostat is where it settled
-and stays there until another temperature node moves it, so what it settled
-at (or the operator typed) is written into the root *and* into every loop
-node already open, and a `bace` that follows it -- in this iteration or the
-next -- is labelled with the temperature the cryostat is at, not the
-session's. A temperature loop still wins for its own subtree; each iteration
-writes its setpoint again on the way in.
+A temperature module binds the remaining run, including later iterations
+of enclosing loops. Its result updates the root and every open loop, so
+copied bindings cannot shadow it. A temperature loop owns its subtree and
+writes its setpoint at each iteration.
 
-**Stopping.** `after_shot` is polled before every node and reported by the
-module in flight (`RunAborted(reason="requested")`); the open loop nodes are
-closed with `NodeDone(outcome="stopped")` so a tree view has no node left
-hanging, and when the module ended without saying so (a `run_jv` that returns
-early) the executor says it. `abort` arrives as `GeneratorExit` at the next
-yield or as `AbortNow` from the wait, and both are left to propagate: the
-`finally` parks the rig, and the worker reports the state. An exception in a
-module is reported as `NodeDone(outcome="failed")` for the node and every
-loop above it, then `RunFailed(where=<node path>)`, and re-raised so the job
-ends `failed` with the error recorded.
+`after_shot` is checked before each node. The active module reports
+`RunAborted(reason="requested")`; if it returns early without that event,
+the executor supplies it. Open loops close with `NodeDone(outcome="stopped")`.
+A measurement that reports `RunFinished` or `JVFinished` is complete even
+if stop is requested during its last shot; stop applies at the next node.
+`abort` propagates as `GeneratorExit` at a yield or `AbortNow` during a
+wait. The `finally` parks the rig and the worker reports the terminal state.
+A module exception yields failed `NodeDone` events for the module and open
+loops, then `RunFailed` with the node path. It is re-raised so the worker
+records the error and ends `failed`.
 
-**The ETA is re-derived from what this run has measured** (the plan's "the ETA is
-recomputed as it measures"). Every loop `Progress` carries `eta_s`: the sum of what is left
-in the schedule, where a module's cost is the median duration of the same
-module in this run once one has completed (the schedule's estimate until
-then), and a temperature's settle is the median of the settles the operator
-has taken *in this run* once one has been measured (the journal's median
-from the schedule until then, or nothing). After the first temperature
-settled in two hours instead of the journal's twenty minutes, the next
-`Progress` says so, and the session copies it into the record's `finish_at`.
-
-Nothing here sleeps except through `RunContext.sleep` and the job's wait.
+Each loop `Progress.eta_s` sums the remaining schedule. Completed modules
+supply median durations by module within this run; before one completes,
+the schedule's estimate applies. Temperature nodes supply the median
+settle time in this run, falling back to the journal estimate or no settle
+estimate. A missing settle estimate makes ETA a lower bound. An unusually
+long first settle therefore changes the next ETA and the record's
+`finish_at`, rather than leaving the journal estimate in place.
+All sleeps use `RunContext.sleep` or the job's operator wait.
 """
 from __future__ import annotations
 
@@ -110,12 +77,14 @@ from .temperature import TEMPERATURE_POLL_S, settle  # noqa: F401 -- the poll cl
 from .worker import AbortNow, Job
 
 LED_MATCH_V = 1e-9
-"""Two drive levels closer than this are the same illumination -- the
-tolerance `core.illumination.assert_axis_centre` uses."""
+"""Defines the LED-level matching tolerance in V.
+It matches `core.illumination.assert_axis_centre`.
+"""
 
 _RELAY_SIDE = {"dc": "sourcemeter", "transient": "amplifier"}
-"""The relay position each `ModuleSpec.relay` needs, in the words the bench
-read-back uses, so the notice reads like the bench card."""
+"""Maps `ModuleSpec.relay` values to bench read-back position names.
+Transition notices therefore use the bench card's vocabulary.
+"""
 
 
 def _never() -> bool:
@@ -136,8 +105,7 @@ def _leaf(node_path: str) -> str:
 
 @dataclass
 class _Open:
-    """A loop iteration that has started and not ended: what it binds for
-    the nodes below it, and what its `NodeDone` needs."""
+    """Carries an open loop iteration's bindings and `NodeDone` data."""
 
     node_path: str
     loop: str
@@ -154,8 +122,7 @@ class _Open:
 
 @dataclass
 class _Tally:
-    """What one module's events say about it, for its `NodeDone` and for
-    the session's card: counts, the folder, and a one-line summary."""
+    """Reduces module events to counts, folders and a summary for `NodeDone`."""
 
     module: str
     kept: int | None = None
@@ -163,11 +130,12 @@ class _Tally:
     summary: str = ""
     aborted: E.RunAborted | None = None
     finished: bool = False
-    """A measurement's own "done" (`RunFinished`/`JVFinished`) was seen. A
-    stop requested during the last shot leaves the module complete, and a
-    complete node is `ok`, not `stopped`; the stop then acts at the next
-    node. Only a measurement can say so; a utility that ends without a
-    `RunAborted` simply ended."""
+    """Records whether `RunFinished` or `JVFinished` confirms completion.
+    A stop during the final shot leaves a completed measurement `ok` and
+    acts at the next node. A utility has no completion event and counts as
+    complete if it ends without `RunAborted`
+    (docs/service-contract.md section 7).
+    """
     last_voc: float | None = None
     curves: int = 0
 
@@ -190,9 +158,9 @@ class _Tally:
             self.requested, self.kept = ev.n_curves, 0
         elif isinstance(ev, JVCurveDone):
             self.kept = (self.kept or 0) + 1
-            # `is False`, not `not`: an unknown curve is not a light one, and
-            # its "V_oc" may be a dark curve's noise crossing. This number is
-            # what the card advertises as the run's result.
+            # `is False` excludes unknown illumination. An unknown curve's
+            # apparent V_oc can be a dark curve's noise crossing; it must not
+            # become the run's advertised result.
             if ev.dark is False and ev.metrics.voc is not None:
                 self.last_voc = float(ev.metrics.voc)
         elif isinstance(ev, JVFinished):
@@ -228,31 +196,34 @@ class _Executor:
         self.emit = emit
         self.abort = abort if abort is not None else (job.abort_check if job else _never)
         self.root = _Open(node_path="", loop="", index=0, count=0, started_at=0.0)
-        """What a `temperature` module at the top level of the tree binds for
-        the nodes after it: the level a loop would have been, when there is
-        no loop open to hold the number."""
+        """Carries temperature-module bindings outside any enclosing loop.
+        The root retains them for subsequent nodes and iterations.
+        """
         self.open: list[_Open] = []
         self.providers: dict[str, list[VocSource]] = {}
-        """`VocSource`s measured so far, by the node path of the module that
-        measured them. The schedule names the provider of every centred
-        `bace`; the value is looked up here at the bace's own drive level."""
+        """Indexes measured `VocSource` values by provider node path.
+        The schedule selects the provider; the receiving `bace` selects the
+        source at its own LED level.
+        """
         self.modules_total = len(schedule.modules)
         self.modules_done = 0
         self.node_path = ""
         self.t_start = time.monotonic()
         self.durations: dict[str, list[float]] = {}
-        """Seconds each completed module took, by module name, for the ETA."""
+        """Records completed module durations in seconds by module for ETA."""
         self.settles: list[float] = []
-        """Seconds each temperature node took to settle this run -- the
-        console's polls, or the operator's answer."""
+        """Records this run's temperature settle durations in seconds.
+        They include controller polling and operator wait time.
+        """
 
     # -- the ETA --------------------------------------------------------------
     def eta_s(self, from_index: int) -> float:
-        """Seconds left from schedule step `from_index` on, from what this
-        run has measured where it has, and the schedule's estimates where
-        it has not. A temperature with no settle known from either source
-        contributes its hold only, so the number is a floor until the first
-        settle is measured -- the session's cost keeps `lower_bound`."""
+        """Estimates seconds remaining from schedule index `from_index`.
+
+        Measured durations in this run supersede schedule estimates. Without
+        any settle estimate, a temperature contributes only its hold, making
+        the result a floor; the session retains `lower_bound`.
+        """
         total = 0.0
         for step in self.schedule.steps[from_index:]:
             if step.kind == "module":
@@ -271,9 +242,11 @@ class _Executor:
 
     # -- position -----------------------------------------------------------
     def _at(self, node_path: str) -> None:
-        """Every event yielded from now on is about `node_path`: the worker
-        stamps envelopes with `job.node_path`, so it is set before the yield,
-        never after."""
+        """Assigns `node_path` to subsequent events before yielding them.
+
+        The worker uses `job.node_path` to stamp envelopes, so setting it after
+        a yield would attribute that event to the wrong node.
+        """
         self.node_path = node_path
         if self.job is not None:
             self.job.node_path = node_path
@@ -302,9 +275,9 @@ class _Executor:
                 else:
                     raise ValueError(f"{step.node_path}: unknown step kind {step.kind!r}")
         finally:
-            # On completion, on a stop, on abort (GeneratorExit / AbortNow)
-            # and on failure alike: outputs off, shutter shut. The worker
-            # parks once more afterwards; a second park is two "off"s.
+            # Completion, stop, abort (`GeneratorExit` or `AbortNow`) and
+            # failure all park: outputs off, shutter shut. The worker's second
+            # park is safe because repeating output-off commands is idempotent.
             self.rig.park()
 
     # -- loops ----------------------------------------------------------------
@@ -332,34 +305,30 @@ class _Executor:
             return False
 
         setpoint = float(d.get("setpoint_k", step.value))
-        # `resolve` fills every key from TEMPERATURE_DEFAULTS; a hand-built
-        # Step that leaves one out gets the same value, not a zero that
-        # would pause at the first reading outside the band.
+        # `resolve` fills every key from `TEMPERATURE_DEFAULTS`. Hand-built
+        # `Step` objects need those same defaults: zero would pause on the
+        # first out-of-band reading.
         detail = {"setpoint_k": setpoint,
                   **{k: float(d.get(k, v)) for k, v in TEMPERATURE_DEFAULTS.items()},
                   "index": index, "count": count}
-        # What was asked for, until the settle says what was reached. If it
-        # never does -- a timeout with not one reading -- this setpoint is what
-        # the folder names carry, and `how` says it was never confirmed.
+        # The setpoint labels the subtree only if settle supplies no reading.
+        # `how` then records that the temperature is unconfirmed.
         node.temperature_k = setpoint
         node.temperature_how, node.temperature_source = "setpoint", ""
         ctx = self.ctx_factory(step)
-        # The settle -- through the console, or the operator's pause -- is
-        # one helper shared with the `temperature` module; what comes back
-        # is the temperature the subtree is measured at and what it took.
+        # The shared helper keeps loop and module settle criteria consistent.
+        # It returns the subtree's temperature and actual settle duration.
         outcome = yield from settle(self.rig, ctx, detail, node_path=path,
                                     emit=self.emit, job=self.job)
         if outcome.stopped:
             yield from self._stop()
             return True
-        # What it actually took: the ETA of every temperature still to come
-        # is re-derived from it.
+        # Actual settle duration updates ETA for remaining temperatures.
         self.settles.append(float(outcome.settle_s))
         if outcome.temperature_k is not None:
-            # What was measured, or what the operator typed -- not the
-            # setpoint: it goes into every folder name and metadata below
-            # this node, and `how`/`source` travel with it so the file can
-            # say which of the two it was.
+            # Readings or typed temperatures label descendant folders and
+            # metadata. `how` and `source` retain the distinction from a
+            # requested setpoint.
             node.temperature_k = float(outcome.temperature_k)
             node.temperature_how = outcome.how
             node.temperature_source = outcome.source or ""
@@ -382,8 +351,7 @@ class _Executor:
                          detail={**node.detail, "elapsed_s": time.time() - node.started_at})
 
     def _context(self) -> _Open:
-        """What the open loops bind for a node under them: the innermost
-        illumination's level, the innermost temperature's reading."""
+        """Returns the innermost illumination and temperature bindings for a node."""
         out = _Open(node_path="", loop="", index=0, count=0, started_at=0.0)
         for node in (self.root, *self.open):
             if node.led_v is not None:
@@ -411,9 +379,8 @@ class _Executor:
         self._hooks(ctx)
         values = step.values()
         given = self._bind(ctx, step, values)
-        # The whole triple, not just the number: a `temperature` module that
-        # settles at exactly the number already in scope still changes what
-        # that number is worth, and that change must be recorded.
+        # An unchanged temperature can have different provenance. Comparing
+        # the whole triple preserves that change in the record.
         bound_temperature = (ctx.temperature_k, ctx.temperature_how, ctx.temperature_source)
         started = time.time()
         gen = None
@@ -426,10 +393,9 @@ class _Executor:
                 if refused is not None:
                     yield E.Notice("warning", refused)
         except AbortNow:
-            # An abort that arrived while a module waited for the operator
-            # (the `temperature` module's hook): not a failure of the node,
-            # and the worker turns it into `aborted` -- so it is not reported
-            # here, only unwound through.
+            # Abort during a module's operator wait propagates to the worker.
+            # It unwinds without marking the node failed; the worker reports
+            # `aborted`.
             raise
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
@@ -441,28 +407,23 @@ class _Executor:
             raise
         finally:
             if gen is not None:
-                # Close the module's generator explicitly: on GeneratorExit
-                # from the worker's abort, the inner generator's finally
-                # (bias off, shutter shut, recorder flushed) must run now,
-                # not whenever the garbage collector gets to it.
+                # Explicit close runs the inner generator's `finally` during
+                # abort: bias off, shutter shut, recorder flushed. Safety cannot
+                # depend on garbage-collection timing.
                 gen.close()
 
         if ctx.voc is not None and ctx.voc is not given and self.on_voc is not None:
-            # The module measured its own V_oc (measure_dc): the session's
-            # rail should show it, as it shows a jv_bace curve's.
+            # `measure_dc` supplies the module's V_oc to the session rail,
+            # just as a `jv_bace` light curve does.
             self.on_voc(ctx.voc)
         if ctx.temperature_k is not None and (
                 ctx.temperature_k, ctx.temperature_how,
                 ctx.temperature_source) != bound_temperature:
-            # A `temperature` module settled (or the operator answered it).
-            # The cryostat is now there and stays there until another
-            # temperature node moves it, so this binds the rest of the run,
-            # not just the rest of this iteration: `root`, because the next
-            # iteration of an enclosing loop builds a fresh `_Open` that
-            # copies from the outer scope, and every node already open,
-            # which would otherwise shadow `root` with the value it copied
-            # on its way in. A temperature loop is unaffected -- its `_enter`
-            # writes its own setpoint again for each iteration.
+            # A temperature module binds the remaining run because the cryostat
+            # retains its temperature between nodes. Update `root` for subsequent
+            # iterations and every open loop whose copied value would shadow it.
+            # A temperature loop still owns its subtree: `_enter` writes its
+            # setpoint at each iteration.
             kelvin = float(ctx.temperature_k)
             for holder in (self.root, *self.open):
                 holder.temperature_k = kelvin
@@ -474,13 +435,12 @@ class _Executor:
                                          temperature_source=ctx.temperature_source)
         self.modules_done += 1
         if tally.aborted is None:
-            # A module that ran to its end is what the next one of its kind
-            # will cost; a stopped one says nothing about that.
+            # Only complete module durations estimate another module's cost.
+            # A stopped module does not measure its full duration.
             self.durations.setdefault(name, []).append(time.time() - started)
-        # A measurement that reported its own end is complete whatever the
-        # flag says now; one that went quiet under the flag (run_jv returns
-        # early with a Notice) was stopped. A utility has no "finished"
-        # event: ended without RunAborted is ended.
+        # A measurement's completion event takes precedence over the stop
+        # flag. Early `run_jv` return with a notice means stopped. A utility
+        # has no completion event and ends normally without `RunAborted`.
         measurement = self._is_measurement(name)
         stopped = tally.aborted is not None or (self.abort() and measurement
                                                 and not tally.finished)
@@ -490,19 +450,19 @@ class _Executor:
         if stopped:
             yield from self._close_open("stopped", "stop requested")
             if tally.aborted is None:
-                # The module ended without reporting (run_jv returns early on
-                # abort): the run still has to say it stopped, honestly.
+                # `run_jv` can return early without `RunAborted`; the executor
+                # must still report the stop.
                 yield E.RunAborted(reason="requested", done=self.modules_done,
                                    total=self.modules_total)
             return True
         return False
 
     def _hooks(self, ctx: RunContext) -> None:
-        """What a module that waits needs from the job, when the factory did
-        not set it: the out-of-band `emit` for readings taken during a pause
-        and the job's stop mode, so a `temperature` module's settle polls
-        the console live and tells an abort from an after_shot exactly as a
-        loop's does."""
+        """Supplies missing pause hooks from the job to a module context.
+
+        Out-of-band `emit` delivers live readings. The job's stop mode lets
+        the module distinguish abort from `after_shot`, matching loop settle.
+        """
         if ctx.emit is None:
             ctx.emit = self.emit
         job = self.job
@@ -516,8 +476,10 @@ class _Executor:
             return False
 
     def _bind(self, ctx: RunContext, step: Step, values: dict) -> VocSource | None:
-        """Bindings 1 and 2 onto the context this module is built with.
-        Returns the V_oc source handed in, so a change can be noticed."""
+        """Applies illumination and V_oc bindings to the module context.
+
+        Returns the supplied V_oc source so changes can be reported.
+        """
         outer = self._context()
         if outer.led_v is not None:
             ctx.led_v = outer.led_v
@@ -533,14 +495,10 @@ class _Executor:
         if isinstance(src, dict):
             how = src.get("how")
             if src.get("session"):
-                # The session's V_oc, resolved into the schedule as a value.
-                # Handed over as the source it is (a jv_bace measured
-                # earlier this session), not as a typed number: the
-                # builder would otherwise record `how = "typed"`, and the
-                # validator's warning about typed values is exactly the
-                # difference this preserves. The session's own object is
-                # used when it is the one the schedule named; otherwise it
-                # is rebuilt from what the schedule kept.
+                # A session V_oc retains its measured source. Treating it as a
+                # typed number would record `how="typed"` and change the validator's
+                # warning. Use `session_voc` when it matches the scheduled source;
+                # otherwise reconstruct the source from the resolved schedule.
                 value, led_v = _float_or_none(src.get("value")), _float_or_none(src.get("led_v"))
                 sv = self.session_voc
                 if (sv is not None and value is not None and led_v is not None
@@ -567,39 +525,28 @@ class _Executor:
         return None
 
     def _capture(self, ev: E.Event, step: Step, ctx: RunContext) -> str | None:
-        """Binding 2, the measuring half: a light curve with a V_oc becomes a
-        source keyed by the drive it was measured at.
+        """Captures a light curve's V_oc at its measured LED level.
 
-        **`dark is False`, not `not dark`.** Since the `jv`/`light` split
-        `JVCurveDone.dark` is three-valued, and `None` -- the bench could not
-        say whether light reached the sample -- is falsy. A curve nobody
-        confirmed was lit may be a dark curve, whose "V_oc" is the noise
-        crossing `metrics` refuses to call one for a *known* dark curve; and
-        this source is what a `bace` centres its axis on. So an unknown curve
-        provides nothing, and the operator sets the light and runs again.
+        `JVCurveDone.dark` is three-valued. Only `dark is False` confirms
+        light: falsy `None` means unknown illumination, and its crossing
+        can be dark noise. Such a curve supplies no V_oc for centring `bace`;
+        the operator must establish the light and repeat the measurement.
 
-        A `jv` that *was* read as lit does provide one, and legitimately: the
-        level is the read-back the curve was labelled with, which is the same
-        number the coupling check compares. That is why the capture keys on
-        the event and not on `spec.provides_voc` -- the spec answers the
-        validator's question ("will this node have produced a V_oc by then?"),
-        which `jv` cannot promise before it runs, and this answers the
-        run's ("did one come out?").
+        A `jv` curve confirmed lit can supply V_oc at its read-back LED
+        level, which the coupling check compares. Capture therefore follows
+        the event, not `spec.provides_voc`: validation asks whether a node
+        promises V_oc, whereas execution checks what it actually measures.
 
-        **And lit is not enough: an as-found curve must have been found under
-        DC.** `light(led_mode="pulse", shutter="open")` leaves the lamp
-        chopping at 500 Hz, and the read-back reports that honestly -- lit, at
-        the pulse high level. But the Keithley integrates across the pulse's
-        light and dark phases, so the crossing it interpolates is a time
-        average that is nobody's V_oc. `_build_bace` already knows this: it is
-        exactly why `measure_dc` switches the 33220A to DC before it measures
-        one. A `bace` centred on the pulse level would then take that average
-        as its axis centre, and the coupling check -- which compares drive
-        levels, and would find them equal -- cannot tell.
+        Confirmed light also requires DC for an as-found curve. With
+        `light(led_mode="pulse", shutter="open")`, the LED chops at 500 Hz.
+        The source-meter integrates across light and dark phases. Its
+        interpolated crossing is a time average rather than V_oc. Matching
+        pulse-high levels cannot expose that error in the coupling check.
+        `modules.Catalogue._build_bace` avoids it by using `measure_dc` at DC.
 
-        Only *as-found* curves are asked: `illumination` is None on a `manage`
-        curve, where `_set_illumination` set the LED to DC itself, and on
-        `jv_bace`, whose light is its own business.
+        This check applies only to as-found curves. A managed curve has
+        `illumination=None` because `experiment.jv._set_illumination` sets DC itself;
+        `jv_bace` also manages its own light.
         """
         if not isinstance(ev, JVCurveDone) or ev.dark is not False:
             return
@@ -607,10 +554,9 @@ class _Executor:
             return
         found = ev.illumination
         if found is not None and str(found.get("led_mode") or "").upper() != "DC":
-            # Said out loud, because nothing else would say it. An unknown
-            # curve is already warned about by `run_jv`; this one is a
-            # perfectly good lit curve, and the only sign that its V_oc was
-            # not taken would be a later `bace` failing to find a source.
+            # `run_jv` warns about unknown light but accepts this lit pulse
+            # curve. An explicit notice explains why it supplies no V_oc;
+            # otherwise only a later `bace` source failure would expose it.
             return ("V_oc not taken from this curve: the LED was in "
                     f"{found.get('led_mode')}, and a curve measured under a "
                     "chopped lamp gives a time average, not a V_oc. Set the "
@@ -632,28 +578,23 @@ class _Executor:
         }
         if ctx.voc is not None:
             detail["voc"] = ctx.voc.as_dict()
-        # The drive level this node ran at: the loop's when it is inside one,
-        # its own single-level parameter otherwise (None for a jv_bace range),
-        # so the journal's per-node record can key a V_oc by its level.
+        # The node's LED level keys V_oc in the journal: the loop's binding,
+        # or its own single-level parameter. A `jv_bace` range has no one level.
         led_v = ctx.led_v if ctx.led_v is not None else (values or {}).get("led_v")
         if led_v is not None:
             detail["led_v"] = led_v
-        # The same triple the recorder wrote into the HDF5, from the same
-        # resolver: the tree's binding when a temperature node made one, the
-        # session's typed number otherwise (`RunContext.temperature`). Read
-        # off the raw `ctx.temperature_k` this was absent on every manual run
-        # and every pipeline without a temperature node, so the journal said
-        # nothing about the temperature of exactly the runs whose folder
-        # name was the only record of it (`docs/history/naming-plan.md` §1).
+        # `RunContext.temperature` resolves the same value, `how` and source
+        # as the recorder's HDF5 metadata. It uses a node binding or the
+        # session's typed temperature. Reading only `ctx.temperature_k`
+        # would omit manual runs and pipelines without a temperature node.
         kelvin, how, source = ctx.temperature()
         if kelvin is not None:
             detail["temperature_k"] = kelvin
             detail["temperature_how"] = how
             detail["temperature_source"] = source
-        # Whether the recorder subtracted the dark trace's baseline: a bench
-        # property of the *file*, restated on the node so a results view can
-        # say it beside the charge. `offset_correct` is a transient's
-        # parameter; a J-V has no baseline and says nothing.
+        # Baseline correction belongs to the recorded file and must accompany
+        # its Q in results. `offset_correct` applies to transients; J-V nodes
+        # have no such baseline correction.
         if values and "offset_correct" in values:
             detail["offset_corrected"] = bool(values.get("offset_correct"))
         if error is not None:
@@ -662,14 +603,16 @@ class _Executor:
 
     # -- stopping -------------------------------------------------------------
     def _stop(self) -> Iterator[E.Event]:
-        """A stop noticed between nodes: close what is open and report."""
+        """Closes open nodes and reports a stop detected between nodes."""
         yield from self._close_open("stopped", "stop requested")
         yield E.RunAborted(reason="requested", done=self.modules_done,
                            total=self.modules_total)
 
     def _close_open(self, outcome: str, reason: str) -> Iterator[E.Event]:
-        """`NodeDone(outcome)` for every open loop, innermost first, so a tree
-        view has no node left hanging when the run ends early."""
+        """Emits `NodeDone` for open loops from innermost to outermost.
+
+        An early run end must leave no open node in the tree view.
+        """
         while self.open:
             node = self.open.pop()
             self._at(node.node_path)
@@ -684,25 +627,23 @@ def run_pipeline(rig: Rig, schedule: Schedule, *, catalogue: Any,
                  abort: Callable[[], bool] | None = None,
                  session_voc: VocSource | None = None,
                  emit: Callable[[E.Event], None] | None = None) -> Iterator[E.Event]:
-    """Execute `schedule` on `rig`, yielding every event, as one worker job.
+    """Executes `schedule` on `rig` as one worker job and yields its events.
 
-    `ctx_factory(step)` builds the `RunContext` a step is executed with
-    (run id, output folder, metadata, sleep, the data sink); the executor then
-    sets the bindings on it -- `led_v`/`led_low_v`, `temperature_k`, `voc` --
-    so the session never has to know what a loop decided. `job` is the
-    worker's job: its `node_path` is kept current so envelopes are stamped
-    with the node each event belongs to, its `abort_check` is the stop flag
-    unless `abort` is given, and its `wait_for_operator` is what a
-    temperature pause blocks in. Without a job (tests) a temperature node
-    that pauses needs `RunContext.wait_for_operator` from the factory; one
-    that settles through `rig.temperature` needs only the context's `sleep`
-    and `abort`. `on_voc` is called with every V_oc measured. `session_voc`
-    is the session's current source, handed as itself to a manual run the
-    schedule resolved against it. `emit` delivers an event out of band while
-    the generator is blocked in a wait -- the console readings taken during a
-    temperature pause; the session binds it to its own event path.
+    `ctx_factory(step)` supplies a `RunContext` with run identity, folder,
+    metadata, sleep and data sink. The executor applies `led_v`,
+    `led_low_v`, `temperature_k` and `voc`, keeping loop binding logic here
+    (docs/service-contract.md section 7).
 
-    The generator parks the rig in its `finally`, whichever way it ends.
+    `job.node_path` identifies each event. `job.abort_check` supplies the
+    stop flag unless `abort` is given. `job.wait_for_operator` handles
+    temperature pauses. Without a job, paused nodes need
+    `RunContext.wait_for_operator`; automatic settle needs the context's
+    `sleep` and `abort` only. `on_voc` receives each measured V_oc.
+    `session_voc` retains the source against which a manual run resolves.
+    `emit` delivers readings through the session event path while the
+    generator blocks in a temperature pause.
+
+    The generator's `finally` parks the rig on every exit path.
     """
     return _Executor(rig, schedule, catalogue=catalogue, ctx_factory=ctx_factory, job=job,
                      on_voc=on_voc, abort=abort, session_voc=session_voc, emit=emit).run()

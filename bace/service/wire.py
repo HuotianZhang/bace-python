@@ -1,57 +1,36 @@
-"""Envelopes, and the one place that decides what each event weighs on the wire.
+"""Builds envelopes and applies WebSocket and journal payload limits.
 
-Two consumers read every event, and they cannot afford the same payload. The
-WebSocket feeds a browser drawing the live trace: it wants the *shape* of a
-4000-point record, not the 4000 points, so `StepDone` goes out decimated to a
-thousand samples (first and last kept, stride declared). The journal is a log
-that is read back to answer "what was `n_loops` last time" and "how long does
-a shot take": it wants the scalars and never a trace -- the recorders keep the
-data. If both consumers took the dataclass as it came, a 100-loop scan would
-write a gigabyte of JSON into a file whose only job is to answer those two
-questions, and the browser would spend its time parsing samples it cannot
-draw.
+The browser needs trace shape, while the journal needs scalars for parameter
+and timing queries. `StepDone` traces are decimated to at most 1000 samples
+on the WebSocket, retaining the first and last samples and declaring the
+stride. The journal omits traces; recorders retain full data. This avoids
+large JSON files and browser parsing work without losing recorded data
+(docs/service-contract.md section 3).
 
-This is contract section 3, implemented once so nothing else decides sizes:
+    Event            WebSocket                         Journal
+    `StepDone`       Decimated traces and verdict      Scalars and verdict
+    `StepPhase`      Full, live only, `seq` null        Omitted
+    `JVPoint`        Full, live only, `seq` null        Omitted
+    `RunFinished`    No `photo_averaged`; 1-D arrays    Same; `q_all` omitted
+                     retained                          above 10 000 cells
+    `JVCurveDone`    Full                              Metrics and scalars
+    `JVFinished`     Full                              Reduced curves
+    Other events     Full                              Full
 
-    event            WebSocket                           journal
-    StepDone         light, dark, photo, photo_averaged  scalars only (index, loop,
-                     decimated to <= 1000 points         step, setpoint, axis_value,
-                                                         q, q_mean, q_std,
-                                                         intensity_w, clipped) plus
-                                                         the service's verdict
-    StepPhase        in full, live only: seq null,       not written
-                     not in the ring
-    JVPoint          in full, live only, like StepPhase  not written
-    RunFinished      photo_averaged omitted; values,     the same, minus q_all above
-                     q_mean, q_std, q_all in full        10 000 cells
-    JVCurveDone      in full                             metrics, label, n_points and
-                                                         the other scalars; no arrays
-    JVFinished       in full                             its curves reduced the same way
-    everything else  in full                             in full
+`JVFinished` curves use the same reduction as `JVCurveDone`, so the summary
+cannot reintroduce arrays. `StepPhase` and `JVPoint` describe progress within
+a shot or curve. They are sent only to current subscribers, with `seq` null,
+and enter neither journal nor replay ring. Clients deduplicating by `seq`
+must pass these unnumbered frames through.
 
-`JVFinished` is not in the contract's table; it carries every `JVCurveDone`
-again, so the journal reduces the curves inside it exactly as it reduces the
-curves themselves -- otherwise the arrays the table keeps out would come back
-in through the summary event. `StepPhase` is per-shot noise (six or seven a
-shot) that says where inside the shot the run is: a live card wants it, a
-log and a replay do not, so it is *ephemeral* -- sent to the subscribers
-that are there, with `seq` null like the drop notice, and never journaled or
-kept in the ring. A client that dedupes on `seq` passes it through.
+Both payloads use `{seq, ts, run_id, node_path, type, data, decimated}`.
+`decimated` names every shortened or omitted array, so a reader cannot
+mistake a reduced trace for a short acquisition.
 
-Both payloads are one frame, `{seq, ts, run_id, node_path, type, data,
-decimated}`, so a journal reader and a WebSocket client parse the same
-shape; `decimated` names every array that was thinned or dropped, so neither
-can mistake a shortened array for a short record.
-
-The per-shot verdict is the service's judgement about a shot and is
-attached to the wire `data` here rather than added to the dataclass: the
-recorder's files must not change because the console learned to say "0 rail
-samples". The rule is the design's, corrected 2026-09-02 (the design
-pack 03-states section C, docs/ui-rules.md): only a run of identical samples *inside one trace* is
-evidence of the digitiser's rail, and an extreme repeated more than a few
-times is a window that is probably too small. Light and dark sharing an
-extreme is reported as a fact and judged as nothing -- the displacement
-spike dominates both traces, so good data shares one.
+The per-shot verdict belongs to wire `data`, preserving the recorder's
+file format. A rail requires repeated extreme samples within one trace.
+Light and dark traces can share an extreme because the displacement spike
+dominates both; that fact alone does not indicate clipping.
 """
 from __future__ import annotations
 
@@ -68,27 +47,33 @@ from ..experiment.jv import JVCurveDone, JVFinished, JVPoint
 from ..experiment.wire import envelope_to_wire, to_wire
 
 EPHEMERAL: tuple[type, ...] = (StepPhase, JVPoint)
-"""Events sent live and never journaled, ringed or numbered."""
+"""Identifies live events excluded from the journal, ring and numbering."""
 
 RAIL_RUN_SAMPLES = 7
-"""Consecutive samples on one extreme that make a rail: the design's "7-8
-consecutive samples (an ~11 ns flat top)" at 0.5 ns per sample. Report 033251
-had about seventy."""
+"""Defines a rail as seven consecutive samples at one trace extreme.
+An averaged analogue trace does not normally retain one code this long.
+The bench clipping criterion is 7-8 samples at a 0.5 ns sample interval
+(docs/notes.md). Clipped traces measured on this bench can repeat an
+extreme for about 70 samples, well above the criterion.
+"""
 
 RAIL_REPEAT_SAMPLES = 8
-"""An extreme repeated more than this many times anywhere in a trace: the
-window is probably too small even though the auto-range did not say so.
-Suspicious, not fatal."""
+"""Flags an extreme repeated more than eight times within one trace.
+This suggests insufficient digitiser range even without an auto-range
+warning. It is suspicious rather than fatal (manual 4.2).
+"""
 
 WS_MAX_POINTS = 1000
-"""Samples per trace on the WebSocket. A browser draws a 1000-point line at
-the same width as a 4000-point one; the stride is declared in `decimated` so
-the time axis still comes out right."""
+"""Limits samples per WebSocket trace to the browser's drawing needs.
+A 1000-sample line occupies the same width as a 4000-sample line.
+`decimated` declares the stride to preserve the time axis.
+"""
 
 JOURNAL_MAX_Q_ALL_CELLS = 10_000
-"""Above this, `RunFinished.q_all` (loops x steps) is dropped from the
-journal. A 100-loop, 100-step run is the boundary: ten thousand numbers on
-one line is still a line a person can open; the HDF5 holds the rest."""
+"""Limits journal `RunFinished.q_all` to 10 000 loop-by-point cells.
+This keeps a 100-loop, 100-point result readable on one JSON line.
+The HDF5 retains larger arrays (docs/service-contract.md section 3).
+"""
 
 STEPDONE_SCALARS: tuple[str, ...] = ("index", "loop", "step", "setpoint", "axis_value",
                                      "q", "q_mean", "q_std", "intensity_w", "clipped",
@@ -99,62 +84,57 @@ JVCURVE_SCALARS: tuple[str, ...] = ("index", "label", "dark", "led_level_v", "di
                                     "intensity_w")
 JVCURVE_ARRAYS: tuple[str, ...] = ("voltage", "current", "density")
 SPIKE_LAG_NS = 0.25
-"""Above this light-to-dark lag of the displacement spike the shot is
-*suspect*. Good shots on the rig align to 0.01-0.07 ns; the six bad ones of
-2026-09-05 sat 0.33-1.15 ns apart (`core.diagnostics`).
+"""Defines the spike-lag threshold that requires an edge check, in ns.
+Good shots align to 0.01-0.07 ns; six jittered shots show 0.33-1.15 ns,
+measured on this bench. The 0.25 ns threshold separates those ranges.
 
-**A lag on its own is not jitter, and on this rig it usually is not**
-(measured 2026-09-06/07, `docs/analysis/2026-09-06/spike-lag-and-dark-charge.md`).
-The light trace is the displacement spike *plus* the charge being extracted,
-and adding a real signal to the spike moves the correlation peak without
-moving the spike: a synthetic trace built from a no-light acquisition with
-its spike untouched, plus the measured photocurrent, reproduced the observed
-lag to 0.01 ns at every temperature from 220 to 290 K. Shifting the dark
-trace by the lag cancels only 4 % of the light-dark difference, so the two
-traces do not differ by a time shift at all -- they differ in shape, because
-they carry different amounts of extracted charge. Re-integrating after such
-a shift moves Q by ~1 %.
+Lag alone does not establish jitter. Extracted charge added to the
+displacement spike moves the correlation peak without moving the spike.
+A synthetic trace with an unchanged no-light spike plus measured
+photocurrent reproduces the lag to 0.01 ns over 220-290 K. Shifting the
+dark trace cancels only about 4 % of the difference. The shapes differ,
+rather than merely their timing
+(docs/analysis/2026-09-06/spike-lag-and-dark-charge.md sections 1-2).
+Re-integration after that shift changes Q by about 1 %
+(docs/service-contract.md section 3).
 
-So this threshold alone is not a verdict. Jitter smears what a shift cannot:
-a jittered average is the true spike convolved with the trigger's own
-scatter, which widens the leading edge. `SPIKE_EDGE_NS` is that, and a
-`warn` needs the lag *and* it."""
+Jitter convolves the spike with trigger scatter and widens its leading
+edge. A warning therefore requires this lag and an edge above
+`SPIKE_EDGE_NS`.
+"""
 
 SYNC_LAG_NS = 0.1
-"""Above this lag between the two acquisitions' *sync* traces they really were
-offset in time, and the shot is void whatever the spikes look like -- the
-engine subtracts sample for sample, so an offset puts the 50 mA displacement
-spike into the photocurrent.
+"""Defines a 0.1 ns limit for lag between the two sync traces.
+The engine subtracts sample for sample. A real timing offset leaves part
+of the 50 mA displacement spike in the difference, invalidating Q
+regardless of spike correlation (docs/service-contract.md section 3).
 
-A spike lag mixes a timing offset with the charge coming out of the device
-and cannot separate them; the sync carries the trigger edge and nothing else.
-Over the 240 shots of the 220-295 K sweep the sync lag never left +-0.004 ns
-while the spike lag ran 0.135 to 0.479 ns, so this threshold sits twenty-five
-times above the noise and well under any offset worth catching.
+Measured on this bench over 240 shots at 220-295 K: sync lag stays within
+±0.004 ns while spike lag spans 0.135-0.479 ns. The limit is 25 times the
+sync noise and below timing offsets that compromise subtraction. Spike
+lag mixes timing and extracted charge; sync contains only the trigger.
 
-It bounds the trigger chain and nothing downstream of it: the field reaches
-the device a latency after the sync edge, so a latency that differed between
-the two acquisitions would move the spikes with the syncs still together
-(`core.diagnostics.sync_lag_ns`). The `ok` line therefore reports what the
-sync measured rather than what it would mean, and says so when there is no
-sync to measure."""
+`core.diagnostics.sync_lag_ns` bounds the trigger chain, not downstream
+latency from sync to field arrival. Different latencies can move the
+spikes while sync edges agree. The `ok` line reports the measured sync
+and explicitly reports missing sync data instead of claiming alignment.
+"""
 
 SPIKE_EDGE_NS = 8.0
-"""A displacement spike whose 10-90 % edge is slower than this was smeared.
-The rig's good shots are 6.0-6.5 ns; the jittered ones were 8-13 ns.
+"""Defines the 8 ns limit for the displacement spike's 10-90 % edge.
+Good edges span 6.0-6.5 ns; jittered edges span 8-13 ns. Jitter also
+reduces spike heights by 4-14 %, but height alone cannot diagnose it
+(docs/service-contract.md section 3).
 
-The **leading edge** and not the spike's height, though the 2026-09-05
-incident lowered both (by 4-14 %). A height difference between the light and
-dark spikes is not the acquisition's alone to explain: under the default
-`dark_reference = "translated"` the two traces repeat one voltage *swing*
-over different absolute ranges, so their capacitive terms agree only where
-`C(V)` is flat (`experiment.transient.RunConfig.dark_reference`). On this
-device the two spikes drift from 0.4 % apart at 220 K to 1.1 % at 295 K and
-are still climbing -- a device with more `C(V)` curvature would pass 2 %
-honestly, and it would do it in exactly the shots that also carry the
-charge-induced lag this rule exists to accept. The edge is not exposed to
-that: it is the generator's rise, and it measured 6.0-6.5 ns across the
-whole 220-295 K sweep while the spikes' *decay* moved by 11 ns."""
+With `experiment.transient.RunConfig.dark_reference="translated"`, the
+same voltage change spans different absolute voltages. Capacitive currents agree only where
+capacitance is independent of voltage. On this device the spike-height
+difference grows from 0.4 % at 220 K to 1.1 % at 295 K. Stronger voltage
+dependence can exceed 2 % without jitter, in shots also carrying
+charge-induced lag. The leading edge instead follows the generator's
+rise: it remains 6.0-6.5 ns over 220-295 K while spike decay varies by
+11 ns. The edge criterion therefore accepts charge-induced lag.
+"""
 
 SHOT_CHECKS: tuple[tuple[str, str, str, str], ...] = (
     ("Rail", "warn",
@@ -175,9 +155,10 @@ SHOT_CHECKS: tuple[tuple[str, str, str, str], ...] = (
      "The digitiser returned no samples: there is nothing to integrate.",
      "Check the digitiser and its connection."),
 )
-"""The per-shot verdicts of `shot_verdict`: name, level, condition, remedy. A
-warning marks the shot and leaves it in the mean. The source of manual 4.2
-(`tools/build_manual.py`)."""
+"""Describes `shot_verdict` checks by name, level, condition and remedy.
+Warnings mark shots without excluding them from the mean.
+`tools/build_manual.py` uses this table to generate manual 4.2.
+"""
 
 VERDICT_KEYS: tuple[str, ...] = ("rail_light", "rail_dark", "rail_run_light", "rail_run_dark",
                                  "shared_extreme", "peak_light_a", "peak_dark_a",
@@ -185,29 +166,28 @@ VERDICT_KEYS: tuple[str, ...] = ("rail_light", "rail_dark", "rail_run_light", "r
                                  "averages_light", "averages_dark",
                                  "sync_edge_light_ns", "sync_edge_dark_ns",
                                  "sync_lag_ns", "level", "text")
-"""The keys every verdict carries. A diagnostic may add to them, never
-replace one: a `shot_diagnostics()` that happened to return `level` would
-otherwise silently overrule the saturation check. `peak_*_a` is the signed
-extreme of each full trace, computed before decimation: the card's
-"peak · light -9.58 mA" cannot be read off a 5:1 thinned trace, whose kept
-samples can straddle the true extreme."""
+"""Reserves the keys every verdict carries.
+Diagnostics may add keys but cannot replace them: a diagnostic `level`
+must not override the rail check. `peak_light_a` and `peak_dark_a` retain
+the signed extreme of each full trace before decimation. A 5:1 reduction
+can skip the true peak, so the card cannot derive it from the wire trace.
+"""
 
 
 def is_ephemeral(event: Event) -> bool:
-    """Sent live, never journaled, ringed or given a `seq` (`StepPhase`,
-    `JVPoint`)."""
+    """Returns whether an event is live-only, without a journal or `seq`."""
     return isinstance(event, EPHEMERAL)
 
 
 # -- envelopes ------------------------------------------------------------
 def make_envelope(seq: int, run_id: str | None, node_path: str, event: Event,
                   ts: float | None = None) -> Envelope:
-    """Wrap one event for the wire. `ts` defaults to now, in unix seconds.
+    """Wraps an `Event` in a wire envelope with a Unix timestamp.
 
-    Refuses anything that is not an `Event`: a dict or a string would pass
-    through `envelope_to_wire` as itself and reach the browser with
-    `type: "dict"`, which no client dispatches on. `RunQueued` is an `Event`
-    like the rest (`experiment.events`), so the session wraps it here too.
+    `ts` defaults to the current time in seconds. A non-`Event` is refused:
+    `envelope_to_wire` would pass a dictionary or string through with a
+    type such as `dict`, which clients cannot dispatch. `RunQueued` is an
+    `Event` and uses this same path.
     """
     if not isinstance(event, Event):
         raise TypeError(
@@ -221,7 +201,7 @@ def make_envelope(seq: int, run_id: str | None, node_path: str, event: Event,
 
 # -- the payload policy ---------------------------------------------------
 def ws_payload(env: Envelope) -> dict:
-    """The frame a WebSocket client receives for `env`, per the table above."""
+    """Returns the WebSocket frame for `env` under the module's payload policy."""
     ev = env.event
     if isinstance(ev, StepDone):
         return envelope_to_wire(env, max_points=WS_MAX_POINTS)
@@ -232,14 +212,13 @@ def ws_payload(env: Envelope) -> dict:
 
 
 def journal_payload(env: Envelope, *, verdict: Mapping[str, Any] | None = None) -> dict | None:
-    """The line the journal writes for `env`, per the table above; None for
-    an ephemeral event, which is not written at all.
+    """Returns the journal payload, or `None` for a live-only event.
 
-    A `StepDone` line always carries a `verdict`. Pass the one that was
-    attached to the WebSocket payload (with the bench's diagnostics) so the
-    live card and the session log say the same thing about the shot; when
-    none is given the saturation check is run here, without diagnostics,
-    rather than leaving the line with no judgement at all.
+    Every `StepDone` line carries a verdict. Supplying the WebSocket's
+    verdict, including bench diagnostics, keeps the live card and journal
+    consistent. Without one, this function runs the rail check without
+    diagnostics rather than omitting the judgement
+    (docs/service-contract.md section 3).
     """
     ev = env.event
     if is_ephemeral(ev):
@@ -271,14 +250,12 @@ def journal_payload(env: Envelope, *, verdict: Mapping[str, Any] | None = None) 
 
 def payloads(env: Envelope, *,
              diagnostics: Mapping[str, Any] | None = None) -> tuple[dict, dict | None]:
-    """`(websocket, journal)` for one envelope, the verdict computed once;
-    the journal payload is None for an ephemeral event.
+    """Returns WebSocket and journal payloads with one shared verdict.
 
-    The call the session's fan-out task wants: one per envelope, and a
-    `StepDone` gets the identical `verdict` object in both payloads, so the
-    live card and the session log cannot disagree about a shot. `diagnostics`
-    is what `rigs.Bench.shot_diagnostics()` returned after the light
-    acquisition -- the autorange pass count, when the driver has it.
+    The journal payload is `None` for a live-only event. Both `StepDone`
+    payloads share the verdict object so the live card and journal agree.
+    `diagnostics` comes from `rigs.Bench.shot_diagnostics` after the light
+    acquisition and includes the auto-range pass count when available.
     """
     ws = ws_payload(env)
     verdict = None
@@ -290,9 +267,11 @@ def payloads(env: Envelope, *,
 
 def ephemeral_frame(run_id: str | None, node_path: str, event: Event,
                     ts: float | None = None) -> dict:
-    """The WebSocket frame of an ephemeral event: the full payload with
-    `seq` null, the same shape as the drop notice, so a client that dedupes
-    on `seq` lets it through and a replay never contains it."""
+    """Returns a full live-only frame with `seq` null.
+
+    Like the drop notice, it passes through client deduplication and never
+    appears in replay (docs/service-contract.md section 3).
+    """
     frame = ws_payload(make_envelope(0, run_id, node_path, event, ts))
     frame["seq"] = None
     return frame
@@ -300,10 +279,11 @@ def ephemeral_frame(run_id: str | None, node_path: str, event: Event,
 
 # -- the per-shot verdict -------------------------------------------------
 def _rail_run(a: np.ndarray) -> int:
-    """The longest run of consecutive samples sitting on the trace's own
-    minimum or maximum. A digitiser that ran out of window returns the same
-    code for every sample past it, so a rail is a flat top; an averaged
-    analogue trace essentially never holds one code for seven samples."""
+    """Finds the longest consecutive run at a trace's minimum or maximum.
+
+    Beyond its range a digitiser repeats the same code, forming a flat top.
+    An averaged analogue trace rarely holds one code for seven samples.
+    """
     if a.size == 0:
         return 0
     best = 0
@@ -326,46 +306,38 @@ def shot_verdict(light_y, dark_y,
                  dt: float | None = None,
                  light: Any = None, dark: Any = None,
                  sync_light: Any = None, sync_dark: Any = None) -> dict[str, Any]:
-    """`{rail_light, rail_dark, rail_run_light, rail_run_dark, shared_extreme,
-    peak_light_a, peak_dark_a, spike_lag_ns, edge_light_ns, edge_dark_ns,
-    averages_light, averages_dark, sync_edge_light_ns, sync_edge_dark_ns,
-    level, text, ...diagnostics}`.
+    """Judges a shot's clipping, timing and completeness.
 
-    Three rules. The third is the shot's *alignment* (2026-09-05,
-    `core.diagnostics`; corrected 2026-09-07): the light and dark displacement
-    spikes must sit on top of each other, because `light - dark` is what the
-    photocurrent is. On six shots of the first hardware day they were
-    0.3-1.2 ns apart -- the trigger had jittered for the length of the shot --
-    and the 50 mA spike's residual was reported as a photocurrent ten times the
-    real one, with the charge's sign flipped, while every rail check passed.
+    The verdict includes rail counts and run lengths, shared extremes,
+    signed peaks in A, spike lag and edge times in ns, N_avg, sync edge
+    times, `level`, `text` and additional diagnostics.
 
-    **But a lag is not by itself jitter.** The light trace carries the charge
-    being extracted on top of the spike, and that alone moves the correlation
-    peak: see `_mistimed`, and `SPIKE_LAG_NS`. So a lag warns only beside a
-    smeared edge; separately, sync traces that are apart warn on their own,
-    whatever the spikes say. A lag with neither goes on the `ok` line beside
-    what the sync measured, for the operator to read. The edge times and the sync edges are reported beside it so
-    the two sides of the trigger chain can be told apart; the average counts
-    say whether the digitiser folded what was asked. All need `dt` (and the
-    `Trace`s for the counts and the syncs); called with bare arrays they are
-    None and the judgement is the two rail rules alone.
+    Sample-by-sample subtraction requires aligned acquisitions. A timing
+    error can leave a 50 mA displacement spike in the difference and produce
+    a photocurrent ten times too large with Q's sign reversed, even when
+    rail checks pass. This is measured on the bench
+    (docs/analysis/2026-09-06/spike-lag-and-dark-charge.md section 0).
 
-    The two rail rules, both about a single trace (03-states section C, corrected):
+    Spike lag alone can reflect extracted charge rather than jitter.
+    `_mistimed` warns when lag accompanies a smeared edge, or independently
+    when sync traces disagree. Without either symptom, the `ok` line reports
+    lag beside the sync evidence. Edge times distinguish trigger-chain
+    faults; N_avg checks acquisition completeness. Timing needs `dt`, and
+    counts and sync need `Trace` inputs. Bare arrays leave these diagnostics
+    `None`, so only the rail checks apply.
 
-    * a run of `RAIL_RUN_SAMPLES` or more consecutive samples on one extreme
-      is the digitiser's rail -- `warn`, and the text says the charge is
-      meaningless;
-    * an extreme repeated more than `RAIL_REPEAT_SAMPLES` times is a window
-      that is probably too small -- `warn`, suspicious rather than fatal.
+    Rail checks concern one trace (manual 4.2):
 
-    `shared_extreme` is reported and judged as nothing: the displacement
-    spike dominates both traces, so light and dark *should* share one, and a
-    rule that warned on it fired on good data. `text` is the warning, or the
-    one-line summary the live card shows ("autorange pass 2 · shared extreme
-    · 1 rail sample"). Diagnostics are merged in flat, so a client reads
-    `verdict.autorange_passes` beside `verdict.rail_light`; a diagnostic that
-    would overwrite one of the fixed keys is refused rather than silently
-    winning.
+    - At least `RAIL_RUN_SAMPLES` consecutive extreme samples imply a rail.
+      The warning states that Q is meaningless.
+    - More than `RAIL_REPEAT_SAMPLES` extreme samples suggest insufficient
+      range. This is suspicious rather than fatal.
+
+    `shared_extreme` is informational: the displacement spike dominates
+    both traces, so valid traces can share it. `text` supplies the warning
+    or the live card's one-line summary. Diagnostics merge as additional
+    keys, such as `autorange_passes`; attempts to overwrite a key in
+    `VERDICT_KEYS` are refused to protect the verdict.
     """
     light_arr = np.asarray(light_y, dtype=float)
     dark_arr = np.asarray(dark_y, dtype=float)
@@ -419,9 +391,10 @@ def shot_verdict(light_y, dark_y,
 
 def attach_verdict(payload_data: dict, ev: StepDone,
                    diagnostics: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """Compute `shot_verdict` for the shot and store it as
-    `payload_data["verdict"]`. Returns the verdict so the caller can put the
-    same object elsewhere."""
+    """Computes and stores `shot_verdict` in `payload_data["verdict"]`.
+
+    Returns that object so other payloads can share the same judgement.
+    """
     if not isinstance(payload_data, dict):
         raise TypeError("attach_verdict wants the payload's `data` dict, not "
                         f"{type(payload_data).__name__}")
@@ -434,8 +407,7 @@ def attach_verdict(payload_data: dict, ev: StepDone,
 
 def _alignment(light: np.ndarray, dark: np.ndarray, dt: float | None,
                light_tr: Any, dark_tr: Any, sync_light: Any, sync_dark: Any) -> dict[str, Any]:
-    """The alignment and completeness numbers (`core.diagnostics`), None
-    where the inputs cannot give them."""
+    """Returns alignment and completeness diagnostics, or `None` if unavailable."""
     from ..core.diagnostics import (edge_10_90_ns, spike_lag_ns, sync_edge_ns,
                                     sync_lag_ns)
     out: dict[str, Any] = {"spike_lag_ns": None, "edge_light_ns": None, "edge_dark_ns": None,
@@ -465,55 +437,44 @@ def _alignment(light: np.ndarray, dark: np.ndarray, dt: float | None,
 
 
 def _mistimed(align: Mapping[str, Any]) -> str:
-    """Why this shot looks jittered rather than merely lagged -- or `""`.
+    """Returns the timing fault description, or an empty string.
 
-    **The lag alone does not say jitter.** The light trace is the
-    displacement spike plus the charge being extracted, and adding that
-    charge moves the correlation peak while the spike itself stands still:
-    on the rig, a no-light acquisition with its spike untouched plus the
-    measured photocurrent reproduced the observed lag to 0.01 ns, and
-    shifting the dark trace by the lag cancelled only 4 % of the light-dark
-    difference (2026-09-06/07). A rule that warned on the lag alone called
-    177 of 492 good shots void, and told the operator to distrust a charge
-    that was within ~1 % of right.
+    Extracted charge can move spike correlation without a timing error.
+    An unchanged no-light spike plus measured photocurrent reproduces the
+    observed lag to 0.01 ns. Shifting the dark trace removes only about
+    4 % of the difference
+    (docs/analysis/2026-09-06/spike-lag-and-dark-charge.md section 2).
+    A lag-only rule flags 177 of 492 good shots with Q within about 1 % of
+    the unshifted value (docs/service-contract.md section 3).
 
-    Two faults, tested independently, and only one of them needs the lag:
+    The two independent fault checks are:
 
-    * **the edge is smeared** *and* the spikes are apart. A jittered average
-      is the true spike convolved with the trigger's own scatter, so the
-      leading edge comes out slower. `SPIKE_EDGE_NS`. This is the fault the
-      2026-09-05 incident was.
-    * **the sync traces are apart**, whatever the spikes say. They carry the
-      trigger edge and nothing else, so the two acquisitions were armed at
-      different times and the engine subtracts sample for sample. This one is
-      deliberately *not* gated behind the spike lag: the charge's lag and a
-      real offset move the spike correlation in opposite directions, so half a
-      nanosecond of offset can leave the spike lag reading 0.08 ns while the
-      acquisitions really are a sample apart. `SYNC_LAG_NS`, and
-      `core.diagnostics.sync_lag_ns` for what the sync can and cannot say: it
-      bounds the trigger chain, and everything downstream of the sync edge is
-      outside it.
+    - Spike lag above `SPIKE_LAG_NS` together with an edge slower than
+      `SPIKE_EDGE_NS`. Trigger scatter convolves and broadens the spike.
+    - Sync lag above `SYNC_LAG_NS`, regardless of spike lag. Sync records
+      the trigger alone. Charge-induced lag and a real offset can move
+      spike correlation in opposite directions: a 0.5 ns offset can leave
+      only 0.08 ns of spike lag. Gating sync on spike lag would miss it.
 
-    The 2026-09-05 incident lowered the spikes as well, but a height
-    difference between the two traces is not the acquisition's alone to
-    explain -- see `SPIKE_EDGE_NS` -- and it grows with temperature on a
-    healthy device, in the very shots this rule exists to stop calling void.
+    `core.diagnostics.sync_lag_ns` bounds only the trigger chain.
+    Latency after the sync edge remains outside that check. Spike height
+    is also unsuitable: voltage-dependent capacitance produces real
+    light-to-dark height differences that grow with temperature, including
+    shots with charge-induced lag. `SPIKE_EDGE_NS` explains that constraint.
     """
     lag = align.get("spike_lag_ns")
     edges = [e for e in (align.get("edge_light_ns"), align.get("edge_dark_ns")) if e is not None]
-    # Jitter first: a smeared spike says so by itself, and it is the fault the
-    # 2026-09-05 incident actually was.
+    # Spike lag and a smeared edge together indicate jitter.
     if lag is not None and abs(lag) > SPIKE_LAG_NS and edges and max(edges) > SPIKE_EDGE_NS:
         return (f"the light and dark displacement spikes are {abs(lag):.2f} ns apart and "
                 f"the spike edge is {max(edges):.1f} ns where a settled shot is 6 ns: that "
                 "pair is the signature of the trigger jittering for the length of the "
                 "shot, so their difference leaves the spike in the photocurrent and Q of "
                 "this shot is not a charge.")
-    # The sync stands on its own, and must: the charge's lag and a real offset
-    # push the spike correlation in *opposite* directions, so half a nanosecond
-    # of offset can leave the spike lag reading 0.08 ns -- under the threshold,
-    # with the acquisitions genuinely a sample apart. Gating this behind the
-    # spike lag would have let exactly that through (2026-09-08).
+    # Sync is independent: charge and timing offsets can move spike
+    # correlation in opposite directions. A 0.5 ns offset can read as
+    # 0.08 ns spike lag, so gating on spike lag would miss misalignment
+    # (docs/service-contract.md section 3).
     offset = align.get("sync_lag_ns")
     if offset is not None and abs(offset) > SYNC_LAG_NS:
         return (f"the two sync traces are {abs(offset):.2f} ns apart: the acquisitions "
@@ -524,7 +485,7 @@ def _mistimed(align: Mapping[str, Any]) -> str:
 
 def _sync_side(align: Mapping[str, Any], sync_light: Any = None,
                sync_dark: Any = None) -> str:
-    """Which side of the trigger chain the sync edges point at."""
+    """Locates the indicated fault within the trigger chain from sync edges."""
     edges = [align.get("sync_edge_light_ns"), align.get("sync_edge_dark_ns")]
     if all(e is None for e in edges):
         if sync_light is None and sync_dark is None:
@@ -550,18 +511,15 @@ def _ok_text(rail_light: int, rail_dark: int, shared: bool, diag: Mapping[str, A
     if align:
         lag = align.get("spike_lag_ns")
         if lag is not None:
-            # Above the threshold and still `ok` means the two corroborating
-            # symptoms of jitter are absent, so the lag is the extracted
-            # charge riding on the spike (see `_smeared`). Say which, or the
-            # operator reads a number they were once told meant a void shot.
+            # Without corroborating timing faults, lag is consistent with
+            # charge added to the spike. The text must distinguish that from
+            # a timing warning; `_mistimed` applies the fault checks.
             note = ""
             if abs(lag) > SPIKE_LAG_NS:
-                # What the sync measured, not what it means. An aligned sync
-                # says the trigger chain did not move between the two
-                # acquisitions; it cannot say the spikes are aligned, because
-                # the field reaches the device a latency after the edge the
-                # scope triggered on. The number goes on the line and the
-                # reading is the operator's.
+                # An aligned sync constrains the trigger chain only. Field arrival
+                # follows the sync edge after a latency that can differ between
+                # acquisitions. Report the measured sync instead of claiming spike
+                # alignment.
                 sync = align.get("sync_lag_ns")
                 note = (f" · sync {abs(sync):.2f} ns apart" if sync is not None
                         else " · no sync to check the trigger")
@@ -580,19 +538,22 @@ def _ok_text(rail_light: int, rail_dark: int, shared: bool, diag: Mapping[str, A
 
 # -- pieces ---------------------------------------------------------------
 def _frame(env: Envelope, data: Any, info: dict) -> dict:
-    """The same seven keys `experiment.wire.envelope_to_wire` produces, for
-    a payload whose `data` was built here rather than by reflection. Kept
-    to one shape on purpose; `test_service_wire` asserts the two agree."""
+    """Builds the seven-key shape from `experiment.wire.envelope_to_wire`.
+
+    The data is built here rather than by reflection.
+    `tests/test_service_wire.py` checks that both paths agree.
+    """
     return {"seq": int(env.seq), "ts": float(env.ts), "run_id": env.run_id,
             "node_path": env.node_path, "type": type(env.event).__name__,
             "data": data, "decimated": info}
 
 
 def _run_finished(ev: RunFinished) -> tuple[dict, dict]:
-    """`RunFinished` with `photo_averaged` (steps x samples) dropped and
-    every 1-D array whole. The matrix is replaced before conversion rather
-    than converted and discarded: 51 x 4000 floats to a Python list is real
-    work for nothing."""
+    """Reduces `RunFinished` by omitting `photo_averaged` and retaining 1-D arrays.
+
+    Replacement precedes conversion, avoiding a wasted conversion of a
+    51-by-4000 matrix to Python lists.
+    """
     shape = list(np.asarray(ev.photo_averaged).shape)
     slim = dataclasses.replace(ev, photo_averaged=np.empty((0, 0)))
     data, info = to_wire(slim)
@@ -609,10 +570,12 @@ def _curve_scalars(c: JVCurveDone) -> dict:
 
 
 def _plain(value: Any) -> Any:
-    """A JSON-safe copy: arrays to lists, numpy scalars to Python ones, NaN
-    and infinity to None, dataclasses to dicts. Anything else is refused --
-    a journal line that `json.dumps` cannot write must fail here, with the
-    type named, not inside the journal's lock."""
+    """Copies data into JSON-safe types and refuses unsupported values.
+
+    Arrays become lists, NumPy scalars become Python scalars, NaN and
+    infinity become `None`, and dataclasses become dictionaries. Refusal
+    names the type here, before serialization reaches the journal lock.
+    """
     if isinstance(value, np.ndarray):
         return _plain(value.tolist())
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
