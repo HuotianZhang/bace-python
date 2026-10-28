@@ -1,48 +1,29 @@
-"""The observers: threads that read an instrument beside a run, off the bus.
+"""Reads power and temperature on observer threads beside worker jobs.
 
-A reading has to be able to arrive *during* a bace scan (the design's R3·2
-power sparkline, and the temperature card's "294.8 K · 331 reads" while a
-scan runs), and the bench-lock rule says the worker thread owns the
-instruments. These threads are the one concurrency it allows, and each pays
-for it differently:
+The power meter uses USB when this process owns it, or HTTP through its
+console. Neither path uses VISA, so readings can arrive during a scan.
+`rigs._METER_LOCK` and the driver's lock serialise reads with the worker
+(docs/service-contract.md section 8).
 
-* **The 1918-C is not on the bus at all** — USB when this process owns it
-  (the default), HTTP when the meter's console does. Either way a reading is
-  not a VISA transaction, so it never interleaves with the scope or the
-  generators. It is serialised against the worker's own reads by
-  `rigs._METER_LOCK` and by the driver's internal lock.
-* **The 331 is on GPIB when this process owns it** (since 2026-09-03), and
-  that *is* the bus. So the temperature monitor takes `bus` -- the worker's
-  own lock, held for the whole of a job -- and reads only while holding it,
-  without ever blocking on it. A tick that cannot take it is skipped rather
-  than run beside an acquisition. With a console named the 331 is HTTP again
-  and no lock is passed.
+The 331 uses GPIB when this process owns it. Its monitor acquires the
+worker's `bus` lock without blocking and holds it for the complete read.
+A busy lock skips the tick; a skip is not a failure. With an HTTP console,
+no bus lock is needed. Testing `worker.idle` is unsafe: a job can start
+between the test and a multi-query read. Holding the lock prevents overlap
+in both directions. A job waits for any read in flight to complete, which
+takes a few tens of milliseconds as measured on this bench.
 
-  Holding it rather than asking `worker.idle` is the point: the boolean was
-  racy, true one instant and stale the next, so a multi-query read could
-  straddle the start of a job. Held, the two cannot overlap in either
-  direction -- and a job that wants to start while a read is in flight waits
-  the few tens of milliseconds it takes, which is the right way round.
+A pipeline holds the bus throughout its job. During a long subtree the
+temperature reading can become stale. `skipped` on `GET /monitors` exposes
+why. The worker supplies readings at safe points during temperature settle
+and operator pauses, through `Job.wait_for_operator`'s `on_poll`. Continuous
+readings inside other modules require safe points in the measurement path.
 
-**What this costs, and it is not nothing.** A pipeline run holds the bus for
-its whole length, so during an hours-long subtree the temperature monitor
-emits nothing at all and the card's reading goes stale. `skipped` on
-`GET /monitors` is how a UI can say *why* instead of showing an old number as
-if it were current. Readings still arrive from the worker itself where it is
-safe to take them -- while a temperature node settles, and while a run is
-paused for the operator (`Job.wait_for_operator`'s `on_poll`). Closing the
-gap properly means the worker sampling at safe points inside a run, which is
-a change to the measurement path and not this one.
-
-A skipped tick is not a failure and is not counted as one.
-
-Threads rather than asyncio tasks so the same objects work under the FastAPI
-loop and in a test with no loop at all; the interval is a `threading.Event`
-wait, so `stop()` returns at once rather than after the interval, and a test
-can run one at 10 ms. A console that stops answering is reported once, as a
-`Verdict(warn, "<name>.console")`, and the monitor keeps trying -- the
-console being restarted is the ordinary case, and a monitor that gave up
-would have to be restarted by hand afterwards, which nobody remembers to do.
+Threads work with both the asyncio service and tests without an event loop.
+The interval uses `threading.Event.wait`, so `stop` need not wait for the
+interval to expire and tests can use a 10 ms interval. An unresponsive
+instrument or console emits one `Verdict(warn, "<name>.console")` while the
+monitor keeps trying. Recovery then requires no manual monitor restart.
 """
 from __future__ import annotations
 
@@ -57,19 +38,19 @@ MAX_INTERVAL_S = 3600.0
 MIN_INTERVAL_S = 0.01
 
 TEMPERATURE_MONITOR_S = 5.0
-"""What the temperature monitor runs at when nobody says otherwise, and the
-interval `Session.start` starts it at -- the console's own slow-poll interval
-and the same number as the settle's poll clock
-(`temperature.TEMPERATURE_POLL_S`), so the card moves at one rate whether a
-run is settling or the bench is idle. It is deliberately not the power
-monitor's 1 s: a cryostat does not change in a second, and this monitor
-competes for the bus."""
+"""Sets the default 331 monitor interval in seconds.
+It matches `temperature.TEMPERATURE_POLL_S` and the console's slow poll,
+so idle and settle readings arrive at the same rate. Five seconds is
+sufficient for a cryostat and limits bus contention; the power monitor's
+1 s interval is unnecessary here (docs/service-contract.md section 8).
+"""
 
 
 class Monitor:
-    """Read something every `interval_s` on a thread of its own and hand
-    each reading to `emit`. Subclasses say what (`read`) and how the last
-    reading is summarised (`last_info`)."""
+    """Reads on a dedicated thread every `interval_s` and calls `emit`.
+
+    Subclasses implement `read` and summarise the result in `last_info`.
+    """
 
     name = "monitor"
 
@@ -83,10 +64,10 @@ class Monitor:
         self.interval_s = interval_s
         self.console = console
         self.bus = bus
-        """The worker's bus lock, for a monitor whose instrument is on the
-        bus the worker owns; None for one whose is not. Acquired without
-        blocking and held across the read, so the tick either happens with
-        the bus to itself or does not happen."""
+        """Protects reads of an instrument on the worker's bus.
+        `None` denotes an instrument off that bus. A nonblocking acquire spans
+        the whole read, so a tick has exclusive bus access or is skipped.
+        """
         self.skipped = 0
         self.started_at: float | None = None
         self.readings = 0
@@ -100,11 +81,11 @@ class Monitor:
 
     # -- what a subclass supplies ---------------------------------------
     def read(self) -> E.Event:
-        """One reading, or raise. Run on the monitor's own thread."""
+        """Returns one reading or raises on the monitor thread."""
         raise NotImplementedError
 
     def last_info(self) -> dict | None:
-        """The last reading as the `/monitors` entry shows it."""
+        """Returns the last reading for the `/monitors` entry."""
         return None
 
     # -- lifecycle ------------------------------------------------------
@@ -122,7 +103,7 @@ class Monitor:
         self._thread.start()
 
     def stop(self, timeout_s: float = 5.0) -> bool:
-        """Ask the thread to end and wait for it. Returns whether it ended."""
+        """Requests thread shutdown, waits and returns whether it ends."""
         self._stop.set()
         thread = self._thread
         if thread is not None and thread.is_alive():
@@ -183,7 +164,7 @@ class Monitor:
 
 
 class PowerMonitor(Monitor):
-    """Read the power meter every `interval_s` and emit `PowerReading`s."""
+    """Reads the power meter every `interval_s` and emits `PowerReading`."""
 
     name = "power"
     what = "1918-C console"
@@ -209,20 +190,17 @@ class PowerMonitor(Monitor):
 
 
 class TemperatureMonitor(Monitor):
-    """Read the 331 every `interval_s` and emit `TemperatureRead`s
-    (`source = "instrument"`, `"console"`, or `"simulated"` under `--sim`).
+    """Reads the 331 every `interval_s` and emits `TemperatureRead`.
 
-    Either half is enough to monitor: `controller` is the rig's attached
-    driver -- normally the one holding the GPIB session, so the monitor reads
-    the very object a settle drives -- and `console` is a 331-console URL,
-    read directly when no driver was attached at start-up, so a console
-    started later is seen without a restart. With neither there is no 331 on
-    this bench and the constructor says so.
+    `source` is `instrument`, `console` or `simulated`. `controller` is
+    the attached driver, usually the GPIB owner also used by settle.
+    `console` supplies an HTTP URL when no driver is attached, so a console
+    can become available without a service restart. With neither, the
+    constructor refuses to start because the bench has no 331.
 
-    The monitor polls on its own thread while the worker may be mid-run, so
-    every exchange goes through the driver's own lock
-    (`lakeshore331.controller._LOCK`); the console path is HTTP and never
-    touches the bus at all.
+    Every driver exchange uses `lakeshore331.controller._LOCK`.
+    Direct GPIB reads also require the worker's bus lock; HTTP reads stay
+    off the bus (docs/service-contract.md section 8).
     """
 
     name = "temperature"

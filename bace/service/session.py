@@ -1,63 +1,43 @@
-"""One service process lifetime: the bench, the catalogue, the journal, the
-worker and the run registry, and the one path every event takes.
+"""Owns one service session and serialises its event processing.
 
-`Session` is what `app.py` wraps in routes and what the tests drive directly.
-It owns four things built once per process -- a `Bench` (the rig and its
-read-back), a `Catalogue` (the modules and their parameters), a `Journal`
-(the append-only log) and a `RunWorker` (the one thread that touches
-instruments) -- and it is the only place their events meet: every event a
-job yields, every state change the worker reports, every reading the power
-monitor takes and every `RunQueued`/`BenchAction` the session itself writes
-goes through `_ingest`, which stamps the envelope (`seq`, `ts`, `run_id`,
-`node_path`), attaches the per-shot verdict, writes the journal line, keeps
-the last 5000 frames for `GET /events?since=`, updates the run registry and
-fans the WebSocket frame out. One path, one `seq` counter, one lock: a
-client that sees a gap in `seq` knows it missed something, and that promise
-only holds if nothing bypasses this. The ring keeps every frame's scalars;
-the traces of a `StepDone` are kept for the last `RING_TRACES_KEPT` shots
-only, because a ring full of thousand-point lists would be hundreds of
-megabytes for one canonical scan.
+`Session` backs the routes in `app.py` and supports direct use in tests.
+It owns a `Bench`, `Catalogue`, `Journal`, `RunWorker` and run registry.
+Every job event, worker state, monitor reading and session event passes
+through `Session._ingest`. That path stamps `seq`, `ts`, `run_id` and
+`node_path`, attaches shot verdicts, appends journal lines, updates the
+registry and replay ring, and fans out WebSocket frames. One lock and one
+sequence counter make gaps meaningful to reconnecting clients. The ring
+retains 5000 frames but full `StepDone` traces only for the last
+`RING_TRACES_KEPT` shots, limiting memory use
+(docs/service-contract.md section 3).
 
-**Threads.** The worker's callbacks run on the worker thread, between one
-instrument call and the next. When an asyncio loop is attached
-(`attach_loop`, called by the app at startup) they are handed to it with
-`loop.call_soon_threadsafe`, so the loop does the journaling and the fan-out
-and the worker never waits on a socket; without a loop (the tests, a script)
-`_ingest` runs on the calling thread under the session's lock. The run
-record is updated on that same path, when the `RunStateChanged` frame is
-applied, and not on the worker thread as the state is reported: a record
-that said `stopped` before the `NodeDone` carrying the counts had been
-applied answered `GET /runs/{id}` with no folder and no counts for a run
-that had both. Two things are done on the worker thread before the
-hand-over, because they have to be: the per-shot diagnostics are read off
-the digitiser right after the `StepDone` that produced them (a moment later
-they describe the next shot), and the worker-side view of which nodes are
-open and how many shots each took is kept there, so that an abort -- which
-closes the generator before it can report -- can still be turned into a
-`NodeDone` per open node with the folder and the counts.
+Worker callbacks run between instrument calls. With an attached asyncio
+loop, `loop.call_soon_threadsafe` transfers processing to the loop so the
+worker cannot wait on a socket. Without a loop, `Session._ingest` uses the
+session lock on the caller's thread. Registry state changes follow
+`RunStateChanged` on that event path, after preceding `NodeDone` data.
+Otherwise `GET /runs/{id}` could report a finished run before its folder
+and counts are visible (docs/service-contract.md section 2).
 
-**Runs.** `submit` validates the tree against the cached bench read-back
-(the Dry run, contract section 7) and refuses `invalid`/`crit` with the
-checks; a valid tree becomes a `RunRecord` and a `Job` whose `make`, on the
-worker thread with the bench to itself, re-reads the chain, attaches it to
-the run, re-checks the `crit` ids against the fresh read-back and only then
-builds `executor.run_pipeline`. A manual run *is* a one-node pipeline: the
-same validate, the same executor, the same journal lines, so the history
-queries and the console cannot tell them apart except by the tree. A queued
-run is not refused and not run beside the current one; it waits its turn on
-the worker and can be cancelled while it waits.
+Two operations remain on the worker before handover. Digitiser diagnostics
+are captured immediately after their `StepDone`, before another shot can
+replace them. Open-node and shot counts are tracked on that thread so an
+abort, which closes the generator before it can report, still produces a
+synthesized `NodeDone` with folder and counts for each open node.
 
-**The bench outside a run.** `bench_read` and `bench_action` are jobs on the
-same worker -- the bench lock is the thread, not a flag -- and both are
-refused with `Busy` while a run is active, except `park`, which aborts the
-run and cancels the queue first: a person who clicks park wants the bench
-safe now, not after the runs behind the current one. Every action is
-journaled as `BenchAction(by="hand")` with what it did or why it was refused,
-and followed by a read-back, so the journal shows the state the action
-*left*, not the one it claimed.
+`Session.submit` validates against cached read-back and refuses `invalid`
+or `crit` checks. A valid tree creates a `RunRecord` and queued `Job`.
+At execution, the worker owns the bench, takes fresh read-back, attaches it
+to the run, rechecks safety and builds `executor.run_pipeline`. A manual
+run uses the same path as a one-node pipeline, preserving journal and
+query semantics. Queued runs wait in FIFO order and can be cancelled.
 
-Nothing here imports FastAPI; nothing here touches an instrument except
-through a job.
+`Session.bench_read` and `Session.bench_action` are worker jobs. Active
+runs make them `Busy`, except park: it aborts the active run and cancels
+queued runs before parking. Safety must not wait for the queued runs.
+Every action is journaled as `BenchAction(by="hand")`, including refusal
+reasons, and followed by read-back of its resulting state. This module
+imports no FastAPI and touches instruments only through jobs.
 """
 from __future__ import annotations
 
@@ -100,96 +80,96 @@ from .worker import TERMINAL, Blocked, Job, RunWorker, StopMode
 log = logging.getLogger("bace.service")
 
 BENCH_STATES: tuple[str, ...] = ("idle", "preflight", "running", "paused", "stopping")
-"""What `GET /bench` may say (contract section 4). A run's own states are
-mapped onto these: `queued` before its preflight frame is applied reads as
-`preflight`, and a terminal state still being parked reads as `stopping` --
-the bench is being made safe, which is what that word means there."""
+"""Defines cached bench states for `GET /bench`.
+A queued run awaiting preflight reads as `preflight`. A terminal run still
+being parked reads as `stopping`, reflecting ongoing safety work
+(docs/service-contract.md section 4).
+"""
 
 RING_SIZE = 5000
-"""Envelopes kept for `GET /events?since=`: a 100-loop scan is about 300
-frames, so this is many runs of replay for a client that reconnects."""
+"""Limits replay envelopes retained for `GET /events?since=`.
+A typical 100-loop scan has about 300 frames, leaving room for several runs.
+"""
 
 RING_TRACES_KEPT = 200
-"""`StepDone` frames in the ring that still carry their traces. A frame with
-four 1000-point lists is about 130 KB, so a ring full of them would be
-600 MB for one 100 x 51 scan; older frames keep every scalar and the verdict
-(what a reconnecting client redraws Q(loop) from) and drop the traces, with
-`decimated` saying so, exactly as the journal line does."""
+"""Limits replay `StepDone` frames retaining trace arrays.
+Four 1000-sample lists occupy about 130 KB per frame as measured on this
+bench. A full ring can reach 600 MB in a 100-by-51 scan. Older frames keep
+scalars and verdicts for Q-versus-loop replay, omit traces and declare that
+in `decimated` (docs/service-contract.md section 3).
+"""
 
 SUBSCRIBER_BACKLOG = 1000
-"""**Numbered** frames a WebSocket subscriber may have unsent before it is
-dropped. A client that cannot keep up with the stream would otherwise hold
-the session's memory hostage; it gets a `Notice` and can replay from `since`.
-Under `--sim --fast` a thousand-loop scan produces frames faster than any
-socket takes them, so a client watching one *is* dropped and reconnects with
-`since`; on the rig a shot is 0.8 s and three numbered frames, so this is
-about four minutes of stream.
+"""Limits a subscriber's unsent numbered frames before disconnection.
+A slow client must not retain unbounded session memory. It receives a
+`Notice` and can reconnect from `since`. Fast simulation can exceed socket
+throughput. On this bench a shot takes about 0.8 s and three numbered frames,
+so the limit holds about four minutes of stream.
 
-Numbered only, since 2026-09-03 -- and that is a correction to what this
-number *means*, not to when a client is dropped. Only numbered frames bear on
-either thing it is for: what a dropped client has to replay (`StepPhase`
-never enters the ring, so there is nothing there to catch up on) and what its
-queue costs this process (measured on the wire, a decimated `StepDone` is
-77 KB and a `StepPhase` 193 bytes -- four hundred times less). Counting both
-made the threshold sensitive to how chatty the running module happens to be,
-which is a property of neither.
+Only numbered frames need replay. `StepPhase` never enters the ring and
+costs much less memory: measured wire sizes are 77 KB for a decimated
+`StepDone` and 193 bytes for `StepPhase`. Counting both would make the replay
+limit depend on the module's live progress-event rate.
 
-Measured, it was barely sensitive at all, because `EPHEMERAL_BACKLOG` had
-already done the work: against a sink that never drains, a 21 x 60 scan left
-**1001 numbered frames and 24 ephemeral ones** queued at the moment of the
-drop -- 323 shots, about 25 MB, and this changes none of it. So the honest
-account is that it buys around 2 % of headroom and no memory. It is here so
-the constant states its own bound whatever module is running, and so the two
-thresholds each measure the one thing they are about.
+With a non-draining sink, a 21-by-60 scan queues 1001 numbered and 24
+live-only frames at disconnection: 323 shots and about 25 MB, measured on
+this bench. `EPHEMERAL_BACKLOG` already limits live-only frames, so numbered
+counting adds about 2 % headroom without reducing memory. The two limits
+separately express replay backlog and live-event staleness.
 
-An `asyncio.Queue` counts its numbered frames as they pass (`Backlog`); a
-sink a caller brought is measured whole, which can only over-count."""
+`Backlog` counts numbered frames in an `asyncio.Queue`. Caller-supplied
+sinks are counted whole, which can over-count but cannot under-count.
+The disconnect and replay policy follows docs/service-contract.md section 6.
+"""
 
 EPHEMERAL_BACKLOG = 50
-"""Unsent frames -- *all* of them, ephemeral included -- beyond which an
-ephemeral frame (`StepPhase`) is not even queued for a subscriber: it says
-where inside the shot the run is *now*, which is worthless fifty frames late.
+"""Limits total unsent frames before suppressing live-only events.
+`StepPhase` describes the current shot phase and is stale fifty frames
+later. Every queued frame delays delivery, so this limit counts numbered
+and unnumbered frames together.
 
-Whole rather than numbered because this one is about staleness on arrival,
-and every frame queued ahead of it adds to that. It is also, measured, what
-keeps a backlogged queue almost entirely numbered: a subscriber stops being
-sent `StepPhase` once it is fifty frames behind and is not dropped until a
-thousand, so the two dozen in flight when it crossed fifty are all it
-holds."""
+Measured on this bench, suppression at fifty frames leaves about two dozen
+live-only frames in flight while numbered frames accumulate toward the
+thousand-frame disconnect limit. Thus a stalled queue remains almost
+entirely replayable numbered frames.
+"""
 
 DATA_RUNS_KEPT = 20
-"""Runs whose full-precision arrays `GET /runs/{id}/data` still serves from
-memory. Beyond that the answer is the folder path and the HDF5."""
+"""Limits runs whose full arrays remain available from `GET /runs/{id}/data`.
+Evicted runs retain folder paths for HDF5 access.
+"""
 
 WORKER_JOIN_S = 60.0
 
 POWER_HISTORY_MAX = 200_000
-"""How many power-monitor readings the session keeps for `GET
-/monitors/power/history` and its CSV: 55 hours at 1 Hz, 11 at 0.2 s. Kept
-on the session rather than on the monitor so stopping and restarting the
-monitor -- a changed interval, say -- does not lose the night's trace. The
-ring keeps the last 5000 envelopes of everything and the journal keeps all
-of them on disk; this is the one that a console can draw from at once."""
-"""How much longer `close()` waits for the worker after `shutdown()` gave
-up. A job inside a blocking VISA call ends when the call times out (the
-resources are opened with 20 s, an acquisition waits up to 30 s), and the
-bench must not be parked and its resources closed from a second thread
-while the first is still talking to them."""
+"""Limits retained power readings for history and CSV to 200 000 points.
+This spans 55 h at 1 Hz or 11 h at 0.2 s intervals. Session ownership keeps
+the trace across monitor stops and interval changes. The shared replay ring
+holds only 5000 envelopes; the journal retains every reading on disk
+(docs/service-contract.md section 8).
+"""
+"""Extends the worker shutdown wait in seconds before bench release.
+VISA resources use 20 s timeouts and acquisitions can wait up to 30 s.
+A blocking call must return before another thread parks or closes those
+same sessions (docs/service-contract.md section 9).
+"""
 
 LAST_USED_SOURCES: frozenset[Source] = frozenset({Source.EDITED, Source.LAST_USED})
-"""Which of a run's parameters `RunQueued.params` carries, i.e. what comes
-back as last-used: what the operator typed, and what they typed before and
-kept. Defaults and recipe values are reproduced by their own layers next
-time; journaling them too would turn every provenance on the card into
-"last-used" after one run and hide a recipe edit for twenty sessions."""
+"""Selects operator-choice layers for `RunQueued.params` and last-used values.
+Defaults and `run.toml` values resolve from their own layers each run.
+Journaling them as choices would mask recipe edits behind last-used values
+(docs/service-contract.md section 3).
+"""
 
 _STEM = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
 # -- errors the routes map to status codes ------------------------------------
 class SubmitRefused(ValueError):
-    """`POST /runs` or `/pipelines` with a tree that is `invalid` or `crit`.
-    Carries the `Validation` so the 422 can show every check."""
+    """Carries validation checks for an `invalid` or `crit` run request.
+
+    The routes return every check with HTTP 422.
+    """
 
     def __init__(self, validation: Validation):
         blocking = [c for c in validation.checks if c.level in ("invalid", "crit")]
@@ -199,24 +179,26 @@ class SubmitRefused(ValueError):
 
 
 class Conflict(RuntimeError):
-    """The request is well-formed but the state refuses it (409)."""
+    """Signals that session state refuses a well-formed request with HTTP 409."""
 
 
 class Busy(Conflict):
-    """A run is active, so the bench cannot be read or acted on outside it."""
+    """Signals that a run prevents an independent bench read or action."""
 
 
 class NotPaused(Conflict):
-    """A resume for a run that is not waiting for the operator."""
+    """Signals a resume request without an open operator pause."""
 
 
 class UnknownRun(KeyError):
-    """No such run in this session (404)."""
+    """Signals an unknown run with HTTP 404."""
 
 
 class DataUnavailable(LookupError):
-    """The arrays for this run are not in memory (404): evicted, never
-    produced, or the node has not run. `folders` names where the HDF5 is."""
+    """Signals that requested run arrays are unavailable in memory (404).
+
+    Arrays can be evicted, absent or not yet produced. `folders` locates HDF5.
+    """
 
     def __init__(self, run_id: str, reason: str, folders: list[str]):
         super().__init__(f"{run_id}: {reason}")
@@ -224,7 +206,7 @@ class DataUnavailable(LookupError):
 
 
 class NodeRequired(ValueError):
-    """`GET /runs/{id}/data` on a pipeline run without `node=` (400)."""
+    """Signals a pipeline data request missing its required `node` (400)."""
 
     def __init__(self, run_id: str, nodes: list[str]):
         super().__init__(f"{run_id} has {len(nodes)} nodes; say which with node=<path>: "
@@ -233,21 +215,22 @@ class NodeRequired(ValueError):
 
 
 class BlockedAtStart(Blocked):
-    """A `crit` check failed on the read-back taken at Start: the run never
-    touched the bench and ends `blocked` (contract section 2) with the
-    verdicts' text as its error."""
+    """Blocks Start when fresh read-back fails a `crit` safety check.
+
+    The run makes no measurement writes and ends `blocked`, retaining the
+    verdict text as its error (docs/service-contract.md section 2).
+    """
 
 
 # -- the registry -----------------------------------------------------------
 @dataclass
 class RunRecord:
-    """Everything `GET /runs/{id}` serves, kept in memory for the session.
+    """Stores the in-memory record served by `GET /runs/{id}`.
 
-    The journal has the same facts as lines; this is the same facts as an
-    object the routes can answer from without re-reading the file. Node
-    outcomes are keyed by node path and filled from `NodeStarted`/`NodeDone`;
-    `params_as_executed` is the schedule's parameters with provenance, per
-    node, which is what ran.
+    The journal retains the same facts as lines. This object avoids
+    re-reading that file for active-session queries. Node paths key outcomes
+    from `NodeStarted` and `NodeDone`. `params_as_executed` retains schedule
+    parameters and their layers per node (docs/service-contract.md section 6).
     """
 
     run_id: str
@@ -269,13 +252,15 @@ class RunRecord:
     folders: list[str] = field(default_factory=list)
     error: str | None = None
     sample: dict = field(default_factory=dict)
-    """The `[sample]` block the run was queued under -- its identity, kept on
-    the run and not only on the session (`docs/history/naming-plan.md` rule 1)."""
+    """Retains the run's queued `[sample]` identity independently of the session.
+    Each run carries its own identity (docs/service-contract.md section 6).
+    """
     node_results: dict[str, dict] = field(default_factory=dict)
-    """Per module node, what it measured, folded from the *journal* payload
-    of its `RunFinished`, `JVFinished` and `StepDone` lines with the
-    journal's own reducers -- so `nodes` in `as_wire()` is the shape
-    `journal.node_record` gives a run of another session, byte for byte."""
+    """Reduces module results from journal payloads with the journal's reducers.
+    `RunFinished`, `JVFinished` and `StepDone` feed the same `journal.node_record`
+    shape for in-memory and file-backed runs, byte for byte
+    (docs/service-contract.md section 6).
+    """
     queued_at: float = field(default_factory=time.time)
     started_at: float | None = None
     finished_at: float | None = None
@@ -283,40 +268,43 @@ class RunRecord:
     requested: int | None = None
     progress: dict | None = None
     eta: dict | None = None
-    """The latest loop `Progress` with a measured ETA: `{eta_s, finish_at,
-    at, node_path, done, total}`. A manual run has no loop and no entry; its
-    own `progress.eta_s` is the module's."""
+    """Retains the latest loop `Progress` with a measured ETA.
+    Fields are `eta_s`, `finish_at`, `at`, `node_path`, `done` and `total`.
+    Manual runs have no loop entry and use the module's `progress.eta_s`.
+    """
     pending: dict | None = None
     position: int = 0
     evicted: bool = False
     live: LiveState | None = None
-    """What the running step implies about the instruments (`service.live`),
-    for `/bench` while this run holds the worker."""
+    """Carries `service.live` inferences for `/bench` during this run."""
     stopping: bool = False
-    """A stop was accepted and `stopping` reported by the session, so the
-    worker's own `stopping` (at its next event) is not journaled twice."""
+    """Records that the session accepts a stop and reports `stopping`.
+    The worker's subsequent report must not duplicate that journal entry.
+    """
     session_voc: VocSource | None = None
-    """The session's V_oc when the tree was resolved -- what a manual bace
-    outside any loop centres on, kept with the run so a jv_bace queued
-    behind it cannot change what this run was validated against."""
+    """Retains the session V_oc against which this tree resolves and validates.
+    A queued `jv_bace` cannot replace this manual `bace` run's axis centre
+    with a later measurement.
+    """
     ended: threading.Event = field(default_factory=threading.Event)
     contexts: dict[str, RunContext] = field(default_factory=dict)
-    """The `RunContext` each module node was built with, by node path. Its
-    `folders` is where the recorder is writing *now*, which is how a run
-    that is aborted before its `NodeDone` still names its folder."""
+    """Indexes each module's `RunContext` by node path.
+    Its `folders` exposes the recorder's active folder even if abort prevents
+    `NodeDone`.
+    """
     open_nodes: list[str] = field(default_factory=list)
-    """Node paths started and not yet done, as seen on the worker thread."""
+    """Tracks open node paths on the worker thread."""
     tally: dict[str, dict] = field(default_factory=dict)
-    """Per module node, on the worker thread: `{module, kept, requested}`
-    from the module's own events, for the `NodeDone` an abort cannot yield."""
+    """Tracks `module`, `kept` and `requested` per node on the worker thread.
+    These supply `NodeDone` when abort prevents the generator from yielding it.
+    """
 
     @property
     def terminal(self) -> bool:
         return self.state in TERMINAL
 
     def all_folders(self) -> list[str]:
-        """Every folder written so far: the ones `NodeDone` reported and the
-        ones the recorders of nodes still running have opened."""
+        """Returns folders from completed `NodeDone` events and active recorders."""
         out = list(self.folders)
         for ctx in list(self.contexts.values()):
             for folder in list(ctx.folders):
@@ -325,9 +313,11 @@ class RunRecord:
         return out
 
     def nodes_wire(self) -> dict[str, dict]:
-        """Every module node that has ended, in the journal's `nodes` shape:
-        `GET /runs/{id}` answers the same for a run of this process and for
-        one read back from a file, and the results tab does not care which."""
+        """Returns completed modules in the journal's `nodes` shape.
+
+        The results view receives the same representation from the registry
+        and journal (docs/service-contract.md section 6).
+        """
         out: dict[str, dict] = {}
         for path, entry in self.node_outcomes.items():
             detail = entry.get("detail") or {}
@@ -384,7 +374,7 @@ def _module_of(node_path: str) -> str:
 
 
 def _bench_state(run_state: str) -> str:
-    """A run's state as `GET /bench` says it (`BENCH_STATES`)."""
+    """Maps a run state to the `BENCH_STATES` vocabulary for `GET /bench`."""
     if run_state in BENCH_STATES:
         return run_state
     if run_state == "queued":
@@ -393,8 +383,10 @@ def _bench_state(run_state: str) -> str:
 
 
 def _slim_step_done(frame: dict) -> dict:
-    """The ring's copy of a `StepDone` frame: every scalar and the verdict
-    kept, the four traces dropped and declared in `decimated`."""
+    """Copies replay `StepDone` scalars and verdict without trace arrays.
+
+    `decimated` declares the four omitted traces.
+    """
     data = dict(frame["data"])
     info = dict(frame.get("decimated") or {})
     for name in STEPDONE_ARRAYS:
@@ -409,22 +401,16 @@ def _stem(name: str) -> str:
 
 
 class Backlog(asyncio.Queue):
-    """A subscriber's sink, which also keeps a count of the *numbered* frames
-    in it.
+    """Counts numbered frames in a subscriber's `asyncio.Queue`.
 
-    `SUBSCRIBER_BACKLOG` is a statement about what a dropped client has to
-    replay and about what its queue costs, and only numbered frames bear on
-    either. The count is kept here rather than walked at the fan-out, because
-    the fan-out runs on the event loop's thread, once per frame, per
-    subscriber -- and this session has just been fixed once for doing too much
-    there without yielding.
+    `SUBSCRIBER_BACKLOG` bounds replay work and queue memory. Counting
+    incrementally avoids walking the queue for every frame and subscriber
+    on the event-loop thread, where repeated scans would delay other tasks.
 
-    `_put` and `_get` are the hooks `asyncio.Queue` itself is extended
-    through -- `LifoQueue` and `PriorityQueue` in the standard library
-    override the same two -- so every path in and out passes through them,
-    `get_nowait` included. The sentinel `None` and the drop `Notice` carry no
-    seq and so count for nothing, which is right: they are what the queue
-    ends with, not a backlog.
+    `_put` and `_get` are the `asyncio.Queue` extension hooks also used by
+    `LifoQueue` and `PriorityQueue`. They cover all insertion and removal
+    paths, including `get_nowait`. The terminal `None` and drop `Notice`
+    have no sequence number and do not count toward replay backlog.
     """
 
     def _init(self, maxsize: int) -> None:
@@ -444,11 +430,11 @@ class Backlog(asyncio.Queue):
 
 
 def backlog_of(sink: Any) -> int:
-    """How far behind a subscriber is, in the frames it would have to replay.
+    """Returns subscriber backlog in replayable numbered frames.
 
-    A sink that does not count them -- a test's list, a plain `Queue`, anything
-    a caller passed to `subscribe` -- is measured whole, which is what this
-    did before `Backlog` existed and can only over-count.
+    Caller-supplied sinks without `Backlog` counting, including test lists
+    and plain queues, are counted whole. This can over-count but cannot
+    under-count.
     """
     numbered = getattr(sink, "numbered", None)
     return sink.qsize() if numbered is None else numbered
@@ -456,7 +442,7 @@ def backlog_of(sink: Any) -> int:
 
 # -- the session --------------------------------------------------------------
 class Session:
-    """One service process lifetime. See the module docstring."""
+    """Owns one service process lifetime, as described by the module."""
 
     def __init__(self, rig_config: RigConfig, run_toml: Mapping[str, Any] | None = None, *,
                  out: str, mode: str = "sim", fast: bool = False,
@@ -471,38 +457,31 @@ class Session:
             raise ValueError(f"mode must be 'sim' or 'rig', not {mode!r}")
         self.rig_config = rig_config
         self.power_monitor_s = None if power_monitor_s is None else float(power_monitor_s)
-        """An interval to start the power monitor at in `start()`
-        (`--power-monitor`), so the meter is watched from the moment the
-        service is up and not from the moment somebody opens a console. None
-        leaves it to `POST /monitors/power`."""
+        """Starts power monitoring at this interval in seconds, or leaves it off.
+        `start` uses the `--power-monitor` setting to watch from service startup.
+        With `None`, `POST /monitors/power` controls startup instead.
+        """
         self.temperature_monitor_s = (None if temperature_monitor_s is None
                                       else float(temperature_monitor_s))
-        """The interval the temperature monitor is started at in `start()`,
-        and the one observer on this bench that runs without being asked
-        for. A cryostat drifts whether or not a run is going and whether or
-        not a console is open, so the 331 is read from the moment the
-        service is up: the card's number is then a reading of a known age
-        rather than the read-back of whenever somebody last pressed
-        something, and a `TemperatureRead` is in the journal for the hours
-        between runs. None is `--no-temperature-monitor`: nothing is
-        started and `POST /monitors/temperature` is the only way in, as it
-        was before.
+        """Starts 331 monitoring at this interval in seconds, or leaves it off.
+        A cryostat can drift between runs. Default monitoring starts with the
+        service, supplies readings of known age and journals temperature while
+        no console is connected (docs/service-contract.md section 8).
+        `None` implements `--no-temperature-monitor`; the monitor then starts
+        only through `POST /monitors/temperature`.
 
-        The power meter is the other way round (`power_monitor_s` defaults
-        to None, `--power-monitor` turns it on): its console holds the
-        wish, and a meter under a dark box logs nothing anybody wants. What
-        makes the difference safe is the bus rule, not the instrument --
-        see `start_temperature_monitor`: on GPIB this monitor reads only
-        while holding the worker's lock and skips the tick otherwise, so
-        "always on" never means "beside an acquisition".
+        Power monitoring defaults to off and is enabled by `power_monitor_s`:
+        a meter behind a dark box need not produce a continuous trace. Bus
+        ownership keeps default temperature monitoring safe. On GPIB,
+        `start_temperature_monitor` passes the worker lock; a busy tick is
+        skipped instead of overlapping an acquisition.
 
-        What it costs, said plainly: one frame every `interval_s` in the
-        journal and in the ring -- at 5 s, some 17 000 lines and a few
-        megabytes for a day the bench spent idle, and the ring's 5000
-        envelopes are then about seven hours of that idleness rather than
-        the last several runs. Both are the price of being able to say what
-        the cryostat did overnight; `--no-temperature-monitor` is the way
-        out for a bench where that is not worth it."""
+        At 5 s intervals an idle day adds about 17 000 journal lines and a few
+        megabytes, as measured on this bench. The 5000-envelope ring then
+        spans about seven idle hours instead of several runs. This is the
+        storage cost of retaining overnight temperature; the command-line
+        flag can disable it.
+        """
         self.run_toml: dict = dict(run_toml or {})
         self.out = str(out)
         self.mode = mode
@@ -527,26 +506,27 @@ class Session:
             "mode": mode, "rig_toml": rig_path, "run_toml": run_path, "out": self.out,
             "fingerprint": self.bench.fingerprint, "python": platform.python_version(),
             "version": _version(), "fast": self.fast,
-            # The instrument writes the assembly made before any job: not a
-            # run, not a by-hand action, so this is where they are recorded.
+            # Assembly writes precede all jobs. They belong in the session
+            # header because neither a run nor a by-hand action contains them.
             "startup_writes": list(self.bench.startup_writes),
-            # The session's own context -- what a file with no runs in it can
-            # still say. Each run carries the block again (`RunQueued.sample`),
-            # because a resumed file keeps the header of whoever opened it.
+            # The header identifies a session even without runs. Each
+            # `RunQueued.sample` repeats identity because resumed files retain
+            # the header from the first process.
             "sample": dict(sample_table or {})})
         self.catalogue = Catalogue(rig_config=rig_config, run_toml=self.run_toml,
                                    history=self.journal, sample=sample_table)
         self._sample_file: dict = dict(self.catalogue.sample)
-        """The `[sample]` block this session opened with, kept so a `null`
-        through `set_sample` has a layer to fall back to -- the same way back
-        a parameter's `↺` has, for the one block that has no `ParamSet`."""
+        """Retains the startup `[sample]` layer for `set_sample` resets.
+        A null restores that layer, like a parameter reset, without requiring
+        `ParamSet` for this block.
+        """
         self.worker = RunWorker(on_event=self._on_event, on_state=self._on_state)
 
         self._lock = threading.RLock()
         self._seq = self.journal.seq
         self._ring: collections.deque[dict] = collections.deque(maxlen=RING_SIZE)
         self._traces: collections.deque[dict] = collections.deque(maxlen=RING_TRACES_KEPT)
-        """The full `StepDone` frames behind the ring's slim copies."""
+        """Retains full `StepDone` frames behind reduced replay copies."""
         self._subscribers: list[Any] = []
         self._records: dict[str, RunRecord] = {}
         self._jobs: dict[str, Job] = {}
@@ -557,26 +537,27 @@ class Session:
         self._data_order: list[str] = []
         self._snapshot: dict | None = None
         self._temperature: dict | None = None
-        """The last `TemperatureRead` on the event path -- the monitor's, the
-        executor's poll during a pause, or the operator's typed value -- so
-        the temperature card follows the newest reading, not the read-back."""
+        """Retains the latest `TemperatureRead` from the shared event path.
+        Monitor readings, pause polls and typed values can supersede read-back
+        on the temperature card.
+        """
         self.session_voc: VocSource | None = None
         self._monitor: PowerMonitor | None = None
         self._temperature_monitor: TemperatureMonitor | None = None
         self._power_history: collections.deque[tuple] = collections.deque(maxlen=POWER_HISTORY_MAX)
-        """`(ts, watts, trustworthy, wavelength_nm, source, averaged)` per
-        monitor reading, newest last; `ts` is the frame's own `ts`, so a
-        console can merge this with the stream without a duplicate."""
+        """Stores power readings with frame timestamps, newest last.
+        Rows contain `ts`, `watts`, `trustworthy`, `wavelength_nm`, `source` and
+        `averaged`. Shared timestamps permit stream merging without duplicates.
+        """
         self._loop: asyncio.AbstractEventLoop | None = None
         self._loop_thread: threading.Thread | None = None
         self.last_validated: dict | None = None
         self.errors: list[str] = []
-        """What went wrong on the event path itself (a journal line that
-        could not be written, a payload that could not be built) or at
-        shutdown. Never raised into a job -- the run is more important than
-        its log -- but never silent either: each entry is logged as it is
-        appended and `session_info()` counts them, so a gap in the journal
-        on the lab PC is visible from the console and the log."""
+        """Collects event-path and shutdown errors without raising them into jobs.
+        Payload or journal failure must not stop measurement. Each entry is
+        logged and counted by `session_info`, so missing journal data remains
+        visible in the console and service log.
+        """
         self._closed = False
 
     def _error(self, text: str) -> None:
@@ -589,9 +570,8 @@ class Session:
             self.attach_loop(loop)
         self.worker.start()
         if self.power_monitor_s is not None and not self.monitor_running:
-            # A bench with no meter is not a reason to refuse to start: the
-            # flag asked for a monitor, and the answer "there is none" goes
-            # where every other start-up trouble goes.
+            # A requested power monitor without a meter reports a startup error
+            # without preventing the service from starting.
             try:
                 self.start_power_monitor(self.power_monitor_s)
             except (ValueError, Conflict) as exc:
@@ -600,20 +580,18 @@ class Session:
             try:
                 self.start_temperature_monitor(self.temperature_monitor_s)
             except (ValueError, Conflict) as exc:
-                # A bench with no 331 is the ordinary case here rather than
-                # start-up trouble: this monitor is the default and not
-                # something a flag asked for, and the read-back's
-                # `unavailable["temperature"]` already says on the card why
-                # there is no reading. So it is logged and *not* counted
-                # among the session's errors -- otherwise every bench
-                # without a cryostat would come up reporting one.
+                # No 331 is a supported bench configuration. Default monitoring
+                # must not turn its absence into a session error. The read-back's
+                # `unavailable["temperature"]` already explains the missing reading.
                 log.info("the temperature monitor was not started: %s", exc)
         return self
 
     def attach_loop(self, loop: asyncio.AbstractEventLoop | None = None) -> None:
-        """Hand the event path to an asyncio loop. Call from the loop's own
-        thread (an `async` startup hook): what is recorded here is which
-        thread may call `_ingest` directly and which must post to the loop."""
+        """Attaches the event path to asyncio from the loop's own thread.
+
+        The recorded thread may call `_ingest` directly. Other threads must
+        post callbacks to the loop (docs/service-contract.md section 2).
+        """
         self._loop = loop if loop is not None else asyncio.get_running_loop()
         self._loop_thread = threading.current_thread()
 
@@ -624,17 +602,15 @@ class Session:
         self.close()
 
     def close(self, timeout_s: float = 5.0) -> None:
-        """Stop the monitor, abort and drain the worker, park and release the
-        bench, close the journal. Idempotent.
+        """Stops monitors, drains the worker, releases the bench and closes the journal.
 
-        The bench is released only once the worker thread has ended. An
-        abort takes effect at the job's next event, and a job inside a VISA
-        call reaches that when the call returns; parking and closing the
-        resources from this thread meanwhile would interleave with the
-        generator's own I/O on the same sessions, and its `finally` would
-        then find them closed. If the worker is still alive after
-        `WORKER_JOIN_S` on top of `timeout_s`, the bench is left as it is
-        and the fact recorded -- the daemon thread ends with the process.
+        Repeated calls are safe. Abort takes effect after a blocking VISA call
+        returns. The worker must end before another thread parks or closes
+        its resources, or instrument I/O and generator `finally` blocks could
+        use closed sessions. If the worker remains alive after `timeout_s`
+        plus `WORKER_JOIN_S`, the bench stays open and the error is recorded.
+        The daemon thread ends with the process
+        (docs/service-contract.md section 9).
         """
         if self._closed:
             return
@@ -657,17 +633,12 @@ class Session:
         return {"id": self.session_id, "mode": self.mode, "fast": self.fast,
                 "started": datetime.fromtimestamp(self.started_at).isoformat(timespec="seconds"),
                 "started_at": self.started_at, "sample": dict(self.catalogue.sample),
-                # What a `null` through `PUT /session/sample` puts a key back
-                # to. On the wire so the console can offer the way back beside
-                # a typed field, the way a parameter row offers its `↺`: this
-                # block is the only thing in the session with two layers and
-                # no `ParamSet` to render them.
+                # The startup layer lets the console offer a reset to `run.toml`.
+                # This sample block has two layers but no `ParamSet` renderer.
                 "sample_file": dict(self._sample_file),
-                # The three identity fields as a folder name carries them:
-                # `slug`ged to `NAME_MAX`, which is where `PTQ10:IT-4F`
-                # becomes `PTQ10IT-4F`. The console shows what a value will be
-                # filed as while it is being typed, and reducing it a second
-                # time in the browser would be a second answer to that.
+                # Naming's `slug` and `NAME_MAX` determine the folder representation:
+                # `PTQ10:IT-4F` becomes `PTQ10IT-4F`. The console displays that result
+                # without independently reducing the value in the browser.
                 "sample_in_name": dict(zip(("sample", "material", "pixel"),
                                            self._metadata_for_name().identity_in_name())),
                 "out": self.out, "rig_toml": self.rig_path, "run_toml": self.run_path,
@@ -676,65 +647,49 @@ class Session:
                 "last_error": self.errors[-1] if self.errors else None}
 
     def _metadata_for_name(self) -> RunMetadata:
-        """The session's identity as `storage.naming` sees it -- for
-        `sample_in_name` only, so the reduction the console shows is the one
-        `folder_name()` will actually perform."""
+        """Returns identity metadata for the `sample_in_name` preview.
+
+        `storage.naming` supplies the same reduction as `folder_name`.
+        """
         s = self.catalogue.sample
         return RunMetadata(sample=str(s.get("sample", "")), material=str(s.get("material", "")),
                            pixel=str(s.get("pixel", "")))
 
     def set_sample(self, values: Mapping[str, Any]) -> dict:
-        """`PUT /session/sample` -- name the device from the console.
+        """Updates device identity through `PUT /session/sample`.
 
-        Until this existed the only way to say what was mounted was to edit
-        `run.toml` and restart the process that owns every instrument, so a
-        session opened on a fresh checkout filed every run of that day under
-        a name with no device in it. The folder name is the record
-        (`docs/history/naming-plan.md`), and renaming afterwards is the hazard that
-        file is about, so this is the one thing on the screen whose cost was
-        permanent.
+        Missing keys retain their values. Explicit `None` restores the startup
+        `run.toml` layer. Merge semantics let the console edit four fields
+        without dropping a recipe's `temperature_k`.
 
-        **A merge, not a replacement.** A key the body does not carry is left
-        alone, and an explicit `None` puts that key back to what `run.toml`
-        opened with -- the same "the way back is a `null`" the parameter
-        layers use, and the reason the console can offer four fields without
-        silently dropping a `temperature_k` somebody typed into the file.
+        `folder_name` applies `slug` to identity fields, handling colons, path
+        separators and `..` at name construction. Metadata retains the verbatim
+        value, so a material such as `PTQ10:IT-4F` is recorded accurately.
+        `sample_in_name` previews the folder form. Identity must be correct
+        before recording because renaming folders compromises the record.
 
-        **Nothing here is refused for being an awkward name.** Since
-        2026-09-05 `folder_name()` reduces all three identity fields with
-        `slug()`, so a colon, a path separator and a `..` are all handled
-        where the name is built rather than at this door -- and the value
-        stays verbatim in the metadata, which for `material = "PTQ10:IT-4F"`
-        is the difference between recording the material and recording a
-        transcription of it. `sample_in_name` in the answer is what the folder
-        will carry, so the console can say so as it is typed.
+        Changes bind only subsequently queued runs. Submission copies identity
+        into `RunRecord.sample` and `RunQueued.sample`; active and queued runs
+        retain their own copy. Updates are therefore allowed during a run,
+        letting later runs use the correct identity without abandoning the
+        active one. They cannot repair the active run's identity
+        (docs/service-contract.md section 3a).
 
-        **It binds the runs queued after it and no others.** Every run takes
-        its own copy at submit (`RunRecord.sample`, `RunQueued.sample`) and
-        is written from that copy, so a sweep already going keeps the
-        identity it started under. Which is why this is allowed while a run
-        is active rather than refused: an operator who notices at hour one
-        that the device is unnamed should not have to choose between
-        abandoning the run and mislabelling everything after it. What it
-        cannot do is repair the run in flight, and the answer says so.
-
-        Returns `{"session", "changed", "run_active"}`. Raises `ValueError`
-        for an unknown key or an unparsable `temperature_k` (422).
+        Returns `session`, `changed` and `run_active`. Unknown keys or an
+        unparsable `temperature_k` raise `ValueError` for HTTP 422.
         """
         patch = dict(values or {})
-        # Checked before anything moves, and through the one function that
-        # owns the sentence: an unknown key or an unparsable `temperature_k`
-        # must not leave the block half applied. Its return is discarded --
-        # `None` means "back to the file" here and `coerce_sample` drops it.
+        # Validate the whole block before applying any key, preventing a
+        # partial update on error. `coerce_sample` drops `None`, but here
+        # `None` means restore the file layer, so its result is discarded.
         coerce_sample(patch)
         with self._lock:
             before = dict(self.catalogue.sample)
             merged = dict(before)
             for key, value in patch.items():
                 if value is None:
-                    # Back to the file. Absent there means absent here: the
-                    # key goes, rather than becoming an empty string that
-                    # reads as "named, with nothing".
+                    # A field absent in the file is removed on reset. An empty
+                    # string would incorrectly imply a named field with no content.
                     if key in self._sample_file:
                         merged[key] = self._sample_file[key]
                     else:
@@ -745,10 +700,9 @@ class Session:
             changed = sorted(k for k in set(before) | set(after)
                              if before.get(k) != after.get(k))
             if changed:
-                # Replaced, never mutated in place: `base_metadata` and the
-                # submit path read this dict from other threads, and a reader
-                # holding the old object gets a whole old block rather than
-                # half of each.
+                # Replace rather than mutate: `base_metadata` and submit read this
+                # dictionary from other threads. Readers need one complete identity,
+                # even if they retain the preceding object.
                 self.catalogue.sample = after
             active = self.run_active()
         if changed:
@@ -758,18 +712,19 @@ class Session:
                 "run_active": active}
 
     def hello(self) -> dict:
-        """The first WebSocket frame's `data`."""
+        """Returns `data` for the first WebSocket frame."""
         return {"session": self.session_info(), "seq": self.last_seq,
                 "bench": self.bench_snapshot()}
 
     # -- runs -------------------------------------------------------------------
     def validate_tree(self, tree_obj: Mapping[str, Any], *, name: str = "",
                       remember: bool = True) -> Validation:
-        """The Dry run: every check against the cached read-back; touches nothing.
+        """Validates a Dry run against cached read-back without instrument I/O.
 
-        `remember=False` leaves `last_validated` alone: the assistant's Dry
-        runs are its own, and must not replace the tree the pipeline tab
-        reopens."""
+        `remember=False` preserves `last_validated`, so assistant queries do
+        not replace the tree reopened by the pipeline tab
+        (docs/service-contract.md sections 7 and 8a).
+        """
         v, _voc = self._validate(tree_obj)
         if remember and v.schedule is not None:
             self.last_validated = {"tree": v.schedule.tree.as_wire(), "name": name,
@@ -784,27 +739,29 @@ class Session:
         return v, voc
 
     def pipeline_folder(self, tree_obj: Mapping[str, Any] | None, name: str = "") -> str:
-        """`<out>/<stem>`: the stem of the folder a pipeline with this name
-        records into. The run's own folder is `<stem>_<stamp>`, the stamp
-        taken at submit (`pipeline_folder_pattern` spells it)."""
+        """Returns `<out>/<stem>` for a named pipeline's output folder.
+
+        Submission adds its timestamp; `pipeline_folder_pattern` shows that form.
+        """
         root_name = tree_obj.get("name", "") if isinstance(tree_obj, Mapping) else ""
         return os.path.join(self.out, _stem(str(name or root_name or "pipeline")))
 
     def pipeline_folder_pattern(self, tree_obj: Mapping[str, Any] | None, name: str = "") -> str:
-        """`<out>/<stem>_YYYYMMDD_HHMMSS`: the folder the run will create,
-        with the stamp `submit` takes spelled as a pattern. The Dry run
-        cannot know the stamp, and a folder name it invented would name a
-        place that will not exist."""
+        """Returns the output pattern `<out>/<stem>_YYYYMMDD_HHMMSS`.
+
+        Only `submit` assigns the timestamp. A Dry run cannot supply an actual
+        folder name without inventing a path that execution will not use.
+        """
         return self.pipeline_folder(tree_obj, name) + "_YYYYMMDD_HHMMSS"
 
     def submit(self, tree_obj: Mapping[str, Any], name: str = "",
                kind: str | None = None) -> tuple[str, Validation]:
-        """Validate, refuse or queue. Returns `(run_id, validation)`.
+        """Validates and queues a tree, returning its run ID and validation.
 
-        `kind` is "manual" (a one-module tree posted from a bench card) or
-        "pipeline"; None infers it from the tree's root. A manual run records
-        straight under `out` as `tools/scan.py` does; a pipeline gets
-        `<out>/<stem>_<stamp>/` and every module records inside it.
+        `kind` is `manual` for one module or `pipeline`; `None` infers it from
+        the root. Manual runs record directly under `out`, as `tools/scan.py`
+        does. Pipeline modules record under `<out>/<stem>_<stamp>/`
+        (docs/service-contract.md section 6).
         """
         if self._closed:
             raise Conflict("the session is closed")
@@ -814,9 +771,8 @@ class Session:
             self.last_validated = {"tree": v.schedule.tree.as_wire(), "name": name,
                                    "validated_at": time.time(), "valid": v.valid}
         if not v.valid or v.schedule is None:
-            # Into the journal, not only the 422 body: session 143158 on
-            # the rig was refused and the reason lived nowhere once the
-            # HTTP response was gone.
+            # Journal refusal reasons as well as returning HTTP 422, so the
+            # evidence survives the response.
             try:
                 self.journal.append({
                     "seq": None, "ts": time.time(), "run_id": None,
@@ -856,13 +812,11 @@ class Session:
                 s.node_path: {n: pv.as_dict() for n, pv in s.params.items()}
                 for s in v.schedule.modules}
             rec.verdicts = [to_wire(c)[0] for c in v.checks if c.level != "ok"]
-            # What last_used_params hands back next time: what the operator
-            # chose (LAST_USED_SOURCES), never the V_oc. A derived V_oc
-            # written here would come back as "last-used" -- a typed-looking
-            # number that was a measurement -- and even a typed one is a
-            # number for one illumination and one hour, not a default for
-            # the next run at whatever level it pulses. `resolved` keeps the
-            # full record of what ran.
+            # `last_used_params` carries choices from `LAST_USED_SOURCES`, never
+            # V_oc. A measured V_oc must retain its measured provenance, and even
+            # a typed V_oc belongs to one illumination and bench condition.
+            # Reusing it at another LED level is unsafe. `resolved` retains the
+            # complete executed record.
             params = resolved = None
             if kind == "manual":
                 step = v.schedule.modules[0]
@@ -870,10 +824,9 @@ class Session:
                           if pv.source in LAST_USED_SOURCES and n != VOC_PARAM}
                 resolved = {n: pv.value for n, pv in step.params.items()}
             job = Job(run_id, "run", self._make_run(rec), park=self.bench.rig.park, name=name)
-            # Queued on the worker before it is journaled: a worker that is
-            # shutting down refuses, and a RunQueued line for a run that
-            # never reached the queue would sit in the index as `queued`
-            # forever.
+            # Queue before journaling: shutdown can refuse submission. A
+            # `RunQueued` entry without an actual queued job would remain
+            # permanently queued in the index.
             try:
                 rec.position = self.worker.submit(job)
             except (RuntimeError, ValueError) as exc:
@@ -881,19 +834,15 @@ class Session:
                 raise Conflict(f"cannot queue {run_id}: {exc}") from None
             self._records[run_id] = rec
             self._jobs[run_id] = job
-            # Down the one event path like every other frame: the same seq
-            # counter, the same journal line, the same fan-out.
+            # One event path preserves shared sequence, journal and fan-out.
             self._ingest(run_id, "", E.RunQueued(
                 kind=kind, module=module, tree=rec.tree, params=jsonable(params),
                 resolved=jsonable(resolved), name=name, folder=folder,
                 sample=dict(rec.sample)), queued_at, None)
             self._ingest(run_id, "", E.RunStateChanged("queued", "submitted"), time.time(), None)
-            # The submit-time checks, journaled: `trigger.auto`,
-            # `intensity.factor`, `temperature.not-wired` are what a results
-            # tab lists as flags, and a record read back from the file after
-            # a restart must carry the same ones this process does. The
-            # registry already holds them (`rec.verdicts`); `_apply` replaces
-            # by (code, node_path), so nothing is doubled.
+            # Journal submit-time flags such as `trigger.auto`, `intensity.factor`
+            # and `temperature.not-wired` for file-backed results too. `_apply`
+            # replaces by code and node path, avoiding duplicates in `rec.verdicts`.
             for check in v.checks:
                 if check.level != "ok":
                     self._ingest(run_id, check.node_path, check, time.time(), None)
@@ -901,9 +850,8 @@ class Session:
 
     def _make_run(self, rec: RunRecord) -> Callable[[Job], Any]:
         def make(job: Job):
-            # The bench is this job's alone now. Re-read the chain, attach it
-            # to the run, and re-check the safety ids against what the
-            # instruments hold *at Start*, not at the moment of the click.
+            # Exclusive bench ownership permits fresh read-back and safety
+            # checks at execution, independent of the cached submission snapshot.
             run_config = self._run_config_of(rec.schedule)
             if run_config is not None:
                 self.bench.run_config = run_config
@@ -914,18 +862,16 @@ class Session:
             with self._lock:
                 self._snapshot = snapshot
                 rec.chain_at_start = snapshot["chain"]
-            # Against the V_oc the tree was validated with (a jv_bace queued
-            # behind it must not change that) and the bench as it is now:
-            # a `crit` is the safety block; an `invalid` here is an
-            # instrument that went away since the Dry run, and a run the
-            # builder would refuse must not be started to fail.
+            # Keep the V_oc used for validation even if a queued `jv_bace`
+            # changes the session value. Fresh `crit` blocks safety hazards;
+            # `invalid` also blocks, including instruments absent after Dry run,
+            # rather than starting a run its builder must refuse.
             check = pipeline.validate(rec.tree, self.catalogue, bench=snapshot,
                                       history=self.journal, session_voc=rec.session_voc,
                                       rig_config=self.rig_config)
-            # The chain as this tree sees it, not as the bench card does: a
-            # bace run writes the 33220A polarity itself, so NORM is `info`
-            # here, and the record keeps one entry per code -- the bench's
-            # `warn` would replace it.
+            # The tree's chain verdict can differ from the bench card's: `bace`
+            # writes 33220A polarity, making NORM `info`. A bench `warn` would
+            # replace the tree-specific entry because records key by code.
             chain = [c for c in check.checks if c.code.startswith("chain.")]
             tree_codes = {c.code for c in chain}
             for verdict in self.bench.chain_verdicts(snapshot):
@@ -941,10 +887,8 @@ class Session:
                 raise BlockedAtStart("blocked at start: " + "; ".join(
                     f"{c.code}: {c.text}" for c in blocking))
             if rec.kind == "pipeline":
-                # The parent folder exists from the moment the run starts,
-                # so the path the record and the index report is a place on
-                # disk even for a pipeline stopped before its first module
-                # recorded anything.
+                # Creating the parent at Start ensures the reported path exists
+                # even if a pipeline stops before recording its first module.
                 os.makedirs(rec.out_folder, exist_ok=True)
             return run_pipeline(self.bench.rig, rec.schedule, catalogue=self.catalogue,
                                 ctx_factory=self._ctx_factory(rec, job), job=job,
@@ -953,24 +897,22 @@ class Session:
         return make
 
     def _ctx_factory(self, rec: RunRecord, job: Job) -> Callable[[Step], RunContext]:
-        # The sleep gives way to an abort only: an after_shot keeps the
-        # shot in flight, settle and all (see `Bench.sleeper`).
+        # Only abort cuts sleep short. `after_shot` retains the entire shot,
+        # including settle (see `Bench.sleeper`).
         sleep = self.bench.sleeper(lambda: job.stop_mode == StopMode.ABORT)
 
         def factory(step: Step) -> RunContext:
             ctx = RunContext(run_id=rec.run_id, node_path=step.node_path,
                              out_folder=rec.out_folder,
-                             # The block this run was *queued* with, not the
-                             # session's now: `set_sample` can move the second
-                             # while a four-hour sweep is running, and a run
-                             # whose folders were half under each name would
-                             # contradict its own `RunQueued.sample`.
+                             # The queued sample copy labels every folder.
+                             # `set_sample` can change session identity during
+                             # a run, but cannot split its folders between
+                             # names or contradict `RunQueued.sample`.
                              metadata=self.catalogue.base_metadata(rec.sample),
                              sleep=sleep, abort=job.abort_check,
                              resolved=self._resolved(step),
                              on_data=self._data_sink(rec.run_id),
-                             # `on_poll` is how a temperature pause reads the
-                             # 331 live while the worker blocks here.
+                             # `on_poll` reads the 331 during the blocked operator wait.
                              wait_for_operator=lambda detail, on_poll=None:
                                  job.wait_for_operator(on_poll=on_poll))
             if step.kind == "module":
@@ -979,9 +921,11 @@ class Session:
         return factory
 
     def _resolved(self, step: Step) -> dict[str, str]:
-        """The recorder's `resolved` seed: the trigger chain as last read
-        back (the run never reads the 33220A's polarity itself), and for a
-        transient the LED levels and frequency it is about to set."""
+        """Seeds recorder `resolved` data with chain read-back and transient settings.
+
+        The run does not read 33220A polarity itself. Transient entries also
+        retain the LED levels and frequency the module will set.
+        """
         out: dict[str, str] = {}
         with self._lock:
             snapshot = self._snapshot
@@ -1034,8 +978,11 @@ class Session:
             self.session_voc = source
 
     def stop(self, run_id: str, mode: str = StopMode.AFTER_SHOT) -> dict:
-        """`after_shot` or `abort` for a running run; a queued run is
-        cancelled whichever mode is asked. 404 unknown, 409 already ended."""
+        """Requests `after_shot` or `abort`, or cancels a queued run.
+
+        Unknown IDs return 404; terminal runs return 409
+        (docs/service-contract.md section 6).
+        """
         if mode not in StopMode.ALL:
             raise ValueError(f"stop mode must be one of {StopMode.ALL}, not {mode!r}")
         job, rec = self._job(run_id)
@@ -1043,13 +990,10 @@ class Session:
             return {"run_id": run_id, "state": "cancelled", "mode": mode}
         if job.terminal or rec.terminal:
             raise Conflict(f"{run_id} is already {rec.state}")
-        # `rec.stopping` is set before the stop is requested, so that when
-        # the worker observes the request and reports its own `stopping`,
-        # `_on_state` already sees the flag and suppresses it -- the session
-        # is the one that reports `stopping`, once. The new state is said
-        # now rather than at the job's next event (seconds away for a long
-        # shot): the record, `/bench` and the stream all say `stopping` from
-        # the moment the stop was accepted.
+        # Set `rec.stopping` first so the worker's next state callback cannot
+        # duplicate the session's `stopping` entry. Report acceptance at once:
+        # a long shot can delay the worker's next event, while the record,
+        # `/bench` and stream must already show the pending stop.
         with self._lock:
             first = not rec.stopping
             rec.stopping = True
@@ -1060,7 +1004,7 @@ class Session:
         return {"run_id": run_id, "state": "stopping", "mode": in_force}
 
     def resume(self, run_id: str, detail: Mapping[str, Any] | None = None) -> dict:
-        """Answer a `NeedsOperator`. 409 when the run is not paused."""
+        """Answers `NeedsOperator`, refusing an unpaused run with HTTP 409."""
         job, rec = self._job(run_id)
         if rec.terminal:
             raise NotPaused(f"{run_id} is already {rec.state}; nothing to resume")
@@ -1073,8 +1017,10 @@ class Session:
         return self.worker.cancel(run_id)
 
     def wait_run(self, run_id: str, timeout_s: float | None = None) -> bool:
-        """Block until the run has been parked (or cancelled). For tests and
-        scripts; the app watches the event stream instead."""
+        """Waits for park or cancellation for scripts and tests.
+
+        The app observes the event stream instead.
+        """
         return self._job(run_id)[1].ended.wait(timeout_s)
 
     def _job(self, run_id: str) -> tuple[Job, RunRecord]:
@@ -1085,11 +1031,12 @@ class Session:
         return job, rec
 
     def run_record(self, run_id: str) -> dict:
-        """`GET /runs/{id}`: the registry's record for a run of this process,
-        else the journal's (`from: "journal"` -- the summary plus `tree` and
-        `nodes`, which is what the pipeline tab's grey V_oc grid of the
-        previous run needs when that run was last week's). 404 when neither
-        knows it."""
+        """Returns a registry run record or its journal reconstruction.
+
+        `GET /runs/{id}` serves the summary, tree and nodes across sessions.
+        Journal records carry `from="journal"`. Unknown IDs return 404
+        (docs/service-contract.md section 6).
+        """
         with self._lock:
             rec = self._records.get(run_id)
             if rec is not None:
@@ -1105,14 +1052,16 @@ class Session:
             return list(self._records.values())
 
     def runs_index(self, session: str = "this") -> list[dict]:
-        """`[RunSummary]`, newest first, from the journal -- the same answer
-        for this session and for last week's."""
+        """Returns journal run summaries newest first across selected sessions."""
         return self.journal.run_index(session)
 
     def run_data(self, run_id: str, node_path: str | None = None) -> dict:
-        """The full-precision arrays of one node (numpy inside; the route
-        applies `modules.jsonable`). 404 unknown or not in memory, 400 when a
-        pipeline run is asked without a node."""
+        """Returns one node's full-precision NumPy arrays.
+
+        The route applies `modules.jsonable`. Unknown or unavailable data
+        returns 404; a pipeline request without a node returns 400
+        (docs/service-contract.md section 6).
+        """
         with self._lock:
             rec = self._records.get(run_id)
             if rec is None:
@@ -1125,10 +1074,9 @@ class Session:
                 raise DataUnavailable(run_id, reason, rec.all_folders())
             nodes = list(rec.schedule.node_paths)
             if node_path is None:
-                # A pipeline run is addressed by node, even one with a single
-                # module: the path is part of the address (contract section
-                # 6), and a client that learned to omit it on small trees
-                # would break on the first real one.
+                # Node paths are part of every pipeline data address, even with one
+                # module. Special-casing small trees would break clients on larger
+                # trees (docs/service-contract.md section 6).
                 if rec.kind == "pipeline" or len(nodes) > 1:
                     raise NodeRequired(run_id, nodes)
                 node_path = nodes[0] if nodes else have[0]
@@ -1140,7 +1088,7 @@ class Session:
 
     # -- the bench ----------------------------------------------------------------
     def run_active(self) -> str | None:
-        """The id of the run holding or waiting for the bench, else None."""
+        """Returns the ID of a run holding or waiting for the bench, or `None`."""
         current = self.worker.current
         if current is not None and current.kind == "run" and not current.terminal:
             return current.id
@@ -1150,8 +1098,11 @@ class Session:
         return None
 
     def bench_read(self, *, wait: bool = True, timeout_s: float = 30.0) -> dict:
-        """A read-back job. Returns the `/bench` dict once it has run (or
-        `{"job": id}` at once with `wait=False`); `Busy` while a run is active."""
+        """Queues bench read-back and returns its snapshot or immediate job ID.
+
+        `wait=False` returns `{"job": id}`. An active run raises `Busy`
+        (docs/service-contract.md section 4).
+        """
         def make(job: Job):
             def gen():
                 snapshot = self._read_back()
@@ -1159,8 +1110,8 @@ class Session:
                     yield verdict
             return gen()
 
-        # The check and the queueing under the one lock `submit` takes, so
-        # a run cannot be queued between them and put this job behind it.
+        # `submit` uses the same lock, preventing a run from entering the
+        # queue between the busy check and this job's submission.
         with self._lock:
             active = self.run_active()
             if active is not None:
@@ -1171,36 +1122,32 @@ class Session:
         if not wait:
             return {"job": job_id}
         self._await(job, done, timeout_s)
-        # The job id rides along so a route that waited can still answer
-        # with the job it ran, as the non-waiting form does.
+        # Both waiting and immediate responses identify the executed job.
         return {"job": job_id, **self.bench_snapshot()}
 
     def bench_action(self, name: str, args: Mapping[str, Any] | None = None, *,
                      wait: bool = True, timeout_s: float = 30.0) -> dict:
-        """One explicit bench action as a job, journaled `by="hand"`.
+        """Queues an explicit bench action and journals it as `by="hand"`.
 
-        `KeyError` for an unknown name (404), `ValueError` for a bad body
-        (422), `BenchActionRefused` when the bench will not do it now (409
-        with the verdict), `Busy` while a run is active -- except `park`,
-        which aborts the run, cancels the queue and then parks. The
-        `BenchAction` carries `result.before`, the read-back's values of
-        what the action changes, so the log can say "NORM -> INV".
+        Unknown names raise `KeyError` (404), invalid bodies `ValueError`
+        (422), and refusal `BenchActionRefused` (409 with verdict). Active
+        runs raise `Busy`, except park, which aborts the run and cancels
+        queued runs first (docs/service-contract.md section 4).
+        `BenchAction.result.before` retains the changed fields' read-back
+        values so the journal can show the transition.
 
-        A park that has not started within `timeout_s` is *not* cancelled:
-        the run it aborted may be inside a VISA call that outlasts the wait,
-        and a park that vanished because the operator's click timed out
-        would leave the bench where the aborted run's own unwind put it with
-        no by-hand line to say so. The answer is then `{"pending": True}`
-        and the job runs when the worker frees.
+        A park queued longer than `timeout_s` remains queued: blocking VISA
+        may outlast the caller's wait. Cancelling it would omit the requested
+        safety action and its by-hand journal record. The response reports
+        `pending=True`; the job runs when the worker becomes available.
         """
         if name not in ACTIONS:
             raise KeyError(name)
         args = dict(args or {})
         outcome: dict[str, Any] = {}
-        # The bace parameters in force are read here, on the caller's
-        # thread, not inside the job: `PUT /modules/bace/params` edits the
-        # catalogue on the loop thread, and the worker reading the layers
-        # while they change is a dict changing size under iteration.
+        # Snapshot `bace` parameters on the caller's thread. The loop can edit
+        # catalogue layers through `PUT /modules/bace/params`; worker-thread
+        # iteration during an edit could encounter a changing dictionary.
         led_params = self.catalogue.param_set("bace").values()
 
         def make(job: Job):
@@ -1232,9 +1179,8 @@ class Session:
             if active is not None:
                 if name != "park":
                     raise Busy(f"run {active} is active; only park is allowed now")
-                # One step on the worker: the queued runs and the current
-                # one are taken under its lock, so a run it pops in between
-                # cannot run to completion ahead of the park.
+                # The worker reads current and queued runs under one lock, so a
+                # run cannot escape cancellation and complete ahead of park.
                 self.worker.stop_runs("park requested")
             job_id, done = self._new_job_id("action")
             job = Job(job_id, "action", make)
@@ -1250,7 +1196,7 @@ class Session:
                 "read_at": (self._snapshot or {}).get("read_at")}
 
     def _read_back(self) -> dict:
-        """On the worker thread: read every instrument and cache the result."""
+        """Reads and caches every instrument on the worker thread."""
         with self._lock:
             voc = self.session_voc
         snapshot = self.bench.read_back(voc=voc, monitor=self.monitor_running)
@@ -1267,11 +1213,13 @@ class Session:
 
     def _await(self, job: Job, done: threading.Event, timeout_s: float, *,
                cancel_on_timeout: bool = True) -> bool:
-        """Wait for a job; True once it has run. A job the caller gave up on
-        must not run later, unattended, after whatever was ahead of it, so
-        on timeout it is cancelled if it has not started and the caller
-        told (`TimeoutError`) either way -- unless `cancel_on_timeout` is
-        False (park), when the answer is False and the job stays queued."""
+        """Waits for job completion and returns true when it runs.
+
+        On timeout, an unstarted job is cancelled to prevent an unattended
+        late action, and `TimeoutError` reports failure to the caller.
+        With `cancel_on_timeout=False`, park remains queued and returns false
+        (docs/service-contract.md section 4).
+        """
         finished = done.wait(timeout_s)
         with self._lock:
             self._job_done.pop(job.id, None)
@@ -1288,18 +1236,15 @@ class Session:
         return True
 
     def bench_snapshot(self) -> dict:
-        """`GET /bench`: the cached read-back, the session's V_oc, the run in
-        progress and the queue. Touches no instrument.
+        """Returns cached bench state, session V_oc, active run and queue.
 
-        While a run holds the worker the read-back is the one Start took,
-        before the module enabled anything, so the instruments the running
-        step implies (`RunRecord.live`) are overlaid on it with
-        `how: "inferred"` and listed in `inferred`: the rail says "bias
-        LIVE, relay amplifier" while a bace runs because the run's events
-        say so, and `read_at` stays the read-back's. The temperature block
-        follows the newest `TemperatureRead` on the event path (the monitor,
-        the pause's poll, the operator's typed value) when it is newer than
-        the read-back.
+        No instrument I/O occurs. During a run, `RunRecord.live` overlays the
+        Start read-back with `how="inferred"` and lists inferred instruments.
+        This reflects active bias and relay state while `read_at` retains the
+        read-back timestamp (docs/service-contract.md section 4).
+
+        The temperature block follows a more recent `TemperatureRead` from a
+        monitor, pause poll or typed operator value on the shared event path.
         """
         with self._lock:
             snapshot = self._snapshot
@@ -1343,10 +1288,11 @@ class Session:
             }
 
     def _temperature_block(self, base: Mapping[str, Any], read_at: float | None) -> dict:
-        """The read-back's temperature block, overlaid with the newest
-        reading the event path saw when that is newer, plus the monitor's
-        state. `wired` stays what the rig says: an operator's typed number
-        does not make the 331 wired."""
+        """Overlays cached temperature with the latest reading and monitor state.
+
+        `wired` remains the rig's value. A typed temperature cannot establish
+        an instrument connection.
+        """
         out = dict(base)
         last = self._temperature
         if last is not None and (read_at is None or float(last["read_at"]) >= float(read_at)):
@@ -1362,19 +1308,20 @@ class Session:
 
     @property
     def snapshot(self) -> dict | None:
-        """The raw last read-back, as `pipeline.validate` and the catalogue
-        want it; None before the first."""
+        """Returns raw cached read-back for validation, or `None` before a read."""
         with self._lock:
             return self._snapshot
 
     # -- modules --------------------------------------------------------------------
     def modules_wire(self) -> dict:
-        """`GET /modules`."""
+        """Returns the catalogue for `GET /modules`."""
         return {"modules": [self.module_wire(name) for name in self.catalogue.names()]}
 
     def module_wire(self, name: str) -> dict:
-        """One module entry, with `last` from the registry and `needs` from the
-        session's V_oc and the cached read-back. `KeyError` for no such module."""
+        """Returns one module with registry `last` and bench-dependent `needs`.
+
+        Needs use session V_oc and cached read-back. Unknown modules raise `KeyError`.
+        """
         with self._lock:
             snapshot, voc = self._snapshot, self.session_voc
         entry = self.catalogue.as_wire(name, bench=snapshot, session_voc=voc)
@@ -1410,22 +1357,23 @@ class Session:
             return self._seq
 
     def events_since(self, seq: int = 0) -> list[dict]:
-        """Frames with `seq` above `seq`, from the ring (last 5000). The last
-        `RING_TRACES_KEPT` shots come back with their traces; older `StepDone`
-        frames carry their scalars and verdict only."""
+        """Returns replay frames with sequence numbers above `seq`.
+
+        The ring holds 5000 envelopes. Only the last `RING_TRACES_KEPT` shots
+        retain traces; earlier shots retain scalars and verdicts.
+        """
         with self._lock:
             full = {f["seq"]: f for f in self._traces}
             return [full.get(f["seq"], f) for f in self._ring if f["seq"] > int(seq)]
 
     def subscribe(self, queue: Any = None) -> Any:
-        """Register a sink with `put_nowait`/`qsize` (a `Backlog` queue by
-        default) and return it. A sink more than `SUBSCRIBER_BACKLOG`
-        *numbered* frames behind is dropped: it gets a `Notice` frame, then
-        `None`.
+        """Registers and returns a sink supporting `put_nowait` and `qsize`.
 
-        A sink of one's own is welcome and is measured whole, since only
-        `Backlog` knows how to count numbered frames -- which is the old
-        behaviour, and never under-counts."""
+        The default is `Backlog`. Beyond `SUBSCRIBER_BACKLOG` numbered frames,
+        a sink receives a `Notice`, then `None`, and is dropped. Other sinks
+        are counted whole, which cannot under-count the backlog
+        (docs/service-contract.md section 6).
+        """
         q = queue if queue is not None else Backlog()
         with self._lock:
             self._subscribers.append(q)
@@ -1443,9 +1391,11 @@ class Session:
 
     # -- the worker's side -------------------------------------------------------------
     def _on_event(self, job: Job, ev: E.Event) -> None:
-        """Worker thread. The digitiser's diagnostics are read here, beside
-        the shot they describe, and the worker-side view of the run's open
-        nodes and their shot counts is kept here, in event order."""
+        """Captures shot diagnostics and open-node counts on the worker thread.
+
+        Diagnostics are read beside the shot they describe. Node counts follow
+        event order before processing crosses to asyncio.
+        """
         diagnostics = None
         if isinstance(ev, E.StepDone):
             try:
@@ -1460,8 +1410,10 @@ class Session:
 
     @staticmethod
     def _track(rec: RunRecord, job: Job, ev: E.Event) -> None:
-        """Worker thread only, so no lock: which nodes are open and what
-        each module has measured, for the `NodeDone` an abort cannot yield."""
+        """Tracks open nodes and module counts on the worker thread only.
+
+        No lock is needed. The data supplies `NodeDone` when abort prevents it.
+        """
         if isinstance(ev, E.NodeStarted):
             if ev.node_path not in rec.open_nodes:
                 rec.open_nodes.append(ev.node_path)
@@ -1482,10 +1434,12 @@ class Session:
                 tally["kept"] = (tally["kept"] or 0) + 1
 
     def _on_state(self, job: Job, state: str, reason: str) -> None:
-        """Worker thread (or the caller's, for `cancelled`). Nothing on the
-        record is written here: the `RunStateChanged` goes down the one
-        event path and `_apply` updates the record in order with the
-        events before it."""
+        """Routes worker state onto the event path without mutating run records.
+
+        Cancellation can call this on the caller's thread. `_apply` processes
+        `RunStateChanged` after preceding events, preserving record order
+        (docs/service-contract.md section 2).
+        """
         ts = time.time()
         if job.kind == "run":
             with self._lock:
@@ -1493,11 +1447,9 @@ class Session:
                 if rec is not None and state == "stopping" and rec.stopping:
                     return                                  # already said by `stop()`
             if rec is not None and state in TERMINAL and state != "cancelled":
-                # The generator is gone (abort) or never reported (a worker
-                # failure): close what it left open, with the folder its
-                # recorder opened and the shots it took, so the record and
-                # the journal do not say "nothing was written" about a run
-                # whose files are on disk.
+                # Abort closes the generator, and worker failure can prevent its
+                # final report. Synthesize outcomes with recorder folders and shot
+                # counts so files on disk remain visible in registry and journal.
                 for node_path in reversed(list(rec.open_nodes)):
                     self._dispatch(job, E.NodeDone(node_path=node_path, outcome=state,
                                                    detail=self._synthesized_detail(
@@ -1506,9 +1458,8 @@ class Session:
                 rec.open_nodes.clear()
             self._dispatch(job, E.RunStateChanged(state, reason), node_path="", ts=ts)
         elif state == "parked" or state in TERMINAL:
-            # A read-back or an action: nothing to journal about its state,
-            # only the caller waiting in `_await` to wake. The terminal
-            # report comes first and `parked` right after; either will do.
+            # Action and read-back states only wake `_await`; no state journal
+            # entry is needed. Either terminal or following `parked` wakes it.
             with self._lock:
                 done = self._job_done.get(job.id)
             if done is not None:
@@ -1531,8 +1482,10 @@ class Session:
 
     def _dispatch(self, job: Job | None, ev: E.Event, *, node_path: str | None = None,
                   ts: float | None = None, diagnostics: Mapping[str, Any] | None = None) -> None:
-        """Route one event to `_ingest`: directly on the loop's thread or with
-        no loop attached, otherwise posted to the loop."""
+        """Dispatches an event to `_ingest` on the event-loop thread.
+
+        Without a loop it runs directly; other threads post to the attached loop.
+        """
         run_id = job.id if job is not None and job.kind == "run" else None
         if node_path is None:
             node_path = job.node_path if run_id is not None and job is not None else ""
@@ -1549,11 +1502,11 @@ class Session:
 
     def _ingest(self, run_id: str | None, node_path: str, ev: E.Event, ts: float,
                 diagnostics: Mapping[str, Any] | None) -> None:
-        """The one path: envelope, verdict, journal, ring, registry, fan-out.
+        """Builds payloads, journals events, updates replay and records, and broadcasts.
 
-        An ephemeral event (`StepPhase`) takes the short form of it: no seq,
-        no journal line, no place in the ring -- applied to the record (the
-        live overlay reads it) and fanned out to whoever is listening now.
+        Live-only events such as `StepPhase` omit sequence, journal and ring.
+        They still update the live overlay and reach current subscribers
+        (docs/service-contract.md section 3).
         """
         with self._lock:
             if is_ephemeral(ev):
@@ -1567,9 +1520,8 @@ class Session:
                     self._apply(run_id, node_path, ev, ts)
                 self._fan_out(frame, ephemeral=True)
                 return
-            # The seq is taken only once the payloads exist: a number spent
-            # on an event that could not be framed would be a gap every
-            # client reads as a missed frame and reconnects to replay.
+            # Assign `seq` after payload creation succeeds. Failed conversion
+            # must not create a false gap that prompts clients to replay.
             seq = self._seq + 1
             env = make_envelope(seq, run_id, node_path, ev, ts)
             try:
@@ -1609,9 +1561,8 @@ class Session:
         if rec.live is not None:
             rec.live.apply(ev, rec.schedule)
         if line is not None and isinstance(line.get("data"), dict):
-            # The node's measurement, from the journal line rather than the
-            # event: the same dict the file gets, through the same reducers,
-            # so the record and the file agree on every number and its type.
+            # Journal payloads and reducers supply identical numbers and types
+            # to the file and in-memory record.
             data = line["data"]
             if isinstance(ev, E.StepDone):
                 count_shot(rec.node_results.setdefault(node_path, {}), data)
@@ -1650,9 +1601,8 @@ class Session:
                 rec.progress = {"done": ev.done, "total": ev.total, "elapsed_s": ev.elapsed_s,
                                 "eta_s": ev.eta_s, "node_path": node_path}
             elif ev.eta_s is not None:
-                # A loop's Progress carries the executor's re-derived ETA
-                # (what this run has measured so far): the record's finish
-                # time follows it, and the submit-time one is kept beside.
+                # Loop `Progress` carries ETA from this run's measured durations.
+                # The record follows it while retaining the submit-time estimate.
                 rec.eta = {"eta_s": ev.eta_s, "finish_at": ts + ev.eta_s, "at": ts,
                            "node_path": ev.node_path, "done": ev.done, "total": ev.total}
                 cost = dict(rec.cost)
@@ -1661,9 +1611,8 @@ class Session:
                 cost["finish_source"] = "measured"
                 rec.cost = cost
         elif isinstance(ev, E.Verdict):
-            # One entry per (code, node) -- a Start re-reads the chain and
-            # dispatches the same verdicts the submit-time validation
-            # copied, and a "2 warn" count taken off the record must not be 4.
+            # Start rechecks submit-time verdicts. Replacement by code and node
+            # keeps warning counts from doubling.
             entry = to_wire(ev)[0]
             for i, old in enumerate(rec.verdicts):
                 if old.get("code") == ev.code and old.get("node_path", "") == ev.node_path:
@@ -1680,7 +1629,7 @@ class Session:
             rec.pending = None
 
     def _apply_state(self, rec: RunRecord, state: str, ts: float) -> None:
-        """The record's state bookkeeping, in order with the run's events."""
+        """Applies record state changes in order with run events."""
         if state == "parked":
             rec.parked = True
             rec.ended.set()
@@ -1688,9 +1637,8 @@ class Session:
         if state == "preflight" and rec.started_at is None:
             rec.started_at = ts
         if rec.stopping and state in ("preflight", "running"):
-            # A stop accepted during preflight: the session said `stopping`
-            # the moment it was accepted, and the worker's start-of-run
-            # reports, which follow, must not put `running` over it.
+            # A stop accepted during preflight already reports `stopping`.
+            # Subsequent worker startup states must not replace it with `running`.
             return
         rec.state = state
         if state in TERMINAL:
@@ -1707,13 +1655,13 @@ class Session:
                 rec.ended.set()
 
     def _fan_out(self, frame: dict, *, ephemeral: bool = False) -> None:
-        # The seq to reconnect from is the last *numbered* frame, which is
-        # what the ring holds; the frame in hand may be ephemeral (seq None).
+        # Reconnect uses the last numbered frame retained by the ring.
+        # The current frame can be live-only with `seq=None`.
         since = self._seq
         for q in list(self._subscribers):
             try:
-                # Staleness is measured whole and the backlog is measured in
-                # numbered frames; the two constants say why.
+                # Staleness counts all frames; replay backlog counts numbered frames.
+                # Each limit documents the reason for its bound.
                 if ephemeral and q.qsize() > EPHEMERAL_BACKLOG:
                     continue
                 q.put_nowait(frame)
@@ -1723,11 +1671,9 @@ class Session:
             if behind:
                 self._subscribers.remove(q)
                 try:
-                    # `seq` None: this frame is for one client and is not
-                    # in the ring; a real seq here would be one the client
-                    # has already seen, and a pump that dedupes on seq
-                    # would drop the very notice that says why it is
-                    # being closed.
+                    # `seq=None` marks this one-client notice outside the ring.
+                    # Reusing a real sequence number could make client deduplication
+                    # discard the explanation for disconnection.
                     q.put_nowait({"seq": None, "ts": time.time(), "run_id": None,
                                   "node_path": "", "type": "Notice",
                                   "data": {"level": "warning",
@@ -1746,8 +1692,10 @@ class Session:
         return self._monitor is not None and self._monitor.running
 
     def start_power_monitor(self, interval_s: float = 1.0) -> dict:
-        """`POST /monitors/power`. One at most (409 if running); `ValueError`
-        when the bench has no meter or the interval is out of range."""
+        """Starts the power monitor, refusing a second one with HTTP 409.
+
+        No meter or an invalid interval raises `ValueError`.
+        """
         interval_s = float(interval_s)
         if not MIN_INTERVAL_S <= interval_s <= MAX_INTERVAL_S:
             raise ValueError(f"interval_s must be between {MIN_INTERVAL_S:g} and "
@@ -1766,11 +1714,11 @@ class Session:
         return monitor.info()
 
     def _on_power_reading(self, ev: E.Event) -> None:
-        """The monitor's sink: the reading goes into the history under the
-        same `ts` its frame will carry, then down the one event path. One
-        clock for both, or a console merging `/monitors/power/history` with
-        the stream would hold every reading twice, a few microseconds
-        apart."""
+        """Stores and dispatches a monitor reading with one shared timestamp.
+
+        History and stream timestamps must match so clients can merge them
+        without duplicating each reading a few microseconds apart.
+        """
         when = time.time()
         if isinstance(ev, E.PowerReading):
             with self._lock:
@@ -1779,7 +1727,7 @@ class Session:
         self._dispatch(None, ev, node_path="", ts=when)
 
     def stop_power_monitor(self) -> bool:
-        """`DELETE /monitors/power`. False when none was running."""
+        """Stops power monitoring and returns whether a monitor is running."""
         monitor = self._monitor
         if monitor is None or not monitor.running:
             return False
@@ -1789,12 +1737,13 @@ class Session:
     # -- the power history ------------------------------------------------------------
     def power_history(self, *, since: float | None = None,
                       limit: int | None = None) -> dict:
-        """`GET /monitors/power/history`: every monitor reading the session
-        still holds, oldest first, as `[ts, watts, trustworthy]` rows --
-        after `since` when given, the newest `limit` when given. The
-        wavelength, source and averaging travel once, off the newest
-        reading, because they are the meter's settings and not the
-        sample's."""
+        """Returns retained power history as timestamp, watts and trust rows.
+
+        Rows are oldest first, optionally after `since` and limited to the
+        latest `limit` rows. Wavelength, source and averaging come once from
+        the latest reading: they describe meter settings rather than sample
+        properties (docs/service-contract.md section 8).
+        """
         with self._lock:
             rows = list(self._power_history)
         total = len(rows)
@@ -1818,17 +1767,21 @@ class Session:
         }
 
     def clear_power_history(self) -> int:
-        """`DELETE /monitors/power/history`: forget the readings held; the
-        journal on disk keeps them. Returns how many were dropped."""
+        """Clears in-memory power readings and returns the number removed.
+
+        The journal retains those readings on disk.
+        """
         with self._lock:
             n = len(self._power_history)
             self._power_history.clear()
         return n
 
     def power_history_csv(self) -> str:
-        """The history as a file a spreadsheet opens: one row per reading,
-        the wall clock in ISO form beside the unix seconds the stream uses,
-        watts in full precision, and what the meter said about each."""
+        """Exports one CSV row per power reading for spreadsheet use.
+
+        Each row retains ISO wall time, Unix seconds, full-precision watts
+        and meter status.
+        """
         import csv
         import io
         with self._lock:
@@ -1851,16 +1804,16 @@ class Session:
         return m is not None and m.running
 
     def start_temperature_monitor(self, interval_s: float = TEMPERATURE_MONITOR_S) -> dict:
-        """`POST /monitors/temperature`: the 331 read every `interval_s`
-        beside whatever the worker is doing -- through the attached driver's
-        lock when this process owns the GPIB session, over HTTP when a
-        console does. One at most (409); `ValueError` when no 331 is on the
-        bench at all or the interval is out of range.
+        """Starts 331 monitoring with the configured bus-ownership rule.
 
-        `start()` has already called this on a bench that has a 331
-        (`temperature_monitor_s`), so the route is what changes the interval
-        -- `DELETE` then `POST` -- or starts the monitor again after a
-        console stopped it, rather than what first turns it on."""
+        Direct GPIB reads require a nonblocking worker bus lock and the driver
+        lock; HTTP reads stay off the bus. Only one monitor can run (409).
+        No configured 331 or an invalid interval raises `ValueError`
+        (docs/service-contract.md section 8).
+
+        `start` enables it by default when `temperature_monitor_s` allows.
+        The route can restart it or change its interval with `DELETE` then `POST`.
+        """
         interval_s = float(interval_s)
         if not MIN_INTERVAL_S <= interval_s <= MAX_INTERVAL_S:
             raise ValueError(f"interval_s must be between {MIN_INTERVAL_S:g} and "
@@ -1868,11 +1821,9 @@ class Session:
         if self.temperature_monitor_running:
             raise Conflict("the temperature monitor is already running")
         controller = self.bench.rig.temperature
-        # When this process holds the 331's GPIB session, the monitor's thread
-        # would be a second thread on GPIB0 -- the one thing the bench-lock
-        # rule forbids. So it reads only while holding the worker's own bus
-        # lock, and skips the tick when a job holds it. A console-backed
-        # controller is HTTP, off the bus, and gets no lock.
+        # Direct 331 reads share GPIB0 with worker jobs. The monitor holds
+        # the worker's bus lock or skips the tick, preventing overlapping
+        # transactions. An HTTP controller needs no worker bus lock.
         on_the_bus = getattr(controller, "resource", None) is not None
         monitor = TemperatureMonitor(self.rig_config.temperature_console,
                                      emit=lambda ev: self._dispatch(None, ev, node_path=""),
@@ -1884,7 +1835,7 @@ class Session:
         return monitor.info()
 
     def stop_temperature_monitor(self) -> bool:
-        """`DELETE /monitors/temperature`. False when none was running."""
+        """Stops temperature monitoring and returns whether a monitor is running."""
         monitor = self._temperature_monitor
         if monitor is None or not monitor.running:
             return False
@@ -1892,14 +1843,14 @@ class Session:
         return True
 
     def monitors(self) -> list[dict]:
-        """`GET /monitors`."""
+        """Returns monitor status for `GET /monitors`."""
         return [m.info() for m in (self._monitor, self._temperature_monitor)
                 if m is not None and m.running]
 
 
 def tree_for_module(module: str, params: Mapping[str, Any] | None = None,
                     name: str = "") -> dict:
-    """The one-node tree `POST /runs` builds from `{module, params, name}`."""
+    """Builds the one-node run tree from `module`, `params` and `name`."""
     tree: dict[str, Any] = {"kind": "module", "module": str(module),
                             "params": dict(params or {})}
     if name:
