@@ -13,6 +13,7 @@ with the working tree:
 | `.py` | The syntax tree with every docstring and every bare string statement removed; comments are not in the tree |
 | `.toml` | The parsed tables, each value with its type |
 | `.js`, `.mjs` | The token sequence with comments removed: every identifier, number, string, template and regular expression |
+| `.css` | The rules with comments removed and whitespace collapsed |
 
 A checked file that was added, deleted or renamed fails: a rewrite changes
 files, it does not create or remove them. Any other changed file is listed
@@ -58,7 +59,32 @@ def _git(*args: str) -> str:
                           encoding="utf-8", check=True).stdout
 
 
-CHECKED = (".py", ".toml", ".js", ".mjs")
+CHECKED = (".py", ".toml", ".js", ".mjs", ".css")
+
+
+def css_text(source: str) -> str:
+    """A stylesheet with its comments removed and every run of whitespace
+    reduced to one space. A comment counts as whitespace, as it does to the
+    parser; quoted strings are kept as they are."""
+    out: list[str] = []
+    i, n = 0, len(source)
+    while i < n:
+        c = source[i]
+        if source.startswith("/*", i):
+            j = source.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+            out.append(" ")
+            continue
+        if c in "'\"":
+            j = i + 1
+            while j < n and source[j] != c:
+                j += 2 if source[j] == "\\" else 1
+            out.append(source[i:j + 1])
+            i = j + 1
+            continue
+        out.append(" " if c.isspace() else c)
+        i += 1
+    return " ".join("".join(out).split())
 
 _JS_PUNCT = sorted(("{ } ( ) [ ] ; , < > + - * % & | ^ ! ~ ? : = . @ / "
                     "... => == != === !== <= >= && || ?? ?. ++ -- << >> >>> "
@@ -221,6 +247,9 @@ def compare(path: str, base: str) -> str | None:
         except tomllib.TOMLDecodeError as exc:
             return f"does not parse: {exc}"
         return None if same else "the tables differ, not only the comments"
+    if path.endswith(".css"):
+        return None if css_text(before) == css_text(after) else \
+            "the rules differ, not only the comments"
     if path.endswith((".js", ".mjs")):
         return None if js_tokens(before) == js_tokens(after) else \
             "the code differs, not only its comments"
