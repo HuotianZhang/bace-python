@@ -4,6 +4,11 @@ Dated, newest first. Details and evidence are in `docs/`.
 
 ## 2026-10-28
 
+- The comments in `rig.toml`, `run.toml` and `recipes/` follow `docs/style.md`:
+  what each setting does and why it has its value, with the document that
+  shows it, and no history. `tools/check_text_only.py` confirms a rewrite
+  changed only comments and docstrings.
+
 - The manual's Part IV: every parameter, every check and every bench action,
   generated from the code by `tools/build_manual.py`, which also builds the
   whole manual as one printable HTML file (`--book`). The checks and

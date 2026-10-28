@@ -1,158 +1,140 @@
-# Against the LabVIEW panel -- combination 4's polarity, every other parameter
-# copied item by item, to see whether it agrees.
+# The recipe compares the measurement with the LabVIEW panel settings.
+# The polarity pair is invert_polarity = true with NORM (docs/notes.md).
+# The panel uses R_s = 5.192 Ω, bias gain 4 and probe attenuation 1.
+# Auto-range uses scale_factor 1.5 and offset_divisor 2. The panel's settle
+# time is 0.2 s; this recipe allows 0.3 s for levels and 0.7 s after shutter
+# motion. Its baseline is the mean of the last 200 samples.
+# Reference data measured on this bench: Q about -9.2e-10 C across three
+# V_pre points (about 0.7 % apart), light trace minus dark trace peak about
+# -3.7 mA, returning to zero within 2 µs, and individual trace peaks about
+# -27 mA. Compare shape as well as Q; the short window can omit a slow tail
+# (manual 2.2).
+# The panel's "positive jSC?" control has no block-diagram connection and
+# does not set output polarity (docs/notes.md).
 #
-# The reference panel (BACE Parameter + LED Setup/Pulse Mode):
-#   Vpre_Start 1.00354   Vpre_End 1.02354   dV 0.01        -> 3 points
-#   Vcoll -1             Delay(ns) 90       Pulse Width 5e3
-#   Timebase 200 ns      Record Length 5e3  t0 Integration 320e−9
-#   # Averages 200       # of Loops 1
-#   LED 1 V / Voltage_Low 0.4 V / 500 Hz / Duty 50 %
-#   offset corr? ON ("Subtract mean of last 200 values")
-#   Resistor 5.192       Pulse Amp 4        Probe Attenuation 1
-#   scale 1.5 / offset 2 (that is autorange's scale_factor / offset_divisor)
-#   Wait before measure 0.2 s
-#
-# The reference results from the panel, to compare against directly:
-#   Charge          ~ -9.2e-10 C (the three Vpre points differ by only ~0.7 %)
-#   PhotoCurrent peak ~ -3.7 mA, back to zero within 2 us
-#   raw light/dark trace peak ~ -27 mA
-#
-#   py -3 tools\scan.py --run recipes\run-labview.toml --dry
-#   py -3 tools\scan.py --run recipes\run-labview.toml
-#
-# ! The panel carries a "positive jSC?" ("if activated, positive voltage is
-#   applied to ITO"), and it is on. It is the only control on the panel that
-#   looks like a polarity switch, and it very likely feeds `:OUTP1:POL`. This
-#   file uses combination 4 (true + INV) -- if Q disagrees while the shape of
-#   the waveform agrees, the first thing to check is where that control goes
-#   inside the VI.
+# Preview: py -3 tools\scan.py --run recipes\run-labview.toml --dry
+# Run: py -3 tools\scan.py --run recipes\run-labview.toml
 
 [axis]
 name = "vpre"
-start = 1.00354                 # copied verbatim from the panel
+start = 1.00354                 # 1.00354 V starts the LabVIEW panel range.
 stop = 1.02354
-step = 0.01                     # 3 points: 1.00354 / 1.01354 / 1.02354
-centre_on_voc = false           # the panel takes absolute values typed by hand, not a span around V_oc
+step = 0.01                     # 0.01 V gives three points across the panel range.
+centre_on_voc = false           # Absolute V_pre in V matches the LabVIEW panel,
+                                # without offsets from V_oc.
 
 [pinned]
-vpre = 1.00354                  # overridden by the axis
-vcoll = -1.00                   # panel Vcoll(V) = -1
-delay_ns = 90.0                 # panel Delay(ns) = 90.
-                                # :PULS:DEL1 receives 90, exactly as the VI
-                                # sends it -- the program no longer adds an
-                                # offset to the command (before 2026-09-02 it
-                                # added 47 ns, and the two displacement spikes
-                                # were measured 48 ns apart). trigger_offset_s
-                                # in rig.toml is now the physical sync->field
-                                # delay, used only to place the integration
-                                # window.
+vpre = 1.00354                  # V_pre in V at the device; a V_pre axis overrides it
+                                # (manual 4.1).
+vcoll = -1.00                   # V_coll in V at the device; check device limits (manual
+                                # 2.4, 4.1).
+delay_ns = 90.0                 # Delay in ns sent unchanged as :PULS:DEL1, matching
+                                # LabVIEW. trigger_offset_s only places the integration
+                                # window (manual 2.2; docs/notes.md).
 
 [acquisition]
-n_loops = 1                     # panel # of Loops = 1
-n_averages = 200                # panel # Averages = 200
+n_loops = 1                     # One loop matches the LabVIEW panel.
+n_averages = 200                # N_avg = 200 matches the panel and reduces independent
+                                # noise by hardware averaging (manual 2.3).
 
-# --- sampling: the most consequential change of this round -------------------
-# The panel is 200 ns/div -> 2 us full screen, with 5000 points = 0.4 ns/sample.
-# Earlier rounds used 500 ns/div + 5000 points and the scope returned only 3125
-# points = 1.6 ns/sample, four times coarser than the panel. The rising edge of
-# the extraction spike is only tens of ns, and 1.6 ns/point is not enough.
-# :ACQ:POIN is a request, not a promise: the runner prints the dt it actually
-# got, and when that disagrees the answer has to be something other than
-# lowering record_length (:ACQ:MODE RTIM decimates by dropping samples, and a
-# narrow pulse can disappear entirely when there are too few).
+# Sampling resolves the displacement spike for the LabVIEW comparison.
+# At 200 ns/div, ten divisions give 2 µs; 5000 requested samples imply
+# 0.4 ns/sample. At 500 ns/div the bench can return 3125 samples, or
+# 1.6 ns/sample, too coarse for the spike's rising edge (measured on this
+# bench). :ACQ:POIN is a request; check the returned sample spacing.
+# Reducing record_length is unsafe: :ACQ:MODE RTIM drops samples, so narrow
+# pulses can disappear.
 timebase_ns_per_div = 200.0
 record_length = 5000
 
-# --- the integration window: converting the panel's record reference ---------
-# The panel's t0 Integration is 320 ns from the **first sample of the record**,
-# integrated to the end of the record (2 us). The window here is always measured
-# from the field's arrival (trigger + :PULS:DEL1 + rig.toml's
-# trigger_offset_s); at 200 ns/div the trigger falls at 200 ns into the record,
-# delay is 90 and the latency 47.1:
-#   320 - 200 - 90 - 47.1 = -17.1 ns, width 2000 - 320 = 1680 ns.
-# This is equivalent to the panel only at delay = 90 and 200 ns/div -- which is
-# exactly the condition this recipe sets.
+# The integration window matches the LabVIEW panel at this delay and timebase.
+# The panel starts 320 ns from the first sample and integrates to 2000 ns.
+# The trigger is 200 ns into the record. Delay is 90 ns and field latency
+# is 47.1 ns (manual 2.2). Relative to field arrival, the start is
+# 320 - 200 - 90 - 47.1 = -17.1 ns; the width is 2000 - 320 = 1680 ns.
+# The 17.1 ns lead is consistent with a 16.5 ns relation measured on this
+# bench. Equivalence requires delay 90 ns and timebase 200 ns/div.
 t0_int_s = -17.1e-9
 t_int_width_s = 1.68e-6
 
-offset_correct = true           # panel offset corr? ON
+offset_correct = true           # Subtracts a constant baseline; the LabVIEW panel
+                                # enables it.
 
-# --- what changes between light and dark ------------------------------------
-# "translated" (the default, and the convention this port rebuilt from the VI):
-# dark repeats the same voltage **span** but translated to start from 0 V. For
-# this round, at the device:
-#     light  baseline -1.01354 V -> pulse +1.00000 V
-#     dark   baseline  0.00000 V -> pulse +2.01354 V
-# The same span over a different absolute interval, so the displacement current
-# only cancels cleanly where C(V) is flat.
-#
-# "same": the levels do not change, and **the shutter is the only thing that
-# differs between light and dark**. The voltage step is bit-identical and the
-# displacement current cancels exactly. The cost is that in the dark the device
-# is held at the prebias (here +1.01 V of forward bias at the device, close to
-# V_oc, with a forward current of order Jsc*A -- not dangerous).
-#
-# translated is what BACE ought to do and is the rebuilt convention, so this
-# file uses it. "same" is only for comparison -- see run-labview-same.toml,
-# which is identical to this file apart from that one line.
+# The dark reference sets the voltage step used for the dark trace.
+# "translated" repeats the light step's voltage change starting at 0 V.
+# At the middle point, amplifier output levels are -1.01354 to +1.00000 V
+# for the light trace and 0 to +2.01354 V for the dark trace. Displacement
+# charge cancels only if capacitance is equal over both voltage ranges.
+# "same" keeps both levels identical; only the shutter changes. This removes
+# the difference in displacement charge but holds V_pre in the dark, about
+# 1.01 V forward bias here. The resulting forward current is of order the
+# short-circuit current and can contribute stored charge (manual 2.1).
+# Compare the spike residual, peak position and Q between the two recipes.
+# A +0.054 mA spike residual and a peak ratio of 3.7 are measured on this
+# bench; subtraction can affect both. run-labview.toml uses "translated";
+# run-labview-same.toml uses "same". Their measurement settings otherwise match.
 dark_reference = "translated"
 
-pulse_width_ns = 5000.0         # panel Pulse Width (ns) 5e3
-pulse_frequency_hz = 500.0      # panel Freq 500 Hz
-duty_percent = 50.0             # panel Duty Cycle 50 %
+pulse_width_ns = 5000.0         # 5000 ns at V_coll matches the LabVIEW panel.
+pulse_frequency_hz = 500.0      # 500 Hz on both generators gives a 2 ms period (manual
+                                # 1.2).
+duty_percent = 50.0             # 50 % gives 1 ms light and 1 ms dark at 500 Hz (manual
+                                # 1.2).
 
-# --- combination 4's polarity ------------------------------------------------
+# The polarity pair matches the LabVIEW program (docs/notes.md).
 invert_polarity = true
-output_polarity = "NORM"        # corrected the evening of 2026-09-02: 4=INV is
-                                # overturned. The bit-exact read-back at 02:20
-                                # shows LabVIEW finishing at NORM, and bare
-                                # --invert at 02:08 agreed with it to 4 % under
-                                # NORM; copying the panel means NORM
+output_polarity = "NORM"        # NORM with invert_polarity = true holds V_pre and steps
+                                # to V_coll through the inverting bias amplifier. INV
+                                # holds V_coll under light and prevents charge
+                                # accumulation (docs/notes.md).
 inverted_output = false
 
-# --- the wait between the shutter and acquisition ----------------------------
-# The gap fixed on 2026-09-01: dark_settle_s used to sleep **before the shutter
-# shut**, so acquisition began the instant it closed, giving neither the
-# mechanical shutter nor the device any settle time at all -- while light had
-# settle_s. When only one of two traces is allowed to settle, their difference
-# cannot be trusted.
-# shutter_settle_s now applies after the shutter moves on **both** branches.
-# The panel's "Wait before measure 0.2 s" is its own counterpart; this is more
-# generous.
+# Both traces need settle time after shutter motion.
+# dark_settle_s waits after dark levels are set but before the shutter shuts;
+# it cannot settle the shutter or the device after the light changes.
+# shutter_settle_s waits after motion for both traces, so their difference
+# compares settled states. The 0.7 s wait exceeds the panel's 0.2 s
+# (manual 4.1).
 settle_s = 0.3
 dark_settle_s = 0.3
-shutter_settle_s = 0.7          # wait after the shutter has moved, on both branches
+shutter_settle_s = 0.7          # 0.7 s after shutter motion for both traces, so each
+                                # device state can settle (manual 4.1).
 
 read_intensity = true
 trigger_sweep = "AUTO"
 calibrate_trigger = true
 store_shots = false
-acquisition_timeout_s = 60.0    # 200 averages x a 2 ms period = 0.4 s, plus the transfer
+acquisition_timeout_s = 60.0    # 60 s allows averaging and transfer. 200 acquisitions
+                                # at 500 Hz take 0.4 s before transfer (manual 2.3,
+                                # 4.1).
 
 [sourcemeter]
 current_compliance_a = 0.01
 voltage_compliance_v = 2.0
-settle_jsc_ms = 1000            # panel Settle Time Jsc/Voc/Jsat = 1000 ms
+settle_jsc_ms = 1000            # 1000 ms at 0 V before reading short-circuit current;
+                                # matches the LabVIEW panel.
 settle_voc_ms = 1000
 settle_jsat_ms = 1000
 nplc = 1.0
-averaging = 10                  # panel Voc/Jsc/Jsat Averages = 10
+averaging = 10                  # 10 readings per DC result, matching the LabVIEW panel.
 terminals = "FRON"
 four_wire = false
 
 [illumination]
-level_v = 1.000                 # panel LED Voltage = 1 (not 1.020)
-low_level_v = 0.4               # panel Voltage_Low = 0.4
-v_sat = -1.0                    # panel Vcoll corresponding to Jsat = -1
+level_v = 1.000                 # 1.000 V LED drive matches the LabVIEW panel. V_oc and
+                                # the light trace require the same level.
+low_level_v = 0.4               # 0.4 V LED low level is below threshold for a dark
+                                # half-cycle (manual 4.1).
+v_sat = -1.0                    # -1 V at the device for saturation current, matching
+                                # the LabVIEW panel.
 
 [sample]
 sample = ""
 material = ""
 pixel = ""
-# temperature_k is deliberately not typed here (2026-09-04): every recipe said
-# 290 and a run at 220 K was filed as "290 K, typed". A bench with a 331 reads
-# the controller as each node starts (how = "read"), a temperature node settles
-# it, and only a bench with no controller should type a number here -- the
-# file will say it was typed.
+# Temperature comes from the 331 read-back at each node. A temperature
+# module settles the controller before measurement. Only a bench without a
+# controller needs a typed temperature_k in K. The run records whether the
+# temperature is read or typed, so a recipe cannot mislabel it (manual 3.3, 4.1).
 operator = ""
 comment = "LabVIEW panel replica - combination 4"

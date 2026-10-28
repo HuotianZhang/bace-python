@@ -46,4 +46,4 @@ These rules apply to the manual, the other documents, code comments and docstrin
 
 ## Review
 
-Each rewritten text is checked twice before it is merged. A language pass by Codex (`codex exec`, read-only) proposes edits, and the author accepts or rejects each. A mechanical check confirms that only text changed. For Python, the syntax tree without comments and docstrings must be identical before and after. For the console, the tests and the linter must pass.
+Each rewritten text is checked before it is merged. Codex (`codex exec`) drafts the rewrite or proposes edits, and the author reviews the diff. Every cited source must contain the fact it is cited for. `tools/check_text_only.py` confirms that only text changed: for Python, the syntax tree without docstrings is identical before and after; for TOML, the parsed tables. For the console, the tests and the linter must pass.
