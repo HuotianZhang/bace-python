@@ -1,25 +1,25 @@
-"""Bench check — run this on the lab PC and send back the report.
+"""Run staged checks on the bench and write a report.
 
-Nothing here has ever spoken to an instrument: every SCPI string in this port
-was recovered from a LabVIEW binary. This session sends each one and reads the
-instrument's error queue immediately afterwards, so the report comes back with
-an exact list of what worked, what was rejected, and where the recovered
-behaviour differs from the instrument's own.
+The checks exercise the LabVIEW SCPI sequences against the instruments. Each
+command is followed by an error-queue query, so the report identifies rejected
+commands and differences between the required sequence and instrument behaviour.
 
-Stages, in the order they run. Each is opt-in past the first two, and nothing
-that can put a voltage on the device node happens without an explicit flag and
-a typed confirmation:
+The first three stages run by default. Other stages need their flags. Stages
+that move hardware require a typed confirmation unless `--yes` skips it.
+`--force-configure` permits level changes on live outputs only with no device
+connected. `--sync-drive` can enable the bias output and needs a safe relay
+read-back or explicit confirmation; `--yes` supplies that confirmation.
 
-    (always)      offline    the package itself, on this machine. No instruments
-    (always)      discover   enumerate VISA and *IDN? each configured address
-    (always)      local      the DELIB library, the 1918-C and 331 consoles
-    --read        read       read back what each instrument is set to
-    --configure   configure  send the configuration commands. Outputs stay OFF
-    --acquire     acquire    one scope acquisition (the trigger must be running)
-    --sync        sync       where the pulse sits in the LED cycle. Scope only
-    --dio         dio        toggle the shutter and relay lines. Audible
-    --outputs     outputs    enable outputs, NO SAMPLE CONNECTED
-    --measure     measure    one real transient. Needs a sample
+    (always)      offline    check the package without instruments
+    (always)      discover   enumerate VISA and query `*IDN?` at each address
+    (always)      local      check DELIB, the 1918-C and the 331
+    --read        read       read back instrument settings
+    --configure   configure  send configuration commands; outputs stay off
+    --acquire     acquire    acquire one record; the trigger must be running
+    --sync        sync       check the bias step in the LED cycle; scope only
+    --dio         dio        toggle shutter and relay lines with device connected
+    --outputs     outputs    enable outputs; disconnect the device first
+    --measure     measure    acquire a transient with a device connected
 
 Typical use, in three passes:
 
@@ -27,13 +27,14 @@ Typical use, in three passes:
     python -m bace.bench --read --configure
     python -m bace.bench --read --configure --acquire
 
-then, when those look right:
+After checking those reports, disconnect the device for `--outputs` and connect
+it for `--measure`:
 
-    python -m bace.bench --outputs                 # nothing connected
+    python -m bace.bench --outputs
     python -m bace.bench --measure --manual-shutter
 
-Three files land in the output folder: a `.txt` to read now, a `.html` to look
-at, and a `.json` with the full transcript — that is the one to send back.
+The output folder contains a `.txt` report, an `.html` report and a `.json`
+report with the full command transcript.
 """
 from __future__ import annotations
 
@@ -62,7 +63,7 @@ def _ask(prompt: str) -> str:
 
 
 def _default_archive() -> str | None:
-    """`bench-archive/` beside the package, if it is there."""
+    """Return `bench-archive/` beside the package if the folder exists."""
     import bace
     root = os.path.dirname(os.path.dirname(os.path.abspath(bace.__file__)))
     folder = os.path.join(root, "bench-archive")
@@ -177,11 +178,12 @@ def main(argv: list[str] | None = None) -> int:
     print()
 
     # -- offline ---------------------------------------------------------
-    # The regression is the strongest evidence the harness can produce -- the
-    # maths core reproducing a real 2026-08-07 run to 0.6 ulp -- and it was
-    # skipping on the lab PC because the archive lives on the other machine.
-    # A copy of one run folder now ships beside the package so every session
-    # re-proves the *deployed* code, not only mine.
+    # The archive checks the deployed code against LabVIEW photocurrent and Q
+    # within the rounding of six significant figures (manual 3.5), as required
+    # by `tests/test_regression_20260807.py`. Agreement measured on this bench
+    # is 0.6 ulp of the written values. The `.dat` round-trip must also match
+    # LabVIEW files byte for byte, as `tests/test_storage.py` checks. Keeping
+    # the run beside the package lets each machine check its own copy.
     checks.stage_offline(report, a.archive or _default_archive())
 
     rig_config, run_config, smu_config, led_drive, pinned = _load_configs(
@@ -206,9 +208,8 @@ def main(argv: list[str] | None = None) -> int:
     if a.acquire:
         checks.stage_acquire(report, rm, rig_config, run_config, a.averages)
     if a.sync:
-        # Before --measure, not after. A charge measured with the extraction
-        # pulse in the wrong half of the LED cycle is a charge of something
-        # else, and it looks exactly like a good one.
+        # Check phase before `--measure`: extraction in the wrong half of the LED
+        # cycle can still give a plausible transient and Q.
         sync.stage_sync(report, rm, rig_config, run_config,
                         led_drive=led_drive, drive=a.sync_drive,
                         confirm=(lambda q: "yes") if a.yes else _confirm,
@@ -248,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _load_configs(report: Report, rig_path, run_path):
-    """Load rig.toml / run.toml, falling back to the built-in defaults."""
+    """Load `rig.toml` and `run.toml`, with built-in defaults as fallbacks."""
     from bace.experiment.rig import RigConfig
     from bace.experiment.transient import RunConfig
 
@@ -257,11 +258,13 @@ def _load_configs(report: Report, rig_path, run_path):
     rig_config, run_config = RigConfig(), RunConfig()
     smu_config = SourceMeterConfig()
     led_drive = (1.020, 0.4)
-    """(high, low) at the 33220A output. The 81150A is armed by this
-    generator's Sync, so anything that sets one has to know the other."""
+    """High and low levels at the 33220A output, in V.
+    The 33220A Sync arms the 81150A, so their settings must agree.
+    """
     pinned = (0.9, -1.0, 88.0)
-    """(vpre, vcoll, delay_ns) at the device: the archive's point until
-    run.toml says otherwise."""
+    """V_pre, V_coll and delay at the device, in V, V and ns.
+    The archive point supplies defaults when `run.toml` provides no values.
+    """
 
     def load(c):
         nonlocal rig_config, run_config, smu_config, led_drive, pinned

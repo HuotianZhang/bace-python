@@ -1,45 +1,42 @@
-"""Where the extraction pulse sits inside the LED cycle.
+"""Check the bias step's phase within the LED cycle.
 
-The one thing the whole measurement rests on and that nothing has ever checked:
-the 81150A must be armed when the light goes **off**, not when it comes on. BACE
-holds the device at V_pre under illumination until it reaches its light V_oc,
-then steps to V_coll once the carriers have stopped being generated. Arm on the
-wrong edge and the extraction happens 135 ns after the LED turns *on*, in the
-middle of generation — and the result still looks like a transient, still
-integrates to a plausible charge, and still lands in the same files.
+The 81150A must arm when the LED drive falls. BACE holds V_pre under light,
+normally at V_oc, then steps to V_coll after the light goes out. Arming on the
+rising edge instead extracts during generation, yet can still produce a
+plausible transient and Q. Field arrival is delay + 47.1 ns after the 81150A
+Sync, fitted over a delay scan (manual 2.2); at 88 ns delay it is about 135 ns.
 
-The chain, and why it can go wrong silently:
+Signal paths:
 
-    33220A output ──► LED (via a fixed-gain amplifier, non-inverting)
-    33220A Sync   ──► 81150A external arm  (EDGE, POS, 1.0 V, 10 kohm)
-    81150A output ──► x4 amplifier ──► device      (delay + 47 ns after the arm)
-    81150A Sync   ──► scope CHAN3 (the run's trigger)
+    33220A output -> LED through a non-inverting amplifier of constant gain
+    33220A Sync   -> 81150A external arm (EDGE, POS, 1.0 V, 10 kΩ)
+    81150A output -> ×4 bias amplifier -> device
+    81150A Sync   -> scope CHAN3, the record trigger
 
-`:OUTP:POL` on the 33220A is what makes a *rising* Sync edge mean "light off":
-inverting the waveform flips which half of the cycle the LED is lit for, while
-leaving the Sync alone (33220A User's Guide p.67 — "the Sync signal associated
-with the waveform is not inverted"). Nothing in this package sets that polarity
-and nothing read it back until now, so the run has been inheriting whatever the
-last session left on the front panel.
+The 33220A's inverted output polarity makes its rising Sync edge correspond
+to the falling LED drive edge (manual 1.2). A transient run reads that polarity
+but does not set it. The check measures the drive directly, so a polarity
+setting alone cannot establish correct phase.
 
-**This stage answers it without trusting any of that.** It looks at the LED
-drive itself rather than at the Sync, so no manual and no polarity setting has
-to be believed: put the 33220A's main output on CHAN1 through a tee, take one
-wide single-shot record covering a whole 2 ms period, and read off whether the
-light was on or off either side of the arm edge.
+Connect the 33220A main output through a tee to CHAN1. A single acquisition
+covers the 2 ms LED period and compares the drive levels on either side of
+the arm marker. The drive edge and light-off at the device differ because of
+the LED driver and fibre delay (manual 2.2).
 
-Wiring for the stage:
+    CHAN1  33220A main output, tee, 1 MΩ; LED drive, 0.400 / 1.020 V
+    CHAN2  device current; unchanged
+    CHAN3  81150A Sync; record trigger
+    CHAN4  81150A main output, tee, 1 MΩ; optional bias-step marker
 
-    CHAN1  33220A main output, tee, 1 Mohm   the LED drive, 0.400 / 1.020 V
-    CHAN2  device current                    already there, untouched
-    CHAN3  81150A Sync                       already there, the arm instant
-    CHAN4  81150A main output, tee, 1 Mohm   the extraction pulse (optional)
+Use 1 MΩ inputs. A 50 Ω input loads the generator output and can change the
+signal under test. Without `--sync-drive`, the stage changes only scope
+settings and restores the settings it reads successfully. It sets no generator
+levels, enables no outputs and moves no relay, so a device can stay connected.
 
-1 Mohm, not 50 ohm: a 50 ohm input would load both generator outputs.
-
-The stage only ever touches the **scope**. It sets no levels, enables no output
-and moves no relay, so it is safe to run with a sample connected — and it
-restores every scope setting it changed.
+`--sync-drive` also runs the generators and restores their saved state. The
+81150A can put voltage on the device through the bias amplifier. The relay
+must select the Keithley with its output off, or explicit confirmation must
+authorize enabling the 81150A. `--yes` supplies that confirmation.
 """
 from __future__ import annotations
 
@@ -50,7 +47,7 @@ import numpy as np
 LED_CHANNEL = 1
 BIAS_CHANNEL = 4
 
-# (query, how to write the answer back)
+# Query and command template for restoring the read-back value.
 _SCOPE_STATE = (
     (":TIM:RANG?", ":TIM:RANG {};"),
     (":TIM:POS?", ":TIM:POS {};"),
@@ -82,21 +79,16 @@ def _edges(y: np.ndarray, threshold: float) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _is_logic(y, min_swing_v: float) -> tuple[bool, float, float]:
-    """Does this channel carry a two-level signal, or is it an unused input?
+    """Test whether a trace contains a two-level logic signal.
 
-    Learned from the rig, 2026-09-01. CHAN3 was not carrying the 81150A Sync and
-    swung 2.3 mV of noise. Edges were being found at the trace's own midpoint,
-    which for noise with one outlier sits *below* the noise band — so every
-    sample read as "high", exactly one rising edge was found (just after the
-    outlier), and a verdict was reported from it. The outlier was the LED edge
-    coupling into an unterminated input, which is why the phantom edge landed
-    320 ns from a real LED edge and looked plausible.
+    An unterminated input can couple to an LED edge and give a plausible timing
+    marker. Noise with an outlier can put the trace midpoint below the noise
+    band, leaving a single apparent rising edge. Noise of 2.3 mV and a false
+    marker 320 ns from the LED edge are measured examples on this bench.
 
-    Two guards, and the first is the one that matters: a logic line swings
-    volts, so anything under `min_swing_v` is not a signal. The second asks
-    whether the samples actually cluster at two levels — noise is unimodal and
-    spreads across the whole span, a pulse train puts ~everything on one rail or
-    the other.
+    The swing must reach `min_swing_v`: a logic signal spans volts. Samples
+    must also cluster near two levels. Noise spreads through the range; a
+    pulse train spends most of the record near one of its two levels.
     """
     y = np.asarray(y, dtype=float)
     ptp = float(y.max() - y.min())
@@ -110,21 +102,19 @@ def _is_logic(y, min_swing_v: float) -> tuple[bool, float, float]:
 def sync_phase(led, arm, dt: float, t0: float, *, led_threshold_v: float,
                bias=None, guard_s: float = 2e-5,
                min_swing_v: float = 0.5) -> dict:
-    """Was the 81150A armed at the LED's falling edge or its rising one?
+    """Determine whether the 81150A marker falls at light-on or light-off.
 
-    `led` is the 33220A output in volts, `arm` the 81150A Sync, `bias` the
-    81150A output if it was captured. `dt` and `t0` come from the record.
+    `led` is the 33220A output in V, `arm` is the 81150A Sync in V, and `bias`
+    is the optional 81150A output in V. `dt` and `t0` are the record's sample
+    interval and origin, in s.
 
-    Edges are found at each trace's **own midpoint**, not at
-    `led_threshold_v`. The drive levels here are 0.400 and 1.020 V against a
-    turn-on threshold of 1.0 V, so a threshold-crossing test would be deciding
-    an edge on 20 mV of margin. The midpoint sits 300 mV from either level. The
-    threshold is then used for the separate question of which of the two levels
-    actually lights the diode.
+    Each trace's midpoint locates its edges. For drive levels 0.400 and
+    1.020 V and a 1.0 V LED threshold, threshold crossings have only 20 mV
+    margin. The midpoint has about 300 mV margin from either level.
+    `led_threshold_v` instead determines whether a level lights the LED.
 
-    `guard_s` is how far either side of the arm edge the LED level is sampled.
-    The LED half-period is 1 ms, so anything from a microsecond up is clear of
-    the transition; 20 us keeps well away from edge ringing.
+    `guard_s` separates LED level samples from the marker on either side.
+    For a 1 ms half-period, a 20 µs guard avoids transition ringing.
     """
     led = np.asarray(led, dtype=float)
     arm = np.asarray(arm, dtype=float)
@@ -133,7 +123,7 @@ def sync_phase(led, arm, dt: float, t0: float, *, led_threshold_v: float,
     lo, hi = float(led.min()), float(led.max())
     mid = (hi + lo) / 2.0
     out["led low / high (V)"] = f"{lo:.4f} / {hi:.4f}"
-    # A drive that never crosses its own turn-on threshold is not a light source.
+    # The LED requires a drive level reaching its turn-on threshold.
     on_is_high = hi >= led_threshold_v - 0.02
     out["LED lit on the"] = "high level" if on_is_high else "(never — see verdict)"
 
@@ -154,12 +144,10 @@ def sync_phase(led, arm, dt: float, t0: float, *, led_threshold_v: float,
             "can be concluded — the diode is dark for the whole cycle")
         return out
 
-    # -- which channel marks the moment the 81150A fired? -----------------
-    # The Sync is the natural marker, but it is an input that can simply not be
-    # connected — and a channel with nothing on it must not be allowed to
-    # produce a verdict. The 81150A's own output answers the same question and
-    # is the better evidence anyway: it is the field itself, not a sync pulse
-    # that stands in for it.
+    # -- bias-step marker ------------------------------------------------
+    # An unconnected Sync input cannot establish phase. If it lacks a logic
+    # signal, the 81150A output can supply the marker: it carries the bias
+    # step directly rather than a separate Sync pulse.
     bias_arr = None if bias is None else np.asarray(bias, dtype=float)
     arm_ok, arm_ptp, arm_near = _is_logic(arm, min_swing_v)
     out["arm channel swing (V)"] = round(arm_ptp, 4)
@@ -260,30 +248,30 @@ def sync_phase(led, arm, dt: float, t0: float, *, led_threshold_v: float,
     return out
 
 
-# -- putting the generators into the state the phase check needs ---------
+# -- generator drive for the phase check ----------------------------------
 @contextlib.contextmanager
 def drive_generators(c, rm, rig_config, run_config, led_drive, confirm=None):
-    """Pulse mode on the 33220A, both outputs on, and everything put back after.
+    """Drive the generators for the phase check and restore their saved state.
 
-    Needed because nothing else in the harness leaves the LED running. A J-V
-    scan leaves the 33220A in DC (`FUNC:SHAP DC`); `--configure` sets pulse but
-    leaves the output off; `--outputs` enables it for one query and turns it
-    straight back off; `--measure` never touches it at all. So after any DC work
-    the generator has to be put back by hand, and this is that hand.
+    A J–V scan leaves the 33220A in DC mode. `--configure` selects pulse mode
+    with output off; `--outputs` enables it only briefly; `--measure` does
+    not drive it. The phase check needs a running LED cycle.
 
-    **The 81150A output is the dangerous half.** Its amplifier feeds the device
-    whenever the relay is on the amplifier side, so this reads the relay line
-    back before enabling anything and refuses if it cannot prove where the relay
-    is. The safe position for a phase measurement is the *SourceMeter* side with
-    the SourceMeter output off: the amplifier is then disconnected, the 81150A
-    can run freely, and nothing reaches the sample.
+    The 81150A drives the device through the bias amplifier when the relay
+    selects that path. The safe phase-check position selects the Keithley
+    with its output off, disconnecting the amplifier from the device. An
+    enabled Keithley blocks this operation. If the relay position is unsafe
+    or unreadable, enabling an inactive 81150A requires explicit confirmation;
+    without it, only the 33220A runs. An enabled 81150A stays enabled. The
+    read-back includes device voltage levels so the confirmation states the
+    voltage at risk. `--yes` supplies confirmation through the caller.
     """
     from bace.drivers.agilent33220a import Agilent33220A
     from bace.drivers.routing import TO_AMPLIFIER, TO_SOURCEMETER
 
     from .checks import _wrap
 
-    # -- where is the relay? ---------------------------------------------
+    # -- relay read-back --------------------------------------------------
     position = None
     try:
         from bace.drivers.shutter import Shutter
@@ -300,7 +288,7 @@ def drive_generators(c, rm, rig_config, run_config, led_drive, confirm=None):
             TO_SOURCEMETER: "SourceMeter — the amplifier is disconnected",
         }.get(position, f"module {rig_config.relay_module_nr} = {position}")
 
-    # -- is the SourceMeter driving into it? -----------------------------
+    # -- Keithley output interlock ----------------------------------------
     smu_res = _wrap(c, rm, rig_config.sourcemeter_address, ":SYST:ERR?")
     if smu_res is not None:
         try:
@@ -321,10 +309,10 @@ def drive_generators(c, rm, rig_config, run_config, led_drive, confirm=None):
     led_res = _wrap(c, rm, rig_config.led_address, ":SYST:ERR?")
     bias_res = _wrap(c, rm, rig_config.bias_address, ":SYST:ERR?")
 
-    # -- what would enabling the 81150A actually put on the device? -------
-    # Asking "enable anyway?" without saying what levels it is holding is an
-    # unanswerable question. The generator keeps whatever the last session left,
-    # and this rig has been found free-running at +5.06 V at the device.
+    # -- device voltage before output enable ------------------------------
+    # Confirmation requires the actual levels: the generator retains settings
+    # between sessions. Free-running output of +5.06 V at the device is
+    # measured on this bench.
     already_on = False
     if bias_res is not None:
         try:
@@ -372,8 +360,8 @@ def drive_generators(c, rm, rig_config, run_config, led_drive, confirm=None):
                 f"{saved_led.get('FUNC:SHAP?', '?')}, output "
                 f"{saved_led.get(':OUTP?', '?')}")
             g = Agilent33220A(led_res)
-            # The 81150A is armed by this generator's Sync, so the frequency has
-            # to be the run's, not a driver default.
+            # The 33220A Sync arms the 81150A, so the generator must use the
+            # run's frequency rather than a driver default.
             g.set_pulse(led_drive[0], led_drive[1],
                         frequency_hz=run_config.pulse_frequency_hz,
                         duty_percent=run_config.duty_percent)
@@ -409,13 +397,12 @@ def drive_generators(c, rm, rig_config, run_config, led_drive, confirm=None):
                     if ":VOLT:OFFS?" in saved_led:
                         led_res.write(f":VOLT:OFFS {saved_led[':VOLT:OFFS?']};")
                 elif shape:
-                    # Two writes, not one compound message. After
-                    # `FUNC:SHAP PULSE;` the next mnemonic continues at the same
-                    # subsystem level, so `FUNC:PULS:HOLD` is parsed as
-                    # `FUNC:FUNC:PULS:HOLD` -- the rig answered
-                    # -113,"Undefined header" and discarded the rest of the
-                    # message. `agilent33220a.set_pulse` splits them for exactly
-                    # this reason; the restore path had quietly recombined them.
+                    # Use separate writes. Within a compound message,
+                    # `FUNC:SHAP PULSE;FUNC:PULS:HOLD DCYC;` makes the second header
+                    # relative to `FUNC`, giving `FUNC:FUNC:PULS:HOLD`. It
+                    # returns -113, "Undefined header", and discards the remaining
+                    # commands. `Agilent33220A.set_pulse` also separates the
+                    # writes; restoration must preserve that command boundary.
                     led_res.write("FUNC:SHAP PULSE;")
                     led_res.write("FUNC:PULS:HOLD DCYC;")
                     for q, cmd in ((":FREQ?", ":FREQ {};"),
@@ -437,10 +424,12 @@ def stage_sync(report, rm, rig_config, run_config, *,
                drive: bool = False, confirm=None,
                window_s: float = 2.5e-3, points: int = 500_000,
                timeout_s: float = 30.0) -> None:
-    """One wide single-shot record of the whole LED cycle, plus the
-    instrument states the run depends on. Since 2026-09-02 the run path arms
-    the 81150A itself (`RunConfig.external_trigger`); the 33220A polarity is
-    still never written by a run and is the state this stage exists for."""
+    """Record a complete LED cycle and read back the trigger-chain state.
+
+    `RunConfig.external_trigger` controls 81150A arming during a run. The run
+    reads the 33220A polarity without setting it, so this stage checks whether
+    that retained setting produces the required phase.
+    """
     from bace.drivers.infiniium import Infiniium
 
     from .checks import Check, _wrap
@@ -468,19 +457,17 @@ def stage_sync(report, rm, rig_config, run_config, *,
             return
         try:
             for q in (":ARM:SOUR1?", ":ARM:SENS1?", ":OUTP1:POL?",
-                      # The delay and width in force. Without them the gap
-                      # between the 81150A Sync and its output cannot be read:
-                      # a fixed instrument latency and a programmed delay look
-                      # identical in one record. `trigger_offset_s = 47e-9`
-                      # claims the gap is fixed; :PULS:DEL1 is what decides
-                      # whether a measurement of it means anything.
+                      # Read delay and width to separate programmed delay from
+                      # latency in the Sync-to-output interval. One record cannot
+                      # distinguish them without `:PULS:DEL1?`. The 47.1 ns
+                      # `trigger_offset_s` locates field arrival at the device,
+                      # rather than the generator output (manual 2.2).
                       ":PULS:DEL1?", ":FUNC1:PULS:WIDT?", ":FREQ1?",
                       ":VOLT1:HIGH?", ":VOLT1:LOW?",
-                      # The driver writes `:ARM:SLOP POS` with no channel index
-                      # while every neighbouring ARM command carries one. Ask
-                      # both spellings: if only the indexed form answers, the
-                      # slope has never actually been set and the instrument has
-                      # been running on its own default.
+                      # The driver uses unindexed `:ARM:SLOP POS` while other arming
+                      # commands carry a channel index. Query both forms to test
+                      # whether the unindexed command applies the slope or leaves
+                      # the instrument at its default.
                       ":ARM:SLOP?", ":ARM:SLOP1?"):
                 try:
                     c.data["81150A " + q] = str(bias_res.query(q)).strip()
@@ -500,7 +487,7 @@ def stage_sync(report, rm, rig_config, run_config, *,
             c.skip("scope not reachable")
             return
 
-        arm_source = rig_config.trigger_source          # CHAN3, the 81150A sync
+        arm_source = rig_config.trigger_source          # CHAN3, the 81150A Sync
         saved: dict[str, str] = {}
         to_save = list(_SCOPE_STATE) + list(_channel_state(LED_CHANNEL)) \
             + list(_channel_state(BIAS_CHANNEL))
@@ -517,45 +504,42 @@ def stage_sync(report, rm, rig_config, run_config, *,
                           probe_attenuation=rig_config.probe_attenuation)
             s.default_setup()
 
-            # A window wide enough for one whole 2 ms LED period, with the
-            # trigger 50 us in so the edge that starts it is visible.
+            # A 2.5 ms record covers the 2 ms LED period. The trigger sits
+            # 50 µs into the record so its starting edge remains visible.
             res.write(f":TIM:RANG {window_s:g};")
             res.write(f":TIM:POS {window_s / 2.0 - 5e-5:g};")
-            # Deep, because the sample rate follows from memory over window and
-            # `:ACQ:MODE RTIM` decimates by dropping samples, not by averaging
-            # them. 100k over 2.5 ms is 40 ns a point, and the rig showed what
-            # that costs: the 81150A Sync came back as 2-87 mV of nothing while
-            # the same channel showed a clean pulse the moment the timebase was
-            # made faster. A pulse narrower than one sample interval is simply
-            # not there. 500k is 5 ns a point over the same window, which also
-            # makes the arm-to-output delay measurable instead of a rounding.
+            # Memory depth sets the sample interval over the record.
+            # `:ACQ:MODE RTIM` drops samples rather than averaging them. At
+            # 100000 samples over 2.5 ms, the interval is 25 ns; narrow Sync
+            # pulses can disappear, including at a 40 ns sample interval.
+            # Sync amplitudes of 2–87 mV at low sample rates, with a clean
+            # pulse at faster rates, are measured on this bench. At 500000
+            # samples the interval is 5 ns, resolving both
+            # short pulses and the arm-to-output delay.
             res.write(f":ACQ:POIN {int(points):d};")
             res.write(":ACQ:MODE RTIM;:ACQ:AVER OFF;")
 
             for ch in (LED_CHANNEL, BIAS_CHANNEL):
                 res.write(f":CHAN{ch}:DISP ON;")
-                # 1 Mohm. A 50 ohm input would load the generator output this is
-                # teed off, which is the one way this read-only stage could
-                # change the measurement it is checking.
+                # Use 1 MΩ input impedance. A 50 Ω input loads the generator
+                # output at the tee and can change the signal under test.
                 res.write(f":CHAN{ch}:INP DC;")
             res.write(f":CHAN{LED_CHANNEL}:RANG 1.5;OFFS 0.7;")
             res.write(f":CHAN{BIAS_CHANNEL}:RANG 6;OFFS 0;")
 
-            # Trigger on the LED drive, not on the 81150A sync: the LED cycle is
-            # the clock everything else is judged against.
+            # Trigger on the LED drive because its cycle defines the phase
+            # reference for the 81150A marker.
             res.write(":TRIG:MODE EDGE;")
             res.write(f":TRIG:EDGE:SOUR CHAN{LED_CHANNEL};")
             res.write(":TRIG:EDGE:SLOP POS;")
             res.write(f":TRIG:LEV CHAN{LED_CHANNEL},0.71;")
-            # TRIG, not AUTO: a missing trigger has to become a timeout. AUTO
-            # would sweep anyway and hand back a free-running picture that looks
-            # like a measurement.
+            # `TRIG` makes a missing trigger time out. `AUTO` can return a
+            # free-running record that looks like a triggered measurement.
             res.write(":TRIG:SWE TRIG;")
 
-            # The generators have to be running for there to be a cycle to
-            # look at, and nothing else in the harness leaves them that way.
-            # Opt-in, because enabling the 81150A is the one part of this stage
-            # that can reach the sample.
+            # A phase record requires running generators. Generator drive is
+            # opt-in because enabling the 81150A can put voltage on the device.
+            # The other stages do not leave both generators running.
             gens = (drive_generators(c, rm, rig_config, run_config,
                                      led_drive, confirm)
                     if drive else contextlib.nullcontext(True))
