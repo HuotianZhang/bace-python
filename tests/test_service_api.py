@@ -681,11 +681,11 @@ def test_bace_is_refused_without_a_voc_source_and_centres_on_the_sessions(servic
 
 def test_stop_after_shot_keeps_the_shot_and_abort_discards_it(service):
     client, session = service
-    # 2000 loops, not 50: under --fast a shot takes a millisecond, and a scan
-    # short enough to finish before the stop request lands turns this into a
-    # race the suite loses once in a while (the run-3 review saw it in the
-    # smoke driver first). The stop lands after the first StepDone either way.
-    r = client.post("/runs", json=bace(2000, voc=0.9))
+    # 100000 loops: under --fast a shot takes a millisecond, and `frames`
+    # re-reads the whole ring on every poll, so on a slow runner a scan of a
+    # few thousand loops can finish before the stop request lands. The stop
+    # ends the run after its first shot either way, so the length costs nothing.
+    r = client.post("/runs", json=bace(100_000, voc=0.9))
     assert r.status_code == 202
     run_id = r.json()["run_id"]
     wait_until(lambda: any(f["type"] == "StepDone" for f in frames(client, run_id=run_id)))
