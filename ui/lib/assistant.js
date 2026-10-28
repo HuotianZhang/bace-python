@@ -334,8 +334,11 @@ export function createAssistantPanel({ api, onChange = () => {} }) {
     return state.editing || Boolean(missing(state.settings, state.key));
   }
 
+  // A key belongs to the address it was typed or loaded for (`keyFrom`), so
+  // that moving the form to another provider never carries one across.
   function freshDraft() {
-    return { ...state.settings, key: state.key, remember: Boolean(storedKey(state.settings)) };
+    return { ...state.settings, key: state.key, keyFrom: keySlot(state.settings),
+             remember: Boolean(storedKey(state.settings)) };
   }
 
   function openForm() {
@@ -379,15 +382,21 @@ export function createAssistantPanel({ api, onChange = () => {} }) {
     const all = state.status && state.status.providers;
     const ps = all ? all[d.provider] : null;
     const rebuild = (patch) => { Object.assign(draft, patch); formVersion += 1; draw(); };
+    // Somewhere else to send the key: take the one stored for there, or none.
+    const moveTo = (patch) => {
+      const next = { ...d, ...patch };
+      const key = storedKey(next);
+      rebuild({ ...patch, key, keyFrom: keySlot(next), remember: Boolean(key) });
+    };
     const field = (label, control) => h('label.as-field', h('span', label), control);
-    const provider = h('select', { onchange: (e) => rebuild({ provider: e.target.value, key: '', model: '' }) },
+    const provider = h('select', { onchange: (e) => moveTo({ provider: e.target.value, model: '' }) },
       h('option', { value: 'anthropic', text: 'Claude · Anthropic', selected: d.provider === 'anthropic' }),
       h('option', { value: 'openai', text: 'OpenAI-compatible', selected: d.provider === 'openai' }));
     const local = d.provider === 'openai' && isLocal(d.base_url);
     const keyInput = h('input', {
       type: 'password', autocomplete: 'off', value: d.key || '',
       placeholder: d.provider === 'anthropic' ? 'sk-ant-…' : local ? 'not needed for a model on this PC' : 'API key',
-      oninput: (e) => { d.key = e.target.value.trim(); },
+      oninput: (e) => { d.key = e.target.value.trim(); d.keyFrom = keySlot(d); },
     });
     const model = h('input', {
       value: d.model || '', autocomplete: 'off',
@@ -403,18 +412,31 @@ export function createAssistantPanel({ api, onChange = () => {} }) {
       field('provider', provider),
     ];
     if (d.provider === 'openai') {
-      const preset = h('select', { onchange: (e) => e.target.value && rebuild({ base_url: e.target.value }) },
+      const preset = h('select', { onchange: (e) => e.target.value && moveTo({ base_url: e.target.value }) },
         h('option', { value: '', text: 'choose …' }),
         PRESETS.map((p) => h('option', { value: p.base_url, text: p.name, selected: p.base_url === d.base_url })));
       rows.push(field('preset', preset),
         field('address', h('input', { value: d.base_url || '', placeholder: 'https://…/v1', autocomplete: 'off',
-                                      oninput: (e) => { d.base_url = e.target.value.trim(); } })));
+                                      oninput: (e) => {
+                                        d.base_url = e.target.value.trim();
+                                        if (d.key && keySlot(d) !== d.keyFrom) {
+                                          d.key = '';
+                                          keyInput.value = '';
+                                          d.remember = false;
+                                          remember.checked = false;
+                                        }
+                                      } })));
     }
     rows.push(field('model', model), field('key', keyInput),
       h('label.as-remember', remember, ' remember the key on this computer'));
     const problem = h('p.as-warn');
     const use = () => {
       const next = { provider: d.provider, base_url: d.provider === 'openai' ? d.base_url : '', model: d.model };
+      // The last guard: a key typed for one address is never sent to another.
+      if (d.key && d.keyFrom !== keySlot(next)) {
+        problem.textContent = 'The key was entered for another address: enter it again.';
+        return;
+      }
       const why = missing(next, d.key);
       if (why) { problem.textContent = `Still needed: ${why}.`; return; }
       writeJson(SETTINGS_STORE, next);
