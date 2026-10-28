@@ -617,16 +617,19 @@ def test_field_docs_returns_the_first_sentence():
 
     docs = field_docs(RunConfig)
     assert docs["n_averages"] == (
-        "How many traces the scope averages in hardware before it hands one back.")
-    assert docs["t_int_width_s"] == "How long the integration window is, in seconds."
+        "How many acquisitions the digitiser averages in hardware before it returns "
+        "one trace.")
+    assert docs["t_int_width_s"] == (
+        "How long the charge integration window lasts, in s, starting at `t0_int_s` "
+        "relative to field arrival.")
     # Absent, not "": a field with no string under it is missing from the map
     # rather than mapping to empty. `RunConfig` has none left -- every one of
     # its fields is documented -- so the case is made on a dataclass that does.
     from bace.core.axis import Axis
     assert "start" not in field_docs(Axis)
     full = field_docs(RunConfig, full=True)
-    assert "Noise falls as 1/sqrt(n)" in full["n_averages"]
-    assert "travels with `:PULS:DEL1` along a\ndelay axis" in full["t0_int_s"]
+    assert "Uncorrelated noise falls as `1 / sqrt(n_averages)`" in full["n_averages"]
+    assert "Field arrival is the trigger plus `:PULS:DEL1` and\n" in full["t0_int_s"]
 
 
 def test_field_docs_works_on_every_config_and_never_raises():
@@ -637,10 +640,13 @@ def test_field_docs_works_on_every_config_and_never_raises():
     from bace.experiment.transient import RunConfig
 
     assert field_docs(JVConfig)["led_levels_v"] == (
-        "Drive levels for the light scans, at the 33220A output.")
-    assert field_docs(SeriesConfig)["led_low_v"] == "The 33220A pulse low level."
+        "Drive levels for managed light scans at the 33220A output, in V; empty means "
+        "no light scan.")
+    assert field_docs(SeriesConfig)["led_low_v"] == (
+        "The 33220A pulse low level driving the LED, in V.")
     assert field_docs(RigConfig)["sense_resistor_ohm"] == (
-        "The resistor between the device and the scope input.")
+        "Resistance between the device and digitiser input, in Ω, used to convert "
+        "measured voltage to current.")
     assert field_docs(SourceMeterConfig)["current_compliance_a"] == (
         "The most current the 2400 will pass while it sources voltage "
         "(`:SENS:CURR:PROT:LEV`); it clamps there rather than going higher.")
