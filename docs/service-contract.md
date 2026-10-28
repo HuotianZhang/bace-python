@@ -1,31 +1,21 @@
-# BACE service layer — contract v1
+# BACE service contract
 
-2026-09-02. This is the implementation contract for `bace/service/`, derived from
-`docs/history/service-plan.md` (the plan), the Round 3 console design
-(`docs/bace-console-round3.html`, artifact *UI mockups: Pipeline bench timeline*)
-and the design pack, historical since 2026-09-02 — what survives of it is
-`docs/ui-rules.md`, and the canvas source is `docs/design/`. Where this file
-and the plan
-disagree, the plan wins; where this file and the code disagree, fix one of them
-and say so here.
+The service owns the instruments in one process on the lab PC. It exposes the
+engine's synchronous event generators through HTTP and WebSocket. It queues
+jobs, broadcasts events, writes the journal and executes pipeline trees.
 
-The service is **a thin shell around the engine**: one process on the lab PC,
-bound to 127.0.0.1, owning every VISA instrument, wrapping the existing event
-generators (`run_transient_scan`, `run_jv`, and the DC characterisation the
-intensity series does) in HTTP + WebSocket. It rewrites no measurement logic.
-It does four things: queue, broadcast events, keep a journal, execute the
-pipeline tree.
-
----
+This document describes the implementation in `bace/service/`. Paths with a
+package or repository directory prefix are relative to the repository root.
+The [manual](manual/README.md) explains operation and measurement physics.
+`ui-rules.md` defines console rendering.
 
 ## 1. Package layout
 
 ```
-bace/params.py            provenance machinery (Source, ParamSpec, ParamSet …)   [round 1]
-bace/experiment/events.py Envelope, Progress.node_path, the service vocabulary  [round 1]
-                          (+ StepPhase and RunQueued, 2026-09-02 review round)
-bace/experiment/wire.py   to_wire / envelope_to_wire                            [round 1]
-bace/drivers/readback.py  ask / on_off / number / word: the read-only queries   [review round]
+bace/params.py            provenance machinery (Source, ParamSpec, ParamSet …)
+bace/experiment/events.py Envelope, Progress.node_path, the service vocabulary
+bace/experiment/wire.py   to_wire / envelope_to_wire
+bace/drivers/readback.py  ask / on_off / number / word: the read-only queries
                           the real drivers' read_state()/read_output() spell
 
 bace/service/
@@ -40,7 +30,7 @@ bace/service/
                   provenance, and build(module, params, ctx) -> generator.
   journal.py      Journal: append-only JSONL per session; history queries
                   (last-used params, settle times, run index).
-  worker.py       BenchLock + RunWorker thread + RunHandle (stop / abort /
+  worker.py       RunWorker thread and bus lock + Job (stop / abort /
                   resume) + the asyncio bridge that fans events out.
   wire.py         thin: envelope creation and the WS/journal payload policy
                   (which arrays are decimated, which are omitted).
@@ -49,7 +39,7 @@ bace/service/
   executor.py     run_pipeline(rig, schedule, ctx) -> Iterator[Event]: the three
                   bindings, relay transitions, NeedsOperator, recorders, park.
   monitors.py     the observers: the power monitor and the temperature monitor
-                  (HTTP, no VISA, run beside a run).
+                  (USB/HTTP power; GPIB/HTTP temperature, with a bus lock).
   live.py         what the running step implies about the instruments, folded
                   from the run's events, overlaid on /bench as `inferred`.
   assistant.py    the console's assistant: a conversation over read-only tools
@@ -59,65 +49,54 @@ bace/service/
   app.py          create_app(session) -> FastAPI. Routes, WS, static mount.
 ```
 
-Dependency rule, enforced by `tests/test_architecture.py`: `core/` imports
-nothing outward; `drivers/` nothing from `experiment/storage/service`;
-`experiment/` and `storage/` nothing from `service`. `bace.service` imports
-`pyvisa` and the real drivers **lazily, inside `rigs.py`**, so `--sim` works on a
-machine with no VISA backend. FastAPI/uvicorn are optional dependencies
-(`pyproject.toml` extra `service = ["fastapi>=0.110", "uvicorn>=0.29", "websockets>=12"]`;
+Dependency rule, enforced by `tests/test_architecture.py`: `bace/core/` imports
+nothing outward; `bace/drivers/` imports nothing from experiment, storage or
+service. `bace/experiment/` and `bace/storage/` import nothing from service. `bace.service` imports
+`pyvisa` and the concrete VISA driver implementations inside `rigs.py`
+when `Bench.build_real` runs, so `--sim` works on a
+machine with no VISA backend. Some driver types import eagerly, but opening
+real instruments and importing PyVISA happen in `Bench.build_real`.
+FastAPI/uvicorn are optional dependencies
+(`pyproject.toml` extra `service`: FastAPI ≥ 0.110, uvicorn ≥ 0.29, websockets ≥ 12,
+`anthropic` ≥ 2.3 and `openai` ≥ 3.40;
 the lab PC needs the rig's VISA stack too, which is the `lab = ["bace[rig,service]"]`
 extra); `bace.service.pipeline`, `modules`, `journal`, `worker`, `executor` must
-import without FastAPI installed — only `app.py` and `__main__.py` need it.
+import without FastAPI installed; only `app.py` and `__main__.py` need it.
 
-**Engine changes made in round 1 beyond the plan's five items** (recorded here
-so "only the round-1 items changed" is true, the plan's "no rewriting the
-measurement logic"
-notwithstanding; each is a sequencing gap the design pack had already
-recorded, the design pack 01-modules §4, `docs/ui-rules.md`): `run_jv` opens the shutter for a light
-curve and shuts it for a dark one (`_set_shutter`) and yields
-`InstrumentState({"shutter": …})` per curve; `_set_illumination` no longer
-swallows a failing `led.off()` and skips the settle on a bare-SMU rig;
-`run_intensity_series` unblocks the shutter around `measure_dc`; and
-`storage/jv.py` is therefore schema **`bace-jv/3`** (`/config/resolved`, a
-per-curve `shutter` attribute, and — since the `jv`/`light` split of
-2026-09-03 — a per-curve `illumination` of `dark`/`light`/`unknown`, with
-`dark` *absent* rather than False on an unknown curve). It is **`bace-jv/4`**
-since 2026-09-03, when every J–V current density in this project became
-**mA/cm²**: the `density` dataset keeps its name and its shape and changes its
-meaning by a factor of a thousand, which is precisely the change a reader
-cannot see, so the version says it. The transient recorder's `bace-run/2` is
-unchanged. The review round of 2026-09-02 added one more engine change:
-`run_transient_scan` yields `StepPhase` between the same instrument calls in
-the same order (§3), and nothing about a measurement moved.
+The J–V recorder writes `bace-jv/4`. It stores `/config/resolved`, per-curve
+`shutter` and `illumination` (`dark`, `light` or `unknown`). An unknown curve
+omits the `dark` attribute. `density` is in mA/cm². The transient recorder
+writes `bace-run/3`. [Data](manual/3.3-data.md) describes both formats.
 
-Python on sternwarte: `C:/WPy64-31370/python/python.exe` (3.13). Lab PC: `py -3`.
-
----
+`run_jv` manages shutter and LED only with `light_control="manage"`.
+With `light_control="leave"`, it reads the illumination and leaves it alone.
+`run_intensity_series` opens the shutter for `measure_dc`.
+`_set_illumination` propagates a failing `led.off()` and skips the LED settle
+on a rig with no LED.
 
 ## 2. Process and concurrency model
 
-- **One `Session`** per process. `session_id = "YYYYMMDD_HHMMSS"` of start.
-- **One `RunWorker` thread** owns every instrument. Everything that touches
-  VISA is a *job* on that thread: a run, a bench read-back, a bench action.
-  Jobs are executed one at a time; a run is a long job. This is the **bench lock**.
+- One `Session` per process. `session_id = "YYYYMMDD_HHMMSS"` of start.
+- One `RunWorker` thread executes bench jobs. VISA writes and run I/O
+  stay on that thread: a run, a bench read-back, a bench action.
+  Jobs are executed one at a time; a run is a long job. This is the bench lock.
 - The worker pulls events from the job's synchronous generator and hands each
   to the asyncio side with `loop.call_soon_threadsafe(queue.put_nowait, …)`. The
   asyncio side (one task) enriches the envelope, writes the journal, and fans out
-  to WebSocket subscribers. **Recorders run on the worker thread**, inside the
+  to WebSocket subscribers. Recorders run on the worker thread, inside the
   generator chain (`storage.recorder.record`), exactly as `tools/scan.py` does.
-- **Queue**: `POST /runs` while a run is active does not fail; it queues. FIFO,
+- Queue: `POST /runs` while a run is active does not fail; it queues. FIFO,
   single operator. A queued run may be cancelled (`POST /runs/{id}/stop` while
-  queued → state `cancelled`). The design shows one card live at a time; the
-  queue exists so a second click is not lost.
-- **Observers** that do not touch the VISA bus run concurrently with a job:
-  the power monitor (HTTP to `:8918`) and the temperature read-back (HTTP to
-  `:8331` when configured). Nothing else.
-- **Stop semantics** (two honest verbs, from the plan):
+  queued → state `cancelled`). The worker executes queued runs in submission order.
+- Observers run beside jobs: power over USB or HTTP to `:8918`, and
+  temperature over HTTP to `:8331`. A directly owned GPIB temperature monitor
+  acquires the worker bus lock without blocking and skips busy ticks (§8).
+- Stop semantics:
   - `after_shot`: set the job's abort flag; every generator polls it at its
     natural boundary (transient: before each step; jv: before each curve;
     executor: before each node). The shot in flight completes and is kept; the
     generator yields `RunAborted(reason="requested", done, total)` and unwinds
-    through its `finally` (outputs off, shutter shut).
+    through its `finally` (bias and SMU off, shutter shut; LED unchanged).
   - `abort`: the worker calls `gen.close()` at the next event it receives (a
     blocking VISA call cannot be interrupted; the next yield is the earliest
     honest moment). `GeneratorExit` unwinds every `finally` in the chain; the
@@ -130,49 +109,37 @@ Python on sternwarte: `C:/WPy64-31370/python/python.exe` (3.13). Lab PC: `py -3`
     used when it is ahead). An abort-aware `RunContext.sleep` (§7) returns a
     settle or hold early, so the abort is not dead for the length of a hold.
   - Both end with `Rig.park()` and `RunStateChanged("parked")`.
-- **Pause** exists only as `NeedsOperator`: the executor blocks on a
-  `threading.Event` inside the generator until `POST /runs/{id}/resume`. Stop
-  and abort still work while paused (the wait polls the flags every 0.2 s).
-  A resume answers the pause that is open and no other: `Job.resume` keeps the
-  operator's detail only while the job is paused (armed the instant the worker
-  sees `NeedsOperator`, cleared when `wait_for_operator` returns), so a resume
-  that lands while the run is measuring — a double-clicked button, a retried
-  request — is refused with 409 **and dropped**. Kept, it would answer the next
-  temperature pause the instant it opened, measuring the subtree with the
-  cryostat wherever it was and tagging it a temperature nobody confirmed.
+- `NeedsOperator` pauses the executor on a `threading.Event`. Stop and abort
+  remain available; the wait polls flags every 0.2 s. `Job.resume` accepts
+  detail only during the open pause. A resume outside it returns 409 and
+  drops its detail, so a duplicate request cannot answer a later pause.
 
 ### Run states
 
 ```
-queued → preflight → running ⇄ paused → stopping → parked
-                         │                          ├─ done      (finished)
-                         ├─ blocked (crit at start) ├─ stopped   (after_shot honoured)
-                         │                          ├─ aborted   (shot discarded)
-                         │                          ├─ failed    (exception; error recorded)
-                         │                          └─ cancelled (removed from the queue)
-                         └──────────────────────────┘
+queued → preflight → running ⇄ paused → stopping
+             │           │                 │
+             └───────────┴─────────────────┴─→ done | stopped | aborted | failed | blocked
+                                               → parked (cleanup complete)
+queued → cancelled (removed without acquisition)
 ```
 
-Every terminal state is reached through `parked` (except `cancelled` — a job
-removed from the queue never touched the bench). `RunStateChanged(state,
-reason)` is emitted on every transition and journaled. `blocked` is its own
-terminal state (`worker.Blocked` raised by `make()`), reached when a `crit`
-check fails on the read-back taken at Start — or an `invalid` one, an
-instrument that went away since the Dry run: the run never touched the bench,
-and a client keying on the state can tell "the bench was unsafe" from "the code
-crashed" without parsing the error. The Start re-check validates against the
-V_oc the tree was submitted with, not the session's current one, so a jv_bace
-queued behind a run cannot change what that run was validated against. `stopping` is reported by the session the
-moment a stop is accepted, not at the job's next event (which for a long shot is
-seconds away), and the worker's own `preflight`/`running` reports that follow a
-stop accepted during preflight do not displace it on the record (they are still
-journaled as the transitions they were).
+The worker reports the terminal outcome before calling `job.park`, then
+reports `parked` with that outcome. The run record retains the terminal state.
+Cancellation removes a queued job without touching instruments.
+`RunStateChanged(state, reason)` records every transition.
+
+`worker.Blocked` at Start means an `invalid` or `crit` re-check fails. The
+run does not acquire. The re-check uses the V_oc captured at submission,
+so another queued run cannot change its source. An accepted stop updates
+the record to `stopping` immediately. Later preflight/running frames do not
+replace that state, though they remain journalled.
 
 ### IDs
 
 - `run_id = f"{session_id}-{n:03d}"`, `n` counting every run in the session
-  (manual and pipeline alike). A manual run IS a pipeline run with one module
-  node, same code path (plan: "a manual run of one card = a single-node pipeline").
+  (manual and pipeline alike). A manual run is a pipeline run with one module
+  node on the same code path.
 - A module execution inside a run is addressed by `(run_id, node_path)`.
 - `seq` is a per-session monotonic counter over every envelope (events from
   runs and from the service itself). `GET /events?since=<seq>` replays.
@@ -197,190 +164,144 @@ Wire format = `experiment.wire.envelope_to_wire(Envelope)`:
   is the tree position (`"T=250K/led=1.020V/bace"`, see §7). Events emitted by
   the executor about a loop node carry that loop's path.
 
-**Payload policy** (`service/wire.py`), the one place that decides sizes:
+Payload policy (`service/wire.py`), the one place that decides sizes:
 
 | event | WebSocket | journal |
 |---|---|---|
-| `StepDone` | `light`, `dark`, `photo`, `photo_averaged` decimated to ≤ 1000 points (stride, first and last kept — the last kept sample is the record's final one, at `t0 + (n-1)*dt`, not one stride after its predecessor) | scalars only: index, loop, step, setpoint, axis_value, q, q_mean, q_std, intensity_w, clipped, t0_int_record_s, t1_int_record_s, dark_first + `verdict` |
-| `StepPhase` | in full, **live only**: `seq` null (like the drop `Notice`), not in the `since=` ring | not written |
-| `JVPoint` | in full, **live only**, exactly as `StepPhase` — one per point of a sweep as it is read | not written |
+| `StepDone` | `light`, `dark`, `photo`, `photo_averaged`, `sync_light`, `sync_dark` decimated to ≤ 1000 points (stride, first and last kept; the last kept sample is the record's final one, at `t0 + (n-1)*dt`, not one stride after its predecessor) | scalars only: index, loop, step, setpoint, axis_value, q, q_mean, q_std, intensity_w, clipped, t0_int_record_s, t1_int_record_s, dark_first + `verdict` |
+| `StepPhase` | in full, live only: `seq` null (like the drop `Notice`), not in the `since=` ring | not written |
+| `JVPoint` | in full, live only, exactly as `StepPhase`; one per point of a sweep as it is read | not written |
 | `RunFinished` | `photo_averaged` omitted; `values`, `q_mean`, `q_std`, `q_all` in full | same minus `q_all` if > 10 000 cells |
 | `JVCurveDone` | in full (≤ a few hundred points) | metrics + label + n_points + the other scalars (index, dark, led_level_v, direction, intensity_w); no arrays |
-| `JVFinished` | in full | its curves reduced exactly as `JVCurveDone` — otherwise the arrays the table keeps out come back through the summary |
+| `JVFinished` | in full | its curves reduced exactly as `JVCurveDone`; otherwise the arrays the table keeps out come back through the summary |
 | `LoopDone`, `AxisResolved`, `SeriesPointDone` | in full | in full |
 | everything else | in full | in full |
 
-*Journal `JVCurveDone` keeps the extra scalars beyond `metrics + label +
-n_points` so the run index can name which light curve gave V_oc; `JVFinished`
-is not in the plan's table and is reduced here for the reason stated.*
+Journal `JVCurveDone` retains curve identity scalars so the run index can
+identify the light curve that supplies V_oc. `JVFinished` reduces its curves
+by the same policy, so the summary cannot reintroduce trace arrays.
 
-**`StepPhase(index, phase, k, of)`** is yielded by `run_transient_scan` as each
-segment of a shot starts — `levels`, `light settle`, `acquire light`,
+`StepPhase(index, phase, k, of)` is yielded by `run_transient_scan` as each
+segment of a shot starts; `levels`, `light settle`, `acquire light`,
 `dark levels` (absent with `dark_reference = "same"`, so `of` is 6 then and 7
-otherwise), `dark settle`, `acquire dark`, `process` — for the live card's
+otherwise), `dark settle`, `acquire dark`, `process`; for the live card's
 "5 · acquire light" indicator. It is *ephemeral*: six or seven a shot say
 where inside the shot the run is, which a log and a replay do not want, so it
 is sent to the subscribers that are there with `seq: null` and never
 journaled, ringed or numbered. A client that dedupes on `seq` passes it
 through; a client that reconnects redraws from `StepStarted`/`StepDone`.
 
-**`JVPoint(index, k, of, label, dark, led_level_v, direction, voltage,
-current, density)`** (2026-09-04) is yielded by `run_jv` for every point of a
-sweep as the SourceMeter reads it — `k` of `of` on curve `index`, the curve's
-identity repeated, the point in the units `JVCurveDone` carries the arrays
-in (A, and mA/cm² when there is an area). The sweep is the host's since that
-day (`Keithley2400.sweep_points`: source, settle, read, one point at a time)
-rather than the 2400's own, which blocked the bus for the whole curve with
-nothing to show, nothing saved if it failed, and a stop that could not land
-until it was over. Ephemeral like `StepPhase`, for the same reason: 36–71 a
-curve, and `JVCurveDone` carries the whole curve, so a client that
-reconnects mid-sweep loses only the picture of it growing. The recorder folds
-them too: the files are rewritten as each curve finishes and, while a sweep
-is in flight, at most every 2 s with the partial curve in them — labelled
-`partial k of n`, `partial = true` and `points_planned` on its HDF5 group, no
-metrics — so a fault on the fourth curve keeps three and the points of the
-fourth. An abort now lands between two points; the curve in flight is never
-reported done.
+`JVPoint(index, k, of, label, dark, led_level_v, direction, voltage,
+current, density)` reports each point read by the SourceMeter. `k` is the
+point count within curve `index`; current is in A and density in mA/cm² when
+an area is supplied. `Keithley2400.sweep_points` sources, settles and reads
+one point at a time. Abort can land between points.
+
+The frame is live-only. `JVCurveDone` carries the complete curve. The recorder
+writes at each completed curve and at most every 2 s during a sweep. A partial
+curve carries label `partial k of n`, `partial = true` and `points_planned`
+on its HDF5 group, with no metrics. A fault keeps completed curves and the
+partial curve. Abort does not report the incomplete curve as done.
 
 The journal stores enough to render the session log and the history queries,
-never the traces — the recorders (HDF5 `bace-run/2` + legacy `.dat`, unchanged)
+never the traces; the recorders (HDF5 `bace-run/3` + legacy `.dat`)
 keep the data. `GET /runs/{id}/data` serves full arrays from an in-memory store
 of the last 20 runs (older → 404 with the folder path, read the HDF5).
 
-**The `since=` ring keeps the last 5000 *envelopes*, but only the traces of the
-last `RING_TRACES_KEPT` (200) `StepDone` shots.** A ring full of thousand-point
+The `since=` ring keeps the last 5000 *envelopes*, but only the traces of the
+last `RING_TRACES_KEPT` (200) `StepDone` shots. A ring full of thousand-point
 lists is ~600 MB for one 100×51 scan; older `StepDone` frames in a replay carry
 every scalar and the `verdict` (what a reconnecting client redraws Q(loop) from)
-with the four traces `null` and `decimated[name] = {"omitted": true, "replay":
+with all six traces `null` and `decimated[name] = {"omitted": true, "replay":
 true}`, exactly as the journal line drops them. A WS client treats
 `decimated[name].replay` as "redraw the loop curve, the trace is gone".
 
-**`RunQueued` is a dataclass in `experiment.events`**
+`RunQueued` is a dataclass in `experiment.events`
 (`RunQueued(kind, module, tree, params, resolved, name, folder)`), sent down
-the session's one event path like every other frame — one `seq` counter, one
+the session's one event path like every other frame; one `seq` counter, one
 journal line, one fan-out; the service assembles no frame by hand. It carries
-both `params` and `resolved`: `params` is only what the operator chose — the
+both `params` and `resolved`: `params` is only what the operator chose; the
 `edited` and carried-forward `last-used` layers, and never the V_oc parameter
 — because it is what `last_used_params` hands back next session, and a journal
 that fed every resolved default back as last-used would, after one run, show
 the whole card as last-used and hide a recipe edit for twenty sessions.
 `resolved` is every value the module ran with, for the record.
 
-**Service-added per-shot verdict.** For every `StepDone` the asyncio side
+Service-added per-shot verdict. For every `StepDone` the asyncio side
 computes `service.wire.shot_verdict(light.y, dark.y)` and attaches
-`"verdict": {"rail_light": n, "rail_dark": n, "rail_run_light": n, "rail_run_dark": n, "shared_extreme": bool, "peak_light_a": A, "peak_dark_a": A, "spike_lag_ns": ns|null, "edge_light_ns": ns|null, "edge_dark_ns": ns|null, "averages_light": n|null, "averages_dark": n|null, "sync_edge_light_ns": ns|null, "sync_edge_dark_ns": ns|null, "level": "ok"|"warn", "text": …}`
+`"verdict": {"rail_light": n, "rail_dark": n, "rail_run_light": n, "rail_run_dark": n, "shared_extreme": bool, "peak_light_a": A, "peak_dark_a": A, "spike_lag_ns": ns|null, "edge_light_ns": ns|null, "edge_dark_ns": ns|null, "averages_light": n|null, "averages_dark": n|null, "sync_edge_light_ns": ns|null, "sync_edge_dark_ns": ns|null, "sync_lag_ns": ns|null, "level": "ok"|"warn", "text": …}`
 to the wire `data` (not to the dataclass).
 
-**The alignment rule (2026-09-05, `core.diagnostics`).** Six of twenty-three
-delay-scan shots on the first hardware day had a photocurrent ten times too
-large and a charge of the wrong sign, and passed every rail check: the
-trigger had jittered for the length of the shot, both displacement spikes
-were 4–14 % lower with 8–13 ns edges instead of 6, and the light and dark
-spikes sat 0.3–1.2 ns apart where a good shot aligns to 0.01 ns — so the
-50 mA spike no longer cancelled in `light − dark`. `spike_lag_ns` is the
-light-to-dark lag of the spike by cross-correlation, sub-sample.
+The timing warning is defined in `service.wire.shot_verdict`:
 
-**Corrected 2026-09-07: a lag on its own is not jitter, and usually is not.**
-The light trace is the displacement spike *plus* the charge being extracted,
-and adding that charge moves the correlation peak while the spike itself
-stands still. Measured on the rig: a synthetic trace built from a no-light
-acquisition with its spike untouched, plus the measured photocurrent,
-reproduced the observed lag to 0.01 ns at every temperature from 220 to
-290 K; shifting the dark trace by the lag cancels only 4 % of the
-light−dark difference, and re-integrating after such a shift moves Q by
-~1 %. The lag-only rule had called 177 of 492 good shots void. A `warn` now
-needs the lag **and** one of two things a superimposed signal cannot produce.
-**The edge is smeared**: slower than `SPIKE_EDGE_NS = 8` ns, where good shots
-are 6.0–6.5. That is the fault the incident was, and a lag beside it warns.
+| Evidence | Threshold | Result |
+|---|---|---|
+| Absolute spike lag and a broad leading edge | `SPIKE_LAG_NS = 0.25` ns and `SPIKE_EDGE_NS = 8` ns, both exceeded | `warn` |
+| Absolute Sync lag | `SYNC_LAG_NS = 0.1` ns exceeded, independently of spike lag | `warn` |
+| Spike lag alone | Above 0.25 ns with neither condition above | `ok`; lag remains reported |
 
-Separately, and **not gated behind the lag**, `sync_lag_ns` — the lag between
-the two acquisitions' own *sync* traces, on the verdict and in the HDF5
-diagnostics. Nothing computed from the light and dark traces alone can stand
-in for it: the light trace is the spike plus the extracted charge, and with a
-large photocurrent a real offset hides inside the charge's own contribution —
-worse, the two push the spike correlation in opposite directions, so half a
-nanosecond of offset can read as a 0.08 ns spike lag. The sync carries the
-trigger edge and nothing else. `SYNC_LAG_NS = 0.1` against a measured
-±0.004 ns across 600 real shots, where the spike lag ran 0.135–0.479 ns and
-grew with temperature — which is itself the proof that nothing in the trigger
-chain moved. With no sync fetched the `ok` line says "no sync to check the
-timing" rather than claiming the lag was explained. Over those 600 shots the
-rule warns on none.
-The incident lowered the spikes by 4–14 % as well, but a height difference
-between the two traces is not the acquisition's alone to explain — under
-`dark_reference = "translated"` they repeat one swing over different
-absolute ranges, so their capacitive terms agree only where `C(V)` is flat,
-and on this device they drift from 0.4 % apart at 220 K to 1.1 % at 295 K
-and are still climbing. The edge is not exposed to that: it is the
-generator's rise, and it held 6.0–6.5 ns across the whole sweep while the
-spikes' decay moved by 11 ns. A lag above
-`SPIKE_LAG_NS = 0.25` with neither of those stays `ok` and is reported in
-the line as "spikes 0.46 ns apart · charge, not jitter".
+Spike correlation mixes displacement current and extracted charge. It does
+not establish jitter by itself. Aligned Sync edges constrain the trigger
+chain; they do not prove equal latency from Sync to field arrival.
+[The transient](manual/2.2-transient.md) and
+[Checks and warnings](manual/4.2-checks.md) explain the diagnostic limits.
 
-`edge_*_ns` are the spikes' 10–90 % times and `sync_edge_*_ns` the same on
-the trigger channel, which the engine fetches out of the same record after
-each acquisition (`StepDone.sync_light/sync_dark`, volts, decimated on the
-socket like the currents): sharp sync edges beside smeared spikes put the
-jitter between the sync and the 81150A's pulse, smeared sync edges put it
-between the sync and the scope's trigger. `averages_*` are `:WAV:COUN?` after
-each acquisition — the Acquisition Done flag both this service and the
-LabVIEW original waited on is set per acquisition, not per completed
-average — and the engine yields a warning `Notice` when a trace folded fewer
-than `n_averages`. Since 2026-09-06 the driver empties the averager before
-every acquisition (it was never emptied before, so `averages_dark` read
-`averages_light + ~27` and the dark trace was half light — `docs/notes.md`, hardware
-defect 5), acquires with `:DIG` + `*OPC?`, which runs to the whole count, and
-refuses a short count as `ScopeError`; `null` now means only that the
-firmware did not answer `:WAV:COUN?` with a number. `sync_edge_ns` reads a **narrow-pulse sync** as well as a step
-(2026-09-07): this rig's sync is 5.5 ns wide, 11 samples of the 400 in the
-search window, and the percentile test that found a step's two levels saw it
-as flat — so every shot reported no sync edge and the verdict said "No sync
-trace was fetched" with the trace sitting in the file. A window that is
-nearly all one level is now read as a spike on a baseline. The verdict also
-distinguishes the two states: nothing fetched, against fetched but no edge
-readable. The recorder stores the same numbers per (loop, step) in
-the HDF5 `diagnostics` group and the sync traces under `traces/sync_light`
-and `traces/sync_dark`. The `ok` line now reads
+Measured values in `analysis/2026-09-06/spike-lag-and-dark-charge.md`:
+six of 23 affected shots show tenfold current, reversed Q, 0.3–1.2 ns lag,
+8–13 ns edges instead of about 6 ns, and spike heights 4–14 % apart.
+Adding measured extraction current to an unshifted spike reproduces lag to
+about 0.01 ns over 220–290 K. Shifting the dark trace removes only 3.5–4.6 %
+of the spike difference. This is shape evidence, not a correction to apply
+to Q. The same source records a 5.5 ns Sync pulse, 11 of 400 search samples,
+with a 0.038 V percentile span against a 0.30 V edge test.
+
+`edge_*_ns` and `sync_edge_*_ns` are 10–90 % edge times. The engine fetches
+the trigger channel from each acquisition as `StepDone.sync_light/sync_dark`
+in V. The socket decimates these with the current traces. The edge detector
+supports steps and narrow pulses. It distinguishes absent Sync traces from
+fetched traces whose edges cannot be resolved.
+
+`averages_*` is stopped `:WAV:COUN?`. The driver clears the averager before
+each acquisition, uses `:DIG` with `*OPC?` for the full count, and raises
+`ScopeError` on a nonempty reset or short acquisition count. A nonnumeric
+count is `null`; it is not proof that the requested average completed.
+The engine can also yield a warning `Notice` for a short trace count.
+HDF5 stores diagnostics by (loop, point), with Sync arrays under
+`traces/sync_light` and `traces/sync_dark`.
+
+| Rail evidence | Rule | Meaning |
+|---|---|---|
+| `rail_run_*` | At least 7 consecutive identical samples at one trace's extreme | `warn`; Q is meaningless |
+| `rail_*` | More than 8 repetitions of one extreme anywhere in one trace | `warn`; the vertical range is probably too small |
+| `shared_extreme` | Light and dark share an extreme | Reported without a warning; both contain the displacement spike |
+
+`peak_*_a` is the signed extreme of each full trace before decimation; a
+5:1 thinning can miss it. `Bench.shot_diagnostics()` adds
+`scope.last_autorange_passes` when available. The status line can read
 "autorange pass 1 · no shared extreme · 1 rail sample · spikes 0.01 ns apart · edge 6.5 ns · 200 avg · sync edge 2.1 ns".
-
-The rail rules are the design's, corrected
-2026-09-02 (the design pack 03-states §C, `docs/ui-rules.md`): **only a run of identical samples inside
-one trace is evidence of the digitiser's rail** — `rail_run_*` ≥ 7 consecutive
-samples on the trace's own extreme is `warn`, "the charge of this shot is
-meaningless"; an extreme repeated more than 8 times anywhere (`rail_*`) is
-`warn`, "the window is probably too small"; light and dark sharing an extreme
-is **reported and judged as nothing** (the displacement spike dominates both,
-so good data shares one). `peak_*_a` is the signed extreme of each *full*
-trace, computed before decimation, because a 5:1 thinned trace can straddle
-the true peak. The `ok` text is the "autorange pass 2 · no shared extreme · 0
-rail samples" line on the live card. The autorange pass count comes from
-`scope.last_autorange_passes` when the driver has it, read by
-`rigs.Bench.shot_diagnostics()` right after the `StepDone` and merged into the
-same `verdict` object. (`bench.checks.saturation_verdict`, which the bench
-harness still uses, keeps the older shared-extreme rule; it is the harness's
-to change.)
+The bench harness's `bench.checks.saturation_verdict` also warns on shared
+extremes. Its rule differs from the service rule.
 
 ### Journal (`service/journal.py`)
 
 - Path: `<out>/journal/<session_id>.jsonl`. One JSON object per line, the wire
   envelope (journal payload policy). Append-only; `flush()` after every line.
-  Never rewritten. (Future failure recovery replays it; this round only writes.)
+  Never rewritten. History queries read it; interrupted runs are not resumed.
 - First line: `{"type": "SessionStarted", "data": {"session_id", "mode": "sim"|"rig", "rig_toml", "run_toml", "out", "fingerprint": bench.checks.fingerprint(bace root), "python", "version", "fast", "startup_writes": [...], "sample": {…}}}`.
-  `sample` is the session's own `[sample]` block — what a file with no runs
+  `sample` is the session's own `[sample]` block; what a file with no runs
   in it can still say. It is *also* on every `RunQueued` (`data.sample`),
   because a resumed file keeps the header of whoever opened it and two
   processes started in the same second share one.
-  `startup_writes` lists the instrument writes the assembly made before the
-  worker started (the scope's `default_setup`, the 1918-C's units and
-  wavelength): not a run and not a by-hand action, so this is where they are
-  on record.
+  `startup_writes` lists assembly operations: scope `default_setup`, and
+  meter units and wavelength. Direct meter opening also configures averaging
+  and digital filtering; these writes are not separately enumerated in that
+  list. The list is not a complete SCPI transcript.
+
 - History queries (read this session's file and, newest first, every earlier
   `<out>/journal/*.jsonl`; stop at 20 files). Each file is parsed once and kept
-  (this session's is folded line by line as it is written), so a query — and the
-  Dry run, which asks `last_used_params` and `estimate_s` for each of a tree's
-  module nodes — is a walk over objects, not a re-read of twenty files. Without
-  this the canonical tree's Dry run took ~9 s on the event-loop thread after one
-  long run and grew with every session.
+  (this session's is folded line by line as it is written), so history queries and Dry run walk cached objects. Dry run asks
+  `last_used_params` and `estimate_s` for each module node.
+
   - `last_used_params(module) -> dict | None`: the `params` of the most recent
     `RunQueued` for that module whose run reached `done` or `stopped`. Reads
     every bench's files: what the operator typed on the sim console is still
@@ -390,32 +311,30 @@ to change.)
     the same sum the session's run record makes, so `GET /runs` and
     `GET /runs/{id}` agree; a pipeline's `outcome_text` counts module runs
     (`"3/18 module runs · aborted"`), not the last module's line. A jv_bace's
-    line gives the V_oc *range* over its light curves when there were several
+    line gives the V_oc *range* over its light curves when several light curves exist
     (`"6 curves · V_oc 1.0269 … 1.0479 V"`), and each summary carries
     `voc_min`, `voc_max`, `light_curves`.
   - `run_record(run_id) -> dict | None`: one run's `summary()` plus its `tree`,
     its `verdicts` (every `warn`/`crit` the run's lines carried) and its
-    `nodes` — every module node reduced by `node_record()` to the shape §6
+    `nodes`; every module node reduced by `node_record()` to the shape §6
     lists under `GET /runs/{id}`: its `NodeDone` detail (module, outcome,
-    counts, the V_oc with the level it was measured at, the LED level, the
-    temperature triple, whether the baseline was subtracted, the folder) and
+    counts, V_oc and its LED level, the run LED level, temperature triple,
+    baseline subtraction flag and folder) and
     what it measured (the axis and `q_mean`/`q_std` per point from
     `RunFinished`, `LoopDone` or the running mean; a J-V's curves as their
-    metrics; its shot counts) — from whichever session file holds it. What
-    `GET /runs/{id}` answers for a run this process never held (§6): the
-    pipeline tab's grey V_oc grid is the *previous* run's, that record died
-    with its process, and the results tab draws its grid from these without
-    opening an HDF5.
+    metrics; its shot counts); from whichever session file holds it. What
+    `GET /runs/{id}` uses this shape for a run outside process memory (§6).
+    The results tab draws its grid from the record without opening HDF5.
   - `settle_history() -> dict[float, list[float]]`: seconds between
     `NeedsOperator(what="temperature")` and the matching `OperatorResumed`,
     keyed by setpoint (rounded to 0.1 K); when the 331 is wired this becomes
-    the automatic settle time and the query does not change. **Reads only files
-    whose `SessionStarted` header has the same `mode`/`fast` as this session**
+    the automatic settle time and the query does not change. Reads only files
+    whose `SessionStarted` header has the same `mode`/`fast` as this session
     (a file with no header is read): a `--sim --fast` session settles a
     "cryostat" in the time a click takes, and the lab PC's Dry run must not
     learn that.
   - `shot_time_s(module="bace") -> float | None`: median interval between
-    consecutive `StepDone` of the last completed bace run — same bench filter as
+    consecutive `StepDone` of the last completed bace run; same bench filter as
     `settle_history`, for the same reason (a sim shot is a millisecond).
 - The submit-time checks that are not `ok` are journaled as `Verdict` lines
   right after the `queued` transition, each on its own `node_path`, so a
@@ -426,23 +345,19 @@ to change.)
   builds the same line for a test or a script), `RunStateChanged`,
   `NodeStarted/NodeDone`, `Verdict`, `NeedsOperator`, `OperatorResumed`,
   `BenchAction`, `TemperatureRead`, `PowerReading`, `SampleNamed` are all
-  journaled; so is every run event under the payload policy, `StepPhase`
-  excepted.
+  journaled; so is every run event under the payload policy, except
+  `StepPhase` and `JVPoint`.
 
 ---
 
-## 3a. `/session` — what is mounted
+## 3a. `/session`; what is mounted
 
 `GET /session` is who this process is: `id, mode, fast, started, started_at,
 sample, sample_file, out, rig_toml, run_toml, fingerprint, journal, errors,
 last_error`. The same `session` block rides on `GET /bench` and in `Hello`.
 
-**`PUT /session/sample`** (2026-09-05) sets the `[sample]` block — the console's
-identity field, `docs/history/ux-screening.md` finding 5. Before it, the block came
-only from `run.toml`, so an operator who mounted a device on a session already
-running could not say so without editing the file and restarting the process
-that owns every instrument; the folder name is the record
-(`docs/history/naming-plan.md`) and every run of that session was filed without one.
+`PUT /session/sample` merges the session's `[sample]` block. It changes
+the identity for runs submitted after the edit.
 
 ```
 PUT /session/sample  {"sample": "s4", "material": "PTQ10IT4F", "pixel": null}
@@ -450,63 +365,45 @@ PUT /session/sample  {"sample": "s4", "material": "PTQ10IT4F", "pixel": null}
   -> 422 {"error": "[sample]: unknown key(s) …", "param": "sample", "accepted": [...]}
 ```
 
-Four rules, and each of them is a decision:
+Rules:
 
-- **It is a merge.** A key the body does not carry is left alone, so a console
+- It is a merge. A key the body does not carry is left alone, so a console
   offering four fields cannot silently drop a `temperature_k` somebody typed
   into the file.
-- **`null` is the way back**, to the value `run.toml` opened the session with —
+- `null` is the way back, to the value `run.toml` opened the session with ;
   the same meaning `null` has in `PUT /modules/{m}/params`. `sample_file` is on
   the wire (and only for this) so a client can render that layer and offer the
   reset beside a typed field. A key the file never had is removed rather than
   set to `""`.
-- **It touches nothing and takes no worker job**, so it is *allowed while a run
-  is going* — an operator who notices at hour one that the device is unnamed
+- It touches nothing and takes no worker job, so it is *allowed while a run
+  is going*; an operator who notices at hour one that the device is unnamed
   should not have to choose between abandoning the sweep and mislabelling
   everything after it. `run_active` is the run holding the bench, for the
   sentence the console owes them.
-- **It binds the runs queued after it and no others.** Every run takes its own
-  copy at submit (`RunRecord.sample`, `RunQueued.sample`) and **is written from
-  that copy** — `Catalogue.base_metadata(rec.sample)`, changed the same day, so
-  the `RunMetadata` behind the folder names is the run's own block rather than
-  the session's now. Without that a rename halfway through a four-hour sweep
-  filed its remaining nodes under the new name inside a run folder named for
-  the old one, and the run contradicted its own `RunQueued.sample`.
+- Each submitted run captures its own `RunRecord.sample` and `RunQueued.sample`.
+  `Catalogue.base_metadata(rec.sample)` uses that copy for folder names and
+  metadata throughout the run. A session rename does not rename queued or
+  active runs.
 
 `SampleNamed(before, after, changed)` goes out on the event path like every
-other frame — `run_id` null, `node_path` `""` — and is journaled, because a
-file read years later has to be able to say which runs in it were measured
-under which name. Nothing moved means no event and no line: a no-op that
-writes to the journal is noise in the one file an operator reads to
-reconstruct a day.
+other frame; `run_id` null, `node_path` `""`; and is journaled, because a
+record retains the identity assigned to each run. An unchanged sample
+block emits no event and writes no line.
 
-**No name is refused for being awkward, and the answer says how it will be
-spelled.** `sample`, `material` and `pixel` reached
-`RunMetadata.folder_name()` **raw** until 2026-09-05 — only the comment was
-slugged — so `material = "PTQ10:IT-4F"`, §4's own example, built a path segment
-with a colon in it, which fails on the lab PC and passes on Linux, and
-`sample = "a/b"` was two directories (`docs/history/naming-plan.md` §2, a live defect
-since it was written). All three are slugged now, at `NAME_MAX = 24`, and
-`as_dict()` keeps them verbatim — for a material whose real name has a colon
-in it, the difference between recording the material and recording somebody's
-transcription of it.
+`RunMetadata.folder_name()` slugs `sample`, `material` and `pixel` with
+`NAME_MAX = 24`. `as_dict()` retains the typed strings verbatim. The route
+accepts names with spaces, colons and path separators; the folder uses their
+safe forms. `GET /session` exposes these three forms as `sample_in_name`, so
+the console previews the same spelling. Names sharing their first 24 slugged
+characters can have the same folder prefix.
 
-So the route takes what is typed, and `GET /session` carries **`sample_in_name`**
-beside `sample`: the same three keys, reduced as `folder_name()` will reduce
-them. It is there so the console can show what a value will be filed as while
-it is being typed, rather than after the run — and so nothing reduces a name a
-second time in a second language. `PTQ10IT4F-batch-2026-08-A` and `…-B` are
-one folder name at 24 characters, which is the case that most needs saying out
-loud and the one no character rule explains.
-
-The console does not offer `temperature_k`, though the route accepts it:
-`run.toml`'s own comment (2026-09-04) says why — every recipe said 290 and a
-run at 220 K was filed as "290 K, typed", so a bench with a 331 reads the
-controller as each node starts instead (`temperature_how = "read"`).
+The console omits `temperature_k`, though the route accepts it. A controller
+reading at node start supplies `temperature_how = "read"` when no temperature
+node or typed value binds it. [Data](manual/3.3-data.md) explains the record.
 
 ---
 
-## 4. `/bench` — read-back, chain, actions
+## 4. `/bench`; read-back, chain, actions
 
 `GET /bench` returns the cached snapshot (never touches VISA):
 
@@ -531,7 +428,7 @@ controller as each node starts instead (`temperature_how = "read"`).
                    "read_at": … (of the newest reading), "monitor": false, "reads": 0,
                    … when wired (a controller attached: this process on the bus, the 331 console answering, or the --sim stand-in):
                    "connected": true|false (whether the instrument answered the last poll), "ramping": …, "heater_range": 3, "status_text": "ok", "max_setpoint_k": 350.0,
-                   … when a console is named: "console": "http://127.0.0.1:8331", and "reason" when a 331 was expected and not attached}
+                   … when a console is named: "console": "http://127.0.0.1:8331", and "reason" when an expected 331 is unavailable}
  },
  "inferred": [] | ["relay", "bias", "led", "shutter"],
  "chain": {"read_at": …, "ok": 3, "total": 4, "items": [
@@ -542,26 +439,23 @@ controller as each node starts instead (`temperature_how = "read"`).
     {"key": "bias_polarity",  "label": "81150A POL",      "value": "INV",  "expected": "INV"|"NORM"|"leave", "level": "ok"|"warn"|"info", "fix": null}
  ]},
  "rig": {"path": "…/rig.toml", "loaded_at": …, "fingerprint": "d7daadac0cc1",
-         "values": {"sense_resistor_ohm": 5.192, "pulse_amp": 4.0, "current_sign": -1.0, "trigger_offset_s": 0.0, "light_path_delay_ns": 502.0, "probe_attenuation": 1.0, "led_threshold_v": 1.0, "max_current_compliance_a": 0.05, "max_voltage_compliance_v": 5.0}},
+         "values": {"sense_resistor_ohm": 5.192, "pulse_amp": 4.0, "current_sign": -1.0, "trigger_offset_s": 4.71e-8, "light_path_delay_ns": 502.0, "probe_attenuation": 1.0, "led_threshold_v": 1.0, "max_current_compliance_a": 0.05, "max_voltage_compliance_v": 5.0}},
  "verdicts": [ …the bench-level Verdict list from the last read-back… ]
 }
 ```
 
-**Read, not remembered.** On the real rig every `output`, the 81150A's
-`polarity` and both generators' levels and frequency come from the instruments
-(`read_state()`/`read_output()` on the drivers, the queries `tools/scan.py`
-sent by hand: `:OUTP1?`, `:OUTP1:POL?`, `:VOLT1:HIGH?/LOW?`, `:FREQ1?`,
-`:PULS:DEL1?`, `:FUNC1:PULS:WIDT?`; `:OUTP?`, `:OUTP:POL?`, `FUNC:SHAP?`,
-`:VOLT:HIGH?/LOW?/OFFS?`, `:FREQ?`; the Keithley's `:OUTP?`), and each read
-refreshes the driver's cached flag, so the relay interlock — which reads that
-flag — sees a generator the LabVIEW VI left ON. The assembly reads each of
-them once, before the first job. A query that fails is `null`/`?`, never a
-default. `bias.polarity_read` says whether `polarity` was queried (the real
-driver) or is the driver's memory (the simulator, which learns it when a run
-configures the shape): a `?` from the former is a `warn` on the chain card
-like any failed query, from the latter `info`.
+The real drivers query output state, 81150A polarity, generator levels and
+frequency through `read_state()` and `read_output()`. Queries include
+`:OUTP1?`, `:OUTP1:POL?`, `:VOLT1:HIGH?/LOW?`, `:FREQ1?`, `:PULS:DEL1?`,
+`:FUNC1:PULS:WIDT?`; `:OUTP?`, `:OUTP:POL?`, `FUNC:SHAP?`,
+`:VOLT:HIGH?/LOW?/OFFS?`, `:FREQ?`; and the Keithley's `:OUTP?`.
+Read-back refreshes cached output flags used by the relay interlock.
+Assembly reads each output before the first job. Failed queries give
+`null` or `?`. `bias.polarity_read` distinguishes an instrument query from
+simulator memory: unread real polarity warns; unread simulator polarity is
+informational.
 
-**While a run holds the worker** the read-back is the one Start took, before
+While a run holds the worker the read-back is the one Start took, before
 the module enabled anything, so the instruments the running step implies are
 overlaid on it from the run's own events (`service/live.py`): a `bace` step's
 `NodeStarted` puts the relay on the amplifier, its `RunStarted` turns the bias
@@ -569,9 +463,12 @@ output and the LED pulse on at the step's levels, `InstrumentState` carries the
 arming and polarity the run read back, `StepStarted` the pulse levels of the
 shot, each `StepPhase` the shutter, a jv's `InstrumentState({"shutter"})` the
 shutter and the LED's DC state, `JVStarted`/`JVFinished` the SourceMeter, and
-the module's `NodeDone` puts everything back off. Every overlaid instrument
+the module's `NodeDone` marks bias and SMU off and shuts the shutter for
+modules that manage it. LED and relay implications persist to the run-end
+transition, which clears the overlay. Park leaves the LED running. Every overlaid instrument
 carries `how: "inferred"` and is listed in `inferred`; `read_at` stays the
-read-back's. Nothing inferred outlives the step that implied it. `state` is one
+read-back's. LED and relay state can persist between module nodes; terminal run
+transitions clear all inferred state. `state` is one
 of `idle | preflight | running | paused | stopping`: a run still `queued` when
 its preflight frame has not been applied reads as `preflight`, and a run in a
 terminal state that the worker is still parking reads as `stopping`; `parked`
@@ -580,7 +477,7 @@ state, so it does not appear here.
 
 `POST /bench/read` enqueues a read-back job (short); 409 while a run is active
 (the chain is re-read automatically at every Start and the result attached to
-the run). It **waits for the job by default** and answers 202 `{"job": "…",
+the run). It waits for the job by default and answers 202 `{"job": "…",
 …the /bench snapshot}` so a UI click sees the outcome; `?wait=false` returns the
 bare 202 `{"job": "…"}` and the caller watches the stream. In `--sim` mode the
 read-back reads the simulated instruments the same way. The temperature block
@@ -589,65 +486,62 @@ monitor, the pause's console poll, the operator's typed value) when it is newer
 than the read-back, with `read_at` of that reading, `source` and, when the
 monitor runs, `monitor: true` and its `reads` count. `session.errors`/
 `session.last_error` surface what went wrong on the event path (a journal line
-that could not be written) — each is also logged to `bace.service` as it
+that could not be written); each is also logged to `bace.service` as it
 happens.
 
-**Expected chain** comes from the recipe in force: `led_polarity` expected `INV`
-always (03-states §B); `bias_arm` expected `EXT` when `external_trigger`;
+Expected chain comes from the recipe in force: `led_polarity` expected `INV`
+always; `bias_arm` expected `EXT` when `external_trigger`;
 `bias_polarity` expected `RunConfig.polarity_instruction()` (`leave` → level
 `info`, value shown, nothing expected).
 
 `POST /bench/actions/{name}` with an optional JSON body. Every action is a
 worker job, journaled as `BenchAction(name, args, result, by="hand")`, followed
 by a read-back. `result.before` carries the read-back's values of what the
-action changes (`{"led.polarity": "NORM"}`; for `park`, the four outputs), so
-the session log can say "33220A :OUTP:POL NORM → INV · by hand" from the
+action changes (`{"led.polarity": "NORM"}`; for `park`, the bias, SMU, LED and shutter states), so
+the session log can say "33220A:OUTP:POL NORM → INV · by hand" from the
 journal alone. Waits by default and answers 202 `{"job", "name", "result",
 "read_at", "bench": …snapshot}`; `?wait=false` returns `{"job", "name"}`. 409
 while a run is active except `park`, which is allowed always: while a run is
-active it aborts the current run **and cancels every queued run** before parking
+active it aborts the current run and cancels every queued run before parking
 (one `stop_runs` step on the worker, so a run popped between "cancel the queue"
 and "abort the current" cannot slip through), because a person who clicks park
-wants the bench safe now, not after the runs behind the current one. A park
+requires the bench parked before another run starts. A park
 that has not started within the wait (the aborted run is inside a VISA call
-that outlasts it) is **not cancelled**: the answer is 202 `{"job", "name",
+that outlasts it) is not cancelled: the answer is 202 `{"job", "name",
 "pending": true, "result": null, …}` and the park runs when the worker frees.
 Any other action that timed out unstarted is cancelled and answered 504.
 Actions:
 
 | name | does | refuses when |
 |---|---|---|
-| `park` | `Rig.park()` — outputs off, shutter shut, router park | never |
-| `set-33220a-pol-inv` / `set-33220a-pol-norm` | `led.set_polarity(True/False)` | LED output ON **as the instrument reports it** (the chain fix is made with the LED off; say so), or the output query unanswered |
+| `park` | `Rig.park()` disables bias and SMU and shuts the shutter; LED unchanged | never |
+| `set-33220a-pol-inv` / `set-33220a-pol-norm` | `led.set_polarity(True/False)` | LED output ON as the instrument reports it (the chain fix is made with the LED off; say so), or the output query unanswered |
 | `arm-81150a-ext` | `bias.configure_trigger(external=True, positive_slope=True)` | bias output ON as the instrument reports it, or unanswered |
-| `set-led-pulse` | `led.set_pulse(level, low, frequency, duty)` from the bace params in force + `enable_output(True)` | — |
-| `set-led-dc` | `led.set_dc(level)` + enable | — |
-| `led-off` / `bias-off` / `smu-off` | `disable_output()` | — |
-| `shutter-open` / `shutter-shut` | `shutter.unblock()/shut()` | — |
+| `set-led-pulse` | `led.set_pulse(level, low, frequency, duty)` from BACE parameters or request overrides + `enable_output(True)` |; |
+| `set-led-dc` | `led.set_dc(level)` from BACE parameters or request override + enable |; |
+| `led-off` / `bias-off` / `smu-off` | `disable_output()` |; |
+| `shutter-open` / `shutter-shut` | `shutter.unblock()/shut()` |; |
 | `relay-to-sourcemeter` / `relay-to-amplifier` | reads both sources' outputs back first (`read_output`, refreshing the flags the interlock reads), then `router._move` via the public context managers (enter `router.dc()`/`transient()` and exit immediately, so the interlock runs) | a source is live, or a source did not answer its output query → `crit` Verdict, nothing moved |
 | `read-power` | one `PowerReading` from the meter | meter silent → `warn` |
 
-Unknown action → 404. The service never performs any of these on its own.
+Unknown action → 404. Chain fixes require explicit actions. Run cleanup and shutdown also park the bench.
 
 ### Saving the bench
 
-The values a bench card holds are the catalogue's **edited** layer, and that
-layer is a session: it lives in the process and goes with it. An afternoon of
-tuning six cards was recoverable only from a pipeline recipe, which records the
-bench for the modules one tree happens to name, as a by-product of saving a
-structure.
+Bench cards hold the catalogue's edited layer in process memory. Saving
+records resolved values for every module so another session can restore them.
 
 `POST /bench/save` body `{"name": "…"}` → 200 `{"name": "<stem>", "path":
 "<out>/bench/<stem>.json"}`, 422 `{"error", "param": "name"}` when the name
 stems to nothing. The record is `{"name", "saved_at", "bench"}`, where `bench`
-is `{module: {param: {"value", "source"}}}` for **every module in the
-catalogue**, resolved — the recipe's `bench` block widened from one tree's
+is `{module: {param: {"value", "source"}}}` for every module in the
+catalogue, resolved; the recipe's `bench` block widened from one tree's
 modules to the whole bench. The name is stemmed by `_RECIPE_STEM` exactly as a
 recipe's is, and an existing file is written over without asking (the console
 arms the second click, which is where a confirmation belongs).
 
 `GET /bench/saved` → `{"benches": [{"name", "path", "saved_at", "bench"}…]}`,
-newest first — keyed `benches` as `/pipelines/saved` is keyed `recipes`: each
+newest first; keyed `benches` as `/pipelines/saved` is keyed `recipes`: each
 tab's saved things, under the name that tab calls them. A file that will not
 parse is listed with an `error` and no values rather than dropped: the operator
 saved it, so a picker that silently omitted it would say the save never
@@ -658,23 +552,23 @@ happened. `GET /pipelines/saved` answers the same way, from the same reader.
 save stems it, so the console deletes under the name it lists. This is the only
 route that unlinks anything: a recipe has no delete (nothing on the pipeline tab
 offers one) and a run's folder is the record of an experiment. The console arms
-the second click for it, as it does for the overwrite beside it — and for more
-reason, since an overwrite replaces a file with the bench in front of the
+the second click for it, as it does for the overwrite beside it; and for more
+reason: an overwrite replaces a file with the bench in front of the
 operator and this leaves nothing.
 
-**There is deliberately no load route.** Putting a saved value back on the
-bench is `PUT /modules/{m}/params`, one module at a time — the same edit a
-card's field makes — so a value the spec now refuses is refused with the
+There is deliberately no load route. Putting a saved value back on the
+bench is `PUT /modules/{m}/params`, one module at a time; the same edit a
+card's field makes; so a value the spec refuses is refused with the
 sentence the field would have given and the modules that took theirs keep it.
 A load route would have had to invent an all-or-nothing rule for the whole
 catalogue at once, and one that fails leaves the operator with the bench they
-were trying to replace and no idea which value stopped it. The console's bench tab
+intend to replace and no idea which value stopped it. The console's bench tab
 compares a picked file with `GET /modules`, lists every value that would move,
 and sends those `PUT`s when the button under the list is clicked.
 
 ---
 
-## 5. `/modules` — the catalogue with provenance
+## 5. `/modules`; the catalogue with provenance
 
 `GET /modules` →
 
@@ -694,63 +588,70 @@ sets the `edited` layer (coerced; 422 with the parameter name on error) and
 returns the module entry. Body value `null` resets that parameter (drops the
 edited value). `POST /modules/{m}/params/reset` drops the whole edited layer.
 
+`GET /modules/{m}` returns that module's entry; an unknown name returns 404.
+
 Layers, lowest first: dataclass defaults → `run.toml` (the file passed with
 `--run`, mapped per module below) → last-used (journal) → edited (this session)
 → inherited/derived (pipeline context, never settable through the API). The
 bench card applies the resolver's manual-run rule to `bace.voc` (§7, `_voc`):
-when the session has a V_oc at the card's `led_v` (|Δ| ≤ 1e-9 V), nothing was
-typed and `measure_dc` is off, the entry reads `{"value": 1.0423, "source":
-"derived", "detail": "jv_bace jv_bace (this session)", "editable": false}` —
-what the run will centre on — rather than `default · null` with an empty
+when the session has a V_oc at the card's `led_v` (|Δ| ≤ 1e-9 V), no value is typed and `measure_dc` is off, the entry reads `{"value": 1.0423, "source":
+"derived", "detail": "jv_bace jv_bace (this session)", "editable": false}` ;
+what the run will centre on; rather than `default · null` with an empty
 `needs`. A typed value still wins, as it does for the run.
 
 ### The catalogue
 
 | module | maps to | params (name → where it goes) |
 |---|---|---|
-| `jv` | `run_jv(rig, JVConfig(light_control="leave", …))` | `start_v stop_v step_v settle_s both_directions pixel_area_cm2` → JVConfig; `smu_current_compliance_a smu_voltage_compliance_v smu_nplc` → SourceMeterConfig (real rig: `Keithley2400(res, config=…)`; sim: ignored). **No illumination parameters at all** — it sweeps under whatever light it finds, touching neither shutter nor LED on the way in or out, unwinds only the SourceMeter, and labels the curve from a read-back (`experiment.jv.illumination_state`): `as found dark`, `as found 1.020 V`, or `as found unknown` with a warning when the bench cannot say. `JVCurveDone.dark` is `True`/`False`/**`None`**, and None is not False |
+| `jv` | `run_jv(rig, JVConfig(light_control="leave", …))` | `start_v stop_v step_v settle_s both_directions pixel_area_cm2` → JVConfig; `smu_current_compliance_a smu_voltage_compliance_v smu_nplc` → SourceMeterConfig (real rig: `Keithley2400(res, config=…)`; sim: ignored). No illumination parameters at all; it sweeps under whatever light it finds, touching neither shutter nor LED on the way in or out, unwinds only the SourceMeter, and labels the curve from a read-back (`experiment.jv.illumination_state`): `as found dark`, `as found 1.020 V`, or `as found unknown` with a warning when the bench cannot say. `JVCurveDone.dark` is `True`/`False`/`None`, and None is not False |
 | `jv_bace` | `run_jv(rig, JVConfig(light_control="manage", dark=<dark>, led_levels_v=<levels>))` | all of `jv` + `led_start_v led_stop_v led_step_v` (or inherited `led_v` → one level), `led_settle_s`, `dark: bool = True` (include the dark curve), `led_low_v` (unused by run_jv, carried for the rail). This is the module that *owns* the light: it sweeps illumination as the measurement, and it is the V_oc source |
-| `light` | `rigs.apply_led` / `rigs.apply_shutter` — the same functions the `set-led-*`, `led-off` and `shutter-*` actions call | `shutter` (`open`/`shut`/`leave`), `led_mode` (`dc`/`pulse`/`off`/`leave`), `led_v led_low_v pulse_frequency_hz duty_percent settle_s`. Exists because a bench action is not a pipeline step: without it a tree of `jv` steps could never be dark. `leave` on either half touches nothing, so the shutter can move without cycling a generator that is at its thermal steady state. **A run whose only module is `light` is `invalid`** (`light.undone-by-park`): every run ends parked, so it would hand the bench back unchanged — the manual form is the bench action |
-| `bace` | `run_transient_scan(rig, ScanSpec, RunConfig, voc=…)` inside `router.transient()` with the LED pulsed at `led_v` | `axis_name axis_start axis_stop axis_step centre_on_voc` → Axis; `vpre vcoll delay_ns n_loops` → ScanSpec; `vpre_on_voc: bool = False` (group `pinned`: the pinned `vpre` is an *offset from the V_oc in scope* — the design's inherited "vpre = V_oc + 0.000 V" when `delay_ns` or `vcoll` is the axis, TDCF at V_oc; resolved in `build()` from the same V_oc source `centre_on_voc` uses, under the same coupling check, so the engine still gets an absolute prebias; inert with the `vpre` axis, where `centre_on_voc` is the flag — `core.axis.voc_flags` reads each of the pair only on its own side of `axis_name`, so the one the console hides never acts); every `RunConfig` field verbatim; `store_shots`; `led_v led_low_v` (33220A pulse levels; inherited inside an illumination loop); `voc` (derived from the V_oc source, or edited = typed by hand → warn); `measure_dc: bool = False` (measure V_oc/J_sc/J_sat on the Keithley under the LED first, like the intensity series; `v_sat`); `led_settle_s` (the least wait after DC → pulse), `led_settle_max_s: float = 60.0` s and `led_settle_tolerance: float = 0.02` (group `illumination`: the power meter behind the open shutter is polled every 0.5 s until three readings agree within the tolerance, giving up with a warning at the maximum; see the README's "Light"); `smu_*` as above |
+| `light` | `rigs.apply_led` / `rigs.apply_shutter`; the same functions the `set-led-*`, `led-off` and `shutter-*` actions call | `shutter` (`open`/`shut`/`leave`), `led_mode` (`dc`/`pulse`/`off`/`leave`), `led_v led_low_v pulse_frequency_hz duty_percent settle_s`. Exists because a bench action is not a pipeline step: without it a tree of `jv` steps could never be dark. `leave` on either half touches nothing, so the shutter can move without cycling a generator that is at its thermal steady state. A run whose only module is `light` is `invalid` (`light.undone-by-park`): every run ends parked, so it would hand the bench back unchanged; the manual form is the bench action |
+| `bace` | `run_transient_scan(rig, ScanSpec, RunConfig, voc=…)` inside `router.transient()` with the LED pulsed at `led_v` | `axis_name axis_start axis_stop axis_step centre_on_voc` → Axis; `vpre vcoll delay_ns n_loops` → ScanSpec; `vpre_on_voc: bool = False` (group `pinned`: the pinned `vpre` is an *offset from the V_oc in scope*; `vpre = V_oc + 0.000 V` when `delay_ns` or `vcoll` is the axis, TDCF at V_oc; resolved in `build()` from the same V_oc source `centre_on_voc` uses, under the same coupling check, so the engine still gets an absolute prebias; inert with the `vpre` axis, where `centre_on_voc` is the flag; `core.axis.voc_flags` reads each of the pair only on its own side of `axis_name`, so the one the console hides never acts); every `RunConfig` field verbatim; `store_shots`; `led_v led_low_v` (33220A pulse levels; inherited inside an illumination loop); `voc` (derived from the V_oc source, or edited = typed by hand → warn); `measure_dc: bool = False` (measure V_oc/J_sc/J_sat on the Keithley under the LED first, like the intensity series; `v_sat`); `led_settle_s` (the least wait after DC → pulse), `led_settle_max_s: float = 60.0` s and `led_settle_tolerance: float = 0.02` (group `illumination`: the power meter behind the open shutter is polled every 0.5 s to obtain three readings that agree within the tolerance, giving up with a warning at the maximum; see the README's "Light"); `smu_*` as above |
 | `power` | `PowerReading` from the meter; `Read` is a worker job, `Monitor` is an observer | `wavelength_nm samples` |
 | `temperature` | `service.temperature.settle`: through the 331 when `Rig.temperature` holds a controller (setpoint written, band held for `hold_s`), else `NeedsOperator` + wait; status `partial` | `setpoint_k tolerance_k hold_s timeout_s` |
-| `park` | `Rig.park()` | — |
+| `park` | `Rig.park()` |; |
 | `wait` | sleep | `seconds` |
 | `note` | journal entry only | `text` |
 
-`run.toml` mapping (`params.toml_layer`): `[axis]` → `axis_*`/`centre_on_voc`;
-`[pinned]` → `vpre vcoll delay_ns`; `[acquisition]` → RunConfig fields,
-`n_loops`, `store_shots`; `[illumination] level_v/low_level_v/v_sat` →
-`led_v/led_low_v/v_sat`; `[sourcemeter]` → `smu_*`; `[sample]` → the session's
-metadata (not a module param). jv modules take their defaults from `JVConfig`
-(run.toml has no jv table; add an optional `[jv]` table to `config.load_run`
-only if trivial — otherwise defaults + last-used is enough).
+`run.toml` mapping (`modules._TOML`):
 
-`ParamSpec.doc` comes from `params.field_docs` on the dataclass — one sentence,
-naming the instrument and what the parameter does to it — and `doc_full` is the
-whole docstring for the field's expandable help (`ui-rules` §1). Both are on the
-wire; `doc_full` is empty when `doc` is the whole of it. Every one of the 69
-distinct parameters carries a `doc` as of 2026-09-03. Groups:
-`axis`, `pinned`, `acquisition`, `processing`, `timing`, `trigger`, `output`,
-`illumination`, `sourcemeter`, `led` — the UI shows the first six fields of the
-bace card and folds "17 more · run.toml"; the service just labels groups.
+| Table | Catalogue values |
+|---|---|
+| `[axis]` | `axis_*`, `centre_on_voc` |
+| `[pinned]` | `vpre`, `vcoll`, `delay_ns` |
+| `[acquisition]` | `RunConfig` fields, `n_loops`, `store_shots` |
+| `[illumination]` | `level_v/low_level_v/v_sat` → `led_v/led_low_v/v_sat` for BACE; LED levels for `light`; both LED range ends and `led_low_v` for `jv_bace` |
+| `[sourcemeter]` | `smu_*` for BACE and both J–V modules |
+| `[sample]` | Session metadata, not module parameters |
+| Optional `[jv]` | Sweep geometry, settle, directions and pixel area for both J–V modules; LED range, low level, settle and `dark` for `jv_bace` |
+
+`Catalogue` validates `[jv]` keys; `config.load_run` does not read that table.
+The shipped `run.toml` has no `[jv]` table. The remaining layers are defaults,
+last used and edited values.
+
+`ParamSpec.doc` is the short field explanation; `doc_full` holds an expanded
+explanation when available. Dataclass fields use `params.field_docs`; service
+parameters also have explicit specifications. Both reach the console.
+Groups are `axis`, `pinned`, `acquisition`, `processing`, `timing`, `trigger`,
+`output`, `illumination`, `sourcemeter` and `led`. `ui-fields.md` describes
+card placement; the service supplies the groups and values.
 
 `Catalogue.build(module, params: dict, ctx: RunContext, rig) -> Iterator[Event]`
 returns the generator (already wrapped in the recorder for that module and in
-the router context) — this is the single place a module's parameters become
+the router context); this is the single place a module's parameters become
 dataclasses. `RunContext` carries: `run_id`, `node_path`, `out_folder`,
 `metadata: RunMetadata` (sample/material/pixel/operator from `[sample]`,
-`temperature_k` from context or typed — with `temperature_how` and
-`temperature_source` saying which, see §7 — `led_drive_v`, `voc_v`), `led_v`
+`temperature_k` from context or typed; with `temperature_how` and
+`temperature_source` saying which, see §7; `led_drive_v`, `voc_v`), `led_v`
 (inherited or None), `voc: VocSource | None` (`value, led_v, run_id, node_path, how`),
 `sleep` (a no-op under `--fast`), `abort: Callable[[], bool]`, `resolved`
 (seed for `RunRecorder.resolved`: `led_output_polarity`, `bias_arm_source`,
 `bias_arm_slope`, `led_levels_v`, `led_frequency_hz` from the last read-back).
 
 Manual `bace` semantics (the bench card). When `measure_dc` is set the builder
-measures V_oc first, the way the intensity series does: 33220A to **DC** at the
-level (`LedDrive.dc_settings`), the **shutter open** (`Rig.park()` shut it before
-the job — an LED that is on is not light at the sample), `led_settle_s` for the
+measures V_oc first, the way the intensity series does: 33220A to DC at the
+level (`LedDrive.dc_settings`), the shutter open (`Rig.park()` shut it before
+the job; an LED that is on is not light at the sample), `led_settle_s` for the
 device to reach its light steady state, `smu.measure_dc` inside `router.dc()`,
 then the shutter shut. Only then does it switch to pulse mode at
 `led_v/led_low_v` at `pulse_frequency_hz/duty_percent`, enable, read the 33220A
@@ -760,28 +661,29 @@ shutter and wait for the power meter to read stable (`led_settle_s`,
 without a meter), and run the transient inside `router.transient()`. A V_oc
 read under the pulse (a slow Keithley integrates over the on and off phases)
 or with the shutter shut (the dark V_oc) would centre the axis on nobody's
-V_oc, and the coupling check — which compares drive *levels* — cannot tell;
-the simulator's `measure_dc` now returns the dark 0 V when the shutter is shut,
+V_oc, and the coupling check; which compares drive *levels*; cannot tell;
+the simulator's `measure_dc` returns the dark 0 V when the shutter is shut,
 so the test catches the class of mistake. After the scan the shutter is shut
-and the LED is left pulsing: no module switches the generator off (operator
-instruction 2026-09-02; the shutter is the light switch).
+and the LED is left pulsing: park leaves the generator running behind the shutter. A `light` node may
+explicitly request `led_mode="off"`; managed dark J–V without a shutter
+also switches the LED off.
 
-V_oc source resolution for a **manual** run (`build()`): `voc` param typed →
-`how="typed"`, else the source in scope (`ctx.voc` — the session's most recent
+V_oc source resolution for a manual run (`build()`): `voc` param typed →
+`how="typed"`, else the source in scope (`ctx.voc`; the session's most recent
 light J-V curve at `led_v`, |Δ| ≤ 1e-9 V), else `measure_dc`, else invalid when
-`centre_on_voc`. An **as-found** `jv` curve qualifies only if its read-back put
-the LED in **DC**: under a pulsing lamp the Keithley integrates across the
-pulse's light and dark phases, so the crossing is a time average and no V_oc —
+`centre_on_voc`. An as-found `jv` curve qualifies only if its read-back put
+the LED in DC: under a pulsing lamp the Keithley integrates across the
+pulse's light and dark phases, so the crossing is a time average and no V_oc ;
 the same reason `measure_dc` switches the generator to DC before measuring one.
 The curve is still filed as light; it just provides no source, and the run says
-so on a warning `Notice`. In a **pipeline** the resolver (`pipeline._voc`, §7) chooses one
-first — a jv_bace in scope at this level, then `measure_dc`, then a typed value,
-then the session's — and hands `build()` a schedule where a chosen measurement
+so on a warning `Notice`. In a pipeline the resolver (`pipeline._voc`, §7) chooses one
+first; a jv_bace in scope at this level, then `measure_dc`, then a typed value,
+then the session's; and hands `build()` a schedule where a chosen measurement
 has cleared `voc` and a chosen typed value left `ctx.voc` unset, so the two
 never both arrive; the `build()` order governs only a direct call with both set,
 where the number just typed wins. When `measure_dc` and a typed `voc` are set on
 the *same* node the run measures and the typed number never runs, so `voc.typed`
-warns that it was ignored rather than letting it vanish from the schedule.
+warns that the measured value takes precedence.
 
 ---
 
@@ -791,28 +693,27 @@ warns that it was ignored rather than letting it vanish from the schedule.
   Internally: build a one-node tree, validate (§7), refuse with 422
   `{"checks": […]}` on `invalid`/`crit`, else queue.
 - `POST /runs/{id}/stop` body `{"mode": "after_shot"|"abort"}` → 202 `{"run_id",
-  "state", "mode"}`; the `state` is the new one — `stopping` for a running or
+  "state", "mode"}`; the `state` reflects the accepted request; `stopping` for a running or
   paused run (reported at once, so the record, `/bench` and the stream all say
-  `stopping` from the moment the stop was accepted), `cancelled` for a queued
+  `stopping` from acceptance of the stop), `cancelled` for a queued
   run. 404 unknown; 409 if already terminal.
 - `POST /runs/{id}/resume` body `{"note": "set to 250.0 K by hand", "temperature_k": 250.1}`
   → 202; 409 if not paused. `temperature_k` becomes the context temperature
   for the subtree (folder names, metadata) and is journaled in `OperatorResumed`.
 - `GET /runs?session=<id>|all` → `[RunSummary]`: `run_id, session_id, kind ("manual"|"pipeline"), name, module|tree_summary, sample, state, queued_at, started_at, finished_at, kept, requested, outcome_text, folder, node_count, node_count_done, voc_min, voc_max, light_curves`.
-  `sample` is the `[sample]` block the run was queued under (`sample, material,
-  pixel, operator, comment, temperature_k`), on every row — the identity
-  travels with the run, not only in the session header (`docs/history/naming-plan.md`
-  rule 1, 2026-09-04), so a grid grouped by device parses no folder name.
+  `sample` is the `[sample]` block captured at submission (`sample, material,
+  pixel, operator, comment, temperature_k`), on every row; the identity
+  travels with the run, not only in the session header , so a grid grouped by device parses no folder name.
 - `GET /runs/{id}` → the full record: tree, resolved schedule, params with
   provenance as executed per node, per-node outcomes (`NodeDone` details),
-  verdicts (one entry per `(code, node_path)` — the Start re-read replaces the
+  verdicts (one entry per `(code, node_path)`; the Start re-read replaces the
   submit-time copy, so a "N warn" count off the record is honest), chain
   read-back at start, folders written, error if failed, `progress` (the
   module's own), `eta` (the latest loop `Progress` with the executor's
   re-derived ETA: `{eta_s, finish_at, at, node_path, done, total}`; null for a
   manual run), and `cost` whose `finish_at` follows that ETA once one has been
   measured (`finish_source: "measured"`, `finish_at_submit` kept beside it).
-  `sample` as on the index row, and `nodes` — every module node that has
+  `sample` as on the index row, and `nodes`; every module node that has
   ended, in the shape §3 `run_record` gives (`journal.node_record` builds it
   for both, so the two sources agree byte for byte): `{node_path, module,
   outcome, kept, requested, voc, voc_how, voc_led_v, led_v, temperature_k,
@@ -820,20 +721,19 @@ warns that it was ignored rather than letting it vanish from the schedule.
   error, reason, started_at, finished_at, elapsed_s, axis, values, q_mean,
   q_std, curves, shots, intensity_recorded, shots_flagged}`. `axis`/`values`/
   `q_mean`/`q_std` are a transient's per-point statistics (from `RunFinished`;
-  from the last `LoopDone` or the last shot's running mean when the node was
-  stopped before one), `curves` a J-V's curves reduced to their metrics, and
-  the three counts what the node's `StepDone` lines said — never a trace.
-  `from: "session"`. For a run this process never held — last week's — the
+  from the last `LoopDone` or the last shot's running mean when the node stops before a `RunFinished`), `curves` a J-V's curves reduced to their metrics, and
+  the three counts what the node's `StepDone` lines said; never a trace.
+  `from: "session"`. For a run this process never held; last week's; the
   answer is the journal's record (§3 `run_record`): the summary fields plus
   `tree`, `nodes` and `verdicts`, `from: "journal"`, `data_in_memory: false`;
   404 when no journal file knows the id.
 - `GET /runs/{id}/data?node=<node_path>` → for `bace`:
   `{"axis": {…}, "values": […], "q_mean": […], "q_std": […], "q_all": [[…]], "time_s": […], "light": [[…]], "dark": [[…]], "photo": [[…]], "last_shot": {"light": […], "dark": […], "photo": […], "cumulative_q": […], "t0_int_record_s": …, "t1_int_record_s": …}, "kept": 12, "requested": 20}`;
   for `jv_*`: `{"curves": [{label, dark, led_level_v, direction, voltage, current, density, metrics}]}`
-  — `voltage` in V, `current` in A as the instrument reported it, `density` in
-  **mA/cm²** and `null` when `pixel_area_cm2` is 0 (there is no density without
-  an area; the client shows amps). `metrics.jsc` is in **A**, not a density:
-  it is interpolated from `current`, whatever area the run was given;
+; `voltage` in V, `current` in A as the instrument reported it, `density` in
+  mA/cm² and `null` when `pixel_area_cm2` is 0 (there is no density without
+  an area; the client shows amps). `metrics.jsc` is in A, not a density:
+  it is interpolated from `current`, independently of pixel area;
   for a pipeline run without `node` → 400 listing the nodes.
   Full precision, no decimation. The `cumulative_q` array is the running
   integral of the last photocurrent over that shot's own integration window
@@ -842,9 +742,9 @@ warns that it was ignored rather than letting it vanish from the schedule.
   measured from the pulse, so it differs from shot to shot along a delay axis;
   `StepDone` carries the same two numbers for every shot.
 - `GET /events` WebSocket. Query `since=<seq>` replays from the in-memory ring
-  (last 5000 envelopes, traces of the last 200 shots — see §3) then streams live.
+  (last 5000 envelopes, traces of the last 200 shots; see §3) then streams live.
   First frame: `{"seq": null, "type": "Hello", "data": {"session", "seq":
-  last_seq, "bench": <GET /bench>}}`. The **envelope** `seq` is `null`, not
+  last_seq, "bench": <GET /bench>}}`. The envelope `seq` is `null`, not
   `last_seq`: the replay that follows carries lower seqs, and a Hello stamped
   with the newest seq would make a client that dedupes on `seq > last seen` drop
   the whole replay; `data.seq` is the last seq the client has. A client that
@@ -877,7 +777,7 @@ warns that it was ignored rather than letting it vanish from the schedule.
   `led_low_v`; `led_settle_s`), `repeat` (`count`). A loop needs ≥ 1 child.
 - Module node `params` are overrides on the module's resolved ParamSet
   ("as on the bench · only what differs is typed here"). A module inside an
-  illumination loop **may not** set `led_v`/`led_start_v` etc. — the loop owns it.
+  illumination loop may not set `led_v`/`led_start_v` etc.; the loop owns it.
 - The root may be a module node (a manual run) or a loop.
 - Optional `"name"` at the root → the pipeline's folder stem.
 
@@ -896,19 +796,19 @@ a flat, ordered list of `Step`s, each `{node_path, kind: "loop-enter"|"module"|"
 The schedule is what `Dry run` shows ("what it will do, in order") and what the
 executor runs; the executor must never re-derive structure.
 
-### The three bindings (plan, "the only new logic")
+### The three bindings
 
-1. **illumination loop → `led_v` of every module inside it.** Set as
+1. illumination loop → `led_v` of every module inside it. Set as
    `Source.INHERITED` (detail `"illumination loop"`) on `jv_bace.led_levels_v = [led_v]`
    and `bace.led_v`. The loop also owns `led_low_v`.
-2. **`jv_bace` → V_oc → `bace` at the same `led_v`.** Within one illumination
+2. `jv_bace` → V_oc → `bace` at the same `led_v`. Within one illumination
    iteration, the latest light curve's `metrics.voc` at that level becomes
    `bace.voc` (`Source.DERIVED`, detail `"jv_bace <node_path>"`). `measure_dc`
    on the `bace` node is the alternative source. A `bace` with
-   `centre_on_voc` and no source in scope is **invalid** at validation.
+   `centre_on_voc` and no source in scope is invalid at validation.
    Outside any loop (manual), the session's last `jv_bace` at the same level
    qualifies (§5).
-3. **Relay transitions at every `jv_* ↔ bace` boundary**: `run_jv` already
+3. Relay transitions at every `jv_* ↔ bace` boundary: `run_jv` already
    runs inside `router.dc()`; the executor runs `bace` inside `router.transient()`.
    The interlock (`Router` refuses while a source is live) is the guard; the
    schedule marks each transition so the UI can draw "relay 2400 → amplifier".
@@ -918,95 +818,80 @@ executor runs; the executor must never re-derive structure.
 One helper, `service.temperature.settle`, serves the temperature loop and the
 `temperature` module; which path it takes is decided by `Rig.temperature`.
 
-**Who owns the instrument** (changed 2026-09-03). The 331 answers only the
-last query it received, so exactly one owner may exist — but that owner is
-now normally *this process*: `Bench.build_real` opens `[temperature] address`
-itself through `drivers.lakeshore331.controller`, and the one-owner rule is
-kept by a lock (`controller._LOCK`) rather than by a process boundary. Naming
-`[temperature] console` is the escape hatch for a bench where the 331 console
-is running and holds the bus; clearing *both* says there is no cryostat here,
-and then nothing is opened and nothing is reported unavailable. `--sim` is
-unchanged and deliberately does not follow `address`: any non-empty `console`
-attaches the simulator's stand-in, and the default (none) is the
-operator-pause path, because that is the one a UI has to handle well. Wiring
-the 331 changed no route, no tree field and no event type (plan, P3: "the
-API does not change").
+The 331 answers the last query it receives, so it needs one owner.
+`Bench.build_real` opens `[temperature] address` through
+`drivers.lakeshore331.controller`; `controller._LOCK` serialises access.
+Naming `[temperature] console` delegates ownership to that console. Empty
+address and console disable the controller without an unavailable warning.
+In `--sim`, a nonempty console attaches the stand-in; the address alone does
+not. Empty console selects operator pauses.
 
-**With a controller attached** the node settles on its own. It is read first
+With a controller attached the node settles on its own. It is read first
 — the first poll, at zero on the poll clock, is the cryostat as found and
 goes out as a `TemperatureRead` like every other; a setpoint is written to an
-instrument that answers, never into a controller with nothing behind it —
+instrument that answers, never into a controller with nothing behind it ;
 then the setpoint is written (once), the controller is polled every 5 s
 through `RunContext.sleep` (so `--fast` costs polls, not wall time), each
 usable reading is yielded as
 `TemperatureRead(source="instrument"|"console"|"simulated")`, and the node is
 done once
 the reading has stayed inside `tolerance_k` of the setpoint, with no ramp
-still walking it (RAMPST?), for `hold_s` — the dwell starts when the band is
+still walking it (RAMPST?), for `hold_s`; the dwell starts when the band is
 entered. Then `Verdict(ok, "temperature.settled", "250 K reached in 27 min,
 held 60 s", node_path, data={setpoint_k, kelvin, settle_s, hold_s, held_s,
-polls, source})`, and the **last measured kelvin** (not the setpoint) becomes
-the subtree's `temperature_k` — folder names and metadata. A `temperature`
-*module* binds the same way for the nodes after it, and for the **rest of the
-run**, not the rest of one loop iteration: the cryostat stays where it was put
-until another temperature node moves it, so a `bace` beside it — or at the
-next level of an enclosing illumination loop — is labelled with what the
+polls, source})`, and the last measured kelvin (not the setpoint) becomes
+the subtree's `temperature_k`; folder names and metadata. A `temperature`
+*module* binds the same way for the nodes after it, and for the rest of the
+run, not the rest of one loop iteration: the cryostat retains its setpoint unless another temperature node moves it, so a `bace` beside it; or at the
+next level of an enclosing illumination loop; is labelled with what the
 cryostat is at, not with the session's number. A temperature loop still wins
 for its own subtree; each iteration writes its setpoint again on the way in.
 
-**Where the number came from travels with it.** The folder name is the
-2026-08-07 archive convention and does not change: `290K` in a name is the
-same string however the 290 was arrived at. So every `RunMetadata`, every
-`/metadata` group in HDF5 and every journalled node carries two more fields —
+Every `RunMetadata`, HDF5 `/metadata` group and journalled node carries
+`temperature_how` and `temperature_source`. The folder's `290K` alone
+cannot distinguish them.
 
 | `temperature_how` | `temperature_source` | means |
 |---|---|---|
 | `typed` | `""` | `[sample]` in the recipe, or the console's metadata field. Nobody read an instrument. |
-| `setpoint` | `""` | A temperature loop asked for it and the settle never got one reading. **What was requested, not what was reached.** |
-| `read` | `instrument` \| `console` \| `simulated` | Nobody typed one and no temperature node bound one, so the module read the controller once as the node started (`modules._bind_temperature`, 2026-09-04): the bench as found. The recipes type nothing since that day; a bench with no controller stays *not recorded*. |
+| `setpoint` | `""` | A temperature loop asked for it and the settle never got one reading. Requested temperature without a measured value. |
+| `read` | `instrument` \| `console` \| `simulated` | Nobody typed one and no temperature node bound one, so the module read the controller once as the node started (`modules._bind_temperature`): the bench as found. Without a typed value or controller, temperature stays not recorded. |
 | `settled` | `instrument` \| `console` \| `simulated` | The controller held it inside the band. `instrument` is this process on the bus, `console` the 331 console asked over HTTP; `simulated` means the stand-in, so a `--sim` file cannot be mistaken for a measured one. |
 | `operator` | `operator` | A person typed the number at the pause. |
 | `operator` | `instrument` \| `console` \| `simulated` | A person ended the pause without typing one; the number is the last reading polled while they decided. |
 
-`how` alone is not enough — the last two rows share it — so both are stored
-and both are rendered. A field absent altogether is a file written before
-these existed; the HDF5 schema stays `bace-run/2`, because two attributes on
-a group every reader already opens is an addition, not a change.
+Both fields are stored and rendered. Missing fields mean the file does not
+record that provenance. Current transient files use `bace-run/3`.
 
-The same split — the name is a convenience, the file is the record — applies
-to `[sample] comment`. The folder name carries a slug of it
-(`bace.storage.naming.slug`: whitespace and `_` become `-`, the characters a
-Windows path segment may not hold are dropped, 64 characters, anything merely
-non-ASCII is kept), while the metadata keeps the sentence verbatim. `runs/`
-holds a directory named `290K_1000mVLED_offsetcorr_LabVIEW panel replica -
-combination 4 - shutter only dark_20260902_012223` from 2026-09-01 to say
-why: spaces in a path, and a claim that was overturned the next day and can
-no longer be corrected without renaming the folder.
+`[sample] comment` is retained verbatim in metadata. The folder uses
+`bace.storage.naming.slug`: whitespace and `_` become `-`, Windows-forbidden
+characters are removed, non-ASCII characters remain, and the limit is
+64 characters. Folder names are labels; metadata is the record.
+
 Each node is marked in the controller's audit trail at the setpoint write
-and at the settle, best effort — the console's own log through `POST
+and at the settle, best effort; the console's own log through `POST
 /api/note` when a console owns the instrument, the session journal when this
-process does (the console kept a separate file because it was the only
-program on the instrument; here the journal is where an operator looks).
+process does The owner keeps the audit record.
 
 The 350 K ceiling and the front-panel settings hold whoever owns the bus, and
 each failure is named for what it is:
 
-- **the heater watchdog** cuts the heater after
+- the heater watchdog cuts the heater after
   `Limits.max_consecutive_faults` consecutive faults, and the count resets on
-  the first clean one. A fault is a bad control-sensor status (`RDGST?`) **or
-  a heater fault** (`HTRST?`): an open or shorted load while the sensor reads
+  the first clean one. A fault is a bad control-sensor status (`RDGST?`) or
+  a heater fault (`HTRST?`): an open or shorted load while the sensor reads
   well would otherwise reset the count forever. Cutting is `RANGE 0`, plus --
   on a loop-2 cryostat, where `RANGE` does not reach the analog output --
   `MOUT 0` then `CMODE open loop`, in that order. It is fed from every
-  `read()` (the monitor, the settle) **and from the worker's own sleeps
-  inside a run** (`rigs.Bench._feed_watchdog`, at most every
+  `read()` (the monitor, the settle) and from the worker's own sleeps
+  inside a run (`rigs.Bench._feed_watchdog`, at most every
   `WATCHDOG_POLL_S`), because the monitor cannot read while a run holds the
   bus and a fault beginning after a temperature settles must not wait hours
   to be seen. `DirectTemperatureController.heater_cut` holds the reason once
   it has fired;
 - a setpoint above the 350 K ceiling (`[temperature] max_setpoint_k`, or the
-  console's own limit when a console owns the bus) is **refused**, never
-  clamped — `Verdict(crit, "temperature.refused", <the controller's own
+  console's own limit when a console owns the bus) is refused, never
+  clamped; `Verdict(crit, "temperature.refused", <the controller's own
   sentence>, data={…, "error": <the driver's full text>, "status": 403})`
   then `NeedsOperator(what="temperature refused", detail={…, "error"})`. The
   direct driver raises the same `TemperatureError(refused=True, status=403)`
@@ -1015,19 +900,19 @@ each failure is named for what it is:
   takes the last reading;
 - the heater range, ramp rate and PID are whatever the front panel holds. A
   heater range of 0 while the setpoint is above the reading is said at once
-  — `Verdict(warn, "temperature.heater-off", …)`, once per node — and the
+; `Verdict(warn, "temperature.heater-off", …)`, once per node; and the
   settle goes on toward its timeout, so the operator raises the range on the
   instrument instead of finding out half an hour later; nothing is changed
   from here, and a cool-down with the heater off is not a warning;
 - `timeout_s` on the poll clock without reaching the band, three consecutive
   readings with `connected` false (`reason = "silent"`, before or after the
   write), or the bus itself not answering three polls or the setpoint write
-  (`reason = "unreachable"`: fix the instrument or the cable — or start the
-  console, if rig.toml names one — do not reconsider the setpoint) gives
+  (`reason = "unreachable"`: fix the instrument or the cable; or start the
+  console, if rig.toml names one; do not reconsider the setpoint) gives
   `Verdict(warn, "temperature.timeout", …,
   data={…, "reason", "written", "error"})` then
   `NeedsOperator(what="temperature timeout", detail={…, "kelvin",
-  "elapsed_s", "reason", "written", "error"})` — the run does not proceed to
+  "elapsed_s", "reason", "written", "error"})`; the run does not proceed to
   measure at a temperature it did not reach; the operator resumes (accepting
   the reading, optionally typing `temperature_k`) or stops. A write the
   console did not answer in time is read back once before that verdict: when
@@ -1036,14 +921,14 @@ each failure is named for what it is:
 
 A stop or abort is honoured at every poll.
 
-**Without a controller** the node pauses as before:
+Without a controller the node pauses:
 `NeedsOperator(what="temperature", node_path="T=250K", detail={"setpoint_k": 250.0, "tolerance_k": 0.2, "hold_s": 60, "timeout_s": 1800, "index": 4, "count": 9})`,
 run state `paused`, and waits. `POST /runs/{id}/resume` wakes it; the resume
 detail (`temperature_k`, `note`) is journaled as `OperatorResumed` and
 `temperature_k` flows into the subtree's metadata. While any pause lasts
 (this one, or the timeout/refusal ones above, on the loop path and on the
 `temperature` module's alike) an attached controller is polled every 5 s and
-each `TemperatureRead` goes out **live** — through an out-of-band `emit` hook
+each `TemperatureRead` goes out live; through an out-of-band `emit` hook
 the session binds to its event path, so the reading reaches the journal and
 the socket while the run is still paused, which is the point (a reading
 delivered after the operator decided the cryostat had settled is history).
@@ -1055,11 +940,9 @@ resume − pause on this path, the same plus the console's `elapsed_s` for a
 verdict on the automatic one; a refused setpoint's pause teaches nothing.
 
 The schedule's `needs_operator` on a temperature step, and the
-`temperature.not-wired` check, come from the bench snapshot the tree was
-validated against: `ok` only when the read-back showed the controller
+`temperature.not-wired` check, come from the validation snapshot: `ok` only when the read-back showed the controller
 attached and `connected` true; `warn` (a pause) when no controller is
-attached, when the console named was silent at Start, when it answered at
-Start and not at the read-back (`error` in the block: start the console),
+attached, when the named console is silent at Start, when a responding console fails the read-back (`error` in the block: start the console),
 when it is up with the instrument silent behind it, and when a controller is
 attached but not read back yet (`connected` null in the bench stub before
 the first read-back). The run decides again at the node from a fresh read.
@@ -1067,31 +950,31 @@ the first read-back). The run decides again at the node from a fresh read.
 ### The check catalogue (`pipeline.validate`)
 
 Stable ids; each result is a `Verdict(level, code, text, node_path)`.
-`invalid` and `crit` block Start; `warn`/`info`/`ok` do not. The service never
-fixes anything: a `fix` field names a bench action the operator may click.
+`invalid` and `crit` block Start; `warn`/`info`/`ok` do not. A `fix` field names an explicit bench action. The BACE builder also sets
+LED polarity to match external arming before configuring pulses.
 
 | id | level | condition |
 |---|---|---|
 | `tree.shape` | invalid | unknown kind/loop/module, loop without children, malformed values |
 | `tree.owned-param` | invalid | a module inside an illumination loop sets `led_v`/`led_*_v` |
-| `light.undone-by-park` | invalid | the run's only module is `light`: every run ends parked, so it would set a light and hand it straight back. Names the bench actions, which do not go through the worker |
+| `light.undone-by-park` | invalid | the run's only module is `light`: every run ends parked, so it would set a light and hand it straight back. Names the bench actions, which are worker jobs without run-level park |
 | `voc.source` | invalid | `bace.centre_on_voc` or `bace.vpre_on_voc` with no V_oc source in scope (`data.needed_by` names the flag) |
 | `voc.coupling` | invalid | V_oc source's `led_v` ≠ the bace's `led_v` (`assert_axis_centre`) |
 | `led.levels` | invalid | `LedDrive` refuses (low ≥ threshold, level < threshold, level ≤ low) |
 | `axis.geometry` | invalid | `Axis`/`ScanSpec` refuse (step, n_loops < 1) or `delay_ns < 0` (`:PULS:DEL1` is given `delay_ns` as it is). `centre_on_voc` on a non-vpre axis and `vpre_on_voc` on the vpre axis are not faults: each flag is read only on its own side of `axis_name` (`core.axis.voc_flags`) |
-| `bench.instrument` | invalid | a module step's instrument is in the read-back's `unavailable` (`Catalogue.needs` minus the advisories in `ADVISORY_NEEDS`; the `power` module needs its meter). `warn` for a plain `jv` with no shutter or LED to read: it runs, its illumination recorded as unknown. `info` before the first read-back. Without it a run on an unplugged Keithley was accepted, queued and failed at preflight |
+| `bench.instrument` | invalid | a module step's instrument is in the read-back's `unavailable` (`Catalogue.needs` minus the advisories in `ADVISORY_NEEDS`; the `power` module needs its meter). `warn` for a plain `jv` with no shutter or LED to read: it runs, its illumination recorded as unknown. `info` before the first read-back. This refuses a run before acquisition when a required instrument is unavailable |
 | `smu.ceiling` | crit | compliance above the bench ceiling (`config.check_smu_limits`) |
 | `relay.interlock` | crit | a tree with both a `jv_*` and a `bace` and no `Router`; or at Start a source reports its output live |
 | `bench.live-at-start` | crit | bias or SMU output ON at Start (read-back) |
 | `voc.typed` | warn | `bace.voc` typed by hand, not measured this session; or a typed `voc` ignored because `measure_dc` on the same node measures it |
-| `chain.led-polarity` | warn | 33220A reads NORM, or `?` (an unreadable polarity on a transient is as unproven as NORM; fix `set-33220a-pol-inv`) — `info` when no transient in the tree uses the Sync edge (a J-V-only tree); the `/bench` card always warns, because it describes the bench, not a tree |
-| `chain.bias-arm` | warn | 81150A not EXT / not POS when the recipe wants external arming (fix `arm-81150a-ext`) |
-| `chain.bias-polarity` | warn | 81150A `:OUTP1:POL` ≠ the recipe's instruction (info when `leave`, or when unread `?` — the run writes it at Start, as the `/bench` card reports) |
-| `temperature.not-wired` | warn / ok | a temperature loop: `ok` when the read-back shows the 331 console attached and its instrument answering ("settles automatically, ±tol, hold, timeout"), `warn` when no controller is attached (pauses at each T for a manual set; names the console when one is named and silent) or when the console is up with the instrument silent behind it (pauses too). The schedule's `needs_operator` on temperature steps follows the same rule; `True` before the first read-back |
+| `chain.led-polarity` | info / warn / ok | INV is `ok`. For externally armed BACE, unread or NORM is `info` because the builder writes polarity at Start (INV for positive slope, NORM for negative). Other transient cases warn; a J–V-only tree reports info. The bench card warns on unread or NORM independently of a tree. |
+| `chain.bias-arm` | warn | 81150A arming source or slope differs from `external_trigger` and `trigger_slope_positive` (fix `arm-81150a-ext`) |
+| `chain.bias-polarity` | warn | 81150A `:OUTP1:POL` ≠ the recipe's instruction (info when `leave`, or when unread `?`; the run writes it at Start, as the `/bench` card reports) |
+| `temperature.not-wired` | warn / ok | a temperature loop or module: `ok` when the read-back shows a controller attached and its instrument answering ("settles automatically, ±tol, hold, timeout"), `warn` when no controller is attached (pauses at each T for a manual set; names the console when one is named and silent) or when the console is up with the instrument silent behind it (pauses too). The schedule's `needs_operator` on temperature steps follows the same rule; `True` before the first read-back |
 | `temperature.inside-illumination` | warn | temperature loop nested in an illumination loop; text states the cost |
 | `trigger.auto` | info | `trigger_sweep = AUTO` (a missing trigger looks like data) |
-| `power.console` | warn | `:8918` not answering → intensity will be NaN |
-| `intensity.factor` | info | no calibration factor (the original's "Factor" is not recoverable) → intensity recorded in watts at the meter, not irradiance at the sample |
+| `power.console` | warn | Required power read unavailable over direct USB or the configured console; intensity is not recorded. Before a read-back, availability is informational. |
+| `intensity.factor` | info | no calibration factor → intensity recorded in watts at the meter, not irradiance at the sample |
 | `cost.long` | warn | estimated total > 8 h, or `store_shots` > 2 GB |
 | `chain.stale` | info | chain read-back older than 10 min (re-read at Start anyway) |
 
@@ -1108,32 +991,34 @@ t_temperature(T) = settle(T) + hold_s + Σ children    settle(T) = median(journa
 total = Σ …
 ```
 
-Output: `{"total_s": …, "measuring_s": …, "waiting_s": … | null, "per_temperature": [{"setpoint_k": 250, "settle_s": 2220 | null, "measure_s": 438}], "lower_bound": true when any settle is None, "finish_at": ts | null, "t_shot_s": 0.8, "t_shot_source": "journal"|"default"}`.
+Output: `{"total_s": …, "measuring_s": …, "waiting_s": … | null, "per_temperature": [{"setpoint_k": 250, "settle_s": 2220 | null, "measure_s": 438}], "lower_bound": true when any settle is None, "finish_at": ts | null, "t_shot_s": 0.8, "t_shot_source": "journal"|"default", "unestimated_modules": n}`.
+For plain `jv`, `led_settle_s = 0` in the estimate because the module leaves
+illumination alone. A `temperature` module, like a temperature loop, adds
+settle history and hold. Unestimated module counts are explicit.
+
 Never invent a settle time: `null` renders as "—" (the design's table shows
 "—" for the first temperature).
 
 ### Endpoints
 
-- `POST /pipelines/validate` body `{"tree": …}` → 200 `{"valid": bool, "checks": [Verdict…], "schedule": [Step…], "counters": {…}, "cost": {…}, "node_paths": […], "folder": "<out>/<stem>", "folder_pattern": "<out>/<stem>_YYYYMMDD_HHMMSS"}`. This is the **Dry run** button: touches nothing. `folder` is the stem; the run's folder is `folder_pattern` with the stamp `submit` takes, which the Dry run cannot know — "writes 90 folders under `20260901_Txill_YYYYMMDD_HHMMSS/`".
+- `POST /pipelines/validate` body `{"tree": …}` → 200 `{"valid": bool, "checks": [Verdict…], "schedule": [Step…], "counters": {…}, "cost": {…}, "node_paths": […], "folder": "<out>/<stem>", "folder_pattern": "<out>/<stem>_YYYYMMDD_HHMMSS"}`. This is the Dry run button: touches nothing. `folder` is the stem; the run's folder is `folder_pattern` with the stamp `submit` takes, which the Dry run cannot know; the console shows the folder pattern and module count.
 - `POST /pipelines` body `{"tree": …, "name": "…"}` → validates (including a fresh chain read-back job when idle), 422 with the checks when `invalid`/`crit`, else 202 `{"run_id", "state", "checks", "cost", "folder"}` (the stamped folder).
-- `GET /pipelines/last` → the last validated tree in this session (so the UI can reopen it). Saving recipes to disk is `POST /pipelines/save {"tree", "name"}` → `<out>/recipes/<name>.json`; `GET /pipelines/saved` lists them. Small, optional. The bench's own save (section 4) writes the same `bench` block to `<out>/bench/` for the whole catalogue, and both listings come from one reader — a file that will not parse is a row with an `error`, not a row that vanished.
-  **The file is complete.** A tree carries only what its nodes override; everything else a node runs with is the module's bench value at *start* time, so a file holding the tree alone would run differently after a bench edit with no diff in it. The record is `{"name", "saved_at", "tree", "bench"}`, where `bench` is `{module: {param: {"value", "source"}}}` for every module the tree names, as the bench had them at save time (a tree that does not parse records `{}`). The UI compares `bench` with `GET /modules` when a recipe is reopened, lists every parameter the bench has moved on that some node of that module still takes from the bench (not one every node overrides or a loop binds), and offers to `PUT` the recipe's values back. Start is unchanged: it runs with the bench as it is — the note is what makes that visible.
+- `GET /pipelines/last` → the last validated tree in this session (so the UI can reopen it). Saving recipes to disk is `POST /pipelines/save {"tree", "name"}` → `<out>/recipes/<name>.json`; `GET /pipelines/saved` lists them. Small, optional. The bench's own save (section 4) writes the same `bench` block to `<out>/bench/` for the whole catalogue, and both listings come from one reader; a file that will not parse is a row with an `error`, not a row that vanished.
+  The file is complete. A tree carries only what its nodes override; everything else a node runs with is the module's bench value resolved at submission, so a file holding the tree alone would run differently after a bench edit with no diff in it. The record is `{"name", "saved_at", "tree", "bench"}`, where `bench` is `{module: {param: {"value", "source"}}}` for every module the tree names, as the bench had them at save time (a tree that does not parse records `{}`). The UI compares `bench` with `GET /modules` when a recipe is reopened, lists every parameter the bench has moved on that some node of that module still takes from the bench (not one every node overrides or a loop binds), and offers to `PUT` the recipe's values back. Start is unchanged: it runs with the bench as it is; the note is what makes that visible.
 
 ### Executor (`executor.run_pipeline`)
 
 A synchronous generator run as one worker job. For each schedule step:
 `loop-enter` → `NodeStarted`, apply the binding (illumination: `led.set_pulse`
 happens inside the module builder, not here; the loop only sets the context),
-temperature: the settle through the console, or `NeedsOperator` + wait + `hold_s` (see "Temperature" above); `Progress(node_path=<loop path>, done=i, total=n, eta_s=…)`.
-**`eta_s` is re-derived from what this run has measured** (the plan's "the
-ETA is recomputed as it measures"): the sum of what is left in the schedule, where a module costs the
+temperature: the settle through the attached controller, or `NeedsOperator` + wait + `hold_s` (see "Temperature" above); `Progress(node_path=<loop path>, done=i, total=n, eta_s=…)`.
+`eta_s` is re-derived from what this run has measured: the sum of what is left in the schedule, where a module costs the
 median duration of the same module in this run once one has completed (its
-`estimate_s` until then) and a temperature costs the median settle the
+`estimate_s` before that) and a temperature costs the median settle the
 operator has taken *in this run* once one has been measured (the journal's
-median from the schedule until then, or nothing) plus `hold_s`, and an
-illumination level its settle. Every loop enter and exit carries it, so after
-the first temperature settled in two hours instead of the journal's twenty
-minutes the next `Progress` says so; the session copies the latest into the
+median from the schedule before that, or nothing) plus `hold_s`, and an
+illumination level its settle. Every loop enter and exit carries it. Measured durations replace initial
+estimates; the session copies the latest into the
 record's `eta` and `cost.finish_at` (§6). A number that no settle has informed
 yet is a floor; the cost's `lower_bound` says so.
 `module` → `NodeStarted`, `catalogue.build(...)`, forward every event unchanged
@@ -1141,16 +1026,16 @@ yet is a floor; the cost's `lower_bound` says so.
 next binding needs (V_oc from `JVCurveDone` light curves; `RunFinished` for
 the summary), `NodeDone(outcome, detail={"module", "kept", "requested", "folder",
 "folders", "summary"})`. A module that reported its own end (`RunFinished`/
-`JVFinished`) is `ok` even if an `after_shot` was requested during its last shot
+`JVFinished`) is `ok` even if `after_shot` arrives during its last shot
 — a complete node is not `stopped`, and the stop takes effect at the next node.
 On `RunAborted` from a module: stop the tree (`NodeDone(outcome="stopped")`
 for the open nodes), then unwind. On an exception: `RunFailed(error, where=node_path)`,
 unwind, re-raise nothing (the worker marks `failed`). `finally`: `Rig.park()`.
 
-An **abort** closes the generator before it can emit `NodeDone`, so the *session*
+An abort closes the generator before it can emit `NodeDone`, so the *session*
 synthesizes one per node the worker saw open, with the folder its recorder had
 opened (`RunContext.folders`) and the shots it took, on the same event path as
-the frames — so `GET /runs/{id}` names the folder and the counts of a run whose
+the frames; so `GET /runs/{id}` names the folder and the counts of a run whose
 files are on disk, rather than reporting nothing. The record's terminal state
 and `parked` are likewise applied on the event path (as the `RunStateChanged`
 frame is ingested), after those synthesized `NodeDone`s, so a client polling on
@@ -1159,8 +1044,8 @@ land.
 
 `RunContext.sleep` is abort-aware on the real bench (`Bench.sleeper`): a settle,
 a temperature `hold_s` (default 60 s) or a `wait` module sleeps in 0.2 s slices
-and returns early once **abort** is requested, so the abort button is not dead
-for the length of a hold. An `after_shot` does *not* cut a sleep short — the shot
+and returns early once abort is requested, so the abort button is not dead
+for the length of a hold. An `after_shot` does *not* cut a sleep short; the shot
 in flight is kept, settle and all. `--fast` makes every sleep a no-op.
 
 Folders: a pipeline run creates `<out>/<stem>_<stamp>/` where `stem` is the
@@ -1176,17 +1061,17 @@ lists every folder written.
 
 `POST /monitors/power {"interval_s": 1.0}` starts a thread that reads the
 meter every interval and emits `PowerReading` (run_id null, `node_path=""`);
-`DELETE /monitors/power` stops it; `GET /monitors` lists. **The meter is
-never on the bus** — USB when this process owns it, HTTP when the meter's
-console does — so it runs right through a bace scan (this is R3·2),
+`DELETE /monitors/power` stops it; `GET /monitors` lists. The meter is
+never on the bus; USB when this process owns it, HTTP when the meter's
+console does; so it runs right through a bace scan ,
 serialised against the worker's own reads by `rigs._METER_LOCK`. One monitor
 of each kind at most. If the meter stops answering, emit a `Verdict(warn,
 "power.console")` once and keep trying. `--power-monitor SECONDS` on the
 service starts it as the process comes up, so the meter is watched from boot
 and not from the moment a console is opened.
 
-**The history (2026-09-05).** The session keeps every monitor reading — up to
-`POWER_HISTORY_MAX = 200 000`, 55 h at 1 Hz — across monitor stops and
+Power history: The session keeps every monitor reading; up to
+`POWER_HISTORY_MAX = 200 000`, 55 h at 1 Hz; across monitor stops and
 restarts, and stamps each with the same `ts` its frame carries, so a console
 that folds the stream can merge it without a duplicate.
 `GET /monitors/power/history?since=<ts>&limit=<n>` answers `{points:
@@ -1195,25 +1080,26 @@ wavelength_nm, source, averaged, running, interval_s}` (the last five are the
 meter's settings, off the newest reading); `GET /monitors/power/history.csv`
 is the same as a file (`time_iso, unix_s, watts, trustworthy, wavelength_nm,
 source, averaged`, `Content-Disposition: attachment`);
-`DELETE /monitors/power/history` forgets it — the journal on disk keeps every
+`DELETE /monitors/power/history` forgets it; the journal on disk keeps every
 reading regardless.
 
-**`averaged`** on every `PowerReading`, on the read-back's `instruments.power`
-and on `read-power`'s result: whether the meter was averaging (DC-continuous
-mode, the 5 Hz analog filter — `DirectPowerMeter.set_averaging`, set at open
-from `[power_meter] averaging`). The LED is pulsed at 500 Hz, 50 % duty for
-every transient, and an unfiltered 1918-C samples that square wave at one
-instant — the operator saw the reading flicker between the level and
-nothing. Averaged, it reads the mean, **half the DC level**, which is the
-power the sample sees. `null` when the driver cannot say (the console
-escape hatch, whose filter route this repository cannot verify); render it —
-a reading that is *not* averaged under a pulse is one instant of it.
+`averaged` on `PowerReading`, `instruments.power` and `read-power` reports
+meter averaging. Direct opening configures DC-continuous mode, a 5 Hz analog
+filter when enabled, and `digital_filter` smoothing (`rig.toml`, default
+100 samples; zero disables it). `null` means the driver cannot report the
+setting, including the console path.
+
+At the recipe's 500 Hz and 50 % duty, averaged power is the mean over the
+cycle, approximately half the on-state power when the low level is dark.
+An unfiltered reading can sample either phase. Frequency and duty are
+parameters, not fixed values for every transient. Power is in W at the meter;
+it is not irradiance at the sample.
 
 `POST /monitors/temperature {"interval_s": 5.0}` is the same shape for the
 331; 422 only when the bench has no 331 at all (neither `[temperature]
-address` nor `console`). **This one is on by default** (2026-09-05): a bench
+address` nor `console`). This monitor is on by default: a bench
 that has a 331 starts reading it in `Session.start`, at
-`TEMPERATURE_MONITOR_S = 5 s`, before any console connects -- a cryostat
+`TEMPERATURE_MONITOR_S = 5 s`, before any console connects; a cryostat
 drifts whether or not a run is going, and the card's number should be a
 reading of a known age rather than the read-back of whenever somebody last
 pressed something. `--temperature-monitor SECONDS` changes the interval and
@@ -1228,32 +1114,31 @@ and in the journal, the `/bench` temperature block follows it (`kelvin`,
 `Verdict(warn, "temperature.console")`. This is the temperature card's
 "294.8 K · 331 reads" while a scan runs. `DELETE /monitors/temperature` stops it.
 
-**The one exception to "observers never touch the bus."** When this process
+The one exception to "observers never touch the bus." When this process
 owns the 331's GPIB session its monitor *is* on GPIB0, so it takes
-`RunWorker.bus` -- the lock the worker holds for the whole of a job --
-acquires it **without blocking**, and reads only while holding it. A tick
+`RunWorker.bus`; the lock the worker holds for the whole of a job --
+acquires it without blocking, and reads only while holding it. A tick
 that cannot take it is skipped and counted in `skipped` on `GET /monitors`;
 a skip is not a failure. Holding the lock rather than testing `worker.idle`
-is the point: the boolean was true one instant and stale the next, so a
-multi-query read could straddle the start of a job. With a console named the
+is the point: a separate idle test can race with a job start and permit interleaved
+queries. With a console named the
 331 is HTTP again and no lock is passed.
 
-**What that costs.** A pipeline run holds the bus for its whole length, so
+What that costs. A pipeline run holds the bus for its whole length, so
 during a long subtree the temperature monitor emits nothing and the card's
 reading goes stale. `skipped` is how a UI says *why* rather than showing an
-old number as if it were current — **render it**. Readings still arrive from
+stale reading as current; render it. Readings still arrive from
 the worker where it is safe to take them: while a temperature node settles,
 and while a run is paused for the operator.
 
-The **safety** half of that gap is closed, and separately: the heater
-watchdog rides on reads, so suppressing reads for hours would have suppressed
-it too. The worker feeds it from its own sleeps (§7), which is a fault check
-and not a reading — no `TemperatureRead` is emitted from there, because a
-number taken mid-run is not the cryostat the shot around it was measured at.
+The heater watchdog needs periodic fault checks even while the worker
+holds the bus. The worker feeds it from its own sleeps (§7), which is a fault check
+and not a reading; no `TemperatureRead` is emitted from there, because a
+watchdog read is not a temperature binding for the surrounding shot.
 
 ---
 
-## 8a. `/assistant` — the console's assistant
+## 8a. `/assistant`; the console's assistant
 
 A conversation with a model that reads the bench and explains it: Claude,
 or any OpenAI-compatible `/chat/completions` endpoint (`providers.py`). It
@@ -1274,8 +1159,8 @@ request and not stored, journaled or logged. An OpenAI-compatible address must
 be `https://`, or `http://` to this machine, which also needs no key (a local
 model). Histories are kept in memory, the newest 32, each under its provider,
 address and model, so an assistant turn goes back exactly as it came and a
-question with another model starts a new conversation; a turn that fails or is
-abandoned leaves the history as it was. Claude is `claude-opus-5-5` unless the
+question with another model starts another conversation; a turn that fails or is
+abandoned preserves the history. Claude is `claude-opus-5-5` unless the
 request or `BACE_ASSISTANT_MODEL` says otherwise, at effort `medium`, with the
 API's server-side fallback on a refusal for the models that take it.
 
@@ -1301,8 +1186,8 @@ py -3 -m bace.service --rig rig.toml --run run.toml      # the lab PC
   `[power_meter] console` names one; the 331 likewise). A missing
   instrument is not fatal: the bench snapshot says `unavailable` for it, the
   modules that need it report `needs`, and `bench.instrument` refuses a run on
-  it at validate. A missing VISA runtime — `pyvisa` not installed, or installed
-  with neither NI-VISA nor pyvisa-py behind it — is the same case four times
+  it at validate. A missing VISA runtime; `pyvisa` not installed, or installed
+  with neither NI-VISA nor pyvisa-py behind it; is the same case four times
   over: scope, bias, led and smu are `unavailable` with the reason and the fix
   (`pip install -e .[rig]`), the DIO lines and the consoles are still tried,
   and the service comes up. A `relay_module_nr` of 0 is refused by
@@ -1310,28 +1195,28 @@ py -3 -m bace.service --rig rig.toml --run run.toml      # the lab PC
   that still says so lands as an unavailable relay, not a traceback.
 - Extras: the desk needs `service`; the lab PC needs `lab` (`rig` + `service`),
   because `Bench.build_real` imports `pyvisa`. `main()` imports `uvicorn` and
-  `app` **before** it builds the session, so a Python without the extra is told
+  `app` before it builds the session, so a Python without the extra is told
   which extra and nothing has touched the bench or written a journal header.
-- `--host 127.0.0.1` fixed unless overridden **with another loopback address**
+- `--host 127.0.0.1` fixed unless overridden with another loopback address
   (`127.0.0.0/8`, `::1`, `localhost`); anything else is refused with exit 2. No
-  auth (plan: "no auth"), which is acceptable only where nobody but this machine
+  authentication, which is acceptable only where nobody but this machine
   can connect.
 - `scripts\Run Service.bat` / `Run Service (sim).bat` `cd` to the repo root, as
   every other script does, so `--out runs`, `rig.toml` and `run.toml` resolve
   there; the banner prints every path absolute.
-- **One process per port.** `main()` binds and listens on the port before it
+- One process per port. `main()` binds and listens on the port before it
   builds the session (`listen_socket`), and a port in use exits 3 with nothing
   opened. On Windows the socket takes `SO_EXCLUSIVEADDRUSE`: uvicorn's own
   socket sets `SO_REUSEADDR`, which there lets a second process bind a port in
   use. uvicorn then serves on the bound socket.
-- **`POST /service/shutdown`** `{"force": bool}` → 202 `{"shutting_down": true,
+- `POST /service/shutdown` `{"force": bool}` → 202 `{"shutting_down": true,
   "aborts": run_id | null}`. A run holding or waiting for the bench is a 409
   that names it (`run`) unless `force`. The route sets the server's
   `should_exit` after answering; the lifespan's shutdown then aborts, parks and
   closes the journal as Ctrl-C does. An app built without `request_exit` (a
   test client, an embedding) answers 409. Open requests get
   `GRACEFUL_SHUTDOWN_S` (5 s) to end.
-- **The launcher** (`bace/launcher.py`, `BACE.pyw` at the root) is standard
+- The launcher (`bace/launcher.py`, `BACE.pyw` at the root) is standard
   library only. It probes the port: free (by binding it; on Windows a refused
   local connection takes about 2 s) → start
   `python -m bace.service --rig rig.toml --run run.toml --ui ui` with no
@@ -1342,41 +1227,45 @@ py -3 -m bace.service --rig rig.toml --run run.toml      # the lab PC
 - `--out runs` (folders and the journal); `--ui DIR` mounts static files at
   `/ui` (the front end lives elsewhere; `/` redirects to `/ui/` when mounted,
   else returns a JSON index of the routes).
-- Startup: load configs (`config.load_rig/load_run`), build the rig (three
-  writes happen here and nowhere else outside a run or an action — the
-  scope's `default_setup`, the 1918-C console's units and wavelength — and the
-  `SessionStarted` header lists them as `startup_writes`), open the journal,
-  run one read-back job, print the URL. Shutdown: abort the worker and
-  **wait for the thread to end before releasing the bench** — a job inside a
-  blocking VISA call ends when the call returns, and parking and closing the
-  resources from the shutdown thread meanwhile would interleave with the
-  generator's own I/O on the same sessions. `close()` waits `WORKER_JOIN_S` (60 s)
-  beyond the worker's own `shutdown` timeout; if the thread still has not ended
-  the bench is left as it is and the fact recorded, and the daemon thread ends
-  with the process. The DIO **relay line is released, not closed**, at shutdown:
-  the shutter driver's `close()` drives its line low, which on the relay module
-  is a throw to the amplifier with no interlock — the relay stays where the last
-  interlocked move left it.
+- Startup loads configs (`config.load_rig/load_run`), builds the bench and
+  opens the journal. Assembly sets scope defaults and meter units, wavelength,
+  averaging and filtering. `SessionStarted.startup_writes` lists the scope
+  setup and meter units/wavelength; it does not enumerate every command.
+  A read-back job populates the snapshot before the URL is printed.
+- Shutdown aborts the worker and waits for its thread before releasing
+  resources. Blocking VISA calls cannot be interrupted. `close()` allows
+  `WORKER_JOIN_S` (60 s) beyond the worker shutdown timeout. If it still runs,
+  the service records that fact and leaves the bench resources alone; the
+  daemon thread ends with the process. The relay line is released without a
+  low write, so shutdown cannot move it without the interlock. The shutter
+  driver's `close()` does drive its line low.
 
 ---
 
-## 10. Tests (all on the simulator, `--fast` semantics, no real sleeps)
+## 10. Tests
 
-- `tests/test_service_wire.py` — payload policy: StepDone decimated on the wire, scalars-only in the journal, verdict attached (the single-trace rail rule, the peaks from the full trace), `StepPhase` live-only, JSON round-trip.
-- `tests/test_service_live.py` — the `inferred` overlay event by event on a simulated run, and the session's `/bench` read while a scan is held inside its acquisition: relay amplifier, bias LIVE, LED pulsing, shutter open, `StepPhase` frames with `seq` null and absent from the ring and the journal.
-- `tests/test_drivers.py` — the real drivers' `read_state()`/`read_output()` transcripts on a scripted fake IO, and `?`/None when the instrument will not answer; `tests/test_service_rigs.py` — `build_real` reading outputs, levels and the 81150A's polarity off the fakes, a bench with no VISA coming up with the four roles unavailable, the relay move reading both sources first.
-- `tests/test_service_journal.py` — append-only, first line, `last_used_params`, `run_index`, `settle_history`, `shot_time_s`, reading older sessions.
-- `tests/test_service_worker.py` — bench lock (two jobs serialise), events reach subscribers in order with monotonic seq, `after_shot` keeps the shot and yields `RunAborted(requested)`, `abort` closes the generator and the `finally` parks, `resume` wakes a paused generator, a raising generator → `failed` then `parked`, queue FIFO + cancel.
-- `tests/test_service_modules.py` — catalogue params with provenance (defaults → run.toml → last-used → edited → inherited), `build()` produces the right dataclasses (transcript-style assertions on the simulated instruments: LED pulsed at `led_v`, router in `transient()` for bace, the light untouched by `jv`), manual bace with `centre_on_voc` refuses without a V_oc source and accepts the session's jv_bace at the same level, coupling invariant enforced.
-- `tests/test_service_pipeline.py` — node paths; every check in the catalogue triggered by a minimal tree; the canonical tree (9 T × 5 levels × jv_bace+bace) resolves to 90 module steps with the right inherited/derived params; cost with and without settle history; `temperature inside illumination` warns.
-- `tests/test_service_executor.py` — the canonical tree with 2 T × 2 levels on the simulator: V_oc flows from jv_bace into bace at the same level (assert the bace ran centred on that V_oc: `AxisResolved.voc == jv metrics.voc`), relay positions at each boundary, `NeedsOperator` pauses and `resume` continues with `temperature_k` in the folder name, stop after_shot in the middle leaves `kept < requested` and `NodeDone(outcome="stopped")`, abort discards, folders written under one parent.
-- `tests/test_service_api.py` — FastAPI `TestClient` (its transport is `httpx2`, in the `dev` extra since 2026-09-08; this line used to read "httpx is installed", which was a fact about one machine rather than a dependency, and on a clean install the file would not collect): `/bench`, actions journaled as by-hand, `/modules` + `PUT` params + reset, `POST /runs` → WS `/events` receives `RunStateChanged` … `RunFinished` … `parked`, `/runs/{id}/data`, `/pipelines/validate` on the canonical tree, `/pipelines` start + stop, 409/422/404 paths, the power monitor.
-- `tests/test_architecture.py` gains: `bace.service.pipeline`, `modules`, `journal`, `worker`, `executor` import without `fastapi` (monkeypatch `sys.modules['fastapi'] = None` in a subprocess or check `sys.modules` after import); `experiment/`, `storage/` do not import `service`.
+- `tests/test_service_wire.py`; payload policy: StepDone decimated on the wire, scalars-only in the journal, verdict attached (the single-trace rail rule, the peaks from the full trace), `StepPhase` live-only, JSON round-trip.
+- `tests/test_service_live.py`; the `inferred` overlay event by event on a simulated run, and the session's `/bench` read while a scan is held inside its acquisition: relay amplifier, bias LIVE, LED pulsing, shutter open, `StepPhase` frames with `seq` null and absent from the ring and the journal.
+- `tests/test_drivers.py`; the real drivers' `read_state()`/`read_output()` transcripts on a scripted fake IO, and `?`/None when the instrument will not answer; `tests/test_service_rigs.py`; `build_real` reading outputs, levels and the 81150A's polarity off the fakes, a bench with no VISA coming up with the four roles unavailable, the relay move reading both sources first.
+- `tests/test_service_journal.py`; append-only, first line, `last_used_params`, `run_index`, `settle_history`, `shot_time_s`, reading older sessions.
+- `tests/test_service_worker.py`; bench lock (two jobs serialise), events reach subscribers in order with monotonic seq, `after_shot` keeps the shot and yields `RunAborted(requested)`, `abort` closes the generator and the `finally` parks, `resume` wakes a paused generator, a raising generator → `failed` then `parked`, queue FIFO + cancel.
+- `tests/test_service_modules.py`; catalogue params with provenance (defaults → run.toml → last-used → edited → inherited), `build()` produces the right dataclasses (transcript-style assertions on the simulated instruments: LED pulsed at `led_v`, router in `transient()` for bace, the light untouched by `jv`), manual bace with `centre_on_voc` refuses without a V_oc source and accepts the session's jv_bace at the same level, coupling invariant enforced.
+- `tests/test_service_pipeline.py`; node paths; every check in the catalogue triggered by a minimal tree; the canonical tree (9 T × 5 levels × jv_bace+bace) resolves to 90 module steps with the right inherited/derived params; cost with and without settle history; `temperature inside illumination` warns.
+- `tests/test_service_executor.py`; the canonical tree with 2 T × 2 levels on the simulator: V_oc flows from jv_bace into bace at the same level (assert the bace ran centred on that V_oc: `AxisResolved.voc == jv metrics.voc`), relay positions at each boundary, `NeedsOperator` pauses and `resume` continues with `temperature_k` in the folder name, stop after_shot in the middle leaves `kept < requested` and `NodeDone(outcome="stopped")`, abort discards, folders written under one parent.
+- `tests/test_service_api.py` uses FastAPI `TestClient` with the `httpx2`
+  transport in the `dev` extra. It covers bench reads and actions, module
+  edits/reset, runs and WebSocket events, full data, pipeline validation,
+  start/stop, error statuses and the power monitor.
+
+- `tests/test_architecture.py`: `bace.service.pipeline`, `modules`, `journal`, `worker`, `executor` import without `fastapi` (monkeypatch `sys.modules['fastapi'] = None` in a subprocess or check `sys.modules` after import); `experiment/`, `storage/` do not import `service`.
 
 ---
 
-## 11. Not in this round
+## 11. Limitations
 
-Results tab, failure recovery (the journal is append-only so it can be replayed
-later; nothing replays it yet), 331 automation, multi-client writes, auth,
-analysis. `checks.py` split. The front end itself.
+Interrupted runs are not resumed after restart. Journal queries recover
+records, not instrument execution. The service has no authentication or
+operator ownership protocol for concurrent writers. The worker serialises
+requests from all clients. Analysis beyond the console's result views is
+external. Controller heater range, PID, ramp and loop wiring are read-only
+through this service; only the setpoint is written by a temperature node.
