@@ -129,3 +129,12 @@ def test_css_comments_may_change_and_rules_may_not():
     assert css_text(before) == css_text(after)
     assert css_text(before) != css_text(before.replace("red", "blue"))
     assert css_text(before) != css_text(before.replace('"/* kept */"', '"kept"'))
+
+
+def test_css_whitespace_in_strings_and_comments_between_selectors_matter():
+    css_text = _tool().css_text
+    assert css_text('[data-label="a  b"] { color: red; }') != \
+        css_text('[data-label="a b"] { color: red; }')
+    assert css_text(".a/**/.b { color: red; }") != css_text(".a .b { color: red; }")
+    assert css_text(".a/**/.b { color: red; }") == css_text(".a.b { color: red; }")
+    assert css_text(".a /* why */ .b {}") == css_text(".a .b {}")

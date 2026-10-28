@@ -64,8 +64,12 @@ CHECKED = (".py", ".toml", ".js", ".mjs", ".css")
 
 def css_text(source: str) -> str:
     """A stylesheet with its comments removed and every run of whitespace
-    reduced to one space. A comment counts as whitespace, as it does to the
-    parser; quoted strings are kept as they are."""
+    outside quoted strings reduced to one space.
+
+    A comment counts as nothing, not as whitespace: `.a/**/.b` selects an
+    element with both classes and `.a .b` a descendant, and the two must
+    compare different. Quoted strings are kept exactly, whitespace included.
+    """
     out: list[str] = []
     i, n = 0, len(source)
     while i < n:
@@ -73,7 +77,6 @@ def css_text(source: str) -> str:
         if source.startswith("/*", i):
             j = source.find("*/", i + 2)
             i = n if j < 0 else j + 2
-            out.append(" ")
             continue
         if c in "'\"":
             j = i + 1
@@ -82,9 +85,15 @@ def css_text(source: str) -> str:
             out.append(source[i:j + 1])
             i = j + 1
             continue
-        out.append(" " if c.isspace() else c)
+        if c.isspace():
+            if out and out[-1] != " ":
+                out.append(" ")
+            i += 1
+            continue
+        out.append(c)
         i += 1
-    return " ".join("".join(out).split())
+    return "".join(out).strip()
+
 
 _JS_PUNCT = sorted(("{ } ( ) [ ] ; , < > + - * % & | ^ ! ~ ? : = . @ / "
                     "... => == != === !== <= >= && || ?? ?. ++ -- << >> >>> "
