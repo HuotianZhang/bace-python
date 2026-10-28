@@ -4,19 +4,38 @@ Dated, newest first. Details and evidence are in `docs/`.
 
 ## 2026-10-28
 
-- The docstrings and comments of `bace/experiment/` follow `docs/style.md`.
-  The first sentence of each run parameter's docstring is its help line in
-  the console and in manual 4.1: it says what the parameter does, on which
-  instrument, and its unit.
+- **The light source is a 1 W, 520 nm laser diode** (Nichia NDG7475), driven
+  through the ×4 light amplifier; the code keeps calling it the LED. The
+  1918-C now reads at its wavelength, 520 nm, by default (`rig.toml`, and the
+  `power` module's field for another source). Intensities recorded at the
+  earlier 530 nm setting are low by one constant factor, the ratio of the
+  detector's responsivities at the two wavelengths.
+- **R_s = 5.192 is the current chain's conversion factor**, set by the
+  sample-holder amplifier, not a resistor in series with the device: the
+  I_d cable reaches CHAN2 through a 50 Ω feed-through, with CHAN2 at 1 MΩ.
+  Q is unchanged; the manual and `rig.toml`'s comments are corrected.
+- The manual takes in the group's training material (the BACE Quick Guide,
+  the TDCF guides and the training video, read frame by frame and
+  transcribed): the parts the software does not address, the limits, the
+  checks before a measurement, troubleshooting, and seven figures of the
+  wiring and the bench. `tools/build_manual.py` embeds figures in the book.
 
-- The docstrings and comments of `bace/core/`, `bace/storage/`, `params.py`
-  and `config.py` follow `docs/style.md`: units, contracts and reasons, the
-  LabVIEW compatibility kept as a constraint, no history.
-
-- The comments in `rig.toml`, `run.toml` and `recipes/` follow `docs/style.md`:
-  what each setting does and why it has its value, with the document that
-  shows it, and no history. `tools/check_text_only.py` confirms a rewrite
-  changed only comments and docstrings.
+- **The whole repository's prose follows `docs/style.md`**: the comments
+  and docstrings of every package, the console's comments and stylesheet,
+  the configuration files and the current documents. No history, units and
+  reasons kept, measured values cited to the document that holds them. The
+  first sentence of each parameter's docstring is its help line in the
+  console and in manual 4.1. Rewriting the documents against the code
+  corrected 39 statements that no longer held. `tools/check_text_only.py`
+  confirms that a rewrite changed only text: Python by its syntax tree,
+  TOML by its tables, JavaScript by its tokens, CSS by its rules.
+  `docs/notes.md`, `docs/ui-plan.md`, `history/`, `analysis/` and `tests/`
+  keep their dates as records.
+- A dark `jv` on a bench with no shutter or LED runs, with a warning that
+  its illumination is unknown; it was refused.
+- `python -m bace.service` reports a missing or malformed `--rig`/`--run`
+  before it takes the port, so a port held by another program no longer
+  hides the configuration error.
 
 - The manual's Part IV: every parameter, every check and every bench action,
   generated from the code by `tools/build_manual.py`, which also builds the

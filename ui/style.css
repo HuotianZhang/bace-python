@@ -1,25 +1,19 @@
-/* The register, from `docs/ui-rules.md` §1: light, clean, dense — a working
-   instrument, closer to a well-set scientific paper than to a dashboard.
-   Density is a requirement, not a preference: if a screen feels comfortable,
-   it is probably hiding something the operator needs.
-
-   The palette is the one the Round 3 canvas settled on and no written brief
-   recorded (`docs/design/README.md`). Saturation is reserved for meaning, in
-   the order §3 gives: alert, warning, accent, then greys with the type doing
-   the hierarchy. */
+/* The dense layout keeps bench state and parameter constraints visible
+   (`docs/ui-rules.md` section 1). Colour carries state: alert, warning and
+   accent. Greys and type carry hierarchy (`docs/ui-rules.md` section 3). */
 
 :root {
   --ink: #201e1d;
   --grey: #7d7979;
   --rule: #d7d3d3;
   --fill: #eae7e7;
-  --grid: #f2efef;            /* a chart's gridlines: present, never competing */
+  --grid: #f2efef;            /* Faint gridlines keep traces prominent. */
   --paper: #ffffff;
-  --view-pad-b: 40px;         /* the view's foot — `.pipe-actions-bar` cancels it */
-  --accent: #ec3013;          /* the swept quantity, and the primary button */
+  --view-pad-b: 40px;         /* Action bar cancels this space at the view edge. */
+  --accent: #ec3013;          /* Accent marks the swept quantity and primary action. */
   --accent-dark: #ae1800;
-  --alert: #ec3013;           /* a live bias output, a crit, a saturation verdict */
-  --warn: #b06a00;            /* evidence, never a block */
+  --alert: #ec3013;           /* Alert marks live bias, critical checks and saturation. */
+  --warn: #b06a00;            /* Warning marks evidence without blocking an action. */
   --ok: #3f7d53;
 
   --font-body: 'IBM Plex Sans', system-ui, sans-serif;
@@ -42,8 +36,8 @@ html, body {
   line-height: 1.45;
 }
 
-/* Every number that can change, in the mono face with tabular figures: a
-   charge that jitters horizontally while it converges is a bug (§2). */
+/* Tabular figures keep changing numbers horizontally stable (`docs/ui-rules.md`
+   section 2). */
 .num, code, pre {
   font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
@@ -58,7 +52,7 @@ h1, h2, h3, .wordmark, button {
 
 #app { display: flex; flex-direction: column; height: 100%; }
 
-/* -- the bar: brand, tabs and the state chips (R3·1) ---------------------- */
+/* The bar keeps navigation and service state visible across tabs. */
 .bar {
   display: flex; align-items: stretch; gap: 0;
   height: var(--tabs-height);
@@ -77,22 +71,21 @@ h1, h2, h3, .wordmark, button {
   white-space: nowrap;
 }
 .chip.m { font-size: 11px; color: rgba(255,255,255,.65); }
-/* A chain check that reads wrong is visible from every tab, because the strip
-   that fixes it is at the foot of every tab. */
+/* A trigger-chain warning stays visible on every tab beside access to the chain
+   checks. */
 .chip.bad { border-color: #ff9783; color: #ffc4b8; }
 .chip.state { background: #fff; color: var(--ink); border-color: #fff; }
 .chip.state.running, .chip.state.preflight { background: var(--accent); border-color: var(--accent); color: #fff; }
 .chip.state.stopping, .chip.state.paused { background: var(--warn); border-color: var(--warn); color: #fff; }
-/* The identity is a control: it is the only chip that acts, so it is the only
-   one with a pointer, and it inverts while its panel is open. */
+/* The identity chip opens a panel. The pointer marks the action; inverted
+   colours mark the open state. */
 button.chip.ident { background: none; cursor: pointer; font: inherit; font-family: var(--font-num); font-size: 11px; }
 button.chip.ident:hover { border-color: #fff; color: #fff; }
 button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); }
 
-/* -- what is mounted: the [sample] block, under the bar --------------------
-   Session-level, like the bar it hangs from, and shut unless it is asked for.
-   The operator is typing a folder name here, so the name it will produce is
-   the last line of the panel rather than something to be inferred. */
+/* The sample panel belongs to the session and stays collapsed unless requested.
+   The final folder name stays visible below its inputs so the operator can check
+   the result. */
 .ident {
   border-bottom: 1px solid var(--rule); background: var(--fill);
   padding: 8px 12px; flex: 0 0 auto;
@@ -105,8 +98,7 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
 .ident .id-status { font-family: var(--font-num); font-size: 11px; }
 .ident .id-status.ok { color: var(--ok); }
 .ident .id-status.bad { color: var(--alert); }
-/* A comment is a sentence and the three name fields are tokens, so they do not
-   want the same width. */
+/* The comment needs sentence width; the three name fields hold short tokens. */
 .ident .id-rows { display: grid; grid-template-columns: repeat(3, 1fr) 1fr 1.6fr; gap: 10px; }
 .ident .id-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 6px; align-items: center; }
 .ident .id-row .l { grid-column: 1 / -1; font-size: 12px; color: var(--grey); display: flex; gap: 6px; align-items: baseline; }
@@ -117,18 +109,15 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
 }
 .ident .id-row input.v:focus { border-color: var(--accent); outline: none; }
 .ident .id-row .src { display: flex; align-items: center; min-width: 14px; }
-/* The card's `.doc` is what opens when an operator asks for the explanation,
-   and its accent rule is that answer. Here every row carries its sentence all
-   the time, so five accent rules would be saturation meaning nothing
-   (`ui-rules` §3) — it is a caption, and reads like one. */
+/* Each sample row keeps its explanation visible as a caption. Repeated accent
+   rules would obscure state colour (`docs/ui-rules.md` section 3). */
 .ident .id-row .doc {
   grid-column: 1 / -1; margin: 0; padding: 3px 0 0; max-width: none;
   border-left: 0; background: none;
   font-size: 10px; color: var(--grey); line-height: 1.35;
 }
-/* Two levels, because they are not the same thing: `warn` is a folder name
-   nobody wants to read, `bad` is one the service will refuse (`ui-rules` §3 —
-   alert is for the thing that stops you). */
+/* `warn` marks an awkward folder name; `bad` marks one the service refuses. The
+   stronger colour distinguishes the blocking condition. */
 .ident .id-row.warn input.v { border-color: var(--warn); }
 .ident .id-row.bad input.v { border-color: var(--alert); }
 .ident .id-warn { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; color: var(--warn); }
@@ -143,30 +132,19 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
 .ident .id-stem { font-family: var(--font-num); font-size: 12px; color: var(--ink); }
 .ident .id-stem.absent { color: var(--alert); }
 
-/* -- the rail: fixed, everything else scrolls (§1) -------------------------
-   Eight live values, from `docs/design/BenchRail.dc.html`. The relay is first
-   and widest because it is the interlock.
+/* The rail keeps eight live values visible in one row (`docs/ui-rules.md`
+   section 1). The relay is first and widest because it is the interlock. Labels
+   and values share a line so the rail leaves room for measurements.
 
-   **One row, at every width.** The rail was three stacked lines per cell,
-   folded to two rows of four below 1560 — 156 px of a 1080-line screen spent
-   before the first measured number appears, on the surface §1 calls the
-   densest thing in the console. It is one 29 px line now: the label and the
-   value side by side, and the sub-line one hover or one Tab away, drawn over
-   the view instead of above it.
-
-   That is a trade, and §1 is the reason to name it rather than enjoy the
-   number: the density exists to keep things visible, and `low 0.400 V` and
-   `stale · 5002 ticks skipped` are no longer on screen at rest. What is at
-   rest is every value, every level colour and every dashed inferred rule —
-   which is what says whether to look closer. The caret in a cell's corner
-   says there is more, and the cell is focusable, because a tooltip nobody
-   can focus is a tooltip half the operators cannot read. */
+   Secondary details, including the LED low level and stale-reading diagnostics,
+   appear over the view on hover or keyboard focus. Values, state colours and
+   dashed inferred markers remain visible at rest. A caret marks available
+   details. Focusable cells make those details accessible without a mouse. */
 .rail {
   display: grid;
-  /* The relay keeps a fixed column because it is the one cell whose value is
-     a *drawing*; the other seven divide what is left. Nothing wraps at any
-     width — a rail that doubles in height when the window narrows is the
-     thing this row was redrawn to end. */
+  /* The relay diagram needs a stable column. The other seven cells share the
+     remaining width. Cells stay on one row so narrowing the window does not
+     increase the rail height. */
   grid-template-columns: 248px repeat(7, minmax(0, 1fr));
   align-items: stretch;
   border-bottom: 2px solid var(--rule);
@@ -182,9 +160,8 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
   min-width: 0;
 }
 .rail .brc:first-child { border-left: 0; }
-/* The label is what gives way when a cell runs out of room, never the number:
-   `optical power` reading as `optical…` beside an intact `159 nW` costs
-   nothing, and a truncated reading is a different reading (§2). */
+/* Labels may truncate; readings must remain intact. A shortened number can imply
+   a different reading. */
 .rail .brl {
   display: flex; align-items: center; gap: 4px;
   flex: 0 1 auto; min-width: 0; overflow: hidden;
@@ -200,19 +177,17 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
   letter-spacing: -.01em;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-/* When a circuit is closed, the interlock's value *is* the diagram — the lit
-   nodes are `Keithley 2400`, and printing both is the same sentence twice on
-   a row that has room for one. `neutral` and an absent read-back are not in
-   the drawing (an unlit diagram is both), so those keep their word:
-   `lib/rail.js` marks the cell `.drawn` only when the diagram says it. */
+/* For a closed circuit, the lit diagram identifies the connected source, so
+   duplicate text takes space without adding information. Neutral and absent
+   read-back both leave the diagram unlit and need text. `ui/lib/rail.js` adds
+   `.drawn` only when the diagram identifies the circuit. */
 .rail .brc.drawn .brv { display: none; }
-/* One line has no room for eight `inferred` badges, and it does not need
-   them: the dashed rule under the value is the same statement, on the value
-   it is about. The badge stays in the DOM with its title. */
+/* Dashed rules mark inferred values without eight repeated badges. The badges
+   remain in the DOM with their titles. */
 .rail .brc .tag-inferred { display: none; }
-/* The sub-line, over the view rather than above it. `lib/rail.js` puts
-   `tabindex` on the cells that have one, which is what `:focus-within` is
-   listening for; `title` carries the same text to a screen reader. */
+/* Details overlay the view to preserve its height. `ui/lib/rail.js` gives cells
+   with details a `tabindex` for `:focus-within`; `title` supplies the same text
+   to screen readers. */
 .rail .brs {
   position: absolute; top: 100%; left: -1px; z-index: 6;
   display: none;
@@ -225,41 +200,37 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
   box-shadow: 0 3px 0 rgba(32,30,29,.09);
 }
 .rail .brc:hover .brs, .rail .brc:focus-within .brs { display: block; }
-/* The last two open leftwards: a panel half off the screen is not a panel. */
+/* The last two panels open leftwards to stay within the viewport. */
 .rail .brc:nth-last-child(-n+2) .brs { left: auto; right: -1px; }
 .rail .brc:hover, .rail .brc:focus-within { background: var(--fill); }
 .rail .brc:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-/* A cell with more to say marks itself. Three pixels: it is the only thing
-   on this row that is about the interface rather than about the bench.
-   `:has()`, as `.pf:has(> .seg)` below already does — the cells that carry a
-   sub-line are the cells `lib/rail.js` gave one, and nothing else to keep in
-   step. */
+/* A small caret marks cells with details without competing with bench state.
+   `:has()` selects cells containing a sub-line, so the marker needs no separate
+   state. */
 .rail .brc:has(.brs)::after {
   content: ''; position: absolute; right: 3px; bottom: 2px;
   border: 3px solid transparent; border-top-color: var(--rule);
 }
 
-/* The one alert on the rail: the 81150A driving the device. §3 keeps this
-   intensity for a live bias, a crit and a saturation verdict, so nothing else
-   in this row may compete with it. */
+/* The 81150A bias output needs the strongest rail alert. Other cells must not
+   compete with live bias (`docs/ui-rules.md` section 3). */
 .rail .lv-alert { background: var(--alert); color: #fff; }
 .rail .lv-alert .brl { color: rgba(255,255,255,.85); }
-/* The panel is on paper whatever the cell is, so it keeps the ink. */
+/* The details panel keeps dark text on paper even when its cell has alert
+   colours. */
 .rail .lv-alert:hover, .rail .lv-alert:focus-within { background: var(--alert); }
 .rail .lv-warn .brv, .rail .lv-warn .brs { color: var(--warn); }
 .rail .lv-warn:has(.brs)::after { border-top-color: var(--warn); }
 .rail .lv-crit .brv, .rail .lv-crit .brs { color: var(--alert); font-weight: 600; }
 .rail .lv-ok .brv { color: var(--ok); }
 .rail .lv-off .brv { color: var(--grey); }
-/* Typed, not measured: the temperature that goes into every folder name when
-   no controller is wired. A claim, rendered as one. */
+/* A typed temperature supplies folder names when no controller is connected. Its
+   styling distinguishes it from a measurement. */
 .rail .lv-typed .brv { color: var(--warn); }
 .rail .lv-typed .brv::after { content: ''; }
 
-/* Inferred, not read back. The dashed rule is the same language the artboard
-   uses for an inherited parameter — a value that is true because something
-   else made it true, rather than because anyone looked. On one line it is the
-   whole of the mark, so it is not decoration any more. */
+/* A dashed rule distinguishes an inferred value from instrument read-back. On a
+   single-line rail it carries the full distinction. */
 .rail .inferred .brv {
   border-bottom: 1px dashed var(--accent);
   padding-bottom: 1px;
@@ -273,10 +244,10 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
 }
 .rail .lv-alert .tag-inferred { border-color: rgba(255,255,255,.7); background: transparent; color: #fff; }
 
-/* The interlock diagram: which circuit the device is actually in. */
+/* The interlock diagram identifies the circuit connected to the device. */
 .rail .relay { display: flex; align-items: center; flex: 0 0 auto; width: 96px; }
-/* Drawn, the diagram is the value and takes the value's place at the right;
-   spelled out, it follows the word it belongs to. */
+/* The diagram replaces a drawn value at the right; a text value keeps the
+   diagram beside its label. */
 .rail .brc.drawn .relay { margin-left: auto; }
 .rail .rn {
   font-family: var(--font-num); font-weight: 500; font-size: 8px;
@@ -287,10 +258,9 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
 .rail .rw { flex: 1; height: 2px; background: var(--rule); }
 .rail .rw.on { background: var(--ink); }
 
-/* -- the chain strip: the trigger chain, and the fix for each check --------
-   It wraps rather than scrolls: `R_sense`, the gain and the sign convention
-   are bench properties §6 wants restated beside the numbers, and a horizontal
-   scrollbar in a fixed footer clipped them to `sign…` at 1920. */
+/* The chain strip wraps to keep R_s, gain and the sign convention visible beside
+   the measurements (`docs/ui-rules.md` section 6). Horizontal scrolling can hide
+   these bench properties. */
 .strip {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 12px;
@@ -317,15 +287,15 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
 .strip .st.status.bad { border-color: var(--alert); color: var(--alert); }
 .strip .spacer { flex: 1 1 auto; }
 .strip button.btns { font-size: 11px; padding: 3px 8px; font-family: var(--font-body); font-weight: 500; }
-/* The way to be rid of a sentence that has been read. Quiet until it is
-   wanted: it sits inside the status and is the only thing there that acts. */
+/* The dismissal control stays beside the status it clears. Quiet styling keeps
+   it subordinate to the message. */
 .strip .st.status button.stx {
   border: 0; background: none; padding: 0 0 0 2px; margin: 0;
   font: inherit; line-height: 1; color: var(--grey); cursor: pointer;
 }
 .strip .st.status button.stx:hover { color: var(--ink); }
 
-/* -- the tabs, inside the bar --------------------------------------------- */
+/* Tabs stay in the bar so navigation remains available across views. */
 .tabs { display: flex; gap: 2px; align-items: stretch; }
 .tabs a {
   display: flex; align-items: center; padding: 0 14px;
@@ -335,7 +305,7 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
 }
 .tabs a.on { color: #fff; border-bottom-color: var(--accent); }
 
-/* -- the view ------------------------------------------------------------- */
+/* The view scrolls within the persistent bench controls. */
 .view { flex: 1 1 auto; overflow: auto; padding: 16px 18px var(--view-pad-b); }
 .view h1 { font-size: 17px; margin: 0 0 12px; }
 .view h1 .sub { font-family: var(--mono, monospace); font-weight: normal; font-size: 11px; color: var(--grey); margin-left: 12px; letter-spacing: 0; }
@@ -357,14 +327,15 @@ table.rows th, table.rows td { text-align: left; padding: 2px 10px 2px 0; vertic
 table.rows th { color: var(--grey); font-weight: 400; white-space: nowrap; }
 table.rows td.num, table.rows td .num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
 
-/* -- levels, in the order of loudness §3 gives ---------------------------- */
+/* Status colours distinguish alerts, warnings and other content
+   (`docs/ui-rules.md` section 3). */
 .level-crit, .level-invalid { color: var(--alert); font-weight: 600; }
 .level-warn { color: var(--warn); }
 .level-ok { color: var(--ok); }
 .level-info { color: var(--grey); }
 .absent { color: var(--grey); }
 
-/* -- the stream footer: what the socket is doing, always visible ---------- */
+/* The stream footer keeps connection state visible while the view scrolls. */
 .stream-bar {
   display: flex; align-items: center; gap: 16px;
   height: 24px; padding: 0 14px;
@@ -379,7 +350,7 @@ table.rows td.num, table.rows td .num { font-family: var(--font-num); font-varia
 .stream-bar.offline .dot, .stream-bar.behind .dot { background: var(--alert); }
 .stream-bar.connecting .dot { background: var(--warn); }
 
-/* -- the session log ------------------------------------------------------ */
+/* The session log keeps service messages readable as a sequence. */
 .log { max-height: 260px; overflow: auto; border: 1px solid var(--rule); background: var(--paper); }
 .log div { display: flex; gap: 10px; padding: 1px 8px; font-family: var(--font-num); font-size: 11px; }
 .log div:nth-child(even) { background: #fbfafa; }
@@ -393,23 +364,17 @@ button {
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button:disabled { opacity: .45; cursor: not-allowed; }
 
-/* -- the module cards ----------------------------------------------------
-   `docs/ui-plan.md` M2. Density is the requirement (§1): a `bace` card shows
-   fourteen fields above the fold and that is the intent, not an overrun. Every
-   field carries one line saying which instrument it touches; the rest of the
-   explanation is a `title`, revealed on hover and read out by a screen reader,
-   because a comfortable screen is one that is hiding something. */
+/* Dense module cards keep parameter constraints visible (`docs/ui-rules.md`
+   section 1). Each field shows its instrument and effect. Expanded help stays
+   available through `title` on hover and to screen readers. */
 
-/* -- the Instruments panel: switches whose lit position is the read-back ---
-   `lib/instruments.js`. Above the cards, in its own zone, because it is a
-   different thing from a card: a switch acts the moment it is clicked. */
+/* Instrument switches sit above the module cards because they act immediately.
+   Their lit positions show read-back rather than values for a later Run. */
 .instruments:empty { display: none; }
-/* One row since 2026-09-06 (`bench-head.html`, option B). It was three
-   stacked rows at 57 px each — 172 px, the least dense surface in the console,
-   directly under a rail just cut to 27 px for eight readings. `nowrap` is the
-   claim: at 1280 the row needs 1226 px of 1250, so nothing truncates at any
-   width the console runs at, and a fourth instrument gets this laid out again
-   rather than wrapped into two rows nobody measured. */
+/* The instrument controls stay on one row to preserve measurement space. At a
+   1280 px viewport, the row needs 1226 px of the available 1250 px. Adding a
+   fourth instrument requires checking the layout rather than allowing an
+   unchecked wrap. */
 .inst {
   display: flex; flex-direction: row; align-items: center; gap: 22px;
   flex-wrap: nowrap; overflow-x: auto;
@@ -422,26 +387,21 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   color: var(--grey);
 }
 
-/* -- saved benches: the `MODULES` header, and what the `⋯` opens ------------
-   `views/bench.js`. This was a 65 px zone of its own between the switches and
-   the cards, carrying a name field and a Save button permanently for
-   something touched once a session — and a Save between two zones states the
-   scope of neither. It is the header of the zone it saves now: the row
-   carries the identity, the `⋯` carries the machinery. The drift list it
-   opens is the pipeline tab's `.recipe-note`, unchanged — same comparison. */
+/* Saved bench controls belong to the module header so their scope stays clear.
+   The row shows the identity; the menu holds infrequent actions. The differences
+   panel uses the same `.recipe-note` comparison as the pipeline tab. */
 .modbar { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; min-height: 22px; }
 .modbar .zt { flex: 0 0 auto; }
 .modbar .sp { flex: 1 1 auto; }
 .modbar .who { font-family: var(--font-num); font-size: 12px; color: var(--ink); }
-/* The dot is the whole of "this has moved since it was saved" — warn, because
-   it is evidence and never a block (§3). */
+/* The warning dot marks a difference from the saved bench. It is evidence rather
+   than a blocker. */
 .modbar .who .dot { color: var(--warn); font-weight: 700; }
 .modbar .drift { font-size: 11.5px; color: var(--warn); }
 .modbar .match { font-size: 11.5px; color: var(--ok); }
 .modbar .none { font-size: 11.5px; color: var(--grey); }
-/* Beside the identity, never at the row's end: at 1440 the end of the row is
-   1300 px from the label it belongs to, and a control that far from the thing
-   it acts on is one nobody finds. */
+/* The menu stays beside the identity so its scope remains clear even on wide
+   screens (`docs/ui-rules.md` section 14). */
 .dots {
   font-family: var(--font-num); font-size: 14px; line-height: 1;
   padding: 2px 8px 5px; cursor: pointer;
@@ -450,9 +410,9 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .dots:hover { border-color: var(--rule); color: var(--ink); }
 .dots[aria-expanded="true"] { border-color: var(--rule); color: var(--ink); background: var(--paper); }
 
-/* Not a `<details>` that shuts on `mouseleave` the way `.pw-menu` is: that
-   depth suits an option picked in one click, and this holds a field to type a
-   name into and a table to read. */
+/* This panel contains a name input and a comparison table. It must remain open
+   while the operator types or reads, rather than closing on `mouseleave` like
+   `.pw-menu`. */
 .bdrawer {
   display: flex; flex-direction: column; gap: 9px;
   padding: 9px 12px 11px; margin: 0 0 10px;
@@ -462,8 +422,8 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .bdrawer .namerow input.v { max-width: 20em; }
 .bfiles { display: flex; flex-direction: column; gap: 1px; }
 .bcap { margin: 0 0 3px; font-size: 11.5px; color: var(--grey); }
-/* Four columns, all packed left, the last one empty to eat the slack — every
-   action within a hand's width of the name it acts on. */
+/* Columns pack actions beside their names. The empty final column absorbs spare
+   width. */
 .brow {
   display: grid; grid-template-columns: minmax(9em, max-content) max-content max-content 1fr;
   align-items: center; gap: 14px; padding: 3px 0; border-bottom: 1px solid var(--fill);
@@ -474,28 +434,23 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .brow .fn i { font-style: normal; color: var(--grey); }
 .brow .ft { font-family: var(--font-num); font-size: 11px; color: var(--grey); }
 .brow .fa { display: flex; gap: 6px; align-items: center; }
-/* A bench is saved once and put back many times, so `open` is the bordered
-   button and `overwrite`/`delete` are quiet beside it. */
+/* Open is prominent because restoring a bench is frequent. Overwrite and Delete
+   stay quieter beside it. */
 .brow .fa .btng { font-size: 11px; }
 .recipe-note.matched { border-left-color: var(--ok); background: #f2f8f3; }
 
-/* The `Modules` label was a `::before` on the grid. It is `.modbar`'s own
-   `.zt` now, because a label that has controls beside it is an element. */
+/* The module heading is an element so controls can sit beside the label. */
 .irow { display: flex; align-items: center; gap: 9px; min-width: 0; }
-/* The label went from a 9em column to a rail-sized eyebrow when the panel
-   became a row: `SHUTTER` names the switch beside it, and at 11px in a column
-   it was doing the job of a zone heading that no longer exists. */
+/* Small switch labels name adjacent controls without introducing another zone
+   heading. */
 .irow .n {
   font-family: var(--font-head); font-weight: 700; font-size: 9px;
   text-transform: uppercase; letter-spacing: .09em; color: var(--grey);
   white-space: nowrap;
 }
-/* -- the instrument switch -------------------------------------------------
-   One of three control families (`docs/ui-rules.md` §14). A position here is
-   a *bench action*: clicking it moves the shutter, drives the LED, throws
-   the relay — now, not on the next Run. So it must never read as a setting:
-   larger hit target, ink border, and a lit position that is a fill with the
-   accent under it rather than the settings' white-on-ink. */
+/* Instrument switches act immediately on the shutter, LED or relay
+   (`docs/ui-rules.md` section 14). Larger targets, ink borders and accent
+   underlines distinguish them from settings read by Run. */
 .sw { display: inline-flex; border: 1px solid var(--ink); }
 .sw .p {
   padding: 4px 12px; font-size: 12px; color: var(--grey); cursor: pointer;
@@ -511,8 +466,8 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 }
 .sw .p:disabled { cursor: not-allowed; opacity: .45; }
 .sw .p:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-/* Inferred, not read: the same dashed rule the rail uses, and the underline
-   goes grey — the position is a guess, not a read-back. */
+/* Dashed borders and grey underlines mark inferred positions so they cannot
+   imply instrument read-back. */
 .irow.inferred .sw { border-style: dashed; }
 .irow.inferred .sw .p.on { box-shadow: inset 0 -3px 0 var(--grey); }
 .vals { display: flex; gap: 9px; align-items: baseline; flex-wrap: nowrap; }
@@ -528,7 +483,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .vals label.dim input.v { color: var(--grey); border-bottom-color: var(--fill); }
 .vals label.dim i { color: var(--rule); }
 
-/* A node's own override reads as one: the value in ink, and ↺ beside it. */
+/* Ink and the reset glyph distinguish a node override from its inherited value. */
 .pf.node .v, .pf.node input.v { color: var(--ink); font-weight: 500; border-bottom-color: var(--ink); }
 button.undo { font-family: var(--font-num); }
 
@@ -539,7 +494,7 @@ button.undo { font-family: var(--font-num); }
   align-items: start;
 }
 .card.mod { margin: 0; padding: 0; display: flex; flex-direction: column; }
-/* The card a node form pointed at (`#/bench?module=…`): one ping, then gone. */
+/* A brief highlight identifies the bench card reached from a node form. */
 .card.mod { transition: outline-color .6s ease, box-shadow .6s ease; outline: 2px solid transparent; outline-offset: 2px; }
 .card.mod.pinged { outline-color: var(--accent); transition: none; }
 a.btng.goto { text-decoration: none; display: inline-flex; align-items: center; }
@@ -565,11 +520,11 @@ a.btng.goto { text-decoration: none; display: inline-flex; align-items: center; 
 .tag.nb { background: var(--fill); }
 .tag.cost { border-color: var(--warn); color: var(--warn); }
 
-/* -- one field ------------------------------------------------------------ */
+/* Field rows keep labels, values and their sources aligned. */
 .pr { display: flex; flex-direction: column; gap: 1px; }
 .pr.folded { border-top: 1px dashed var(--rule); padding-top: 6px; margin-top: 4px; }
-/* A row plus whatever belongs under it: the explanation, the reason a value
-   is missing, the note that a range is a repeat. */
+/* Each field groups its explanation, missing-value reason and repeated-point
+   notice under its own row. */
 .pw { display: flex; flex-direction: column; }
 
 .pf {
@@ -586,9 +541,8 @@ a.btng.goto { text-decoration: none; display: inline-flex; align-items: center; 
 .pf .v, .pf input.v, .pf select.v {
   font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 12px;
 }
-/* Which of these fifty values can be typed into must not be a hover
-   discovery: an editable field carries a faint baseline, a read-only one does
-   not. `ui-rules` §1 asks for density, not for a guessing game. */
+/* A faint bottom rule identifies editable fields without requiring hover.
+   Read-only values omit it. */
 .pf input.v, .pf select.v {
   border: 1px solid transparent; border-bottom-color: var(--rule);
   background: transparent; color: inherit;
@@ -596,14 +550,13 @@ a.btng.goto { text-decoration: none; display: inline-flex; align-items: center; 
 }
 .pf input.v:hover, .pf select.v:hover { border-color: var(--rule); }
 .pf input.v:focus, .pf select.v:focus { border-color: var(--accent); outline: none; background: var(--paper); }
-/* An empty field that is the only route to a value — the typed V_oc on a
-   bench with no SourceMeter — has to look like something you can type in. */
+/* An empty editable field needs a visible outline when it is the only source of
+   V_oc on a bench without a source meter. */
 .pf input.v.blank { border-color: var(--warn); background: #fff8ef; min-width: 5em; }
 .pf .v i { font-style: normal; color: var(--grey); margin-left: 6px; font-size: 11px; }
 
-/* The name, as the button that opens the explanation. §1 wants every field
-   expandable to the whole of it; a `title` on a div with no tabindex was
-   mouse-only. */
+/* The field name opens expanded help. A focusable button makes the explanation
+   accessible by keyboard as well as mouse. */
 .pf .l.lh {
   border: 0; background: none; padding: 0; margin: 0;
   font-family: var(--font-body); font-weight: 400; font-size: 12px;
@@ -618,17 +571,18 @@ a.btng.goto { text-decoration: none; display: inline-flex; align-items: center; 
 }
 .doc .dfull { color: var(--grey); }
 
-/* A reason, and a consequence, each on its own line under the row it is
-   about — never inside the value column, where it pushed `@ led_v` onto a
-   second line. */
+/* Reasons and consequences occupy separate lines below the field. Keeping them
+   outside the value column leaves the LED level beside its value. */
 .need1, .note1 {
   display: flex; align-items: baseline; gap: 5px;
   padding: 1px 4px 3px; font-size: 11.5px; color: var(--warn); text-wrap: pretty;
 }
 .note1 { color: var(--grey); }
-/* §4: `start == stop` is a repeat, and the switch must be visible. */
+/* The repeated-point switch stays visible because `start == stop` means
+   repetition rather than a sweep (`docs/ui-rules.md` section 4). */
 .tag.rep { border-color: var(--accent); color: var(--accent-dark); text-transform: none; }
-/* The quiet provenance, once per card instead of on every row. */
+/* Common source layers appear once per card to avoid repeated tags on every
+   field. */
 .provsum {
   font-size: 11px; color: var(--grey); font-family: var(--font-num);
   border-top: 1px dashed var(--rule); padding-top: 5px;
@@ -636,9 +590,9 @@ a.btng.goto { text-decoration: none; display: inline-flex; align-items: center; 
 
 .pf.ro { color: var(--grey); }
 .pf.ro .v { color: var(--ink); }
-/* Not read in this configuration (`fields.inertReason`): the row stays, greyed,
-   with the value it will have when the setting that reads it is turned back
-   on, and a dashed tag naming that setting on hover. */
+/* An inactive setting stays visible with the value that applies when it is
+   enabled. Grey text and a dashed tag distinguish it; hover identifies the
+   controlling setting. */
 .pf.inert .l, .pf.inert .v.off { color: var(--grey); opacity: .6; }
 .pf.inert .v.off { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 12px; }
 .tag.off { border-style: dashed; color: var(--grey); text-transform: none; letter-spacing: 0; }
@@ -647,16 +601,13 @@ a.btng.goto { text-decoration: none; display: inline-flex; align-items: center; 
 .pf.acc .l { color: var(--accent-dark); }
 .pf.miss .need { color: var(--warn); }
 
-/* Provenance, rendered and never re-derived (§6) — and only where it is a
-   *statement*: somebody typed this, a loop owns it, a measurement produced
-   it. `run.toml` and `last-used` are counted once per card instead
-   (`card.js`, `provSummary`), because a tag on every row was twenty
-   repetitions of "normal" — and making it near-white left an illegible tag
-   still holding a column. */
+/* Source tags render service provenance without deriving it again
+   (`docs/ui-rules.md` section 6). Edited, loop-supplied and measured values need
+   individual tags. The `run.toml` and last-used layers are counted once per card
+   to avoid repeated tags occupying a column. */
 .src { display: flex; align-items: center; gap: 5px; justify-self: end; }
-/* A segmented control is as wide as its choices and cannot shrink, so on a
-   330 px card its provenance tag spilled into the next column. It sits under
-   the control instead. */
+/* A segmented control cannot shrink below its choices. Its source tag sits below
+   it so a narrow card does not spill into the next column. */
 .pf:has(> .seg) { grid-template-columns: 13em minmax(0, 1fr); }
 .pf:has(> .seg) > .src { grid-column: 2; justify-self: start; }
 .src .tag { text-transform: none; letter-spacing: 0; }
@@ -668,12 +619,10 @@ button.link {
 }
 button.link:hover { color: var(--accent-dark); }
 
-/* -- the two small choosers: a *setting* -----------------------------------
-   The second control family (`docs/ui-rules.md` §14): a value a later Run
-   reads. Grey border, the chosen option white on ink. Nothing on the bench
-   moves when one is clicked.
-   `<button>`s, not clickable spans: a span with an onclick cannot be tabbed
-   to, carries no role and is invisible to a screen reader. */
+/* Setting controls change values read by a later Run (`docs/ui-rules.md` section
+   14). Grey borders and white-on-ink selections distinguish them from immediate
+   bench actions. Buttons provide keyboard focus and accessible roles that
+   clickable spans lack. */
 .seg { display: inline-flex; border: 1px solid var(--rule); }
 .seg .opt {
   padding: 0 7px; font-size: 11px; cursor: pointer; color: var(--grey);
@@ -681,25 +630,22 @@ button.link:hover { color: var(--accent-dark); }
   border: 0; background: none; line-height: 1.5;
 }
 .seg .opt.on { background: var(--ink); color: #fff; }
-/* Hover darkens the type of an option that is not chosen; the chosen one is
-   already white on ink (or on the accent), and darkening it made the word
-   vanish under the pointer. */
+/* Hover darkens only unselected options. Dark text on the selected ink or accent
+   background would hide the label. */
 .seg .opt:not(.on):hover { color: var(--ink); }
 .seg .opt:focus-visible,
 .btng:focus-visible, .btnp:focus-visible, .btns:focus-visible,
 .btnd:focus-visible, .btnw:focus-visible, .pf .l.lh:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 1px;
 }
-/* §3: the accent is the swept quantity — so the axis chooser's selection is
-   the accent, and the polarity pair is ordinary ink. */
+/* The axis selection uses the accent because it identifies the swept quantity.
+   Polarity choices use ink (`docs/ui-rules.md` section 3). */
 .pf.acc .seg .opt.on { background: var(--accent); }
 
-/* A boolean setting is a checkbox, not a `true | false` pair (#42). Same
-   family as `.seg` — it changes a value a later Run reads — so it takes the
-   family's ink and the family's focus ring. It is the grid's middle column on
-   its own: the row's label names it, so there is no text beside the box, and
-   `justify-self` keeps it the size of a box rather than the width of a
-   column. */
+/* A boolean setting uses a checkbox in the same family as `.seg`
+   (`docs/ui-rules.md` section 14). Ink and focus styling identify a value read
+   by Run. The row label names it, so the box needs no adjacent text.
+   `justify-self` keeps it box-sized within the middle column. */
 .cbx {
   appearance: none; -webkit-appearance: none; margin: 0;
   width: 13px; height: 13px; cursor: pointer;
@@ -708,30 +654,29 @@ button.link:hover { color: var(--accent-dark); }
 }
 .cbx:hover { border-color: var(--ink); }
 .cbx:checked { background: var(--ink); border-color: var(--ink); }
-/* The tick is drawn, not typed: a `✓` glyph sits on the baseline of a 13 px
-   box and no font in the stack put it in the middle of one. */
+/* A drawn tick stays centred in the 13 px box. A font glyph aligns to the text
+   baseline and can sit off-centre. */
 .cbx:checked::after {
   content: ''; display: block;
   width: 3px; height: 7px; margin: 1px 0 0 4px;
   border: solid #fff; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg);
 }
-/* Neither on nor off: the service has not said, and an empty box would say
-   `false`. §2's rule about a zero that is not a zero, applied to a flag. */
+/* Indeterminate styling marks an unknown boolean. An empty unchecked box would
+   incorrectly imply `false` (`docs/ui-rules.md` section 14). */
 .cbx:indeterminate { background: var(--paper); border-color: var(--rule); }
 .cbx:indeterminate::after {
   content: ''; display: block;
   width: 7px; height: 0; margin: 5px 0 0 2px; border-top: 1.5px solid var(--grey);
 }
 .cbx:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-/* Inherited, derived, or not read in this configuration: shown, not clicked. */
+/* Inherited, derived and inactive values remain visible but cannot be edited
+   here. */
 .cbx:disabled { cursor: not-allowed; opacity: .5; }
 .cbx:disabled:hover { border-color: var(--rule); }
 
-/* -- the view filter ------------------------------------------------------
-   The third family: what is *drawn* — a monitor's interval, its window,
-   which way round a grid is charted. Nothing about the bench or the recipe
-   changes, so the chosen option gets no fill and no border, only weight and
-   a rule under it. `.filt` groups options; a lone `button.filt` is a toggle. */
+/* View filters change what the screen shows (`docs/ui-rules.md` section 14).
+   Bold text and an underline mark selection without the border or fill of
+   settings. `.filt` groups options; `button.filt` marks a single toggle. */
 .filt { display: inline-flex; gap: 1px; align-items: baseline; }
 .filt .opt, button.filt {
   padding: 0 5px; font-size: 11px; cursor: pointer; color: var(--grey);
@@ -747,10 +692,8 @@ button.link:hover { color: var(--accent-dark); }
 .pf.pol .v { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pf.pol .eff { color: var(--accent-dark); }
 
-/* -- the range row: three parameters and a count that came from the service
-   Its label is `sweep`, `axis`, `LED levels` — short, unlike a parameter
-   name — so the row gives the column back to the three fields and the count,
-   which is what has to stay on one line. */
+/* Short range labels leave room for three parameters and the service count on
+   one line. */
 .pf.range { grid-template-columns: 7.5em minmax(0, 1fr) auto; }
 .pf.range .rng { display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
 .pf.range input.v { width: 4.5em; max-width: 4.5em; text-align: right; }
@@ -759,28 +702,28 @@ button.link:hover { color: var(--accent-dark); }
 .pf.voc .v { display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
 .pf.voc input.v { max-width: 6em; }
 .pf.voc .v .det { flex-basis: 100%; margin-left: 0; font-size: 11px; color: var(--grey); overflow-wrap: anywhere; white-space: normal; }
-/* The V_oc row holds a value, a level and its unit on one line: the label
-   column gives way, as the range row's does, or the row overflows the form
-   column and the tag draws over the value. And a grid item may shrink below
-   its content, or a long provenance sentence widens the whole row. */
+/* The V_oc row needs its value, LED level and unit on one line. A narrower label
+   column prevents overlap. Shrinkable grid items stop long provenance text from
+   widening the row. */
 .pf.voc { grid-template-columns: 6em minmax(0, 1fr) auto; }
 .pf.voc input.v { max-width: 5em; }
 .pf > .v { min-width: 0; }
-/* The four-way polarity choice is wider than the value column beside its
-   long label: the label gives way, and the choices may wrap rather than clip. */
+/* The four polarity choices need more width than the value column. A narrower
+   label and wrapping choices prevent clipping. */
 .pf.pol { grid-template-columns: 9.5em minmax(0, 1fr) auto; }
 .pf.pol .seg { flex-wrap: wrap; }
-/* The reason sits beside the field it is about, not instead of it. */
+/* A missing-value reason stays beside the field so the operator can still locate
+   its control. */
 .pf.voc .need { color: var(--warn); font-size: 11px; }
 
-/* -- the bench read-back: not a parameter, and not from /modules ---------- */
+/* Bench read-back stays distinct from editable module parameters. */
 .pf.rb { border-left: 2px solid var(--rule); background: var(--fill); }
 .pf.rb.lit { border-left-color: var(--warn); }
 .pf.rb.warn { border-left-color: var(--alert); }
 .pf.rb.warn .v { color: var(--alert); }
 .pf.rb.inferred .l { border-bottom: 1px dashed var(--grey); }
 
-/* -- needs, blockers, the fold ------------------------------------------- */
+/* Needs and blockers stay beside the controls that resolve them. */
 .warn1 { display: flex; align-items: baseline; gap: 6px; color: var(--warn); font-size: 12px; }
 .warn1.crit, .warn1.invalid { color: var(--alert); }
 .warn1 .code { font-family: var(--font-num); font-size: 11px; color: var(--grey); }
@@ -801,33 +744,30 @@ button.link:hover { color: var(--accent-dark); }
   font-family: var(--font-head); font-weight: 800; letter-spacing: -0.01em;
 }
 .btnp { background: var(--accent); border-color: var(--accent); color: #fff; }
-/* The action that makes the bench safe, and the run that takes hours: §3's
-   loudness is for meaning, so neither is another verb in the row. */
+/* Park and the long-running action need stronger hierarchy than ordinary row
+   actions so their consequences remain visible. */
 .btnd { border-color: var(--alert); color: var(--alert); }
 .btnd:hover { background: var(--alert); color: #fff; }
 .btnw { border-color: var(--warn); color: var(--warn); }
 .btnw:hover { background: var(--warn); color: #fff; }
 .btnp:disabled, .btns:disabled, .btnd:disabled, .btnw:disabled { opacity: .38; cursor: not-allowed; }
-/* Armed: the second click of an arm-then-confirm is a different act from the
-   first — Park aborts the run and cancels the queue, Abort throws a shot
-   away — so it is a different button. One rule, because the strip, the
-   monitor and the Instruments panel all arm the same way and a Park that
-   looked armed in one place and not the other was #42's complaint. */
+/* Armed controls distinguish the confirming click from the arming click. Park
+   aborts the run and cancels the queue; Abort discards a shot. The strip,
+   monitor and Instruments panel share styling so the armed state means the same
+   thing everywhere (`docs/ui-rules.md` section 13). */
 button.armed { background: var(--alert); border-color: var(--alert); color: #fff; }
 
-/* The 422's own check list, beside the sentence that refused. */
+/* Validation checks stay beside the refusal message so the operator can find the
+   blocking condition. */
 .strip .checks { display: inline-flex; gap: 5px; margin-left: 8px; }
 .strip .ck { font-family: var(--font-num); font-size: 10px; }
 .strip .ck.crit, .strip .ck.invalid { color: var(--alert); }
 
 
-/* -- charts (M3) ----------------------------------------------------------
-   The result panel sits beside the form in the card that produced it, as
-   Round 3 has it: `ch-jvdark` in the jv card, `ch-transient` in the bace card,
-   and the timing diagram in the bace card too, because it is a function of
-   the form beside it rather than of any run. A card with one is twice as wide,
-   which the auto-fill grid gives it for free — but only where there is room
-   for two columns, or a one-column grid would grow an implicit second one. */
+/* Result charts stay beside their module forms (`docs/ui-rules.md` section 11).
+   The timing diagram stays with the form because its content depends on those
+   settings. Cards span two columns only when space permits; otherwise the span
+   would create an implicit second column. */
 
 .card.mod.wide { grid-column: span 1; }
 @media (min-width: 980px) {
@@ -842,15 +782,10 @@ button.armed { background: var(--alert); border-color: var(--alert); color: #fff
 .cb.split > .col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .res { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 
-/* R3·2 sets the shot's numbers as a narrow column to the **right** of the
-   charts, not as a block above them: seven rows of text before the first plot
-   put the drawing 160 px down a card that is already taller than its window.
-   Beside them the chart starts at the top of the slot, and each number stays
-   next to the panel it is about.
-
-   This only became possible once a chart was built to the width it is given
-   (`charts/frame.js`): while the container merely zoomed a fixed viewBox,
-   taking 170 px for a column shrank the chart's type with it. */
+/* Shot statistics sit to the right of the charts so text does not push the first
+   plot below view. Each number stays beside its panel. Charts must render at the
+   available width; scaling a fixed-width drawing would also shrink text when the
+   statistics column takes space. */
 @media (min-width: 980px) {
   .card.mod.wide .cb.split > .res {
     display: grid;
@@ -860,12 +795,12 @@ button.armed { background: var(--alert); border-color: var(--alert); color: #fff
   }
   .card.mod.wide .cb.split > .res > * { grid-column: 1; margin-bottom: 12px; }
   .card.mod.wide .cb.split > .res > *:last-child { margin-bottom: 0; }
-  /* The block spans the column so it stays put while the charts flow past it. */
+  /* The statistics block spans the column so it stays in place while charts flow
+     beside it. */
   .card.mod.wide .cb.split > .res > .shot { grid-column: 2; grid-row: 1 / -1; margin-bottom: 0; }
 }
 
-/* Label over value, so the pair reads down a 172 px column instead of across
-   a table that has no room for one. */
+/* Labels sit above values so each pair fits within the narrow statistics column. */
 dl.shot-rows { margin: 0; display: flex; flex-direction: column; gap: 5px; }
 dl.shot-rows dt { color: var(--grey); font-size: 11px; line-height: 1.3; }
 dl.shot-rows dd {
@@ -880,10 +815,9 @@ dl.shot-rows dd {
 .chart-legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--grey); }
 .legend-item { display: inline-flex; align-items: center; gap: 4px; }
 
-/* The readout the crosshair writes into. It holds its height when empty so
-   nothing on the card moves as the pointer enters the plot, and it is a fixed
-   row rather than a floating tooltip so a value can be read while the pointer
-   travels — which is what comparing two points on a transient is. */
+/* The crosshair readout reserves height when empty to prevent card movement. A
+   stable row keeps values readable while the pointer travels between points on a
+   transient. */
 .chart-readout {
   min-height: 15px;
   font-family: var(--font-num);
@@ -894,22 +828,22 @@ dl.shot-rows dd {
 .chart-notes { display: flex; flex-direction: column; gap: 2px; }
 .chart-note { font-size: 11px; color: var(--grey); }
 .chart-absent { border: 1px dashed var(--rule); padding: 10px; }
-/* A slot that draws the chart's own footprint owns its frame already, so the
-   box around it would be a second, looser edge around a dashed one. */
+/* A chart with its own frame needs no second outer border, which would compete
+   with its dashed edge. */
 .chart-absent.framed { border: 0; padding: 0; }
 
-/* The design pack's icons (`lib/icons.js`). `currentColor` does the colour, so
-   there is nothing here but the box and the baseline: an icon sits on the text
-   it labels, never on its own line. */
+/* Icons use `currentColor` to match their labels and align within the text line
+   rather than taking a separate row. */
 .icon { flex: none; vertical-align: -0.12em; }
-/* A row of text and a glyph aligns on the text's baseline, which an SVG has
-   none of — centre the glyph on the line instead of dropping it to the floor. */
+/* SVG glyphs need vertical centring because they lack the text baseline used by
+   the adjacent label. */
 .warn1 > .icon, .need1 > .icon, .note1 > .icon, .inh > .icon { align-self: center; }
-/* `not read` is a glyph and a word now, not a word alone. */
+/* The inactive-state glyph reinforces the text so the state does not depend on
+   colour alone. */
 .tag.off { display: inline-flex; align-items: center; gap: 3px; }
 
-/* The timing diagram's fold on the bace card: one line shut, the drawing and
-   its alerts open. The count keeps the worst level's colour either way. */
+/* The timing fold hides the drawing and alerts in its collapsed state. The count
+   retains the strongest alert colour so a hidden warning stays visible. */
 .tfold { border-top: 1px solid var(--rule); padding-top: 6px; }
 .tfold .foldbar { gap: 10px; }
 .tfold .tsum.invalid, .tfold .tsum.alert { color: var(--alert); }
@@ -921,20 +855,18 @@ dl.shot-rows dd {
 .alerts .warn1.alert { color: var(--alert); }
 .alerts .warn1 .code { text-transform: uppercase; letter-spacing: .04em; }
 
-/* One row per curve: the LED drive voltage (or `dark`) down the first column,
-   the derived parameters across. Numbers right-aligned so a column reads as
-   a column; the header row is the only text that is not a number. */
+/* Each curve keeps its LED level or dark label beside its derived parameters.
+   Right-aligned numbers make columns comparable; headers remain text. */
 .metrics table.rows { width: auto; }
 .metrics table.rows th { text-align: right; font-weight: 600; font-size: 11px; padding: 2px 0 3px 14px; white-space: nowrap; border-bottom: 1px solid var(--rule); }
 .metrics table.rows th.l { text-align: left; padding-left: 0; }
 .metrics td.l { color: var(--grey); font-size: 11px; white-space: nowrap; padding-right: 0; }
 .metrics td.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 11px; text-align: right; padding: 2px 0 2px 14px; white-space: nowrap; }
 
-/* -- the run monitor (M4) ---------------------------------------------------
-   Under the rail on every tab while a run holds the worker, gone when the
-   bench is parked. Three counters at three time scales (§5), the segment the
-   shot is in, the ETA, the two honest verbs — and the operator's answer to a
-   pause. It shares the strip's register: this is bench furniture. */
+/* The run monitor stays below the rail on every tab while a run holds the worker
+   and disappears when the bench is parked. Separate counters distinguish
+   scheduling from shot progress (`docs/ui-rules.md` section 5). Phase, remaining
+   time, run actions and pause responses stay accessible together. */
 .monitor {
   display: flex; flex-direction: column; gap: 0;
   border-bottom: 1px solid var(--rule);
@@ -965,7 +897,8 @@ dl.shot-rows dd {
 .mon-count {
   padding: 2px 7px; background: var(--paper); border: 1px solid var(--rule); white-space: nowrap;
 }
-/* The outer loops carry the time; the shot counter is the fast one (§5). */
+/* Outer-loop counters carry scheduling time; the shot counter tracks acquisition
+   progress (`docs/ui-rules.md` section 5). */
 .mon-count.temperature { border-color: var(--ink); }
 .mon-count.open.temperature { font-weight: 600; }
 .mon-count.shots { border-color: transparent; background: none; color: var(--ink); }
@@ -983,7 +916,7 @@ dl.shot-rows dd {
 .mon-status.bad { color: var(--alert); }
 .monitor .spacer { flex: 1 1 auto; }
 .monitor button.btns { font-family: var(--font-body); font-weight: 500; font-size: 11px; padding: 3px 8px; }
-/* The queue: runs waiting for the worker, each with the Cancel it needs. */
+/* Each queued run keeps its own Cancel action beside it. */
 .mon-queue {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   padding: 4px 12px;
@@ -1014,7 +947,8 @@ dl.shot-rows dd {
 .mon-field i { font-style: normal; color: var(--grey); }
 .mon-fallback { color: var(--grey); font-size: 10.5px; }
 
-/* -- the newest shot, beside its trace (M4) -------------------------------- */
+/* The latest shot stays beside its trace so its values and waveform can be
+   compared. */
 .shot { border: 1px solid var(--rule); padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; }
 .shot.alert { border-color: var(--alert); }
 .shot-head { display: flex; align-items: center; gap: 8px; }
@@ -1024,12 +958,9 @@ dl.shot-rows dd {
 .shot-trigger { font-family: var(--font-num); font-size: 10.5px; color: var(--grey); }
 .shot-trigger.auto { color: var(--warn); }
 
-/* -- the pipeline tab (M5, R3·3) -------------------------------------------
-   Two columns: the tree that gets posted, and what the service says it will
-   do with it. 640px is the artboard's own width for the left one — wide
-   enough for a four-deep tree with its tags, narrow enough that the schedule
-   beside it is the wider half, which is the right way round: the tree is
-   half a screen of typing and the schedule is four hours of bench time. */
+/* The pipeline tree and service schedule share two columns. The 640 px tree
+   column accommodates four levels and their tags. The wider schedule column
+   leaves room to assess the bench time implied by the tree. */
 .pipe {
   display: grid;
   grid-template-columns: 640px minmax(0, 1fr);
@@ -1045,8 +976,7 @@ dl.shot-rows dd {
   font-family: var(--font-num); font-size: 11px;
 }
 
-/* The tree. Depth is an indent rather than a rule, because a loop three deep
-   is normal here and three nested boxes would be all border and no tree. */
+/* Indentation marks tree depth without repeated borders obscuring nested loops. */
 .tree { display: flex; flex-direction: column; gap: 2px; }
 .tr {
   display: flex; align-items: center; gap: 8px;
@@ -1063,22 +993,22 @@ dl.shot-rows dd {
 .tr .nk.mod { border-color: var(--ink); color: var(--ink); }
 .tr .n { font-family: var(--font-num); font-size: 12px; font-weight: 500; }
 .tr .d { color: var(--grey); font-family: var(--font-num); font-size: 11px; }
-/* A node that differs from the bench: the node form's own glyph, the list on hover. */
+/* A node override uses the same glyph as its form. Hover exposes the differences
+   from the bench. */
 .tr .ovr { color: var(--ink); font-family: var(--font-num); font-size: 12px; cursor: help; }
 .tr .rowact { display: inline-flex; gap: 2px; opacity: .25; }
 .tr:hover .rowact, .tr.on .rowact { opacity: 1; }
 .tr .rowact button.btng { padding: 0 5px; line-height: 16px; }
 
-/* A value the pipeline supplies, wherever it is named: the same arrow and the
-   same accent the inherited field rows carry (`.pf.inh`), so "this comes from
-   somewhere else" reads the same on the tree, in the schedule and in a form. */
+/* The arrow and accent match `.pf.inh` so a pipeline-supplied value has the same
+   meaning in the tree, schedule and form. */
 .inh {
   font-family: var(--font-num); font-size: 10.5px; color: var(--accent-dark);
   white-space: nowrap;
 }
 .binds { display: flex; flex-wrap: wrap; gap: 6px 14px; }
 
-/* The selected node's form. */
+/* The selected node form groups edits with the node they affect. */
 .nodeform:empty { display: none; }
 .nf { border: 1px solid var(--ink); }
 .nfh {
@@ -1089,8 +1019,8 @@ dl.shot-rows dd {
 .nf .pf.range .rng { flex-wrap: wrap; }
 .nf input.v.vlist { min-width: 22em; text-align: left; }
 
-/* The value lists — R3·3's two tables. `auto` columns, so nine temperatures
-   and their settles line up as a grid and never wrap mid-pair. */
+/* Automatic table columns keep temperatures and their settle times aligned
+   without wrapping a pair. */
 .vlists { display: flex; flex-direction: column; gap: 8px; }
 .vlist-block { display: flex; flex-direction: column; gap: 3px; }
 .lst {
@@ -1100,7 +1030,7 @@ dl.shot-rows dd {
 }
 .lst .h { color: var(--ink); font-weight: 500; }
 
-/* The three numbers. Big, because they are the reason this screen exists. */
+/* Large summary numbers make the pipeline cost visible before Start. */
 .nums { display: flex; gap: 32px; flex-wrap: wrap; }
 .nm { display: flex; flex-direction: column; gap: 1px; }
 .nm .l {
@@ -1119,22 +1049,18 @@ dl.shot-rows dd {
 .cklist .warn1.info { color: var(--grey); }
 .cklist .cs { margin-left: auto; padding-left: 10px; }
 
-/* The drift note, alone in the flow now that the name row is in the bar. It is
-   null unless a recipe is open and the bench has moved under it (`recipeNote`),
-   so it collapses the way an unselected node form does. */
+/* The recipe differences panel stays in the flow and collapses when no recipe is
+   open or the bench matches it. */
 .pipe-note:empty { display: none; }
-/* Start is the reason the tab exists, so it does not scroll away: the button
-   row is pinned to the foot of the structure card and the tree, the costs and
-   the check list pass under it. The row only — the name field and the recipe
-   note stay in the reading order, because a two-line note pinned as well would
-   hold a third of the panel against the operator.
+/* The action row stays at the foot of the scrolling pipeline panel so Start
+   remains reachable (`docs/ui-rules.md` section 1). Only the row is sticky;
+   pinning a multiline recipe note would obscure too much of the tree and checks.
 
-   The scrollport is `.view`, and a sticky offset is measured from its content
-   edge, so `bottom: 0` would leave the view's own foot open under the bar and
-   the check list would show through it — hence the offset cancels that foot.
-   The bar cannot leave `.cb` either way, so at the end of the scroll it lands
-   on the card's bottom border rather than hanging past it. The negative side
-   margins are `.cb`'s own padding, so the bar reaches both card edges. */
+   The `.view` scrollport measures sticky offsets from its content edge. `bottom:
+   0` would expose the view padding beneath the bar and let checks show through.
+   The offset cancels that padding. The bar remains inside `.cb` and meets the
+   card bottom at the end of scrolling. Negative side margins cancel `.cb`
+   padding so the bar reaches both card edges. */
 .pipe-actions-bar {
   position: sticky; bottom: calc(-1 * var(--view-pad-b)); z-index: 2;
   display: flex; flex-direction: column; gap: 8px;
@@ -1142,7 +1068,8 @@ dl.shot-rows dd {
   background: var(--paper); border-top: 1px solid var(--rule);
 }
 .namerow { display: flex; align-items: center; gap: 8px; }
-/* Where the bench has moved since a recipe was saved (`lib/recipe.js`). */
+/* Recipe differences stay visible so the operator can compare the saved settings
+   with the bench. */
 .recipe-note {
   display: flex; flex-direction: column; gap: 4px;
   border-left: 2px solid var(--warn); background: #fff8ef; padding: 5px 8px;
@@ -1163,14 +1090,13 @@ dl.shot-rows dd {
 .namerow input.v { flex: 1 1 auto; min-width: 0; }
 .namerow input.v:focus, .namerow select.v:focus { border-color: var(--accent); outline: none; }
 .btnrow { display: flex; align-items: center; gap: 10px; }
-/* Undo sits to the left of the three that go forward, and carries the name of
-   what it takes back — so it is the widest of the small buttons and must be
-   allowed to shrink rather than push Start off the row. */
+/* Undo sits before forward actions and names the edit it reverses. Its longer
+   label must shrink to keep Start on the row. */
 .btnrow .btng { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .btnrow .btnp { padding: 10px 16px; font-size: 14px; }
 
-/* The schedule at three scales. A row is a line, not a box: the canonical
-   tree has 45 leaves and 54 loop rows, and 99 boxes is a wall. */
+/* Schedule rows use lines rather than boxes to keep large trees readable. A tree
+   with 45 module leaves and 54 loop rows must remain scannable. */
 .sched { display: flex; flex-direction: column; gap: 1px; }
 .schedbar { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .sr {
@@ -1195,11 +1121,10 @@ dl.shot-rows dd {
 .fs .k { color: var(--grey); min-width: 5ch; }
 .fs.mod .p { color: var(--ink); font-weight: 500; }
 
-/* -- the results tab (M6, R2·3) --------------------------------------------
-   Two columns: the runs the journal knows, and the one that is open. 380px
-   for the list — a row is a label, a state, a stamp and a count, and the
-   folder is not in it — and the rest for the grid, which is nine rows by
-   five columns on the canonical tree and must not wrap. */
+/* The results view keeps journal runs beside the open run. The 380 px list
+   column fits a label, state, timestamp and count; the folder appears
+   separately. The remaining width keeps a nine-by-five result grid from
+   wrapping. */
 .results {
   display: grid;
   grid-template-columns: 380px minmax(0, 1fr);
@@ -1210,7 +1135,8 @@ dl.shot-rows dd {
 .results .ch .spacer { flex: 1 1 auto; }
 .results .cs.right { margin-left: auto; }
 
-/* The run list, grouped by session. A row is a button because it is one. */
+/* Session grouping keeps related runs together. Button rows make each run
+   selectable. */
 .hist .cb { gap: 10px; max-height: calc(100vh - 220px); overflow: auto; }
 .hgroup { display: flex; flex-direction: column; gap: 2px; }
 .hgh {
@@ -1231,14 +1157,15 @@ dl.shot-rows dd {
 .hr2 { font-size: 11px; color: var(--grey); }
 .hr3 { font-size: 11px; }
 .hname { font-family: var(--font-head); font-weight: 600; font-size: 12px; }
-/* A state reads at its loudness (§3): a failure is the one alert on the list. */
+/* Failure states use alert colour so they stand out within the run list. */
 .tag.st { text-transform: none; letter-spacing: 0; font-family: var(--font-num); }
 .tag.st.ok { border-color: var(--ok); color: var(--ok); }
 .tag.st.warn { border-color: var(--warn); color: var(--warn); }
 .tag.st.crit { border-color: var(--alert); color: var(--alert); font-weight: 600; }
 .tag.st.live { border-color: var(--accent); color: var(--accent); }
 
-/* The open run. */
+/* The open run keeps its identity and summary separate from individual node
+   results. */
 .open .rhd .ch { border-bottom: 0; }
 .rhead { padding: 8px 10px; border-bottom: 1px solid var(--rule); display: flex; flex-direction: column; gap: 3px; }
 .rh1, .rh2 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
@@ -1250,8 +1177,8 @@ dl.shot-rows dd {
 .rright { min-width: 0; position: sticky; top: 0; }
 .rleft h3, .rright h3 { font-size: 11px; margin: 6px 0 2px; text-transform: uppercase; letter-spacing: .08em; color: var(--grey); }
 
-/* The grid. Every cell of the product is a cell; the three states are three
-   borders, so they read with the colour turned off. */
+/* Each parameter combination keeps a grid cell. Distinct borders preserve state
+   differences without colour. */
 .qgrid-wrap { display: flex; flex-direction: column; gap: 6px; overflow-x: auto; }
 table.qgrid { border-collapse: separate; border-spacing: 3px; }
 table.qgrid th {
@@ -1274,7 +1201,8 @@ table.qgrid td { padding: 0; }
 }
 .cell:hover { background: var(--fill); }
 .cell.on { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
-/* Partial: outlined in the accent, never averaged in, never dropped. */
+/* A partial result stays visible with a dashed accent border. It is neither
+   included in averages nor omitted. */
 .cell.partial { border: 1.5px dashed var(--accent-dark); }
 .cell.failed { border-color: var(--alert); }
 .cell.missing {
@@ -1291,14 +1219,15 @@ table.qgrid td { padding: 0; }
 .mk.partial { background: var(--paper); border: 1.5px dashed var(--accent-dark); }
 .mk.missing { background: repeating-linear-gradient(45deg, var(--paper), var(--paper) 2px, var(--rule) 2px, var(--rule) 4px); border-color: var(--rule); }
 
-/* The summary strip: four sentences about the whole run. */
+/* The summary strip keeps whole-run conclusions separate from node details. */
 .rsum { display: flex; flex-direction: column; gap: 3px; border-top: 1px solid var(--rule); padding-top: 6px; }
 .rsl { display: grid; grid-template-columns: 8em 1fr; gap: 8px; font-size: 12px; }
 .rsk { color: var(--grey); font-size: 11px; }
 .rsv { font-family: var(--font-num); font-size: 11.5px; }
 .rsv.warn { color: var(--warn); }
 
-/* The node list: every module node, the J-Vs included. */
+/* The node list includes every module, including J-V, so results remain
+   reachable outside the grid. */
 .nlist { display: flex; flex-direction: column; gap: 2px; }
 .nrow {
   display: flex; flex-direction: column; gap: 1px; align-items: stretch; text-align: left;
@@ -1314,7 +1243,8 @@ table.qgrid td { padding: 0; }
 .nr2 .ok { color: var(--ok); }
 .np { font-weight: 500; }
 
-/* The selected node. */
+/* A border groups the selected node details and distinguishes them from the node
+   list. */
 .npanel { border: 1px solid var(--ink); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
 .nph { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .nnum td .num { font-size: 12.5px; }
@@ -1326,11 +1256,12 @@ table.qgrid td { padding: 0; }
 .flags .warn1.info { color: var(--grey); }
 .flags .warn1 .code { flex: 0 0 13em; overflow-wrap: break-word; }
 .flags .warn1 > span:last-child { min-width: 0; }
-/* The folder, whole. Long names are real and must not truncate (§1). */
+/* Long folder names wrap and remain fully selectable for identification and
+   copying (`docs/ui-rules.md` section 1). */
 .path { margin: 0; font-size: 11px; overflow-wrap: anywhere; user-select: all; }
 .rchart { border-top: 1px solid var(--rule); padding-top: 6px; }
 
-/* -- the rig tab (R3·4): the chain beside one shot at three scales --------- */
+/* The rig view keeps the measurement chain beside shot timing at three scales. */
 .rig {
   display: grid;
   grid-template-columns: minmax(0, 940px) minmax(0, 1fr);
@@ -1345,10 +1276,9 @@ table.qgrid td { padding: 0; }
 .rig .cs .accent { color: var(--accent-dark); font-family: var(--font-num); }
 .rig-readback .card { margin: 0; }
 
-/* -- the power panel --------------------------------------------------------
-   The 1918-C under the rail on every tab: the switch that keeps the monitor
-   running in the service, the reading, the statistics over the window, and
-   the trace. Shell furniture like the run monitor, in the rail's register. */
+/* The power panel stays below the rail on every tab so the operator can follow
+   the 1918-C reading during other work. The switch controls service polling; the
+   reading, statistics and trace stay together. */
 .power {
   display: flex; flex-direction: column;
   border-bottom: 1px solid var(--rule);
@@ -1389,13 +1319,13 @@ table.qgrid td { padding: 0; }
 .pw-value.warn { color: var(--warn); }
 .pw-value.stale, .pw-value.off { color: var(--grey); }
 .pw-sub { color: var(--grey); font-size: 10.5px; }
-/* Off: one quiet line — the switch and the last spot check, muted. The rail's
-   cell already carries the number; this is only where it is switched on. */
+/* When monitoring is off, a muted row keeps the switch and last spot reading
+   available without competing with the rail reading. */
 .power.off .pw-row { padding: 2px 12px; }
 .power.off .pw-value { font-size: 12px; font-weight: 400; color: var(--grey); letter-spacing: 0; }
 .power.off .pw-switch { color: var(--grey); }
-/* The fold: the trace away without the monitor off. Beside the `⋯`, in its
-   register — the switch is about the bench, this is about the screen. */
+/* The trace fold changes the view independently of the monitor switch. Folding
+   keeps polling and the numeric reading active (`docs/ui-rules.md` section 14). */
 .pw-fold {
   display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
   background: none; border: 1px solid transparent; padding: 2px 6px;
@@ -1405,7 +1335,8 @@ table.qgrid td { padding: 0; }
 .pw-fold:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .pw-fold.open { color: var(--ink); }
 .pw-caret { font-size: 11px; width: 1em; text-align: center; line-height: 1; }
-/* The `⋯` menu: everything touched less than once a session. */
+/* The menu groups infrequent power controls so the switch, reading and trace
+   remain accessible (`docs/ui-rules.md` section 14). */
 .pw-menu { position: relative; }
 .pw-menu summary {
   list-style: none; cursor: pointer; color: var(--grey); font-size: 14px; line-height: 1;
@@ -1434,16 +1365,15 @@ table.qgrid td { padding: 0; }
 .pw-chart .chart-svg { max-height: 210px; }
 .pw-chart .chart-readout { min-height: 13px; }
 
-/* -- the assistant: a panel beside every tab, from the bar's `ask` chip ----
-   Over the view rather than beside it, so opening it moves nothing the
-   operator is reading; the rail and the strip stay where they were. */
+/* The assistant overlays the view so opening it does not move the content being
+   read. The rail and chain strip retain their positions. */
 button.chip.ask { background: none; cursor: pointer; font: inherit; font-family: var(--font-num); font-size: 11px; }
 button.chip.ask:hover { border-color: #fff; color: #fff; }
 button.chip.ask.on { background: #fff; border-color: #fff; color: var(--ink); }
 button.chip.quit { background: none; cursor: pointer; font: inherit; font-family: var(--font-num); font-size: 11px; }
 button.chip.quit:hover { border-color: #fff; color: #fff; }
 button.chip.quit.armed { background: var(--warn); border-color: var(--warn); color: #fff; }
-/* What the window shows once the service has ended. */
+/* The ended-service screen keeps the terminal state visible in the browser. */
 .ended { max-width: 60ch; margin: 18vh auto 0; padding: 0 16px; }
 .ended .wordmark { font-size: 15px; text-transform: uppercase; letter-spacing: .02em; color: var(--grey); }
 .ended h1 { font-size: 20px; margin: 8px 0 12px; }
