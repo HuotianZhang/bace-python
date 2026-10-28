@@ -17,6 +17,11 @@ symptom in the data. `--host` is refused unless it is a loopback address:
 there is no authentication, and that is acceptable only where nobody but
 this machine can connect.
 
+One service owns the instruments: the port is bound before the session is
+built, so a second service on it exits (3) before it opens anything. The
+process ends on Ctrl-C or on `POST /service/shutdown`; either parks the bench.
+`bace.launcher` starts this without a window for the operator.
+
 `pyvisa` is imported only by `Bench.build_real`, so `--sim` works on a
 machine with no VISA backend, and a real bench with no VISA runtime comes up
 with its four VISA roles marked unavailable rather than not at all;
@@ -28,6 +33,7 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import os
+import socket
 import sys
 from typing import Any, Callable
 
@@ -48,6 +54,10 @@ on the bench to anyone on it."""
 
 DEFAULT_PORT = 8900
 
+GRACEFUL_SHUTDOWN_S = 5.0
+"""How long an exit waits for open requests: a WebSocket or an assistant
+answer streams until it is closed, and would otherwise hold the exit open."""
+
 SERVICE_EXTRA_HINT = ("the service needs the 'service' extra: pip install -e .[service] "
                       "(the lab PC needs the rig too: pip install -e .[lab])")
 
@@ -60,6 +70,39 @@ def is_loopback(host: str) -> bool:
         return ipaddress.ip_address(host.strip()).is_loopback
     except ValueError:
         return False
+
+
+def exclusive(sock: socket.socket) -> None:
+    """Make a bind fail while another socket listens on the port.
+
+    On Windows that takes `SO_EXCLUSIVEADDRUSE`: there `SO_REUSEADDR`, which
+    uvicorn's own socket sets, lets a second process bind a port in use.
+    Elsewhere `SO_REUSEADDR` only allows a restart over connections left in
+    TIME_WAIT, and a listener still refuses the bind.
+    """
+    if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+    else:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+
+def listen_socket(host: str, port: int) -> socket.socket:
+    """The service's listening socket, bound exclusively before the bench is built.
+
+    One process owns the instruments. Binding first makes a second service
+    fail here, before it opens a VISA resource or resets the digitiser, and
+    listening at once queues a client's connection until uvicorn serves it.
+    """
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    sock = socket.socket(family, socket.SOCK_STREAM)
+    try:
+        exclusive(sock)
+        sock.bind((host, port))
+        sock.listen(64)
+    except OSError:
+        sock.close()
+        raise
+    return sock
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -183,12 +226,26 @@ def main(argv: list[str] | None = None) -> int:
               "if the console must be reached from elsewhere.")
         return 2
     try:
+        sock = listen_socket(a.host, a.port)
+    except OSError as exc:
+        print(f"port {a.port} on {a.host} is in use ({exc.strerror or exc}): another "
+              f"service, or another program, holds it. Nothing was opened.")
+        return 3
+    try:
         session = build_session(a)
     except ConfigError as exc:
+        sock.close()
         print(f"config: {exc}")
         return 2
 
-    app = create_app(session, ui_dir=a.ui)
+    server: uvicorn.Server | None = None
+
+    def request_exit() -> None:
+        server.should_exit = True
+
+    app = create_app(session, ui_dir=a.ui, request_exit=request_exit)
+    server = uvicorn.Server(uvicorn.Config(app, log_level="info",
+                                           timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_S))
     url = f"http://{a.host}:{a.port}/"
     print(f"bace service  {session.mode}{' fast' if session.fast else ''}  "
           f"session {session.session_id}")
@@ -202,7 +259,7 @@ def main(argv: list[str] | None = None) -> int:
     for write in session.bench.startup_writes:
         print(f"  startup write  {write}")
     sys.stdout.flush()
-    uvicorn.run(app, host=a.host, port=a.port, log_level="info")
+    server.run(sockets=[sock])
     return 0
 
 

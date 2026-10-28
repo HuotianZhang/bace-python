@@ -32,6 +32,9 @@ py -3 -m bace.service --rig rig.toml --run run.toml
 
 Or double-click `scripts\Run Service.bat` / `scripts\Run Service (sim).bat`;
 each `cd`s to the repo root first so `rig.toml` and `run.toml` are found by name.
+The operator's entry point is `BACE.pyw` at the root (`bace/launcher.py`): it
+starts the service without a window, logging to `runs/logs/`, unless one
+already answers on the port, and opens the console.
 
 | flag | default | what |
 |---|---|---|
@@ -63,9 +66,11 @@ three instrument writes the assembly makes (the scope's default setup, the
 1918-C's units and wavelength) are printed as `startup write` lines
 and listed in the journal's `SessionStarted` header; nothing else writes to an
 instrument outside a run or a by-hand action. `GET /` lists every route with a
-one-line description; `/docs` is FastAPI's interactive page. Ctrl-C aborts the
-job in flight, waits for the worker thread to end, parks the bench (outputs
-off, shutter shut) and closes the journal.
+one-line description; `/docs` is FastAPI's interactive page. Ctrl-C, or
+`POST /service/shutdown` (the console's `shut down`), aborts the job in
+flight, waits for the worker thread to end, parks the bench (outputs off,
+shutter shut) and closes the journal. The port is bound before the bench is
+built, so a second service on it exits before it opens an instrument.
 
 On the real rig the bench card is **read, not remembered**: every output
 state, the 81150A's polarity and both generators' levels and frequency are

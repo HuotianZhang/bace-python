@@ -1,6 +1,8 @@
 @echo off
-REM The BACE service and its console: open http://127.0.0.1:8900/ in a browser
-REM once this window says the service is running.
+REM The BACE service and its console in a terminal, for diagnosis: open
+REM http://127.0.0.1:8900/ in a browser once this window says the service is
+REM running. Operators start it with BACE.pyw in the repository root, which
+REM runs the same command without a window and opens the console.
 REM
 REM WHAT IT DOES
 REM     Loads rig.toml and run.toml from the repo root, opens the journal
@@ -23,8 +25,8 @@ REM        programs on one instrument read each other's replies.
 REM     3. The manual, docs\manual\1.3-first-measurement.md, walks through
 REM        a first measurement.
 REM
-REM Leave this window open. Ctrl-C aborts any active run, parks the bench
-REM and closes the journal. The HTTP routes are listed at
+REM Leave this window open. Ctrl-C, or shut down in the console, aborts any
+REM active run, parks the bench and closes the journal. The HTTP routes are listed at
 REM http://127.0.0.1:8900/docs.
 
 setlocal

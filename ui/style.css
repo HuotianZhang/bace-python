@@ -1440,6 +1440,13 @@ table.qgrid td { padding: 0; }
 button.chip.ask { background: none; cursor: pointer; font: inherit; font-family: var(--font-num); font-size: 11px; }
 button.chip.ask:hover { border-color: #fff; color: #fff; }
 button.chip.ask.on { background: #fff; border-color: #fff; color: var(--ink); }
+button.chip.quit { background: none; cursor: pointer; font: inherit; font-family: var(--font-num); font-size: 11px; }
+button.chip.quit:hover { border-color: #fff; color: #fff; }
+button.chip.quit.armed { background: var(--warn); border-color: var(--warn); color: #fff; }
+/* What the window shows once the service has ended. */
+.ended { max-width: 60ch; margin: 18vh auto 0; padding: 0 16px; }
+.ended .wordmark { font-size: 15px; text-transform: uppercase; letter-spacing: .02em; color: var(--grey); }
+.ended h1 { font-size: 20px; margin: 8px 0 12px; }
 .assistant {
   position: fixed; top: var(--tabs-height); right: 0; bottom: 0; width: 460px; z-index: 30;
   display: flex; flex-direction: column;

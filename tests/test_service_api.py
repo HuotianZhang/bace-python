@@ -1273,6 +1273,27 @@ def test_shutdown_parks_the_bench_and_closes_the_journal(tmp_path):
     assert session.errors == []
 
 
+def test_the_shutdown_route_refuses_a_run_it_was_not_told_about(tmp_path):
+    session = make_session(tmp_path, sid="20260902_220004")
+    with TestClient(create_app(session)) as client:
+        r = client.post("/service/shutdown")
+        assert r.status_code == 409 and "not started by" in r.json()["error"]
+
+    exits: list[int] = []
+    session = make_session(tmp_path, sid="20260902_220005")
+    with TestClient(create_app(session, request_exit=lambda: exits.append(1))) as client:
+        run_id = client.post("/pipelines", json={"tree": temperature_tree(bace(1, voc=0.9))}).json()["run_id"]
+        wait_until(lambda: client.get(f"/runs/{run_id}").json()["state"] == "paused")
+        r = client.post("/service/shutdown", json={})
+        assert r.status_code == 409 and r.json()["run"] == run_id and exits == []
+        assert client.post("/service/shutdown", json={"force": "yes please"}).status_code == 422
+        r = client.post("/service/shutdown", json={"force": True})
+        assert r.status_code == 202 and r.json() == {"shutting_down": True, "aborts": run_id}
+        wait_until(lambda: exits == [1])
+    assert session.run_record(run_id)["state"] == "aborted"
+    assert not session.bench.sim.bench.bias_output
+
+
 # -- the CLI --------------------------------------------------------------------------------------
 def _free_port() -> int:
     with socket.socket() as s:
@@ -1322,6 +1343,45 @@ def test_python_m_bace_service_sim_fast_starts_and_answers(tmp_path):
             proc.wait(10)
         except subprocess.TimeoutExpired:
             proc.kill()
+
+
+def test_one_service_per_port_and_the_console_ends_it(tmp_path):
+    """A second service on the port stops before it builds a bench; the
+    shutdown route ends the first, which exits cleanly."""
+    pytest.importorskip("uvicorn")
+    port = _free_port()
+    first = subprocess.Popen(
+        [sys.executable, "-m", "bace.service", "--sim", "--fast", "--port", str(port),
+         "--out", str(tmp_path / "first")],
+        cwd=str(REPO), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        deadline = time.monotonic() + 30.0
+        while True:
+            assert first.poll() is None, first.stdout.read()
+            assert time.monotonic() < deadline, "the service did not answer within 30 s"
+            try:
+                _get(f"http://127.0.0.1:{port}/session")
+                break
+            except (urllib.error.URLError, ConnectionError, OSError):
+                time.sleep(0.2)
+
+        second = subprocess.run(
+            [sys.executable, "-m", "bace.service", "--sim", "--fast", "--port", str(port),
+             "--out", str(tmp_path / "second")],
+            cwd=str(REPO), capture_output=True, text=True, timeout=60)
+        assert second.returncode == 3 and "in use" in second.stdout
+        assert not (tmp_path / "second").exists(), "refused before a journal was opened"
+
+        request = urllib.request.Request(f"http://127.0.0.1:{port}/service/shutdown",
+                                         data=b"{}", method="POST",
+                                         headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(request, timeout=5) as r:
+            assert r.status == 202 and json.loads(r.read())["shutting_down"] is True
+        assert first.wait(30) == 0
+    finally:
+        if first.poll() is None:
+            first.kill()
+            first.wait(10)
 
 
 def test_the_cli_builds_a_sim_session_without_pyvisa_and_refuses_fast_on_the_rig(tmp_path, monkeypatch):

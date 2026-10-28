@@ -45,7 +45,7 @@ import os
 import re
 import time
 from contextlib import asynccontextmanager
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from fastapi import Body, FastAPI, Header, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
@@ -95,6 +95,13 @@ class StopRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     mode: Literal["after_shot", "abort"] = StopMode.AFTER_SHOT
+
+
+class ShutdownRequest(BaseModel):
+    """`POST /service/shutdown`: `force` ends a run that holds the bench."""
+
+    model_config = ConfigDict(extra="forbid")
+    force: bool = False
 
 
 class ResumeRequest(BaseModel):
@@ -341,14 +348,17 @@ def _stem(name: str) -> str:
 
 # -- the app ---------------------------------------------------------------------
 def create_app(session: Session, *, ui_dir: str | None = None,
-               read_back_at_start: bool = True) -> FastAPI:
+               read_back_at_start: bool = True,
+               request_exit: Callable[[], None] | None = None) -> FastAPI:
     """Every route of contract sections 4-8 over `session`.
 
     `ui_dir` mounts a static front end at `/ui` and makes `/` redirect to
     it; without it `/` is a JSON index of the routes. `read_back_at_start`
     runs one read-back job in the startup hook so the bench card is not
     blank until someone clicks; a test that wants the untouched stream can
-    turn it off.
+    turn it off. `request_exit` ends the server that runs the app; without it
+    `POST /service/shutdown` is refused, since nothing here can stop the
+    process.
     """
     if ui_dir is not None and not os.path.isdir(ui_dir):
         raise ValueError(f"--ui: {ui_dir!r} is not a directory")
@@ -399,6 +409,25 @@ def create_app(session: Session, *, ui_dir: str | None = None,
             return session.set_sample(values)
         except ValueError as exc:
             return _error(422, str(exc), param="sample", accepted=sorted(SAMPLE_KEYS))
+
+    @app.post("/service/shutdown", status_code=202)
+    async def shutdown(body: ShutdownRequest | None = Body(default=None)):
+        """End the service: abort any run, park the bench, close the journal, exit.
+
+        A run holding or waiting for the bench is refused unless `force` is
+        set, so a client that did not see the run cannot end it. The exit
+        follows the answer: the server stops accepting, and the lifespan's
+        shutdown parks the bench as Ctrl-C does.
+        """
+        if request_exit is None:
+            return _error(409, "this service was not started by `python -m bace.service`; "
+                               "stop it where it was started")
+        active = session.run_active()
+        if active is not None and not (body and body.force):
+            return _error(409, f"run {active} holds the bench; shutting down aborts it and "
+                               "cancels the queue. Repeat with force to do so.", run=active)
+        asyncio.get_running_loop().call_soon(request_exit)
+        return {"shutting_down": True, "aborts": active}
 
     # -- /bench --------------------------------------------------------------
     @app.get("/bench")
