@@ -13,10 +13,10 @@ REM
 REM --fast is refused without --sim. On the real rig it would measure before
 REM the device has settled, with no symptom in the data.
 REM
-REM Ctrl-C to stop. http://127.0.0.1:8900/ lists the routes.
+REM Open http://127.0.0.1:8900/ for the console. Ctrl-C to stop.
 
 setlocal
 cd /d "%~dp0.."
-py -3 -m bace.service --sim --fast
+py -3 -m bace.service --sim --fast --ui ui
 echo.
 pause
