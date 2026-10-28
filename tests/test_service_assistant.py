@@ -159,6 +159,27 @@ def test_a_refusal_ends_the_turn_without_running_its_tools(service, fake):
     assert not any(f["type"] == "tool" for f in frames) and len(model.sent) == 1
 
 
+def test_a_text_answer_cut_off_at_max_tokens_is_an_error_and_not_kept(service, fake):
+    client, _ = service
+    fake(turn(text("The first half of"), stop="max_tokens"))
+    frames = ask(client, "explain everything")
+    assert frames[-1]["type"] == "error" and "ran out of room" in frames[-1]["message"]
+    model = fake(turn(text("short")))
+    ask(client, "again", conversation=frames[0]["id"])
+    assert [m["role"] for m in model.sent[0]["messages"]] == ["user"]
+
+
+def test_the_run_index_comes_in_pages_newest_first(service, monkeypatch):
+    _, session = service
+    runs = [{"run_id": f"r{i:03d}"} for i in range(100)]
+    monkeypatch.setattr(session, "runs_index", lambda scope="this": runs)
+    out = json.loads(assistant.run_tool(session, "list_runs", {}))
+    assert out["total"] == 100 and len(out["runs"]) == 20
+    assert out["runs"][0]["run_id"] == "r099"
+    out = json.loads(assistant.run_tool(session, "list_runs", {"limit": 1000, "offset": 90}))
+    assert [r["run_id"] for r in out["runs"]] == [f"r{i:03d}" for i in range(9, -1, -1)]
+
+
 def test_the_dry_run_does_not_replace_the_tree_the_pipeline_tab_reopens(service):
     _, session = service
     tree = {"kind": "module", "module": "voc"}

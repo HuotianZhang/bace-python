@@ -172,9 +172,11 @@ TOOLS = [
     _tool("get_module", "One module's full entry, including each parameter's long doc.",
           {"name": {"type": "string", "description": "module name, e.g. bace, jv, voc"}},
           ("name",)),
-    _tool("list_runs", "The run index from the journal, newest last.",
+    _tool("list_runs", "The run index from the journal, a page at a time, newest first.",
           {"scope": {"type": "string", "enum": ["this", "all"],
-                     "description": "this session (default) or every session"}}),
+                     "description": "this session (default) or every session"},
+           "limit": {"type": "integer", "description": f"how many, default 20, at most {LIST_LIMIT}"},
+           "offset": {"type": "integer", "description": "how many of the newest to skip, default 0"}}),
     _tool("get_run", "One run's record: tree, schedule, parameters as executed, node "
           "outcomes and verdicts, folders.",
           {"run_id": {"type": "string"}}, ("run_id",)),
@@ -267,7 +269,13 @@ def run_tool(session, name: str, args: Mapping[str, Any]) -> str:
     if name == "get_module":
         return _render(session.module_wire(args["name"]))
     if name == "list_runs":
-        return _render(session.runs_index(args.get("scope", "this")))
+        # Paged before `compact` sees it: a journal of more than LIST_LIMIT
+        # runs would otherwise come back as its length and nothing else.
+        runs = session.runs_index(args.get("scope", "this"))
+        limit = max(1, min(int(args.get("limit", 20)), LIST_LIMIT))
+        offset = max(0, int(args.get("offset", 0)))
+        page = list(reversed(runs))[offset:offset + limit]
+        return _render({"total": len(runs), "offset": offset, "runs": page})
     if name == "get_run":
         return _render(session.run_record(args["run_id"]))
     if name == "get_events":
@@ -383,11 +391,13 @@ async def chat(session, conversations: Conversations, *, key: str, text: str,
             stop = response.stop_reason
             turn.append({"role": "assistant", "content": response.content})
             tool_uses = [b for b in response.content if b.type == "tool_use"]
-            if stop == "refusal" or not tool_uses:
-                break
             if stop == "max_tokens":
+                # Before the text-only exit: a cut-off answer is not kept as if
+                # it were whole, and a cut-off tool input is not run.
                 yield {"type": "error", "message": "the answer ran out of room mid-way; ask a narrower question"}
                 return
+            if stop == "refusal" or not tool_uses:
+                break
             rounds += 1
             if rounds > MAX_TOOL_ROUNDS:
                 yield {"type": "error", "message": f"stopped after {MAX_TOOL_ROUNDS} rounds of reading"}
