@@ -48,3 +48,15 @@ def test_the_book_holds_every_chapter_and_its_links_resolve():
     targets = re.findall(r'href="#([^"]+)"', page)
     assert targets and all(t in ids for t in targets)
     assert "**" not in re.sub(r"<pre>.*?</pre>|<code>.*?</code>", "", page, flags=re.S)
+
+
+def test_every_figure_exists_and_is_embedded_in_the_book():
+    tool = _tool()
+    manual = REPO / "docs" / "manual"
+    paths = [p for name in tool.chapters()
+             for p in tool.figures((manual / name).read_text(encoding="utf-8"))]
+    for path in paths:
+        assert (manual / path).is_file(), path
+    page = tool.book()
+    assert page.count("<figure>") == len(paths)
+    assert page.count('src="data:image/') == len(paths)
