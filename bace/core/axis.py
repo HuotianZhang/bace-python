@@ -1,26 +1,16 @@
-"""The swept axis, as a parameter.
+"""Scan axes specify which bias condition varies between points.
 
-One shot is `(V_pre, V_coll, t_delay, illumination) -> transient`. A run is
-that shot repeated along **one** axis while the other two are pinned. Which
-axis is swept *is* the choice of experiment:
+One shot records a light trace and a dark trace at V_pre, V_coll and a delay.
+A loop visits every point on one axis while the other conditions stay constant:
 
-    Axis("vpre",     ...)   carrier density vs bias   -- BACE
-    Axis("delay_ns", ...)   recombination kinetics    -- TDCF
-    Axis("vcoll",    ...)   field dependence of extraction
+    Axis("vpre", ...)       Q against V_pre, for BACE
+    Axis("delay_ns", ...)   Q against delay, for recombination kinetics
+    Axis("vcoll", ...)      Q against V_coll, for field dependence
 
-The original had this generalisation half-built: `calcLoopParameters` computes
-`Vcoll1Loop` and `Delay1Loop` as per-step arrays, one entry per sweep point,
-and then fills both with a constant (`Vpre1Loop*0 + Vcoll`). No VI in the
-folder ever gave them a value. Making the axis a parameter finishes that work
-rather than adding a feature.
-
-**Repeats are loops, not axis points.** "Q at V_oc, three times" is a
-zero-width axis with three loops, not a three-point sweep around V_oc. The
-original did the latter, and averaging three points that straddle V_oc buys a
-curvature bias in Q(V) for nothing. Both spellings are available here and they
-run the same code path; the zero-width one is the honest way to say "repeat".
-
-Nothing in this module knows about instruments.
+Repeated shots at V_oc use a zero-width axis and multiple loops. Averaging
+points on either side of V_oc introduces curvature bias in Q(V_pre).
+The three-point axis also supports exact reproduction of LabVIEW runs.
+This module has no instrument dependencies.
 """
 from __future__ import annotations
 
@@ -36,15 +26,12 @@ UNITS: dict[str, str] = {"vpre": "V", "vcoll": "V", "delay_ns": "ns"}
 
 
 def voc_flags(values: Mapping[str, Any]) -> tuple[bool, bool]:
-    """`(centre_on_voc, vpre_on_voc)` **as they apply** to `axis_name`.
+    """Returns the V_oc flags that apply to `axis_name`.
 
-    The two are one decision, and the axis decides which: `centre_on_voc`
-    belongs to a swept `vpre`, `vpre_on_voc` to a pinned one. The console
-    shows whichever applies and hides the other -- so a flag left `true`
-    behind a hidden field, after the axis was switched, is not a request. It
-    was refused as one (`Axis` raised on `centre_on_voc` under `delay_ns`),
-    which disabled Shot and Scan with no field on screen to clear. Read the
-    flags through this and the stale one is simply inert.
+    `centre_on_voc` applies to swept V_pre; `vpre_on_voc` applies to constant
+    V_pre. The console displays only the applicable flag. Ignoring the hidden
+    flag prevents an axis change from disabling Shot and Scan with no visible
+    field to clear.
     """
     swept_vpre = values.get("axis_name") == "vpre"
     centre = bool(values.get("centre_on_voc", False)) and swept_vpre
@@ -57,14 +44,14 @@ class AxisError(ValueError):
 
 @dataclass(frozen=True)
 class Axis:
-    """A one-dimensional sweep specification.
+    """A one-dimensional scan specification with limits and point spacing.
 
-    `step` is the *spacing*; the point count follows from the span. A zero-width
-    axis (`start == stop`) is one point and ignores `step`.
+    `start`, `stop` and `step` use V for V_pre and V_coll, or ns for delay.
+    `step` sets the spacing used to calculate the point count. A zero-width
+    axis (`start == stop`) contains one point and ignores `step`.
 
-    `centre_on_voc` makes `start`/`stop` offsets relative to a V_oc that is not
-    known until it has been measured under the illumination in force. Only
-    meaningful for `vpre`.
+    `centre_on_voc` makes `start` and `stop` offsets from V_oc measured under
+    the run's illumination. It applies only to `vpre`.
     """
 
     name: AxisName
@@ -90,7 +77,7 @@ class Axis:
     # -- geometry ---------------------------------------------------------
     @property
     def is_point(self) -> bool:
-        """True if this axis is a single setpoint — i.e. a repeat, not a sweep."""
+        """Returns whether the axis contains one point for repeated shots."""
         return self.start == self.stop
 
     @property
@@ -104,11 +91,10 @@ class Axis:
         return UNITS[self.name]
 
     def resolve(self, voc: float | None = None) -> "Axis":
-        """Return this axis with `centre_on_voc` folded into absolute limits.
+        """Returns an axis with absolute limits, resolving V_oc offsets.
 
-        Raises if the axis needs a V_oc and none was supplied — the failure that
-        would otherwise centre a whole sweep on zero and produce a plausible,
-        wrong Q(V).
+        A V_oc-centred axis requires `voc` in V. Missing V_oc raises `AxisError`;
+        centring on zero instead would produce a plausible but incorrect Q(V_pre).
         """
         if not self.centre_on_voc:
             return self
@@ -122,12 +108,12 @@ class Axis:
                        centre_on_voc=False)
 
     def values(self, voc: float | None = None) -> np.ndarray:
-        """The setpoints along this axis, in sweep order.
+        """Returns the points in scan order, in the axis unit.
 
-        The point count is rounded, not truncated. LabVIEW's
-        `N = abs(a-b)/dV + 1` truncated, and floating-point V_oc values push
-        that ratio just under the integer often enough to matter (23 % of V_oc
-        values at dV = 5 mV), silently dropping the last point.
+        Rounding the point count preserves the last point when floating-point
+        arithmetic puts the span-to-spacing ratio just below an integer.
+        Truncation drops that point for 23 % of V_oc values at 5 mV spacing,
+        as measured on this bench.
         """
         a = self.resolve(voc)
         if a.is_point:
@@ -144,11 +130,11 @@ class Axis:
 
 @dataclass(frozen=True)
 class Setpoint:
-    """One shot's worth of bias conditions. All three always have a value."""
+    """The V_pre and V_coll in V, and delay in ns, for one shot."""
 
     vpre: float          # V at the device
     vcoll: float         # V at the device
-    delay_ns: float      # ns after the LED falling edge, before the offset
+    delay_ns: float      # ns after the LED drive edge, excluding field latency
 
     def as_dict(self) -> dict[str, float]:
         return {"vpre": self.vpre, "vcoll": self.vcoll, "delay_ns": self.delay_ns}
@@ -156,26 +142,25 @@ class Setpoint:
 
 @dataclass(frozen=True)
 class ScanStep:
-    """A setpoint together with where it sits in the run."""
+    """A shot setpoint with its run index, loop and point position."""
 
-    index: int           # 0-based position in the flattened run
+    index: int           # 0-based shot position in the run
     loop: int            # 1-based loop number
-    step: int            # 1-based position within one loop
+    step: int            # 1-based point position within a loop
     setpoint: Setpoint
 
 
 @dataclass(frozen=True)
 class ScanPlan:
-    """A resolved run: the axis values, the pinned conditions, and the loops.
+    """A resolved axis, constant conditions and loop count for a run.
 
-    Flattened loop-major, matching the original engine: all steps of loop 1,
-    then all steps of loop 2, and so on. That ordering is what lets a running
-    average update after every single acquisition instead of at the end.
+    Iteration visits every point of loop 1, then every point of loop 2.
+    This order lets the running average update after each shot.
     """
 
-    axis: Axis                 # already resolved (no centre_on_voc)
-    values: np.ndarray         # (n_steps,) the swept quantity
-    setpoints: tuple[Setpoint, ...]   # (n_steps,) one loop's worth
+    axis: Axis                 # resolved; `centre_on_voc` is false
+    values: np.ndarray         # `(n_steps,)` axis values
+    setpoints: tuple[Setpoint, ...]   # `(n_steps,)` setpoints for one loop
     n_loops: int
 
     @property
@@ -194,7 +179,7 @@ class ScanPlan:
                 i += 1
 
     def value_of(self, step: int) -> float:
-        """The swept quantity at 1-based position `step` within a loop."""
+        """Returns the axis value at the 1-based point position `step`."""
         return float(self.values[step - 1])
 
     def describe(self) -> str:
@@ -206,9 +191,10 @@ class ScanPlan:
 
 @dataclass(frozen=True)
 class ScanSpec:
-    """What the user asks for: one axis, the pinned values, and a loop count.
+    """A requested axis, constant bias conditions and loop count.
 
-    The pinned value for the swept quantity is ignored — the axis supplies it.
+    V_pre and V_coll are in V; delay is in ns. The axis supplies the swept
+    quantity, so its constant value is ignored.
     """
 
     axis: Axis
@@ -236,38 +222,37 @@ class ScanSpec:
 
 # -- ready-made axes ------------------------------------------------------
 def bace_at_voc(n_loops: int = 3) -> ScanSpec:
-    """Q at V_oc, repeated. The zero-width axis: no curvature bias."""
+    """Returns repeated shots at V_oc without curvature bias in Q."""
     return ScanSpec(axis=Axis("vpre", 0.0, 0.0, centre_on_voc=True), n_loops=n_loops)
 
 
 def bace_legacy_three_point(dv: float = 0.010, n_loops: int = 1) -> ScanSpec:
-    """The original's three prebias points straddling V_oc.
+    """Returns three V_pre points around V_oc, with `dv` in V.
 
-    Kept so archived runs can be reproduced exactly. For new work prefer
-    `bace_at_voc`, which repeats at V_oc instead of averaging across it.
+    This axis supports exact reproduction of LabVIEW runs. `bace_at_voc`
+    repeats at V_oc without the curvature bias of averaging across it.
     """
     return ScanSpec(axis=Axis("vpre", -dv, +dv, dv, centre_on_voc=True),
                     n_loops=n_loops)
 
 
 def bace_sweep(start: float, stop: float, step: float, n_loops: int = 1) -> ScanSpec:
-    """Q(V) over an absolute prebias range — e.g. 0 -> 1 V step 20 mV."""
+    """Returns a Q(V_pre) scan with absolute limits and spacing in V."""
     return ScanSpec(axis=Axis("vpre", start, stop, step), n_loops=n_loops)
 
 
 def tdcf_delay(start_ns: float, stop_ns: float, step_ns: float,
                vpre: float, n_loops: int = 1) -> ScanSpec:
-    """Charge vs delay after the LED falling edge."""
+    """Returns a delay scan in ns after the LED drive falling edge."""
     return ScanSpec(axis=Axis("delay_ns", start_ns, stop_ns, step_ns),
                     vpre=vpre, n_loops=n_loops)
 
 
 def field_dependence(start: float, stop: float, step: float,
                      vpre: float, n_loops: int = 1) -> ScanSpec:
-    """Charge vs collection field.
+    """Returns a V_coll scan with limits and spacing in V.
 
-    Note this axis changes the *swing* from point to point, so the dark
-    reference changes with it — which is correct, and is why the dark trace is
-    reacquired at every step rather than once per run.
+    The voltage change varies between points, so the dark reference must
+    change with it. Each point requires its own dark trace.
     """
     return ScanSpec(axis=Axis("vcoll", start, stop, step), vpre=vpre, n_loops=n_loops)

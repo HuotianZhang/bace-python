@@ -1,24 +1,15 @@
-"""LED drive levels, and the invariant that couples them to the V_oc measurement.
+"""LED drive levels keep the V_oc measurement and transient illumination equal.
 
-The LED is driven by a 33220A through a fixed-gain amplifier. Two modes are
-used within one intensity point, and the whole experiment depends on them
-agreeing:
+The 33220A drives the LED through an amplifier with constant gain. At one LED
+level, DC mode uses `:VOLT:OFFS` and pulse mode uses `:VOLT:HIGH` with the
+same value. Otherwise V_pre centres on V_oc at the wrong illumination and
+biases Q without an obvious symptom in the data.
 
-    V_oc measurement    FUNC:SHAP DC;   :VOLT:OFFS  <level>
-    transient           FUNC:SHAP PULSE; :FREQ 1000; :VOLT:HIGH <level>
-                                         :VOLT:LOW <sub-threshold>
-                                         FUNC:PULS:DCYC 50
-
-`level` must be the **same number** in both. The prebias for the transient is
-centred on the V_oc measured under DC at that level, so if the pulse high level
-ever drifts from the DC level, the sweep is centred on the wrong V_oc and every
-extracted charge is biased — silently, with no symptom in the data.
-
-There is no duty-cycle dimming to correct for: the low level sits below the
-LED's turn-on threshold (~1 V at the generator), so the diode is fully off, not
-dim. The on-phase intensity is therefore exactly the DC intensity, and the
-on-phase (1 ms at the rig's measured 500 Hz, 50 % duty) is long enough for the
-device to equilibrate at its light V_oc.
+The pulse low level stays below the LED threshold, about 1 V at the generator
+as measured on this bench. The LED is off during that phase, so the pulse high
+phase has the DC intensity without duty-cycle dimming. At the measured bench
+frequency of 500 Hz and 50 % duty, the 1 ms high phase allows equilibration
+at V_oc (manual 3.2, `docs/manual/3.2-correspondence.md` for pulse timing).
 """
 from __future__ import annotations
 
@@ -27,11 +18,12 @@ from dataclasses import dataclass
 DEFAULT_FREQUENCY_HZ = 1000.0
 DEFAULT_DUTY_PERCENT = 50.0
 DEFAULT_THRESHOLD_V = 1.0
-"""Approximate generator voltage at which the LED turns on. Rig-specific — it is
-the LED's turn-on threshold referred back through the fixed amplifier gain, and
-on this rig it sits around 1 V. Drive levels at the threshold are legitimate
-(the working point in use is exactly 1 V); only levels clearly below it are
-rejected."""
+"""The approximate LED turn-on voltage at the generator, in V.
+
+The LED threshold referred through the amplifier gain is about 1 V,
+measured on this bench. Levels at the threshold remain valid, including
+the 1 V working level; only lower levels are rejected.
+"""
 
 
 class IlluminationError(ValueError):
@@ -40,10 +32,12 @@ class IlluminationError(ValueError):
 
 @dataclass(frozen=True)
 class LedDrive:
-    """One illumination point, in volts at the 33220A output.
+    """An LED level in V at the 33220A output, with pulse timing and threshold.
 
-    `level` is the drive that defines this point; it is used unchanged for both
-    the DC V_oc measurement and the high level of the pulse.
+    `level` supplies both the DC V_oc measurement and pulse high level.
+    `low_level` and `threshold_v` are in V, `frequency_hz` in Hz and
+    `duty_percent` in %. The low level must be below the threshold and high
+    level. The high level must reach the threshold.
     """
 
     level: float
@@ -72,23 +66,20 @@ class LedDrive:
         if not 0.0 < self.duty_percent < 100.0:
             raise IlluminationError(f"duty cycle {self.duty_percent} % out of range")
         if self.frequency_hz <= 0.0:
-            # Not a pulse frequency the 33220A accepts, and `period()` is
-            # `1 / frequency_hz`. Refused here rather than at the one caller,
-            # because everything that pulses the LED builds one of these --
-            # the `light` node, the `set-led-pulse` bench action and the
-            # validator alike -- and a `:FREQ 0` the instrument ignores would
-            # leave the generator at its previous timing while the console
-            # reported the pulse as applied.
+            # The 33220A requires positive frequency; `period_s` also divides by it.
+            # Validation here covers the `light` module, `set-led-pulse` bench
+            # action and validator. An ignored `:FREQ 0` would leave the preceding
+            # timing active while the console reports the requested pulse.
             raise IlluminationError(
                 f"pulse frequency {self.frequency_hz} Hz must be above zero")
 
     # -- the two generator states ----------------------------------------
     def dc_settings(self) -> dict[str, float | str]:
-        """For the V_oc / J_sc / J_sat measurement: steady illumination."""
+        """Returns steady illumination settings for V_oc and DC current measurements."""
         return {"shape": "DC", "offset": self.level}
 
     def pulse_settings(self) -> dict[str, float | str]:
-        """For the transient: on/off square at the same on-level."""
+        """Returns pulse settings with the same high level as the DC illumination."""
         return {
             "shape": "PULSE",
             "frequency": self.frequency_hz,
@@ -107,11 +98,10 @@ class LedDrive:
         return self.period_s * self.duty_percent / 100.0
 
     def check_equilibration(self, tau_s: float) -> None:
-        """Raise if the on-phase is too short for the device to reach light V_oc.
+        """Rejects a high phase shorter than five device settling times.
 
-        `tau_s` is the slowest relevant settling time of the device under
-        illumination. The prebias is only meaningful once the device has
-        equilibrated, so this is worth asserting rather than assuming.
+        `tau_s` is the slowest relevant device settling time under illumination,
+        in s. V_pre represents steady state only after the device equilibrates.
         """
         if self.on_time_s < 5.0 * tau_s:
             raise IlluminationError(
@@ -123,11 +113,11 @@ class LedDrive:
 
 
 def assert_axis_centre(drive: LedDrive, voc_measured_at: float) -> None:
-    """Guard the coupling: V_oc must have been measured at this drive level.
+    """Checks that V_oc uses the transient's LED drive level.
 
-    Call this where the prebias axis is built. It is the one check that catches
-    a stale V_oc — measured at a previous intensity, or at a DC level that no
-    longer matches the pulse high level.
+    `voc_measured_at` is the generator level in V during the V_oc measurement.
+    The axis must use V_oc at that illumination; a different DC or pulse high
+    level centres V_pre on the wrong value.
     """
     if abs(drive.level - voc_measured_at) > 1e-9:
         raise IlluminationError(

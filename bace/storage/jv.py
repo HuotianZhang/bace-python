@@ -1,27 +1,19 @@
-r"""J–V output: the flat files and an HDF5 alongside.
+r"""J–V runs have tabular `.dat` exports and a full-precision HDF5 file.
 
-The original wrote `BACE_JV_Data_<stamp>.dat` and
-`BACE_JV_Parameters_<stamp>.dat`, with the column names recovered from the block
-diagram (`Voltage`, `Current Density `, `LED Voltage`, `J_SC`, `V_OC`, `FF`).
-Those names are reused and the house format is the same as the BACE files —
-CRLF, tabs, `%10.5e` with an unpadded exponent, a `% ` header.
+The LabVIEW filenames `BACE_JV_Data_<stamp>.dat` and
+`BACE_JV_Parameters_<stamp>.dat` are retained. The format uses CRLF, tabs,
+`%10.5e` with an unpadded exponent and a `% ` header.
 
-Every density here is **mA/cm²** (`experiment.jv.current_density`), which is
-what the legacy series summary's `Jsc [mA/cm2]` column already was and what a
-J–V curve is read in. The columns say so in their own names — `J/mA cm-2`,
-`Jsc/mA cm-2` — so a file cannot be read in the wrong unit by someone who never
-saw this docstring.
+Every current density is in mA/cm², through `experiment.jv.current_density`.
+Column names such as `J/mA cm-2` and `Jsc/mA cm-2` state the unit so readers
+do not need this docstring to interpret a file.
 
-**Not byte-verified.** The BACE writer is checked against a real archive; this
-one is not, because no J–V output folder has been read. If byte-compatibility
-with the old J–V files matters, one sample pair is enough to pin it — the
-difference would be in header wording and column order, not in the numbers.
+Byte compatibility with LabVIEW J–V exports is unverified. Header wording and
+column order require a sample file pair for comparison; the shared number
+formatter is checked against BACE exports.
 
-The layout here is a small improvement on the original rather than a copy: the
-curve file carries one column block per curve, labelled with its illumination
-*and its sweep direction*, so a dark scan, a light scan and a hysteresis pair
-stay in the same file as one measurement instead of becoming three files whose
-relationship lives in someone's folder naming.
+Each curve occupies a column block labelled by illumination and scan direction.
+Dark, light and hysteresis curves therefore stay together as one measurement.
 """
 from __future__ import annotations
 
@@ -42,16 +34,22 @@ H_PARAMETERS = ("% LED Voltage/V ", "Voc/V", "Jsc/A", "Jsc/mA cm-2", "Pmax/W",
 
 
 FLUSH_S = 2.0
-"""How often, at most, the recorder rewrites its files while a sweep is in
-flight -- so a curve interrupted by a fault, a stop or a pulled plug is on
-disk to within this many seconds of the last point read."""
+"""The minimum interval in s between file rewrites during a curve.
+
+Each incoming point can trigger a flush after this interval. Periodic
+flushes limit data loss from a fault, stop or disconnection to the points
+acquired after the last flush.
+"""
 
 
 @dataclass
 class PartialCurve:
-    """The sweep in flight, accumulated from `JVPoint`s. Written the way a
-    curve is, labelled partial with how far it got, and with no metrics: a
-    V_oc interpolated on half a curve would be a number nobody measured."""
+    """A curve accumulated from `JVPoint` events while acquisition continues.
+
+    It is written with a partial label and point count, without metrics.
+    Interpolating V_oc from an incomplete curve can imply a measurement
+    the acquired range does not support.
+    """
 
     index: int
     label: str
@@ -86,12 +84,12 @@ class PartialCurve:
 
 
 def _label(curve) -> str:
-    """`dark fwd`, `1.02 V rev`, `as found unknown fwd`; a sweep in flight
-    adds `partial 12 of 36`.
+    """Returns a curve label with illumination, direction and partial point count.
 
-    `curve.dark is None` means the run never set the light and could not read
-    it either, so the curve carries the label `run_jv` built from the
-    read-back; only a curve known to be dark is renamed `dark`.
+    Examples are `dark fwd`, `1.02 V rev` and `as found unknown fwd`, with
+    `partial 12 of 36` for an unfinished curve. `curve.dark is None` retains
+    the read-back label from `experiment.jv.run_jv`; only a known dark curve
+    is labelled `dark`.
     """
     d = "fwd" if curve.direction == "forward" else "rev"
     tag = f"{'dark' if curve.dark else curve.label} {d}"
@@ -101,12 +99,11 @@ def _label(curve) -> str:
 
 
 def render_curves(curves) -> str:
-    """One header line naming each column, then one row per sweep point.
+    """Renders named curve columns with one row per scan point.
 
-    Curves may differ in length (a hysteresis pair does not, but a dark scan
-    over a different range might), so short columns are padded with NaN rather
-    than truncating everything to the shortest — losing measured points to make
-    a rectangle is the wrong trade.
+    Curves can have different voltage ranges or lengths. NaN padding preserves
+    all measured points; truncating to the shortest curve would discard data.
+    Voltage is in V, current in A and current density in mA/cm².
     """
     if not curves:
         return ""
@@ -164,34 +161,22 @@ class JVWriter:
 def write_hdf5(path: str, curves, *, metadata: dict, config: dict,
                rig_config: dict, resolved: dict | None = None,
                curve_states: list[dict] | None = None) -> str:
-    """One file per J–V run, with every curve as its own group.
+    """Writes every J–V curve as a group in one run file.
 
-    Dark and light live together because a dark curve is only interpretable
-    beside the light curve it belongs to, and hysteresis is only visible when
-    both directions are in the same place.
+    Dark and light curves stay together for comparison; both scan directions
+    are needed to assess hysteresis. `/config/resolved` and each curve's
+    `shutter` attribute retain read-back independently of requested settings.
+    These fields are available in schemas 2–4; other paths also support schema 1.
 
-    Schema `bace-jv/2` adds `/config/resolved` -- what the instruments
-    reported during the run, folded from `InstrumentState` events the same
-    way `bace-run/2` does it -- and a `shutter` attribute on every curve
-    group. A light J-V taken with the shutter shut is a dark J-V wearing a
-    light label, and until 2026-09-02 nothing in the file could say which it
-    was. Readers of `bace-jv/1` are unaffected: nothing moved.
+    Schemas 3–4 label illumination as `dark`, `light` or `unknown` using
+    `experiment.jv.illumination_state`. For `unknown`, `dark` is absent:
+    `False` would falsely claim known illumination. Access to an absent
+    attribute raises `KeyError`. Curves with controlled illumination retain
+    `dark`, including those from `jv_bace`.
 
-    `bace-jv/3` adds `illumination` on every curve group -- `dark`, `light` or
-    `unknown` -- for the `jv` module, which sweeps under whatever light it
-    finds and reads that back rather than setting it (`experiment.jv.
-    illumination_state`). On an `unknown` curve the `dark` attribute is
-    **absent**, not False: a reader that asks for it gets a KeyError, which is
-    loud, where a False would have been a dark label on a curve nobody read.
-    Every curve a run *set* the light for still carries `dark`, so files from
-    `jv_bace` are `bace-jv/2` in every respect but the version.
-
-    `bace-jv/4` is the unit: every `density` dataset is **mA/cm²**, where
-    `bace-jv/1`--`3` held A/cm². Nothing else moved, and that is exactly why
-    the version had to: the dataset keeps its name and its shape and changes
-    its meaning by a factor of a thousand, which is the one kind of change a
-    reader cannot notice. `unit` on the dataset says `mA cm-2`; a file whose
-    schema is `bace-jv/3` or lower says `A cm-2` and means it.
+    Schema 4 stores `density` in mA/cm² with unit `mA cm-2`. Schemas 1–3 use
+    A/cm² with unit `A cm-2`. Readers must check the schema or unit: identical
+    dataset names and shapes cannot reveal the factor of 1000 between them.
     """
     import h5py
 
@@ -215,18 +200,17 @@ def write_hdf5(path: str, curves, *, metadata: dict, config: dict,
             partial = bool(getattr(c, "partial", False))
             _set_attrs(sub, {
                 "label": c.label, "direction": c.direction,
-                # A sweep the run did not finish: the points it read, said
-                # to be that. `points_planned` is what the whole curve would
-                # have had; the datasets hold what there is.
+                # Partial curves keep every acquired point and identify the intended
+                # length through `points_planned`.
                 "partial": partial,
                 **({"points_planned": int(c.of)} if partial else {}),
                 "illumination": ("unknown" if dark is None
                                  else "dark" if dark else "light"),
-                # `dark` only when the run knows. See the schema note above:
-                # absent is the honest answer, False would be a claim.
+                # Unknown illumination requires an absent `dark` attribute;
+                # `False` would assert a known light curve.
                 **({} if dark is None else {"dark": bool(dark)}),
-                # "?" is honest: a rig without a shutter, or a run recorded
-                # before the shutter state was on the stream, cannot say.
+                # `"?"` preserves unknown state when no shutter or read-back event
+                # supplies evidence.
                 "shutter": state.get("shutter", "?"),
                 "led_level_v": "" if c.led_level_v is None else c.led_level_v,
                 "intensity_w": "" if c.intensity_w is None else c.intensity_w,
@@ -248,11 +232,10 @@ def write_hdf5(path: str, curves, *, metadata: dict, config: dict,
 
 @dataclass
 class JVRecorder:
-    """Accumulates a J–V run and writes it out.
+    """Accumulates J–V curves and write completed and partial data.
 
-    Same contract as `RunRecorder`: a listener, not a stage, and it flushes
-    whatever it has on any exit path — a series interrupted after the dark scan
-    still leaves the dark scan on disk.
+    Like `RunRecorder`, this is an event listener that flushes on every exit.
+    Interruption after a dark scan still preserves that scan on disk.
     """
 
     folder: str
@@ -261,20 +244,26 @@ class JVRecorder:
     rig_config: dict
     write_hdf5: bool = True
     resolved: dict = field(default_factory=dict)
-    """Instrument readbacks, folded from `InstrumentState` events -- the
-    shutter position before each curve, and anything a caller seeds here
-    (the 33220A polarity it verified before the run). Same idea as
-    `RunRecorder.resolved`: a *reading*, kept apart from the *settings*."""
+    """Instrument read-back accumulated from `InstrumentState` events.
+
+    This includes shutter position per curve and caller-supplied checks such
+    as 33220A polarity. As in `RunRecorder.resolved`, readings stay separate
+    from requested settings.
+    """
 
     curves: list = field(default_factory=list)
     partial: PartialCurve | None = None
-    """The sweep in flight, from its `JVPoint`s; None between curves. Written
-    with the finished curves whenever the files are flushed, and dropped the
-    moment its `JVCurveDone` arrives."""
+    """The active curve accumulated from `JVPoint` events, or `None`.
+
+    Flushes include it alongside completed curves. Its `JVCurveDone` event
+    replaces it with the completed curve.
+    """
     curve_states: list = field(default_factory=list)
-    """The `resolved` snapshot in force when each curve was taken, so a
-    file with a dark and a light curve says "shut" for one and "open" for
-    the other rather than only the last value."""
+    """The `resolved` snapshot for each completed curve.
+
+    Per-curve snapshots preserve different shutter states for dark and light
+    curves instead of applying the last state to both.
+    """
     written: list[str] = field(default_factory=list)
     _config: dict = field(default_factory=dict)
     _finished: bool = False
@@ -300,8 +289,8 @@ class JVRecorder:
                     index=ev.index, label=ev.label, dark=ev.dark,
                     led_level_v=ev.led_level_v, direction=ev.direction, of=int(ev.of))
             p.add(ev)
-            # On disk as it goes (2026-09-04): a fault on the fourth curve
-            # used to keep three and lose every point of the fourth.
+            # Periodic flushes preserve the active curve's points if a fault
+            # interrupts acquisition before its completion event.
             if time.monotonic() - self._flushed_at >= FLUSH_S:
                 self.flush()
         elif isinstance(ev, JVCurveDone):
@@ -317,9 +306,11 @@ class JVRecorder:
         return out
 
     def flush(self) -> list[str]:
-        """Rewrite the files with every finished curve and the one in
-        flight. Cheap -- a J-V file is tens of kilobytes -- and idempotent:
-        the same paths every time, so `written` names each once."""
+        """Rewrite files with all completed curves and the active partial curve.
+
+        J–V files occupy tens of kilobytes, so repeated rewrites are inexpensive.
+        Paths stay the same and `written` lists each path once.
+        """
         curves = self._all()
         if not curves:
             return self.written
@@ -348,7 +339,7 @@ class JVRecorder:
 
 
 def record(events, recorder: JVRecorder):
-    """Pass events through while recording them, flushing on any exit."""
+    """Yields each event unchanged while recording, and flush on every exit."""
     try:
         for ev in events:
             recorder.handle(ev)

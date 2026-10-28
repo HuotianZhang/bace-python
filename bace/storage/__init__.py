@@ -1,5 +1,4 @@
-"""Persistence: the modern store, the legacy export, and the recorder that
-drives both from the event stream."""
+"""Storage exports full-precision data, LabVIEW files and event recorders."""
 from .legacy_dat import LegacyWriter, read_matrix, read_table, find
 from .naming import RunMetadata
 from .numbers import lv_fixed, lv_float

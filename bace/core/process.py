@@ -1,12 +1,10 @@
-"""Transient processing: dark subtraction, baseline, averaging, charge.
+"""Transient processing subtracts dark traces and computes baseline and Q.
 
-Ported from the main processing MathScript node of TDCF-BACE_20160223.vi.
-Two details that matter for numerical agreement with the original:
-
-* the baseline is the mean of the **last 10 %** of the record
-  (`mean(PhotoC(time > T/10*9))`), not a fixed number of samples;
-* `std` in MathScript is the *sample* standard deviation, so `ddof=1` here.
-  NumPy's default `ddof=0` would give systematically smaller error bars.
+LabVIEW numerical compatibility requires the last 10 % baseline when no
+pre-trigger region is supplied, rectangular integration, and sample standard
+deviation (`ddof=1`). `tests/test_regression_20260807.py` checks the baseline
+and Q against the LabVIEW files. NumPy's default `ddof=0` gives smaller error
+bars.
 """
 from __future__ import annotations
 
@@ -17,64 +15,58 @@ import numpy as np
 
 def to_current(trace_volts: np.ndarray, resistor_ohm: float,
                probe_attenuation: float = 1.0) -> np.ndarray:
-    """Scope voltage -> device current through the sense resistor.
+    """Converts a voltage trace in V to device current in A through R_s.
 
-    Do NOT apply this to traces returned by `drivers.infiniium`. The LabVIEW
-    scope driver already divides by the sense resistor inside its fetch
-    (`Fetch (Waveform).vi` with `50 Ohm? = TRUE`), so the arrays coming back
-    from an acquisition are **already in amps**. The Python driver reproduces
-    that, and dividing again here would scale every charge by 1/R a second
-    time.
+    `resistor_ohm` is R_s in ohms. `probe_attenuation` is dimensionless.
+    Traces from `drivers.infiniium` are already in A, matching the LabVIEW
+    fetch with `50 Ohm? = TRUE`. Applying this conversion again scales Q by
+    1/R_s a second time.
 
-    This helper exists only for the case where a trace arrives in volts --
-    a manual capture, or a channel read with the division disabled.
-
-    Probe attenuation reaches the instrument as `:CHAN%d:PROB:EXT:GAIN`, so a
-    trace fetched from a correctly configured channel already accounts for it;
-    the argument here is for traces that do not.
+    This helper accepts voltage captures or channel reads with current
+    conversion disabled. A correctly configured channel already accounts for
+    probe attenuation through `:CHAN%d:PROB:EXT:GAIN`; the argument applies
+    only when the trace does not include that correction.
     """
     return np.asarray(trace_volts, dtype=float) * probe_attenuation / resistor_ohm
 
 
 PRE_TRIGGER_GUARD_S = 10e-9
-"""How far before the trigger a pre-trigger baseline stops. The sync edge
-couples into the current channel at the trigger itself (the 2026-09-06 records
-show the pickup from about 200 ns, with the trigger at 200 ns), and the step
-reaches the device some 30 ns after it; 10 ns keeps the baseline clear of
-both."""
+"""The pre-trigger baseline ends this many seconds before the trigger.
+
+Sync pickup enters the current channel at the trigger. The 10 ns guard keeps
+the baseline clear of that pickup and the later voltage step (manual 2.3,
+`docs/manual/2.3-signal.md`).
+"""
 
 
 def photocurrent(light: np.ndarray, dark: np.ndarray, dt: float, *,
                  offset_correct: bool = True,
                  baseline_end_s: float | None = None) -> np.ndarray:
-    """Dark-subtracted transient, optionally baseline-corrected.
+    """Returns light minus dark in A, with optional baseline subtraction.
 
-    `baseline_end_s = None` takes the baseline from the last 10 % of the record,
-    as the original did. A number takes it from the samples **before** that
-    record time instead -- the pre-trigger stretch, where neither trace has
-    seen the step. On 2026-10-26 the last 10 % of a 2 us record still held
-    extraction current, so the tail baseline read Q 10-20 % low, and with a
-    longer record it only traded that for the amplifier's shot-to-shot drift
-    (`docs/analysis/2026-10-26/scope-window/`). Refuses a pre-trigger stretch
-    of fewer than 20 samples, which would be a noise sample, not a baseline.
+    `dt` is the sample interval in s. `baseline_end_s = None` selects the last
+    10 % of the record, as required for LabVIEW numerical compatibility.
+    A number selects samples before that record time in s, suitable for a
+    pre-trigger baseline. Fewer than 20 such samples raises `ValueError`,
+    because that region cannot provide a reliable baseline. A tail baseline
+    underestimates Q by 10–20 % on a 2 µs record on this bench; on longer
+    records drift enters the baseline (manual 2.3,
+    `docs/manual/2.3-signal.md`).
 
-    `dark` is not a zero reference. It is the same measurement repeated in the
-    dark over the same bias *swing*, translated down by V_oc:
+    With a translated dark reference, the steps are:
 
-        light   V_pre  ->  V_coll                 (e.g.  +0.8 -> -2.5 V)
-        dark      0    ->  V_coll - V_pre         (e.g.   0.0 -> -3.3 V)
+        light trace: V_pre -> V_coll          (e.g. +0.8 -> -2.5 V)
+        dark trace:  0 -> V_coll - V_pre       (e.g.  0.0 -> -3.3 V)
 
-    so it carries the capacitive charge displaced by that swing plus the dark
-    current, which is exactly the non-photogenerated background the light run
-    also contains. Translating rather than repeating the absolute range keeps
-    the diode out of forward bias, where in the dark it would inject heavily.
+    The dark trace contains displacement current and dark current. Translating
+    the voltage range keeps the diode out of forward bias, where it injects
+    strongly in the dark. The caller supplies the dark reference; this function
+    does not choose it.
 
-    Residual systematic: the two runs share an amplitude, not a range. The
-    displaced charge is the integral of C(V) over each range, so the
-    cancellation is exact only where C is flat across the swing. Junction
-    capacitance is not flat near forward bias, so a residual survives -- small
-    for deep V_coll, larger for shallow V_coll or thin devices. Keep both raw
-    traces so this stays checkable.
+    Equal voltage changes cancel displacement charge exactly only when C(V)
+    is constant across both ranges. Near forward bias, varying capacitance
+    leaves a residual. It is smaller at deep V_coll and larger at shallow
+    V_coll or in thin devices. Retaining both raw traces keeps it checkable.
     """
     light = np.asarray(light, dtype=float)
     dark = np.asarray(dark, dtype=float)
@@ -102,24 +94,20 @@ def photocurrent(light: np.ndarray, dark: np.ndarray, dt: float, *,
 
 def baseline_is_flat(light: np.ndarray, dark: np.ndarray, *,
                      tolerance: float = 0.1) -> tuple[bool, float, float, float]:
-    """Is the tail of `light - dark` a baseline, or is it still signal?
+    """Checks whether light minus dark has a tail consistent with its baseline.
 
-    `photocurrent(offset_correct=True)` subtracts the mean of the last 10 % of
-    the record. That is right when the transient has decayed by then, and it is
-    what the original did. It is silently wrong when the tail is *not* baseline:
-    the correction then subtracts the signal itself and returns the trace's own
-    mirror image, with a plausible-looking charge.
+    Subtracting the last 10 % is valid only after extraction decays. A tail
+    that still contains signal subtracts that signal from the whole record
+    and can produce an inverted trace with a plausible Q.
 
-    That is not hypothetical. 2026-09-01 17:59, the first run with
-    `:OUTP1:POL INV`: the device rested at V_oc (raw `light - dark` = 0.04 mA)
-    and stepped into a **steady** 1.9 mA extraction current that never decayed,
-    because the LED never turned off inside the record. The tail was the signal.
-    `photo` came out reading −1.9 mA before the step and 0 after — the exact
-    inverse of the truth — and Q came out a believable −3e−10 C.
+    For example, with the LED on throughout the record, this bench measures
+    0.04 mA before the step and a steady 1.9 mA after it. Tail subtraction
+    gives -1.9 mA before the step and zero after it, with Q about -3e-10 C.
+    These values are measured on this bench.
 
-    Compares the head (before any step can have arrived) with the tail, scaled
-    by the largest excursion. Returns `(flat, head, tail, peak)` in the units of
-    the traces. Judgement only: it changes no number.
+    The comparison scales the head-to-tail difference by the largest absolute
+    excursion. The return value is `(flat, head, tail, peak)` in trace units;
+    `tolerance` is dimensionless. The traces remain unchanged.
     """
     photo = np.asarray(light, dtype=float) - np.asarray(dark, dtype=float)
     n = photo.size
@@ -135,18 +123,17 @@ def baseline_is_flat(light: np.ndarray, dark: np.ndarray, *,
 
 def charge(photo: np.ndarray, dt: float, t0_int: float,
            t1_int: float | None = None) -> float:
-    """Extracted charge: the rectangular sum of the transient over the window
-    `(t0_int, t1_int]` of record time. `t1_int = None` integrates to the end of
-    the record, which is what the original engine did.
+    """Returns signed Q in C from a rectangular sum over `(t0_int, t1_int]`.
 
-    Both edges are in **record** time, from the first sample. Where the window
-    sits relative to the pulse is the caller's business
-    (`experiment.transient.resolve_window`); this function is validated
-    numerics and integrates on `arange(n) * dt`, full stop.
+    `photo` is in A and `dt` is the sample interval in s. `t0_int` and
+    `t1_int` are in s from the first sample of the record. `t1_int = None`
+    integrates to the record end. The caller places the integration window
+    relative to field arrival through
+    `experiment.transient.resolve_window`. Q keeps the sign of `photo`.
 
-    Kept as `sum(...)*dt` rather than a trapezoid so it matches the original
-    exactly; with thousands of samples the difference is far below the noise,
-    but it should be a deliberate change, not an accidental one.
+    The rectangular sum matches LabVIEW numerics, checked by
+    `tests/test_regression_20260807.py`. A trapezoidal sum changes that contract,
+    even when its difference at thousands of samples is below the bench noise.
     """
     photo = np.asarray(photo, dtype=float)
     t = np.arange(photo.size) * dt
@@ -158,11 +145,12 @@ def charge(photo: np.ndarray, dt: float, t0_int: float,
 
 @dataclass
 class RunningAverage:
-    """Incremental mean over loops, matching the original's update rule.
+    """An incremental trace mean over loops at each point.
 
-    Loop 1 seeds the buffer; loop L folds in as
-    `(new + (L-1)*avg) / L`, which is the exact arithmetic mean of the
-    first L loops and lets the display update after every single step.
+    Loop 1 seeds the buffer. Each later loop updates it as
+    `(trace + (loop - 1) * self._buf[i]) / loop`, giving the arithmetic mean
+    over the acquired loops at point `i`.
+    The display can therefore update after each shot.
     """
 
     n_steps: int
@@ -173,7 +161,7 @@ class RunningAverage:
         self._buf = np.full((self.n_steps, self.n_samples), np.nan)
 
     def update(self, step: int, loop: int, trace: np.ndarray) -> np.ndarray:
-        """`step` and `loop` are 1-based, as in the original."""
+        """Updates one point with a trace using 1-based `step` and `loop`."""
         i = step - 1
         if loop == 1:
             self._buf[i] = trace
@@ -188,7 +176,7 @@ class RunningAverage:
 
 @dataclass
 class ChargeAccumulator:
-    """Per-(loop, step) charges with running mean and sample std."""
+    """Per-shot Q in C with a mean and sample standard deviation per point."""
 
     n_loops: int
     n_steps: int
@@ -201,7 +189,11 @@ class ChargeAccumulator:
         self._q[loop - 1, step - 1] = q
 
     def summary(self) -> tuple[np.ndarray, np.ndarray]:
-        """(mean, sample std) per step, ignoring loops not yet measured."""
+        """Returns mean Q and sample standard deviation in C for each point.
+
+        Unmeasured shots are ignored. One measured shot has standard deviation
+        zero; a point with no measured shots has NaN for both results.
+        """
         mean = np.full(self.n_steps, np.nan)
         std = np.full(self.n_steps, np.nan)
         for j in range(self.n_steps):

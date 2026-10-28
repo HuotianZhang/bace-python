@@ -1,32 +1,15 @@
-"""Run folder and file names, in the convention the archives already use.
+"""Run folders and files use the LabVIEW naming convention.
 
-The 2026-08-07 folder is
+Folder fields identify sample, material, pixel, temperature in K, LED level
+in mV, V_oc in mV, baseline correction, comment and start timestamp.
+Metadata inside each file preserves the full values; the folder name is a
+convenience rather than the sole record.
 
-    s4_PTQ10IT4F_pxa_290K_1020mVLED_906mVVOC_offsetcorr_20260807_111521
-    │  │         │   │    │         │        │          └─ started
-    │  │         │   │    │         │        └─ offset correction was on
-    │  │         │   │    │         └─ V_oc measured, in mV
-    │  │         │   │    └─ LED drive at the 33220A, in mV
-    │  │         │   └─ temperature
-    │  │         └─ pixel
-    │  └─ material
-    └─ sample
-
-Most of that was typed by hand in the original — including the temperature,
-because temperature was set manually. Here every field is a named piece of
-metadata that also gets stored inside the file, so the name stays a convenience
-rather than the only record. `temperature_k` is already a field for the same
-reason: when the temperature controller is integrated it fills itself in, and
-nothing about the naming or the stored schema has to change.
-
-The controller since arrived, and with it the question the name cannot answer:
-a folder called `290K` looks the same whether someone typed 290 into
-`[sample]`, a loop asked for it and nothing ever read back, the 331 console
-settled there, or an operator typed it at a pause. `temperature_how` and
-`temperature_source` are that answer, stored beside the number and never in
-the name — the name keeps the 2026-08-07 convention exactly. They are the
-`how` and `source` of `service.temperature.Settled`, carried through
-unchanged, which is where every value but `typed` comes from.
+A `290K` name cannot distinguish typed temperature from a requested setpoint,
+a settled controller reading or a value accepted at a pause. The stored
+`temperature_how` and `temperature_source` distinguish these cases without
+changing the naming convention. Except for `typed`, they carry the `how` and
+`source` fields of `service.temperature.Settled` unchanged.
 """
 from __future__ import annotations
 
@@ -36,79 +19,66 @@ from datetime import datetime
 
 
 def _mv(volts: float) -> str:
-    """0.906 -> '906'. Rounds, because the original wrote whole millivolts."""
+    """Rounds V to whole mV for LabVIEW-compatible names, such as 0.906 to 906."""
     return f"{round(volts * 1000):d}"
 
 
 _PATH_UNSAFE = '<>:"/|?*' + chr(92)
-"""What a path segment may not hold on Windows. `chr(92)` is the backslash,
-spelled that way so neither this string nor the class built from it needs an
-escape that a later edit could quietly drop -- one surviving backslash in a
-comment would put a path separator inside a folder name."""
+"""Characters prohibited in a Windows path segment.
+
+`chr(92)` represents a backslash without a fragile escape sequence. Losing
+that character from the filter lets metadata insert a path separator.
+"""
 _UNSAFE = re.compile("[\x00-\x1f" + re.escape(_PATH_UNSAFE) + "]+")
 _TO_DASH = re.compile(r"[\s_]+")
-"""Whitespace, and `_` -- the field separator, which a comment must not forge."""
+"""Whitespace and `_` match here so metadata cannot forge field separators."""
 
 NAME_MAX = 24
-"""Characters of `sample`, `material` and `pixel` the folder name will carry,
-each.
+"""Each identity field contributes at most 24 characters to the folder name.
 
-`docs/history/naming-plan.md` asked for "a shorter limit than a comment's 64" and
-measured its collision table at 24; this is that number. It is nearly three
-times the archive's longest identity field (`PTQ10IT4F`, nine) and half again
-the sixteen that all three of `s4_PTQ10IT4F_pxa` take together -- which is the
-figure `COMMENT_MAX` below budgets the rest of the name against -- so it
-truncates nothing anybody has actually typed. What it is for is the other end:
-a text field in the console (`PUT /session/sample`) can hold a pasted sentence,
-and an unbounded path segment is how a run folder reaches Windows' limit.
+This exceeds the nine-character `PTQ10IT4F` identity and the sixteen-character
+`s4_PTQ10IT4F_pxa` combination used to budget the rest of the name. The bound
+keeps a pasted sentence from extending a Windows path beyond its limit.
 
-**`slug` is many-to-one, so a limit can make two identities one name.**
-`PTQ10IT4F-batch-2026-08-A` and `…-B` both reduce to
-`PTQ10IT4F-batch-2026-08`, and two batches of one material differing after
-character 24 is an ordinary thing for a lab to have. Nothing is lost -- every
-field is verbatim in `as_dict()`, and since `docs/history/naming-plan.md` rule 1 the
-console reads the record and never parses a name -- but the *name* stops
-telling them apart, so the console shows what a value will be filed as while
-it is being typed rather than after the run. What it does not yet do is make
-the **directories** unique; that is naming-plan's own next section, it is a
-hazard that predates this (two runs whose metadata matches to the second
-already land in one folder, and the J-V path opens its HDF5 with mode "w"),
-and it wants all three writers changed at once."""
+`slug` maps multiple identities to one name. Two material names differing
+only after character 24 can therefore collide. `RunMetadata.as_dict` keeps
+each full value, and the console reads metadata rather than parsing names.
+The console displays the reduced name while the operator edits it.
+
+Directories are not guaranteed unique: matching metadata and a start time
+within the same second can select one folder. The J–V writer opens HDF5 in
+`w` mode, so a collision can overwrite data. A uniqueness guarantee requires
+consistent handling across the BACE, J–V and series writers.
+"""
 
 COMMENT_MAX = 64
-"""Characters of comment the folder name will carry. The rest of a name runs
-to about 66 (`s4_PTQ10IT4F_pxa_290K_1020mVLED_906mVVOC_offsetcorr_<stamp>`)
-and the longest file inside to about 40, which leaves this much before a run
-under a `runs/` directory a few levels deep approaches Windows' 260-character
-path limit."""
+"""The folder name carries at most 64 characters of the comment.
+
+The other fields take about 66 characters and the longest filename about
+40. This budget allows a `runs/` directory a few levels deep to remain
+within the Windows 260-character path limit.
+"""
 
 
 def slug(text: str, limit: int = COMMENT_MAX) -> str:
-    """A comment reduced to one path segment.
+    """Reduces metadata text to one bounded Windows path segment.
 
-    The original typed comments straight into the folder name and the
-    2026-09-01 runs show the bill: `290K_1000mVLED_offsetcorr_LabVIEW panel
-    replica - combination 4 - shutter only dark_20260902_012223` puts spaces
-    into a directory name, and `_` in a comment would forge a field boundary
-    in a name whose fields are separated by `_`. Only the *name* is reduced --
-    `as_dict` keeps the comment verbatim, so the file still has the sentence
-    the operator wrote, the same split as `temperature_how`.
+    Whitespace and `_` become `-`; prohibited path characters are removed.
+    This prevents spaces from splitting words inconsistently and underscores
+    from forging field boundaries. `RunMetadata.as_dict` retains the full text.
 
-    Anything that is merely not ASCII is kept: a Chinese comment is a
-    perfectly good directory name and dropping it would lose the operator's
-    note from the one place they look first.
+    Non-ASCII characters remain valid path text, so comments in any language
+    retain their meaning in the folder name.
     """
-    # Whitespace first, then the rest: a tab between two words is a word
-    # break like a space, and removing it before it becomes a dash would
-    # glue the words together.
+    # Whitespace replacement precedes character removal so a tab separates
+    # words instead of joining them.
     out = _UNSAFE.sub("", _TO_DASH.sub("-", text))
     out = re.sub(r"-{2,}", "-", out).strip("-. ")
     if len(out) > limit:
         cut = out[:limit].rstrip("-. ")
         if len(cut) == limit and out[limit] != "-":
-            # The cut landed inside a word: back off to the last whole one,
-            # but not at the cost of half the comment -- a single very long
-            # token is truncated as it stands.
+            # A whole-word boundary preserves readability if it retains at least
+            # half the limit. A single long token still requires truncation.
             head, sep, _tail = cut.rpartition("-")
             if sep and len(head) >= limit // 2:
                 cut = head
@@ -118,27 +88,30 @@ def slug(text: str, limit: int = COMMENT_MAX) -> str:
 
 @dataclass(frozen=True)
 class RunMetadata:
-    """Everything about a run that is not an instrument setting."""
+    """Run identity and context stored separately from instrument settings."""
 
     sample: str = ""
     material: str = ""
     pixel: str = ""
     temperature_k: float | None = None
     temperature_how: str = ""
-    """Where `temperature_k` came from. `typed` -- `[sample]` in the recipe or
-    the console's metadata field, nobody read an instrument; `setpoint` -- a
-    temperature loop asked for it and the settle never got a reading, so this
-    is what was requested, not what was reached; `read` -- nobody asked for
-    a setpoint and the controller was read once as the node started (the
-    bench as found); `settled` -- the controller
-    held it inside the band; `operator` -- a person resumed a pause (they
-    typed the number when `temperature_source` is `operator`, otherwise it is
-    the last reading polled while they were deciding). Empty in files written
-    before this field existed, and when `temperature_k` is None."""
+    """The method that supplies `temperature_k`, in K.
+
+    `typed` is recipe or console metadata without an instrument read-back.
+    `setpoint` is a requested temperature without a reading during settling;
+    it does not establish the reached temperature. `read` is one controller
+    reading at node start without a requested setpoint. `settled` means the
+    controller holds within the tolerance band. `operator` means a pause
+    resumes: the value is typed if `temperature_source` is `operator`, or is
+    the last controller reading polled during the pause.
+    The field is empty when unavailable or when `temperature_k` is `None`.
+    """
     temperature_source: str = ""
-    """Which instrument produced it: `console` (the 331 through its console),
-    `simulated` (the stand-in, so a `--sim` file says so), `operator` (typed),
-    or empty when nothing was read."""
+    """The source of the temperature value.
+
+    `console` is the 331 through its console; `simulated` identifies a simulated
+    reading; `operator` identifies a typed value. Empty means no read-back.
+    """
     led_drive_v: float | None = None
     voc_v: float | None = None
     offset_corrected: bool = True
@@ -148,32 +121,27 @@ class RunMetadata:
 
     @property
     def stamp(self) -> str:
-        """`YYYYMMDD_HHMMSS`, shared by the folder and every file in it."""
+        """Returns `YYYYMMDD_HHMMSS`, shared by the folder and its files."""
         return self.started.strftime("%Y%m%d_%H%M%S")
 
     def identity_in_name(self) -> tuple[str, str, str]:
-        """`sample`, `material`, `pixel` as the folder name carries them.
+        """Returns the reduced sample, material and pixel fields for the folder.
 
-        Reduced with `slug` -- whitespace and `_` become `-`, what a Windows
-        path segment may not hold is dropped, anything merely non-ASCII is
-        kept -- to `NAME_MAX` each. `as_dict()` keeps all three verbatim: the
-        same split the comment has had since it was written, and the reason
-        `material = "PTQ10:IT-4F"` can be both the true material and a legal
-        directory.
+        `slug` bounds each field to `NAME_MAX`, replaces whitespace and `_`,
+        removes prohibited Windows path characters and keeps non-ASCII text.
+        `RunMetadata.as_dict` retains all three full values, so a material such
+        as `PTQ10:IT-4F` remains intact in metadata and legal in the folder name.
 
-        Public because the service answers with it (`GET /session`'s
-        `sample_in_name`), so the console can show what a value will be filed
-        as *while it is typed*. A second implementation of this in the browser
-        would be a second answer to that question.
+        The service exposes this result as `sample_in_name` in `GET /session`.
+        The console can show the destination name during editing without a
+        second implementation of the reduction rules.
         """
         return tuple(slug(p, NAME_MAX) for p in (self.sample, self.material, self.pixel))
 
     def folder_name(self) -> str:
-        # Reduced, not raw. Until 2026-09-05 these three went in as typed, so
-        # `material = "PTQ10:IT-4F"` -- the service contract's own example --
-        # built a path segment with a colon in it, which fails on the lab PC
-        # and passes on Linux, and `sample = "a/b"` was two directories.
-        # `docs/history/naming-plan.md` §2 carried it as a live defect.
+        # Identity fields need reduction before joining. A colon in
+        # `material = "PTQ10:IT-4F"` fails on Windows even if Linux accepts it;
+        # `sample = "a/b"` would create two path segments.
         parts = [p for p in self.identity_in_name() if p]
         if self.temperature_k is not None:
             parts.append(f"{self.temperature_k:g}K")
@@ -184,9 +152,8 @@ class RunMetadata:
         if self.offset_corrected:
             parts.append("offsetcorr")
         if self.comment:
-            # The name gets a slug, `as_dict` keeps the sentence: the same
-            # split as the temperature above -- the name is a convenience,
-            # the file is the record.
+            # `as_dict` keeps the full comment. The reduced name is a convenience;
+            # stored metadata is the record.
             reduced = slug(self.comment)
             if reduced:
                 parts.append(reduced)
