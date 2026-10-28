@@ -1079,7 +1079,7 @@ fixes anything: a `fix` field names a bench action the operator may click.
 | `voc.coupling` | invalid | V_oc source's `led_v` ≠ the bace's `led_v` (`assert_axis_centre`) |
 | `led.levels` | invalid | `LedDrive` refuses (low ≥ threshold, level < threshold, level ≤ low) |
 | `axis.geometry` | invalid | `Axis`/`ScanSpec` refuse (step, n_loops < 1) or `delay_ns < 0` (`:PULS:DEL1` is given `delay_ns` as it is). `centre_on_voc` on a non-vpre axis and `vpre_on_voc` on the vpre axis are not faults: each flag is read only on its own side of `axis_name` (`core.axis.voc_flags`) |
-| `bench.instrument` | invalid | a module step's instrument is in the read-back's `unavailable` (`Catalogue.needs` minus the V_oc and power advisories; the `power` module needs its meter). `info` before the first read-back. Without it a run on an unplugged Keithley was accepted, queued and failed at preflight |
+| `bench.instrument` | invalid | a module step's instrument is in the read-back's `unavailable` (`Catalogue.needs` minus the advisories in `ADVISORY_NEEDS`; the `power` module needs its meter). `warn` for a plain `jv` with no shutter or LED to read: it runs, its illumination recorded as unknown. `info` before the first read-back. Without it a run on an unplugged Keithley was accepted, queued and failed at preflight |
 | `smu.ceiling` | crit | compliance above the bench ceiling (`config.check_smu_limits`) |
 | `relay.interlock` | crit | a tree with both a `jv_*` and a `bace` and no `Router`; or at Start a source reports its output live |
 | `bench.live-at-start` | crit | bias or SMU output ON at Start (read-back) |

@@ -1,17 +1,10 @@
-"""Accumulating a bench report.
+"""Collect and render the results of a bench session.
 
-The report is the deliverable of a bench session, so it is built to be read by
-someone who was not in the room. Three rules shape it:
-
-* **Record the traffic, not a summary of it.** Every command sent, the reply,
-  how long it took, and what the instrument's error queue said immediately
-  afterwards. A failing SCPI string is then a line in a table rather than a
-  guess.
-* **Never let one failure end the session.** A check that raises records the
-  traceback and the session continues. Half a report from a rig with one broken
-  instrument is worth far more than no report.
-* **Say what was not done.** Skipped stages are listed with their reason, so an
-  absent result is never mistaken for a passing one.
+Each report records commands, replies, elapsed times and error-queue replies
+so a maintainer can identify rejected SCPI commands without access to the bench.
+A check exception records its traceback and leaves the session running, so one
+unreachable instrument does not discard the other results. Skipped checks carry
+a reason to distinguish missing evidence from a passing check.
 """
 from __future__ import annotations
 
@@ -35,7 +28,7 @@ WARNED = "warned"
 
 @dataclass
 class Exchange:
-    """One command and what came back."""
+    """Record one command, its reply, elapsed time and errors."""
 
     command: str
     reply: str | None = None
@@ -50,7 +43,7 @@ class Exchange:
 
 @dataclass
 class Check:
-    """One named thing that was tried."""
+    """Store the result and evidence for one named check."""
 
     name: str
     stage: str
@@ -76,16 +69,15 @@ class Check:
         return self
 
     def skip(self, reason: str) -> "Check":
-        # A warn recorded before the skip is the cause, not noise: `_wrap`
-        # says why an instrument could not be opened, and the stage then
-        # skipped with a bare "not reachable" that hid it (2026-09-04).
+        # Keep the warning as the skip reason: `bace.bench.checks._wrap` explains
+        # why opening an instrument fails; "not reachable" alone hides the cause.
         self.status = SKIPPED
         self.detail = f"{reason} ({self.detail})" if self.detail else reason
         return self
 
 
 def environment() -> dict:
-    """What the report needs to be interpretable somewhere else."""
+    """Return the host and package details needed to interpret a report."""
     mods = {}
     for name in ("numpy", "scipy", "h5py", "pyvisa", "pyvisa_py", "serial"):
         try:
@@ -121,7 +113,7 @@ class Report:
         self.notes.append(text)
 
     def run(self, name: str, stage: str, fn, *args, **kwargs) -> Check:
-        """Run one check, catching everything."""
+        """Run one check and record any exception without ending the session."""
         check = Check(name=name, stage=stage)
         t0 = time.monotonic()
         try:
@@ -141,7 +133,7 @@ class Report:
         return out
 
     def failed_commands(self) -> list[tuple[str, Exchange]]:
-        """The debug list: every command the instrument complained about."""
+        """Return commands with instrument errors or exchange exceptions."""
         out = []
         for c in self.checks:
             for x in c.exchanges:

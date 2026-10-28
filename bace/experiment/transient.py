@@ -1,28 +1,18 @@
-"""The standalone transient measurement — one axis, N loops, on real or simulated instruments.
+"""The transient measurement scans one axis over repeated loops.
 
-This is `TDCF-BACE.vi` rewritten: the engine that sweeps one axis, takes a
-light and a dark trace at every point, subtracts, integrates, and averages over
-loops. It commands the bias generator, the shutter and the scope, and nothing
-else. Illumination and DC characterisation belong to the layer above
-(`experiment.intensity_series`), exactly as they did in the original — the
-standalone VI had no 33220A, no Keithley and no relay.
+Each shot records a light trace and a dark trace, subtracts them, integrates
+Q and updates the loop averages. This module controls the bias generator,
+shutter and digitiser. `bace.experiment.intensity_series` controls the LED,
+relay and DC characterisation.
 
-**Why a plain generator and not an async one.** The architecture note called for
-an async generator. That is wrong here for a concrete reason: every call inside
-this loop is blocking VISA I/O, and VISA sessions are not thread-safe, so this
-code must run on the one thread that owns the instruments. An `async def`
-generator whose body blocks for two seconds would stall the service's event
-loop for two seconds. So the run is a synchronous generator executed on the
-instrument thread, and the service adapts it to `async` at its own edge by
-pumping events into an asyncio queue. `async` belongs where the waiting is on
-sockets, not where it is on an oscilloscope.
+VISA calls block and sessions are not thread-safe. The synchronous generator
+runs on the thread that owns the instruments. The service forwards events to
+an asynchronous queue so instrument waits do not block its socket event loop.
 
-**Abort** has two paths, and both unwind the same way. A consumer that stops
-iterating (or calls `.close()`) raises `GeneratorExit` at the yield, and the
-`finally` disables the bias output and shuts the shutter. A consumer that wants
-a clean, reported stop passes an `abort` callable, which is polled once per
-step and produces a `RunAborted` event before the same unwinding. Nothing is
-left driving the sample either way.
+Closing the generator raises `GeneratorExit` at a yield. The `finally` block
+attempts to disable bias and shut the shutter on completion, abort, exception
+or close. An `abort` callable is polled before each shot and emits `RunAborted`
+before the same cleanup.
 """
 from __future__ import annotations
 
@@ -44,315 +34,318 @@ from .rig import Rig
 
 @dataclass(frozen=True)
 class RunConfig:
-    """The measurement recipe. Copied verbatim into the output."""
+    """Run parameters define acquisition, timing and processing.
+
+    The output stores these parameters verbatim beside the bench configuration.
+    """
 
     n_averages: int = 200
-    """How many traces the scope averages in hardware before it hands one
-    back. Noise falls as 1/sqrt(n); time rises as n."""
+    """How many acquisitions the digitiser averages in hardware before it returns one trace.
+
+    Uncorrelated noise falls as `1 / sqrt(n_averages)`; acquisition time grows
+    with `n_averages`. Too few acquisitions leave a noisy trace and uncertain Q.
+    """
 
     timebase_ns_per_div: float = 200.0
-    """The scope's horizontal scale, in nanoseconds per division with ten
-    divisions across the record — so the record is ten times this.
+    """The digitiser's horizontal scale, in ns per division, with ten divisions across the record, so the record duration is ten times this value.
 
-    200 is what the LabVIEW panel shows (`Timebase (200 ns) = 200E+0`) and what
-    the 2026-08 archive was taken with. It briefly defaulted to 500 here on the
-    argument that ten divisions should equal `pulse_width_ns`; a screenshot of
-    the panel on 2026-09-01 shows Timebase 200 ns *and* Pulse Width 5e3 ns side
-    by side, so they were never meant to be equal. The record is a 2 us window
-    onto a 5 us pulse: only the leading edge is in it, which is the edge the
-    measurement is about.
+    The record spans ten divisions, with one before the trigger. At 200 ns/div,
+    the 2 µs record covers the leading edge of a 5 µs pulse; record duration and
+    `pulse_width_ns` are independent. A longer record costs more samples at the
+    same sample interval. A short record cuts off the integration window and
+    underestimates Q, especially at later delay points.
 
-    It also decides where the trigger sits in the record: 200 ns in at
-    200 ns/div, 500 ns in at 500 ns/div (`:TIM:POS` is four of the ten
-    divisions). The integration window is measured from the pulse, not from
-    the record, so it does not move when this does.
+    The trigger lies 200 ns into the record at 200 ns/div and 500 ns into it at
+    500 ns/div. `:TIM:POS` places the screen centre four divisions after the
+    trigger. The integration window follows field arrival, so changing the record
+    origin does not change the part of the transient it integrates.
     """
 
     record_length: int = 5000
-    """How many samples the scope is asked for per trace. It may return fewer
-    — 5000 gave 4000 in the 2026-08-07 archive — so nothing here assumes it got
-    what it asked for."""
+    """How many samples the digitiser is asked for per trace.
+
+    More samples cost transfer time and storage. The digitiser may return fewer:
+    a request for 5000 returns 4000 on this bench (`docs/notes.md`). Consumers use
+    the returned length; assuming the request is fulfilled gives a wrong time axis.
+    """
 
     t0_int_s: float = 0.0
-    """Where charge integration starts, in seconds **from the field's arrival
-    at the device** -- i.e. from the applied pulse edge, `:PULS:DEL1` plus the
-    rig's sync-to-field latency (`RigConfig.trigger_offset_s`). Negative starts
-    before the step; a few nanoseconds of lead is harmless because the dark
-    trace removes the displacement spike, and it guarantees the whole
-    transient is inside the window.
+    """Where charge integration starts, in s from the field's arrival at the device: the 81150A trigger plus `:PULS:DEL1` and `trigger_offset_s`.
 
-    The window is pinned to the pulse, so it travels with `:PULS:DEL1` along a
-    delay axis: the scope triggers on the 81150A's *Sync*, which is **not**
-    delayed by `:PULS:DEL1` -- only the output is -- so a window measured from
-    the trigger (or from the first sample) would stand still while the transient
-    slid through the record, and Q(delay) would be half physics and half
-    window. Measured from the pulse, every delay point gets the same slice of
-    its own transient, which is what both kinds of zero-finding need: the light
-    zero (sweep the delay, watch where Q turns) needs the integration to be
-    correct at every point, and the integration zero (where does the transient
-    start) is a question for the stored traces, `tools/reintegrate.py`, not for
-    the acquisition.
+    Field arrival is the trigger plus `:PULS:DEL1` and
+    `RigConfig.trigger_offset_s`. A negative start includes samples before the
+    step. A few ns of lead include the whole transient; light minus dark removes
+    the shared displacement current. Extra lead adds noise.
 
-    Earlier files carried `t0_int_reference = record | trigger | pulse` and a
-    `t0_int_s` in that reference's units. The two fixed references are gone
-    (`docs/integration-window.md` records how to convert an old value); a
-    `run.toml` that still names them is refused with the conversion.
+    The integration window follows the pulse along a delay axis. The 81150A Sync
+    is not delayed by `:PULS:DEL1`, so a window tied to the trigger or first sample
+    integrates different parts of the transient at different points. That makes
+    Q depend on window placement as well as carrier recombination. A delay scan
+    therefore needs the same window relative to field arrival at every point.
+    Locating light-off from Q against delay requires valid integration at every
+    point. The transient start can be checked on stored traces with
+    `tools/reintegrate.py`.
+
+    Configurations with `t0_int_reference` are refused with conversion guidance;
+    `t0_int_s` always uses field arrival as its reference.
     """
 
     t_int_width_s: float = 1.5e-6
-    """How long the integration window is, in seconds. The window is
-    `(t0_int, t0_int + t_int_width]` in the pulse's own time, so its **end**
-    travels with the delay too; integrating to the end of the record instead
-    (the original engine's habit) makes the window shorter at every later
-    delay point. 1.5 us is about six extraction time constants on the devices
-    measured so far (tau ~ 265 ns); the run warns once if the record ends
-    before the window does."""
+    """How long the charge integration window lasts, in s, starting at `t0_int_s` relative to field arrival.
+
+    The interval is open at the start and closed at the end. Both ends follow
+    the delay; integrating to the record end instead shortens the window at
+    later delay points. A wider window adds noise from drift between traces.
+    A short window loses extraction current, and a short pulse truncates it.
+    The run warns once if the record ends before the integration window.
+
+    A 1.5 µs window spans about six 265 ns extraction time constants measured on
+    this bench. Slow tails can extend further: manual 2.2 records 80 % of the
+    15 µs charge at 1.5 µs. The width needs checking on each device.
+    """
 
     output_polarity: str = "auto"
-    """What to do with the 81150A's output polarity (`:OUTP1:POL`): `auto`,
-    `NORM`, `INV` or `leave`.
+    """What to do with the 81150A output polarity (`:OUTP1:POL`): `auto` uses `inverted_output`, `NORM` or `INV` forces polarity, and `leave` preserves it.
 
-    `auto` uses `inverted_output`, which is what every run did before this
-    existed. `leave` writes nothing: the polarity found on the instrument is
-    read back and reported instead.
+    `auto` uses `inverted_output`. `leave` sends no polarity command and records
+    the instrument read-back. The read-back costs an instrument query and keeps
+    the file's polarity convention explicit.
 
-    `leave` is not laziness. Which level the device rests at between pulses
-    depends on how the sample is wired, and that is not always known — the
-    device's own terminals may be reversed. Writing a polarity then is a guess,
-    and a wrong guess puts the extraction on the *other* edge of the pulse,
-    5 us away and outside the record, while still producing a transient (the
-    step into prebias) that integrates to a plausible charge. Declining to set
-    it, and recording what was there, is the honest option.
+    The resting device voltage depends on wiring, including reversed terminals.
+    A wrong polarity moves extraction to the other pulse edge, 5 µs away for a
+    5 µs pulse and outside the default record. The step into V_pre can still
+    produce a plausible Q. `leave` allows the bench polarity to remain in force
+    when the wiring does not justify selecting one.
     """
 
     pulse_width_ns: float = 5000.0
-    """How long the 81150A holds the collection level before returning -- the
-    width of the extraction pulse itself. It has to outlast the extraction:
-    a pulse shorter than the charge takes to come out cuts the transient off
-    mid-integration and under-reports Q. 5 us against a transient that is over
-    in a few hundred ns."""
+    """How long the 81150A holds the collection level V_coll before returning to V_pre, in ns: the extraction pulse width.
+
+    A longer pulse reduces the time available at V_pre in each cycle. It must
+    outlast extraction and the integration window; a shorter pulse cuts the
+    transient off and underestimates Q. The default 5 µs exceeds the few hundred
+    ns extraction time measured on this bench, but slow tails need checking.
+    """
 
     pulse_frequency_hz: float = 500.0
-    """The rate **both** generators run at: the 33220A chopping the LED and
-    the 81150A firing the collection pulse. Both were found at 500 Hz on the
-    rig (2026-08-31), not the 1 kHz assumed from the recovered code. The 81150A
-    is armed by the 33220A sync, so the two must match; 500 Hz gives a 2 ms
-    period and a 1 ms on-phase."""
+    """The rate both generators run at, in Hz: the 33220A chopping the LED and the 81150A firing the collection pulse.
+
+    The 33220A drives the LED and its Sync arms the 81150A. Their frequencies
+    must match. At the bench's 500 Hz, the period is 2 ms and each phase lasts
+    1 ms at 50 % duty (manual 1.2). Raising the frequency shortens equilibration
+    time; a device that does not reach steady state gives a transient V_oc.
+    """
     duty_percent: float = 50.0
-    """The LED's light/dark split within one period, written to the 33220A
-    (`FUNC:PULS:DCYC`) as the fraction of the period at the waveform's **high**
-    level. At 500 Hz and 50 % the device gets 1 ms of light and 1 ms of dark
-    per cycle.
+    """The fraction of each period at the 33220A waveform's high level, in %; with inverted output, this is the LED's dark fraction.
 
-    **Away from 50 %, read it inverted.** This rig runs the 33220A at
-    `:OUTP:POL INV` always -- `rigs.LED_EXPECTED_POLARITY`, and the bench check
-    calls NORM a fault -- because inverting makes the Sync's rising edge mean
-    *light off*, which is the edge the extraction follows. Inverting flips
-    which half of the cycle the LED is lit for (`Agilent33220A.set_polarity`),
-    so the lit fraction is `100 - duty_percent`, not `duty_percent`. Raising
-    this number **shortens** the illumination. At the default 50 % the two
-    coincide, which is why the default hides it.
+    At 500 Hz and 50 %, the device has 1 ms of light and 1 ms of dark per cycle.
+    The bench uses `:OUTP:POL INV` so rising Sync means light off
+    (`bace.service.rigs.LED_EXPECTED_POLARITY`). Under inversion the lit fraction
+    is `100 - duty_percent`: increasing the duty shortens illumination. At 50 %
+    the fractions coincide. A short on-phase prevents steady-state V_oc.
 
-    What the lit half buys is the **on-phase**: the device has to reach its
-    light V_oc within it, or the prebias the scan centres on is a transient
-    value. Nothing checks that for you -- `LedDrive.__post_init__` enforces the
-    levels against the LED threshold, the duty range and a positive frequency,
-    and `check_equilibration` would test the 5 tau rule but is called from
-    nowhere, because tau is a property of the device and no parameter carries
-    it. (`LedDrive.on_time_s` is `period x duty`, so under INV it is the *dark*
-    time -- worth knowing before that check is ever wired up.) Judging the
-    on-phase against the device is the operator's, not the run's.
+    `LedDrive.__post_init__` checks the LED threshold, duty range and positive
+    frequency. `LedDrive.check_equilibration` tests five time constants but has
+    no caller or device time-constant parameter. `LedDrive.on_time_s` computes
+    period times duty, which under inversion is the dark time. The operator must
+    check equilibration for the device.
 
-    There is no duty-cycle dimming to trade against it -- the low level sits
-    below the LED's turn-on threshold, so the diode is fully off rather than
-    dim, and the on-phase intensity is exactly the DC intensity.
+    The low level is below the LED threshold. Duty changes on-time, not the
+    on-phase intensity, which equals the DC intensity. The shutter separates the
+    light trace from the dark trace; both use the same trigger timing.
 
-    It is *not* what separates the two traces. `run_transient_scan` takes the
-    light trace with the shutter open and the dark reference with it shut, at
-    the same trigger timing, and the photocurrent is that difference -- the
-    shutter is the light switch, not the duty boundary.
-
-    The same number is written to the 81150A too, by `configure_shape`, where
-    it does not survive: `set_levels` writes `PULS:WIDT` from `pulse_width_ns`
-    afterwards and again on every shot, and the width is what the collection
-    pulse actually has. So this controls the lamp, not the extraction."""
+    `Agilent81150.configure_shape` also writes this duty, but
+    `Agilent81150.set_levels` overwrites its width with `pulse_width_ns` on every
+    shot. Duty therefore controls LED illumination; `pulse_width_ns` controls
+    the collection pulse.
+    """
 
     offset_correct: bool = True
-    """Subtract a constant baseline from the photocurrent record: the mean of
-    the region `offset_region` names."""
+    """Subtract a constant baseline, in A, from light minus dark before charge integration: the mean of the region `offset_region` names.
+
+    It adds no acquisition time. Disabling it leaves a constant offset in Q;
+    using a region with extraction current removes signal as well as baseline.
+    """
 
     offset_region: str = "tail"
-    """Where `offset_correct` takes its baseline: `"tail"` | `"pre-trigger"`.
+    """Where baseline correction takes the mean of light minus dark: `tail` uses the last 10 % of the record; `pre-trigger` uses samples before the trigger.
 
-    `"tail"` is the last 10 % of the record, what the original did. It is only
-    a baseline if the transient is over by then, and on 2026-10-26 it was not:
-    with a 2 us record the tail still held extraction current and Q read
-    10-20 % low; with longer records the tail mean carried the amplifier's
-    shot-to-shot drift into Q instead.
+    `tail` uses the last 10 % of the record. `pre-trigger` uses samples before
+    the trigger, excluding `PRE_TRIGGER_GUARD_S` for Sync pickup. Both reuse
+    stored samples and add no acquisition time.
 
-    `"pre-trigger"` is the record before the trigger (less
-    `core.process.PRE_TRIGGER_GUARD_S` for the sync pickup). Neither trace has seen the step there, the scope's
-    zero error (about 1 mV, and different at each vertical range) is the same
-    for both, and it does not move with the record length. A null run on the
-    rig (shutter shut for both traces, `dark_reference = "same"`) put the
-    drift that is left at -1.2 +/- 2.9 uA per shot, the same as a real BACE
-    run -- see `docs/analysis/2026-10-26/scope-window/`."""
+    The tail is a baseline only after extraction ends. On this bench a 2 µs
+    record leaves extraction current in the tail and Q reads 10–20 % low. Longer
+    records let amplifier drift enter the tail mean. Before the trigger neither
+    trace contains the step. The scope zero is about 1 mV and depends on range,
+    so both traces need the same range. This region does not depend on record
+    length. Neither region removes drift after the step: a null run and a BACE
+    run both give −1.2 ± 2.9 µA per shot for the late-minus-pre-trigger offset
+    (`docs/analysis/2026-10-26/scope-window/README.md`).
+    """
 
     alternate_order: bool = False
-    """Take the dark trace first on every even loop, so the light-then-dark
-    order alternates. Whatever drifts in time between the two acquisitions of
-    a shot (the amplifier did, by -1.2 uA on average, on 2026-10-26) then
-    enters Q with opposite signs on successive loops and cancels in the mean
-    over an even number of loops. The first trace of a shot sets the vertical
-    range either way, and the second inherits it, so both share one scope
-    zero. Off by default, which keeps the original's order."""
+    """Have the digitiser take the dark trace first on every even loop, so light-then-dark and dark-then-light acquisition alternate.
+
+    Drift between acquisitions then enters Q with opposite signs on successive
+    loops and cancels in the mean over an even number of loops. It adds no
+    acquisition, but a dark trace taken first requires the range of this point's
+    light trace from a preceding loop. Both traces share that range and scope
+    zero. A range fitted to the dark trace alone can clip the light trace.
+
+    With `alternate_order` disabled, every shot takes the light trace first.
+    Amplifier drift measured on this bench averages −1.2 µA per shot
+    (`docs/analysis/2026-10-26/scope-window/README.md`), so a constant order can
+    bias the mean Q.
+    """
 
     invert_polarity: bool = False
-    """Swap and negate both 81150A bias levels in software, before they are
-    written, for a device of the opposite architecture — the original's
-    `New Sample?`. A sign convention, not a feature —
-    getting it wrong flips the charge, it does not merely disable something.
+    """Swap and negate both 81150A bias levels in software before writing them, for a device of the opposite architecture; independent of `inverted_output`.
 
-    This is the *software* half. `inverted_output` below is the instrument half.
-    They are independent, and the two names are close enough that this docstring
-    spent a while attached to the wrong one."""
+    It supports the opposite device architecture without another acquisition.
+    It is independent of the instrument polarity, `inverted_output`. A wrong
+    value reverses the voltage steps and Q; it does not merely disable a feature.
+    """
 
     inverted_output: bool = False
-    """`:OUTP:POL INV` on the 81150A — a *different* knob from `invert_polarity`.
+    """Apply inverted rather than normal hardware output polarity on the 81150A when `output_polarity` is `auto`; separate from the software level transformation `invert_polarity`.
 
-    `invert_polarity` is the MathScript half of the original's `New Sample?`:
-    it swaps and negates the two computed levels. This is the other half.
-    `Agilent 81150StandardWaveformTDCF20131120.vi` calls
-    `Configure Output Polarity.vi` from a case structure whose two frames hold
-    `Polarity = 0 (Normal)` and `Polarity = 1 (Inverted)`, so the original sets
-    one or the other per shot -- and which frame goes with which sample type was
-    an open question, answered by measurement rather than by the binary.
+    It writes `:OUTP:POL INV` or normal polarity without another acquisition.
+    It is independent of the software swap and negation in `invert_polarity`.
+    The LabVIEW waveform sequence includes an explicit polarity selection.
 
-    It matters because the 81150A's *low* level is what the device sits at
-    between pulses. With NORM and `LoLvl = Vcoll` the device is held in
-    extraction and pulsed to V_pre; with INV it is held at V_pre and pulsed to
-    V_coll, which is BACE as the physics describes it.
+    The generator low level holds the device between pulses. With normal
+    polarity and a low level corresponding to V_coll, the device rests at V_coll
+    and pulses to V_pre; inversion exchanges those phases. Amplifier inversion
+    and terminal wiring also determine the device voltages. A wrong selection
+    extracts on the wrong edge and can give plausible Q outside the intended
+    light-off timing.
     """
 
     settle_s: float = 0.2
-    """How long the run waits once the shutter is open and the light levels
-    are on the 81150A, before the scope acquires."""
+    """How long the run waits with the shutter open and light levels on the 81150A before the digitiser acquires, in s.
+
+    It adds `settle_s` to each shot, plus `shutter_settle_s`. Too short a wait
+    records an unsettled device; an excessive wait increases the gap between
+    traces and can increase drift noise.
+    """
 
     dark_settle_s: float = 0.2
-    """How long the run waits once the 81150A holds the dark levels, before the
-    shutter closes, and only on the `translated` dark reference. Under
-    `dark_reference = "same"` the levels are never rewritten, so there is
-    nothing to settle: the scan goes straight to the shutter and a value set
-    here simply does not happen."""
+    """How long the run waits after writing the 81150A dark levels before closing the shutter, in s; skipped with `same` after a light trace.
+
+    It adds time when `dark_reference` is `translated`, or when a dark trace
+    comes first and needs its levels written. With `same` after a light trace,
+    no levels change and this wait is skipped. Too short a wait records an
+    unsettled bias step; an excessive wait increases drift between traces.
+    """
 
     dark_reference: str = "translated"
-    """Which levels the 81150A holds for the dark trace: `"translated"` |
-    `"same"`.
+    """Which voltage levels the 81150A holds for the dark trace: `translated` repeats the swing starting at 0 V; `same` repeats the light levels.
 
-    `"translated"` is what this port reconstructed from the VI and what
-    `core.pulses.pulse_levels` returns a second pair of levels for: the dark
-    trace repeats the same voltage *swing* shifted so it starts at 0 V, e.g.
-    light `-1.014 -> +1.000 V` becomes dark `0.000 -> +2.014 V`. The stated
-    reason is to keep the diode out of forward bias, where in the dark it would
-    inject heavily. The cost is that the two traces are taken over different
-    absolute ranges, so the capacitive term only cancels where C(V) is flat.
+    `translated` repeats the light step's voltage change starting at 0 V.
+    For example, a light step from −1.014 to +1.000 V becomes a dark step from
+    0.000 to +2.014 V at the generator. Avoiding forward bias limits dark
+    injection. It requires a level write and `dark_settle_s`. The absolute voltage
+    ranges differ, so displacement current cancels only where capacitance is
+    independent of voltage.
 
-    `"same"` leaves the levels alone and lets **the shutter be the only thing
-    that changes** between the two traces. The voltage step is then identical,
-    so the displacement current cancels exactly rather than to within C(V) --
-    at the price of holding the device at the prebias level in the dark.
-
-    Which one the LabVIEW engine does has not been read off the block diagram;
-    the reconstruction says translated. `"same"` is here to be run against it.
+    `same` uses the light levels, so only the shutter changes between traces.
+    It avoids the level write and dark-level wait after a light trace. The
+    identical voltage step cancels displacement current without a capacitance
+    mismatch, but holds V_pre in the dark and can sustain injected carriers.
+    A wrong reference changes what Q subtracts and can mask device charge.
     """
 
     light_shutter: str = "open"
-    """Where the shutter sits for the *light* trace: `"open"` | `"shut"`.
+    """Where the shutter sits for the light trace: `open` illuminates the sample; `shut` takes a control without light.
 
-    `"open"` is the measurement: light on the sample, the transient at V_pre
-    is photogenerated charge plus whatever the device holds in the dark.
-    `"shut"` takes the "light" trace with the shutter shut as well, so the
-    pair differs in nothing but the bias levels and `Q` is the dark term
-    alone -- injected or doping charge at V_pre, and the capacitive mismatch
-    between the light and the translated dark swing. The 2026-09-06 sweep
-    (220 -> 295 K, `docs/analysis/2026-09-06/`) found Q at room temperature
-    nearly independent of intensity while doubling with temperature; this is
-    the control that says how much of it never came from the light.
+    `open` measures under illumination at V_pre. `shut` records both traces
+    without light as a control, without adding acquisitions. With a translated
+    dark reference, Q then includes charge sustained by the bias at V_pre and
+    the capacitive mismatch of the two voltage ranges. With `same`, identical
+    steps without light form a null run.
 
-    Everything else is unchanged: V_pre still comes from a V_oc measured
-    under light (the DC measurement opens the shutter itself), the LED still
-    pulses, the intensity is still read -- and reads the shutter's leak.
+    On this bench Q nearly doubles from 220 to 295 K and is nearly independent
+    of intensity at room temperature (`docs/analysis/2026-09-06/README.md`). The
+    control tests charge sustained without light; it does not define an additive
+    photogenerated share (manual 2.1).
+
+    V_pre still uses V_oc measured under illumination: the DC measurement opens
+    the shutter. The LED still pulses and the intensity read-back measures shutter
+    leakage. Selecting `shut` for an illuminated measurement records a control
+    instead of the intended light trace.
     """
 
     shutter_settle_s: float = 0.0
-    """How long the run waits after the shutter has finished moving, before
-    the scope acquires. **Applied to both traces.**
+    """How long the run waits after the shutter finishes moving before the digitiser acquires, in s, for both traces.
 
-    Until 2026-09-01 the two branches were not symmetric: the light trace waited
-    `settle_s` after `unblock()`, while the dark trace slept `dark_settle_s`
-    *before* `shut()` and then acquired the instant the shutter closed. So the
-    dark trace was taken with neither the mechanical shutter nor the device
-    given any time to settle, and the light trace was the only one that got any.
-    A difference of two traces cannot be trusted when one of them is measured
-    during a transient the other was allowed to finish.
+    It adds a wait to both traces, in addition to their level settle times.
+    A difference between traces is unreliable if one still contains shutter or
+    device settling. Too short a wait records that transient; excessive waits
+    increase the time between traces and can increase drift noise.
 
-    Zero by default, which preserves the archive behaviour for the regression;
-    a real measurement should set it. The LabVIEW panel's own analogue is
-    `Wait before measure (0.2)s`.
+    Zero preserves the no-wait acquisition contract used with the LabVIEW
+    regression in `tests/test_regression_20260807.py`. Bench measurements need
+    a settle time checked on the device. The LabVIEW panel's corresponding
+    control is `Wait before measure (0.2)s`.
     """
 
     read_intensity: bool = True
-    """Read the 1918-C power meter once per shot and store the number beside
-    the charge. The meter sits behind a beam splitter, so this costs nothing
-    but a serial round trip -- and it is the only record of the LED drooping
-    during a long scan, which is a real effect this rig showed (see the LED
-    settle note in `service/modules.py`). Off leaves `intensity_w` empty."""
+    """Read the 1918-C power meter once per shot and store its optical power, in W, beside the charge.
+
+    The meter samples a beam splitter, so it adds only an instrument round trip
+    and does not interrupt the shot. The read-back exposes LED droop during long
+    runs. Disabling it leaves `StepDone.intensity_w` empty and loses that record.
+    """
 
     acquisition_timeout_s: float = 30.0
-    """How long to wait for the scope to return a trace before giving up on
-    the shot. Not a measurement setting: it is the guard against a run that
-    hangs for ever because the 81150A never armed and the scope is waiting for
-    a trigger that will not come."""
+    """How long to wait for the digitiser to return a trace before giving up on the shot, in s.
+
+    A longer limit permits more averaging but delays failure reporting. A short
+    limit aborts valid acquisitions; an excessive limit leaves a run waiting for
+    a missing trigger, such as an unarmed 81150A.
+    """
 
     external_trigger: bool = True
-    """Arm the 81150A from its external trigger input -- the 33220A Sync --
-    rather than free-running. The panel's "ext. trig?" toggle. True is BACE:
-    the collection pulse has to be phased to the LED cycle, and only the Sync
-    carries that phase.
+    """Arm the 81150A from its external trigger input, the 33220A Sync, rather than free-running.
 
-    Written by the run, not inherited. Until 2026-09-02 only `tools/scan.py`
-    armed the generator, in its pre-flight; `run_transient_scan` itself sent
-    nothing, so a run started any other way -- the bench harness, the
-    service, a front panel left in IMM -- pulsed at whatever the instrument
-    held. That is dangerous precisely because it is silent: the scope
-    triggers on the 81150A's *own* Sync, so a free-running generator still
-    triggers every acquisition and still produces a transient of plausible
-    size, at a random phase of the LED cycle. So the arming is written on
-    every run and read back into `InstrumentState` as `bias_arm_source` and
-    `bias_arm_slope`, beside the polarity.
+    The run writes the arming mode and records `bias_arm_source` and
+    `bias_arm_slope` in `InstrumentState`. It costs setup commands and queries.
+    The collection pulse must follow LED light-off; only Sync carries that phase.
+
+    With external triggering disabled, the free-running 81150A still triggers
+    the digitiser from its own Sync. Acquisitions can therefore look valid and
+    give plausible Q while extraction occurs at an arbitrary LED phase.
     """
 
     trigger_slope_positive: bool = True
-    """Arm the 81150A on the rising edge of the external trigger — the 33220A
-    Sync. With the 33220A at
-    `:OUTP:POL INV` the rising Sync edge is light-off, the edge extraction
-    has to follow; arming on the falling edge would extract in the middle of
-    generation. Moot when `external_trigger` is False."""
+    """Arm the 81150A on the rising rather than falling edge of the 33220A Sync when external triggering is enabled.
+
+    It adds no acquisition time and applies only with `external_trigger` enabled.
+    With `:OUTP:POL INV` on the 33220A, rising Sync means light off. Selecting the
+    falling edge extracts during generation and changes the meaning of Q.
+    """
 
     trigger_sweep: str = "AUTO"
-    """**The scope's** trigger sweep mode, `AUTO` or `TRIG` — not the 81150A's
-    arming, which is `external_trigger` beside it. The recovered driver used
-    AUTO, so that is the default.
-    AUTO sweeps anyway when no trigger arrives, so a loose sync cable produces
-    untriggered noise whose dark subtraction cancels to nearly zero charge — a
-    plausible result from a disconnected cable. TRIG waits instead, turning that
-    into a timeout. Worth switching once the trigger path is known good."""
+    """The digitiser's trigger sweep mode: `AUTO` acquires even without a trigger; `TRIG` waits for one; independent of 81150A arming through `external_trigger`.
+
+    The default `AUTO` preserves the recovered LabVIEW SCPI sequence. It acquires
+    even without a trigger. `TRIG` waits for an edge, up to
+    `acquisition_timeout_s`. This setting does not control 81150A arming.
+    A loose Sync cable under `AUTO` produces untriggered noise whose subtraction
+    can give plausible near-zero Q; `TRIG` makes the missing edge a timeout.
+    """
 
     calibrate_trigger: bool = False
-    """Have the scope acquire its trigger channel once before the scan and set
-    its edge threshold to `max(CHAN3) * 0.5 * attenuation`, as the original did.
-    Needs a digitizer that can acquire that channel before any range has been
-    set, so it is off by default and switched on for the real rig."""
+    """Have the digitiser acquire its trigger channel before the scan and set its edge threshold to `max(CHAN3) * 0.5 * attenuation`, in V.
+
+    It adds a 16-acquisition probe before the scan and sets half the signed Sync
+    peak in V, scaled by probe attenuation, as the edge threshold. LabVIEW
+    compatibility requires this half-amplitude calibration. The digitiser must
+    acquire the trigger channel before a range is set; calibration is disabled
+    by default and enabled for the bench. A missing or mis-scaled Sync gives an
+    invalid threshold, and `AUTO` can then average untriggered noise.
+    """
 
     def __post_init__(self) -> None:
         if not self.t_int_width_s > 0:
@@ -382,7 +375,10 @@ class RunConfig:
             )
 
     def polarity_instruction(self) -> bool | None:
-        """What to hand `configure_shape`. `None` means leave it alone."""
+        """The polarity instruction is the boolean for `Agilent81150.configure_shape`.
+
+        `None` leaves the instrument polarity unchanged.
+        """
         p = self.output_polarity.lower()
         if p == "leave":
             return None
@@ -398,53 +394,53 @@ class RunConfig:
 
 def resolve_window(config: RunConfig, trace_t0: float, pulse_delay_s: float,
                    trigger_offset_s: float = 0.0) -> tuple[float, float]:
-    """The integration window in **record** time, which is what `charge` wants.
+    """The resolved integration window gives start and end in record time, in s.
 
-    `config.t0_int_s` is measured from the field's arrival at the device, which
-    is `pulse_delay_s` (`:PULS:DEL1`, from the arm) plus `trigger_offset_s`
-    (the rig's sync-to-field latency) after the trigger. A `Trace`'s `t0` is
-    the instrument's `:WAV:XOR?` -- the record's own origin relative to the
-    trigger, negative whenever the trigger sits inside the record, which it
-    always does here -- so a time `x` after the trigger is `x - t0` of record
-    time. The 2026-09-03 delay scan at 500 ns/div (`t0 = -500 ns`) with a 47 ns
-    latency and `t0_int_s = -2 ns` therefore starts its window at
-    `delay + 545 ns` of record time, and ends `t_int_width_s` later.
+    Field arrival is `pulse_delay_s + trigger_offset_s` after the trigger.
+    `trace_t0` is the record origin relative to the trigger, from `:WAV:XOR?`;
+    it is negative when the trigger lies inside the record. Subtracting it
+    converts trigger-relative time to time from the first sample. For example,
+    `trace_t0 = -500 ns`, latency 47 ns and `t0_int_s = -2 ns` place the start at
+    delay plus 545 ns of record time; the end is `t_int_width_s` later.
 
-    Kept out of `core.process` deliberately: `charge()` is validated numerics
-    and integrates on `arange(n) * dt`, full stop. Where the window *sits* is
-    a question about the instrument's record and the bench's cabling, and
-    belongs on this side of the boundary.
+    This conversion belongs with the bench timing. `bace.core.process.charge`
+    integrates on `arange(n) * dt` and does not depend on cabling or record origin.
+    The LabVIEW arithmetic contract is checked by
+    `tests/test_regression_20260807.py`.
     """
     start = config.t0_int_s + pulse_delay_s + trigger_offset_s - trace_t0
     return start, start + config.t_int_width_s
 
 
 PROVISIONAL_TRIGGER_V = 0.5
-"""Where the scope triggers on the sync channel while the sync is being
-measured. The calibration is circular otherwise: `max(CHAN3)` over a 2 us
-record only sees a 5 us pulse at 500 Hz if the record *starts on it*, and the
-scope only starts on it if it is already triggering on it. Every earlier
-calibration inherited a trigger level the LabVIEW VI or a previous session
-had left on CHAN3; session 125751 on the rig (2026-09-02) inherited the
-0.25 mV level of the session before it, free-ran, and measured 4.5 mV of a
-1.2 V sync with both generators demonstrably on. Half a volt triggers a TTL
-sync and nothing else; the measured half-amplitude replaces it afterwards."""
+"""The provisional Sync threshold is 0.5 V during calibration.
+
+A 2 µs record can sample a 5 µs pulse at 500 Hz only when it starts on that
+pulse. Calibration therefore needs a valid trigger before measuring the
+threshold. An inherited threshold near baseline can free-run and measure
+noise despite both generators being enabled. A 0.5 V threshold selects the
+TTL Sync; half its measured peak replaces this provisional value.
+"""
 
 MIN_SYNC_SWING_V = 0.1
-"""The least peak-to-peak swing on the trigger channel that counts as a sync.
-The 81150A sync into the scope is about 1.2 V (bench sessions of 2026-09-01
-calibrated 0.115 V thresholds from 0.23 V of it seen through the 1/R
-division); noise on an open CHAN3 is under a millivolt. A tenth of the
-real thing is a generous floor, and anything under it is not a trigger."""
+"""The minimum Sync swing is 0.1 V peak to peak at calibration.
+
+The 81150A Sync measures about 1.2 V on this bench; open-channel noise is
+below 1 mV. A threshold about one tenth of the Sync swing separates it from
+noise. Calibration must undo the current conversion by R_s before comparing
+voltages; otherwise the apparent swing is too small.
+"""
 
 
 class BiasOutputError(RuntimeError):
-    """`:OUTP1 ON` was sent and the 81150A still reports its output off."""
+    """The bias output error reports an off read-back after `:OUTP1 ON`."""
 
 
 class SyncError(RuntimeError):
-    """The trigger channel carried no sync at calibration, and the run refused
-    to acquire untriggered noise as data."""
+    """The Sync error stops acquisition when calibration detects no Sync.
+
+    This prevents `AUTO` from recording untriggered noise as data.
+    """
 
 
 AbortCheck = Callable[[], bool]
@@ -452,8 +448,11 @@ Sleep = Callable[[float], None]
 
 
 def _output_state(device) -> str:
-    """`ON` / `OFF` / `?` -- from the instrument when the driver has a
-    `read_output`, else from its cached flag."""
+    """The output state is `ON`, `OFF` or `?` from the instrument read-back.
+
+    It uses `read_output` when available, otherwise the cached output flag.
+    A failed or unknown read-back returns `?`.
+    """
     read = getattr(device, "read_output", None)
     try:
         on = read() if callable(read) else bool(device.output_enabled)
@@ -470,12 +469,11 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                        voc: float | None = None,
                        abort: AbortCheck | None = None,
                        sleep: Sleep = time.sleep) -> Iterator[Event]:
-    """Run one scan, yielding events as it goes.
+    """The transient scan yields measurement and progress events for one axis.
 
-    `voc` is required if the axis is centred on V_oc, and must have been
-    measured under the illumination that is in force now — `core.illumination`
-    has the guard for that; the caller that owns the LED is the one that can
-    apply it.
+    `voc`, in V, is required for an axis centred on V_oc. It must match the
+    illumination of the shots. The caller that controls the LED applies
+    `bace.core.illumination.assert_axis_centre` to enforce that constraint.
     """
     plan = _resolve_plan(spec, voc)
     cfg = rig.config
@@ -490,19 +488,17 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
     averaged: RunningAverage | None = None
     dt = float("nan")
     window_told = False
-    """The first shot reports where its window landed in record time, and the
-    first shot whose window runs past the record warns; neither repeats."""
+    """The window report and the truncation warning each appear at most once."""
     done = 0
     aborted = False
 
     try:
         # -- setup ---------------------------------------------------------
         rig.scope.configure_timebase(config.timebase_ns_per_div, config.record_length)
-        # Arming before the shape, as `Agilent 81150StandardWaveformTDCF` does
-        # (Configure Trigger, then Configure Standard Waveform). Written on
-        # every run: a generator left free-running by the front panel still
-        # triggers the scope and still yields a plausible charge, at a random
-        # phase of the LED cycle -- see `RunConfig.external_trigger`.
+        # LabVIEW compatibility requires trigger configuration before waveform
+        # configuration. Every run writes arming explicitly: a free-running
+        # generator still triggers the digitiser and can give plausible Q at
+        # an arbitrary LED phase. See `RunConfig.external_trigger`.
         rig.bias.configure_trigger(external=config.external_trigger,
                                    positive_slope=config.trigger_slope_positive)
         rig.bias.configure_shape(config.pulse_frequency_hz,
@@ -511,12 +507,10 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
         pol = rig.bias.output_polarity
         arm = rig.bias.trigger_state()
         left_alone = config.polarity_instruction() is None
-        # The readback, not the request, is what a later reader needs: with
-        # `output_polarity = "leave"` the recipe says nothing about which
-        # convention ran, so only this reaches the file. A Notice goes to the
-        # terminal and is gone; InstrumentState is written beside the config.
-        # The arming is read back for the same reason: what was *sent* is in
-        # the run config, what the instrument *holds* is here.
+        # With `output_polarity = "leave"`, only read-back identifies the
+        # polarity. `InstrumentState` persists it beside the configuration;
+        # a transient `Notice` cannot provide that file contract. Arming is
+        # also read back because a request alone does not prove instrument state.
         yield InstrumentState({
             "bias_output_polarity": pol,
             "bias_polarity_source": "left as found" if left_alone else "set by this run",
@@ -532,31 +526,25 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                 "rests at between pulses depends on how the sample is wired, so "
                 "this run does not assume it"
                 if left_alone else ""))
-        # The generator is enabled BEFORE the scope calibrates its trigger, at
-        # the first step's light levels, the shutter wherever the caller left
-        # it (a lit device at its first setpoint is a shot, not a hazard) -- the
-        # order `Agilent 81150StandardWaveformTDCF` and then the scope VIs
-        # take. Until 2026-09-02 the calibration came first, and it worked only
-        # because every earlier run inherited an 81150A the LabVIEW VI had left
-        # ON. The service parks the bench after every run, so the first run
-        # from a parked bench (session 115857) calibrated against a silent
-        # CHAN3: 5.2 mV peak to peak, no sync, no measurement.
+        # LabVIEW compatibility requires enabling the first point's light
+        # levels before trigger calibration. A parked generator supplies no
+        # Sync, so calibration without enabling it measures only noise.
+        # The shutter remains under the caller's control; the first setpoint
+        # under illumination is a measurement condition.
         first = pulse_levels(plan.setpoints[0].vpre, plan.setpoints[0].vcoll,
                              cfg.pulse_amp, plan.setpoints[0].delay_ns,
                              config.pulse_width_ns, invert=config.invert_polarity)
         rig.bias.set_levels(first.high_light, first.low_light,
                             delay_s=first.delay_s, width_s=first.width_s)
         rig.bias.enable_output(True)
-        # Read back where the driver can (`read_output` is not a protocol
-        # member; the real driver asks `:OUTP1?`), else the cached flag: a
-        # generator that did not take `:OUTP1 ON` gives no sync and no
-        # pulse, and the file should say which it was.
+        # `read_output`, when available, queries the instrument; otherwise
+        # the cached flag is the only state. A refused `:OUTP1 ON` supplies
+        # neither pulse nor Sync, so the file needs the output read-back.
         bias_on = _output_state(rig.bias)
         yield InstrumentState({"bias_output": bias_on})
         if bias_on == "OFF":
-            # The instrument, not the driver, says the output did not come
-            # on. Nothing downstream can work -- no pulse, no sync -- and
-            # the operator asked, watching the panel, whether it ever did.
+            # An off read-back proves the generator supplies neither a pulse nor
+            # Sync. Continuing cannot produce the intended measurement.
             raise BiasOutputError(
                 "the 81150A answers :OUTP1? = 0 after :OUTP1 ON: its output did "
                 "not come on, so no pulse reaches the device and no sync reaches "
@@ -572,17 +560,12 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
             probe = rig.scope.acquire(16, source=cfg.trigger_source,
                                       autorange_first=True,
                                       timeout_s=config.acquisition_timeout_s)
-            # `acquire` returns amps in the rig's sign convention: the
-            # digitizer divides by the sense resistor and multiplies by
-            # `current_sign`. The sync on CHAN3 is a voltage, and the scope
-            # wants a voltage threshold, so undo both. Until 2026-09-02 this
-            # took max() of the amps directly: a factor 1/R nobody noticed
-            # (0.115 V on a 1.2 V sync still triggers), and then, the day
-            # `current_sign = -1` landed, a sign flip that turned the sync
-            # into a negative pulse whose max() is the baseline noise -- the
-            # first service run on the rig set a 0.25 mV threshold and, with
-            # `trigger_sweep = AUTO`, averaged twenty untriggered records
-            # into a flat trace and a charge of 1e-12 C.
+            # `acquire` returns A after division by R_s and multiplication by
+            # `current_sign`. Sync and its threshold are in V, so both conversions
+            # must be reversed. A missing factor makes the threshold too small;
+            # a missing sign reversal takes the noise baseline as the peak of an
+            # inverted pulse. `AUTO` can then average untriggered records into a
+            # flat trace with plausible near-zero Q.
             volts = np.asarray(probe.y) * cfg.sense_resistor_ohm * cfg.current_sign
             peak = float(np.max(volts) if cfg.trigger_positive else -np.min(volts))
             threshold = peak * 0.5 * cfg.probe_attenuation
@@ -595,9 +578,9 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                         f"cable is off. ")
                 yield Notice("warning", text)
                 if config.trigger_sweep.upper() == "AUTO":
-                    # AUTO would sweep anyway, average untriggered records
-                    # and report a plausible, meaningless charge; TRIG would
-                    # at least time out. Refuse rather than measure noise.
+                    # `AUTO` averages untriggered records into plausible but meaningless
+                    # Q. `TRIG` waits for an edge and can time out. Missing Sync must
+                    # stop automatic sweeping rather than measure noise.
                     raise SyncError(text + "With trigger_sweep = AUTO every trace "
                                     "would be untriggered noise, so this run stops "
                                     "before the first shot. Set calibrate_trigger = "
@@ -611,10 +594,9 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
 
         # -- the loop ------------------------------------------------------
         sync_failed = False
-        # Per step, the vertical window the last light-first light trace
-        # settled on and whether its auto-range ended clipped. A pair taken
-        # dark first is acquired in it: a range fitted to the dark trace can
-        # be too small for the light one, which would then clip.
+        # Each point retains its light trace's vertical range and clipping
+        # flag. A dark trace acquired first reuses that range: auto-ranging
+        # on the dark trace alone can choose a range that clips the light trace.
         light_windows: dict[int, tuple[tuple[float, float], bool]] = {}
         for s in plan:
             if abort is not None and abort():
@@ -631,19 +613,17 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                                   sp.delay_ns, config.pulse_width_ns,
                                   invert=config.invert_polarity)
 
-            # The shot's segments, announced as each starts (`StepPhase`),
-            # so a live view can tell a settle from a hung acquisition.
-            # Nothing about the measurement changes: these are yields
-            # between the same instrument calls in the same order.
+            # `StepPhase` marks shot segments so the console can distinguish
+            # settling from a stalled acquisition.
             same_dark = config.dark_reference == "same"
-            # Dark first only where a light trace at this step has set the
-            # window -- always so on an even loop of a run started at loop 1.
+            # A dark trace can come first only after a light trace sets this
+            # point's range, as on even loops when a run starts at loop one.
             dark_first = (config.alternate_order and s.loop % 2 == 0
                           and s.step in light_windows)
             light_phases = ["levels", "light settle", "acquire light"]
-            # With `dark_reference = "same"` and the light trace first, the
-            # levels are already the dark trace's; only a dark trace that
-            # comes first, or a translated one, writes its own.
+            # With `dark_reference = "same"` after a light trace, the levels
+            # already match. A dark trace taken first or using `translated`
+            # requires its own level write.
             dark_phases = ([] if same_dark and not dark_first else ["dark levels"]) \
                 + ["dark settle", "acquire dark"]
             if dark_first:
@@ -676,12 +656,12 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                 return trace, sync, notes
 
             def light_part(autorange: bool):
-                # levels first, then shutter, then acquire
+                # Levels and shutter changes must precede settling and acquisition.
                 yield phase(light_phases[0])
                 rig.bias.set_levels(levels.high_light, levels.low_light,
                                     delay_s=levels.delay_s, width_s=levels.width_s)
                 if config.light_shutter == "shut":
-                    rig.shutter.shut()          # the dark-only control, see RunConfig
+                    rig.shutter.shut()          # No-light control; see `RunConfig`.
                 else:
                     rig.shutter.unblock()
                 yield phase("light settle")
@@ -695,10 +675,9 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                 return trace, sync, intensity
 
             def dark_part(autorange: bool, window=None):
-                # shutter closed. With `dark_reference = "same"` after the
-                # light trace nothing but the shutter moves, so the levels are
-                # not rewritten at all -- and the settle before the shutter has
-                # nothing to settle.
+                # With `same` after a light trace, only the shutter changes.
+                # Rewriting identical levels and waiting for them would add delay
+                # between traces without a level change to settle.
                 if "dark levels" in dark_phases:
                     yield phase("dark levels")
                     dark_levels = ((levels.high_light, levels.low_light) if same_dark
@@ -714,9 +693,9 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                 yield from notes
                 return trace, sync
 
-            # One vertical window for the pair, so both share one scope zero:
-            # the light trace's auto-range, or for a dark-first pair the
-            # window this step's light trace settled on a loop earlier.
+            # Both traces share a vertical range and scope zero. A light trace
+            # sets the range; a dark trace taken first uses the range of this
+            # point's light trace from the preceding loop.
             if dark_first:
                 window, clipped = light_windows[s.step]
                 dark, sync_dark = yield from dark_part(autorange=False, window=window)
@@ -731,8 +710,8 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
             # -- process ---------------------------------------------------
             dt = light.dt
             first = averaged is None
-            # Recomputed every step: the window is pinned to the pulse, so it
-            # travels with `:PULS:DEL1` along a delay axis.
+            # Field arrival moves with `:PULS:DEL1`, so the integration bounds
+            # must follow it at every delay point.
             t0_rec, t1_rec = resolve_window(config, light.t0, levels.delay_s,
                                             cfg.trigger_offset_s)
             record_end = (light.n - 1) * dt
@@ -763,8 +742,8 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                     "longer timebase or a shorter t_int_width_s makes it whole")
             baseline_end = None
             if config.offset_correct and config.offset_region == "pre-trigger":
-                # `-t0` is where the trigger sits in the record (`:WAV:XOR?`
-                # is the record's origin relative to it).
+                # `-light.t0` locates the trigger in record time. `:WAV:XOR?` gives
+                # the first sample's time relative to the trigger.
                 baseline_end = -light.t0 - PRE_TRIGGER_GUARD_S
                 if first:
                     yield Notice(
@@ -802,14 +781,10 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                            q_mean=float(q_mean[s.step - 1]),
                            q_std=float(q_std[s.step - 1]),
                            intensity_w=intensity,
-                           # Not `getattr(..., False)`. That default is what let
-                           # the real driver call this `last_autorange_clipped`
-                           # and report False for every shot ever taken on the
-                           # rig. `clipped` is in the `Digitizer` protocol now,
-                           # so a driver that lacks it fails loudly here and in
-                           # `test_every_real_driver_satisfies_its_protocol`.
-                           # Read after the light trace's auto-range: the window
-                           # both traces of the pair were taken in.
+                           # `Digitizer.clipped` is required. A `False` default hides
+                           # missing attributes and marks clipped shots valid.
+                           # `tests/test_architecture.py` checks the protocol.
+                           # The flag describes the range shared by both traces.
                            clipped=clipped,
                            sync_light=sync_light, sync_dark=sync_dark,
                            t0_int_record_s=t0_rec, t1_int_record_s=t1_rec,
@@ -832,9 +807,8 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                           dt=dt, elapsed_s=time.monotonic() - t_start)
 
     finally:
-        # Runs on normal completion, on abort, on exception, and on the
-        # consumer walking away mid-iteration (GeneratorExit). The sample is
-        # never left with a driven bias or an open shutter.
+        # Cleanup attempts to remove bias and light on completion, abort,
+        # exception and generator close, including a consumer ending iteration.
         try:
             rig.bias.disable_output()
         except Exception:
@@ -847,13 +821,13 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
 
 
 def _sync_trace(rig: Rig, cfg: RigConfig, already_failed: bool):
-    """The trigger channel out of the record just acquired, or None -- and,
-    the first time it cannot be fetched, a Notice saying so (2026-09-05).
+    """The Sync fetch returns the trigger trace in V from the acquired record.
 
-    Fetched after `acquire` has stopped the scope, so it is the same record
-    as the current trace: what the edge the scope triggered on looked like,
-    for the shot's verdict and its file. A digitiser without `fetch_volts`,
-    or a channel the scope will not hand over, costs one line, not the run.
+    It runs after `Digitizer.acquire` stops the digitiser, so the Sync belongs to
+    the same record as the current trace and supports the shot's timing verdict.
+    A digitiser without `fetch_volts` returns `None` without a warning. A fetch
+    failure returns `None` and a `Notice` only on the first failure, so an
+    unavailable channel does not stop the run or flood the event stream.
     """
     fetch = getattr(rig.scope, "fetch_volts", None)
     if fetch is None:
@@ -872,8 +846,10 @@ def _sync_trace(rig: Rig, cfg: RigConfig, already_failed: bool):
 
 
 def _averages_notice(trace: Trace, asked: int, index: int, which: str):
-    """A warning when the digitiser folded fewer acquisitions into `trace`
-    than the recipe asked for; None when it folded them all or cannot say."""
+    """The averages check returns a warning for a trace below the requested N_avg.
+
+    It returns `None` when the count meets the request or is unavailable.
+    """
     count = getattr(trace, "count", None)
     if count is None or count >= int(asked):
         return None

@@ -1,69 +1,48 @@
-"""The bench lock: one thread, one job at a time, and the two honest stops.
+"""Serialises instrument jobs and implements stop and abort.
 
-**Why one thread.** Every instrument call is blocking VISA I/O, VISA sessions
-are not thread-safe, and the relay interlock only holds when one sequence of
-calls reaches it. So a run, a bench read-back and a bench action are all the
-same thing here -- a `Job` on a FIFO queue, executed by the single
-`RunWorker` thread -- and the bench lock is not a lock object anyone can
-forget to take: it is the fact that there is exactly one thread. Anything
-that needs the bus waits its turn; a second Start while a run is live is
-queued, not refused and not run beside it.
+VISA calls block, VISA sessions are not thread-safe, and the relay interlock
+requires one ordered sequence of calls. Runs, read-backs and bench actions
+are `Job` objects on a FIFO queue. The `RunWorker` thread executes one job
+at a time under `RunWorker.bus`, the bench lock. A second run waits in the
+queue (docs/service-contract.md section 2).
 
-**Why the callbacks run on the worker thread.** `on_event` and `on_state`
-are called from inside the job, between one instrument call and the next.
-The session hands them to asyncio with `loop.call_soon_threadsafe`; this
-module never imports asyncio, so it can be tested with a list and two
-functions, and so the worker cannot stall the event loop.
+`on_event` and `on_state` run on the worker thread between instrument calls.
+The session bridges them to asyncio with `loop.call_soon_threadsafe`, so
+journaling and socket fan-out cannot stall instrument I/O. This module has
+no asyncio dependency and also accepts plain callbacks in tests.
 
-**The two stops**, from the plan, both ending in `parked`:
+Both stop modes end with park (docs/service-contract.md section 2):
 
-- `after_shot` sets the job's abort flag. Every generator polls it at its
-  natural boundary (transient: before each step; jv: before each curve;
-  executor: before each node); the shot in flight completes and is kept,
-  the generator yields `RunAborted(reason="requested", done, total)` and
-  unwinds through its own `finally`. Terminal state `stopped`.
-- `abort` cannot interrupt a blocking VISA call, so the worker acts at the
-  next event it receives: it calls `gen.close()`, which raises
-  `GeneratorExit` at the yield and unwinds every `finally` in the chain
-  (outputs off, shutter shut, recorders flushed), then emits
-  `RunAborted(reason="aborted", done, total)` itself -- the generator is
-  gone and cannot -- counting the shots it saw go by. A shot that completed
-  between the request and that event was already recorded by the generator
-  and is reported as it came; nothing after it starts. Terminal state
-  `aborted`. An abort that arrives while the job is paused in
-  `wait_for_operator` raises `AbortNow` inside the generator instead, which
-  unwinds the same way.
+- `after_shot` sets the job's stop flag. Generators poll it before each
+  transient step, J-V curve or executor node. The shot in flight completes
+  and is kept. The generator yields `RunAborted(reason="requested")`,
+  unwinds its `finally` blocks and ends `stopped`.
+- `abort` cannot interrupt blocking VISA I/O. At the next event the worker
+  calls `gen.close()`. `GeneratorExit` unwinds every `finally`: outputs off,
+  shutter shut, recorders flushed. The worker emits
+  `RunAborted(reason="aborted")` with the observed shot count. A completed
+  shot recorded before that event is kept and reported; no later shot
+  starts. During `Job.wait_for_operator`, `AbortNow` unwinds the generator
+  instead. The terminal state is `aborted`.
 
-**States.** `queued -> preflight -> running (<-> paused) -> stopping ->` a
-terminal state (`done`, `stopped`, `aborted`, `failed`, `blocked`), then
-`parked`. The contract says every terminal state is reached through
-`parked`; here that is the terminal state set on `job.state` and reported,
-then `job.park()` (the callable the session installs, which runs
-`Rig.park()`), then one more `on_state(job, "parked", <terminal state>)`.
-`job.state` stays the terminal state -- `parked` is a transition every
-ending passes through, not a place a run rests -- and `job.parked` records
-that it happened. `cancelled` is the exception: a job removed from the queue
-never touched the bench, so nothing is parked and the `cancelled` report is
-the last one. `blocked` is what `make()` raising `Blocked` ends in: a safety
-check refused the run at Start, before the generator existed, and the run
-must not be mistaken for one that crashed. `paused` and the return to
-`running` are reported when the worker sees `NeedsOperator` and
-`OperatorResumed` go by, so the state follows the events rather than a
-second bookkeeping path.
+States follow `queued -> preflight -> running (<-> paused) -> stopping`,
+then `done`, `stopped`, `aborted`, `failed` or `blocked`. The worker reports
+that terminal state, calls `job.park` and reports `parked`.
+`job.state` retains the terminal state; `job.parked` records completion of
+park. A cancelled queued job never touches the bench and needs no park.
+`Blocked` from `make` means a safety check refuses Start before a generator
+exists. It remains distinct from an execution failure. `NeedsOperator` and
+`OperatorResumed` drive `paused` and `running` on the event path.
 
-**A resume answers a pause, never the next one.** `Job.resume` keeps the
-operator's detail only while the job is paused -- from the `NeedsOperator`
-the worker saw to the moment `wait_for_operator` returns. A resume that
-lands while the run is measuring is refused (the session's 409) *and*
-discarded: kept, it would answer the next temperature pause the instant it
-opened, and the subtree below would be measured with the cryostat wherever
-it was, tagged with a temperature nobody confirmed.
+`Job.resume` retains operator detail only during the open pause, from the
+worker's receipt of `NeedsOperator` through the return of
+`Job.wait_for_operator`. An unpaused resume is refused with HTTP 409 and
+discarded. Retaining it could answer the next temperature pause without
+confirmation and label a subtree with an unconfirmed cryostat temperature.
 
-**The thread never dies on a job.** An exception from the generator, from
-`make`, from a callback or from `park()` is recorded in `job.error`; the job
-ends `failed` (or keeps the terminal state it had reached) and the next job
-runs. A worker that died with a queue behind it would leave the operator
-with a bench that answers nothing.
+Exceptions from a generator, `make`, callbacks or park are recorded in
+`job.error`. The job ends `failed` or retains its terminal state. The worker
+continues with the next job, so a failed job cannot strand the queue.
 """
 from __future__ import annotations
 
@@ -87,18 +66,20 @@ class StopMode:
 
 
 class AbortNow(Exception):
-    """Raised inside a generator by `Job.wait_for_operator` when an abort was
-    requested while it waited. Let it propagate: the generator's `finally`
-    blocks run on the way out, and the worker turns it into `aborted`."""
+    """Signals abort during `Job.wait_for_operator`.
+
+    Propagation runs the generator's `finally` blocks. The worker reports
+    `aborted`.
+    """
 
 
 class Blocked(Exception):
-    """Raised by `make()` when a safety check refuses the run at Start -- a
-    live output on the read-back, a compliance over the ceiling. The job
-    ends `blocked` (and is parked like every ending), not `failed`: nothing
-    was touched and nothing crashed, and the console must be able to tell
-    "the bench was unsafe" from "the scope fell over" without parsing an
-    error string."""
+    """Signals that a safety check refuses Start before instrument writes.
+
+    A live output or excessive compliance ends the job `blocked`, followed
+    by park. The console distinguishes an unsafe bench from an execution
+    failure without parsing an error string.
+    """
 
 
 TERMINAL: frozenset[str] = frozenset(
@@ -107,14 +88,13 @@ JOB_KINDS: tuple[str, ...] = ("run", "readback", "action")
 
 
 class Job:
-    """One unit of work for the worker thread.
+    """Represents one unit of work for the worker thread.
 
-    `make(job)` is called on the worker thread and must return a generator
-    of events; it gets the job so the generator can poll `job.abort_check`
-    and block in `job.wait_for_operator`. `park` is the callable run after
-    every terminal state (the session installs `Rig.park`); `node_path` is
-    for the generator to update as it moves through a tree, and is what a
-    synthesized `RunFailed` reports as `where`.
+    `make(job)` runs on that thread and returns an event generator. The
+    generator polls `job.abort_check`, waits in `job.wait_for_operator`
+    and updates `node_path` for synthesized `RunFailed.where` values.
+    `park` runs after terminal states for executed jobs; the session
+    installs `Rig.park` (docs/service-contract.md section 2).
     """
 
     def __init__(self, id: str, kind: str, make: Callable[["Job"], Iterator[Event]], *,
@@ -134,13 +114,14 @@ class Job:
         self.error: str | None = None
         self.node_path = ""
         self.last_progress: Progress | None = None
-        """The run's own last `Progress` (node_path ""): a loop's progress
-        counts iterations, not shots, and must not stand in for it."""
+        """Retains the module's last `Progress` with an empty `node_path`.
+        A loop counts iterations and cannot supply the shot count.
+        """
         self.shots_done = 0
-        """`StepDone`/`JVCurveDone` seen since the module in flight started.
-        The synthesized `RunAborted` counts from here as well as from the
-        last `Progress`, because the `Progress` a module yields describes
-        the shot *before* the one it just reported."""
+        """Counts `StepDone` and `JVCurveDone` events in the active module.
+        The synthesized `RunAborted` also uses this count because a module's
+        `Progress` describes the shot before its latest completed shot.
+        """
         self.parked = False
         self.paused = False
         self.queued_at = time.time()
@@ -158,28 +139,27 @@ class Job:
 
     # -- the generator's side ------------------------------------------
     def abort_check(self) -> bool:
-        """True once a stop of either mode was requested. The generators'
-        abort callable: the shot in flight finishes, the next is not started."""
+        """Returns whether either stop mode is requested.
+
+        Generators finish the shot in flight and start no further shot.
+        """
         return self.stop_mode is not None
 
     def wait_for_operator(self, *, poll_s: float = 0.2,
                           on_poll: Callable[[], None] | None = None) -> dict:
-        """Block the worker thread until `resume`, a stop, or an abort.
+        """Waits on the worker thread for resume, stop or abort.
 
-        Returns the resume detail (`{"temperature_k": 250.1, "note": ...}`);
-        returns `{"stopped": True}` when `after_shot` was requested, so the
-        generator can yield its `RunAborted(reason="requested")` and unwind;
-        raises `AbortNow` on `abort`. `on_poll` runs every `poll_s` with no
-        lock held -- the executor uses it to read the 331 console and emit
-        `TemperatureRead` while the operator works.
+        Returns resume detail such as `{"temperature_k": 250.1, "note": ...}`.
+        `after_shot` returns `{"stopped": True}` so the generator can emit
+        `RunAborted(reason="requested")` and unwind. `abort` raises `AbortNow`.
+        `on_poll` runs every `poll_s` without a lock held. The executor uses
+        it for 331 readings and `TemperatureRead` events during the pause.
 
-        A resume that arrived between the `NeedsOperator` and this call is
-        honoured, not discarded: the worker marks the job paused the moment
-        it sees `NeedsOperator`, microseconds before the generator gets
-        here, and an operator's click that landed in that window must not
-        be lost. A resume from before the pause was never kept (see
-        `resume`), and whatever is left when the wait ends is dropped here,
-        so nothing can answer the next pause but the operator.
+        A resume between `NeedsOperator` and this call must be retained:
+        the worker arms `paused` before publishing that event. `Job.resume`
+        discards replies outside a pause. This wait clears remaining detail
+        on exit, so only an operator's reply to the next pause can answer it
+        (docs/service-contract.md section 2).
         """
         with self._cv:
             self.paused = True
@@ -207,9 +187,11 @@ class Job:
 
     # -- the session's side ---------------------------------------------
     def request_stop(self, mode: str) -> str:
-        """Ask for `after_shot` or `abort`. An abort is never downgraded to
-        an after_shot; the stronger request stands. Returns the mode in
-        force. Callable from any thread."""
+        """Requests `after_shot` or `abort` from any thread.
+
+        Returns the mode in force. An abort cannot be downgraded to
+        `after_shot`.
+        """
         if mode not in StopMode.ALL:
             raise ValueError(f"stop mode must be one of {StopMode.ALL}, not {mode!r}")
         with self._cv:
@@ -219,10 +201,11 @@ class Job:
             return self.stop_mode
 
     def resume(self, detail: dict | None = None) -> bool:
-        """Answer a `NeedsOperator`. Returns whether the job was paused at
-        the time -- the session's 409 when it was not -- and keeps the
-        detail only then: a resume with nothing to answer is dropped, not
-        stored for the next pause. Callable from any thread."""
+        """Answers an open `NeedsOperator` pause from any thread.
+
+        Returns whether the job is paused. Otherwise the session returns 409
+        and the detail is discarded, so it cannot answer a later pause.
+        """
         with self._cv:
             if not self.paused:
                 return False
@@ -232,7 +215,7 @@ class Job:
 
 
 class RunWorker:
-    """The one thread that owns the instruments. FIFO, one job at a time."""
+    """Owns the instruments on one thread and executes jobs in FIFO order."""
 
     def __init__(self, *, on_event: Callable[[Job, Event], None],
                  on_state: Callable[[Job, str, str], None]):
@@ -241,14 +224,14 @@ class RunWorker:
         self._queue: collections.deque[Job] = collections.deque()
         self._cv = threading.Condition()
         self.bus = threading.Lock()
-        """Held for the whole of a job. The bench lock made concrete, for the
-        one caller that needs to ask rather than be the worker: an observer
-        whose instrument is on the bus (`monitors.TemperatureMonitor` when
-        this process owns the 331's GPIB session) tries to take it without
-        blocking and skips its tick when it cannot. Asking `idle` instead
-        raced -- true, then a job starts, then the observer's multi-query read
-        interleaves with the run's own GPIB traffic. Never taken by the
-        observer while blocking: a run holds this for hours."""
+        """Holds the bench lock throughout each worker job.
+        `monitors.TemperatureMonitor` uses a nonblocking acquire when this
+        process owns the 331 GPIB session. It skips a tick if the lock is busy.
+        Testing `idle` cannot protect a multi-query read: a job can start
+        between the test and the read. The observer must not block on this
+        lock because a run can hold it for hours
+        (docs/service-contract.md section 8).
+        """
         self._thread: threading.Thread | None = None
         self._stopping = False
         self.current: Job | None = None
@@ -256,10 +239,12 @@ class RunWorker:
 
     # -- the queue --------------------------------------------------------
     def submit(self, job: Job) -> int:
-        """Queue `job`; returns its position (0 = nothing ahead of it, it
-        starts when the current job, if any, ends). The `queued` state is
-        not reported through `on_state` -- this is the caller's thread --
-        so the session journals `RunQueued` and `queued` itself."""
+        """Queues `job` and returns its zero-based queue position.
+
+        Position 0 starts after any active job. This runs on the caller's
+        thread, so the session journals `RunQueued` and `queued` itself
+        instead of using `on_state`.
+        """
         with self._cv:
             if self._stopping:
                 raise RuntimeError("the worker is shutting down; a job queued now "
@@ -277,10 +262,12 @@ class RunWorker:
         return position
 
     def cancel(self, job_id: str) -> bool:
-        """Remove a queued job. False when it is not in the queue -- the
-        running job is stopped with `request_stop`, not cancelled. The
-        `cancelled` report is the one `on_state` call made on the caller's
-        thread; `loop.call_soon_threadsafe` does not mind."""
+        """Removes a queued job and returns whether it is present.
+
+        A running job requires `Job.request_stop`. The `cancelled` report is
+        the sole `on_state` call on the caller's thread; the session's
+        `loop.call_soon_threadsafe` bridge accepts it.
+        """
         with self._cv:
             hit = next((j for j in self._queue if j.id == job_id), None)
             if hit is None:
@@ -290,13 +277,13 @@ class RunWorker:
         return True
 
     def stop_runs(self, reason: str = "park requested") -> tuple[list[Job], Job | None]:
-        """Cancel every queued run and abort the one in flight, as one step.
+        """Cancels queued runs and aborts the active run as one operation.
 
-        The queue is emptied of runs and the current job read under the
-        same lock, so a run the thread pops between "cancel the queue" and
-        "abort the current" cannot slip through and run to completion ahead
-        of a park. Returns `(cancelled, aborted)`; read-backs and actions
-        already queued are left where they are. Callable from any thread.
+        The queue and current job are read under one lock, so a run cannot
+        escape cancellation and complete ahead of park. Returns the cancelled
+        jobs and the aborted job. Queued read-backs and actions remain in
+        place. Calls are allowed from any thread
+        (docs/service-contract.md section 4).
         """
         with self._cv:
             runs = [j for j in self._queue if j.kind == "run"]
@@ -322,7 +309,7 @@ class RunWorker:
             return self.current is None and not self._queue
 
     def wait_idle(self, timeout_s: float | None = None) -> bool:
-        """Block until no job is running or queued. For tests and shutdown."""
+        """Waits for an empty queue and idle worker, for tests and shutdown."""
         with self._cv:
             return self._cv.wait_for(lambda: self.current is None and not self._queue,
                                      timeout=timeout_s)
@@ -339,9 +326,11 @@ class RunWorker:
             self._thread.start()
 
     def shutdown(self, timeout_s: float = 5.0) -> bool:
-        """Cancel the queue, abort the current job, join. Returns whether the
-        thread ended in time -- a job inside a long VISA call cannot be
-        interrupted, and the caller should know rather than assume."""
+        """Cancels the queue, aborts the active job and joins the thread.
+
+        Returns whether the thread ends within the timeout. A blocking VISA
+        call cannot be interrupted.
+        """
         with self._cv:
             self._stopping = True
             leftovers = list(self._queue)
@@ -359,9 +348,11 @@ class RunWorker:
         return True
 
     def join(self, timeout_s: float | None = None) -> bool:
-        """Wait for the thread to end after `shutdown`; True when it has.
-        A job inside a blocking VISA call ends when the call does, and the
-        bench must not be released from another thread before then."""
+        """Waits for the thread after `shutdown` and returns whether it ends.
+
+        A blocking VISA call must return before another thread releases the
+        bench (docs/service-contract.md section 9).
+        """
         thread = self._thread
         if thread is None or not thread.is_alive():
             return True
@@ -388,9 +379,8 @@ class RunWorker:
             except BaseException as exc:            # noqa: BLE001 -- the thread outlives any job
                 job.error = _append(job.error, f"worker: {_describe(exc)}")
                 if not job.terminal:
-                    # Through `_finish`, so the bench is parked: a "parked"
-                    # report for a job that skipped park() would be a lie
-                    # in the journal about the state the bench was left in.
+                    # `_finish` parks the bench before reporting `parked`, so the
+                    # journal's safety state agrees with the attempted park.
                     self._finish(job, "failed", job.error)
             finally:
                 with self._cv:
@@ -409,8 +399,8 @@ class RunWorker:
                     "works by closing the generator so its finally blocks park the "
                     "bench, and there is nothing to close here")
         except Blocked as exc:
-            # The crit verdicts went out before the raise; this carries
-            # their text as the run's error, under its own state.
+            # The `crit` verdicts precede this error and retain their text
+            # under the run's `blocked` state.
             job.error = _describe(exc)
             self._emit(job, RunFailed(error=job.error, where="preflight"))
             self._finish(job, "blocked", job.error)
@@ -439,10 +429,8 @@ class RunWorker:
                 except Exception as exc:
                     job.error = _describe(exc)
                     outcome, reason = "failed", job.error
-                    # The wire carries the sentence; the console window gets
-                    # the traceback. Run 20260904_214634-024 failed with a
-                    # bare "VisaIOError: VI_ERROR_TMO" and nothing said which
-                    # instrument, which query, or which line.
+                    # The wire carries the error text; the service log carries the
+                    # traceback, which identifies the instrument call and line.
                     log.error("run %s failed in %s: %s", job.id,
                               job.node_path or job.kind, job.error, exc_info=exc)
                     if not failed_reported:
@@ -488,7 +476,7 @@ class RunWorker:
                     self._set_state(job, "running", "operator resumed")
 
                 if job.stop_mode == StopMode.ABORT:
-                    # The next yield was the earliest honest moment; this is it.
+                    # This yield is the first point where abort can close the generator.
                     self._close(gen, job)
                     if not aborted_reported:
                         self._synthetic_abort(job)

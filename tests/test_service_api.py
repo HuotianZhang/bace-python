@@ -681,11 +681,12 @@ def test_bace_is_refused_without_a_voc_source_and_centres_on_the_sessions(servic
 
 def test_stop_after_shot_keeps_the_shot_and_abort_discards_it(service):
     client, session = service
-    # 2000 loops, not 50: under --fast a shot takes a millisecond, and a scan
-    # short enough to finish before the stop request lands turns this into a
-    # race the suite loses once in a while (the run-3 review saw it in the
-    # smoke driver first). The stop lands after the first StepDone either way.
-    r = client.post("/runs", json=bace(2000, voc=0.9))
+    loops = 100_000
+    # 100000 loops: under --fast a shot takes a millisecond, and `frames`
+    # re-reads the whole ring on every poll, so on a slow runner a scan of a
+    # few thousand loops can finish before the stop request lands. The stop
+    # ends the run after its first shot either way, so the length costs nothing.
+    r = client.post("/runs", json=bace(loops, voc=0.9))
     assert r.status_code == 202
     run_id = r.json()["run_id"]
     wait_until(lambda: any(f["type"] == "StepDone" for f in frames(client, run_id=run_id)))
@@ -698,7 +699,7 @@ def test_stop_after_shot_keeps_the_shot_and_abort_discards_it(service):
     wait_run(session, run_id)
     rec = client.get(f"/runs/{run_id}").json()
     assert rec["state"] == "stopped" and rec["parked"]
-    assert rec["kept"] < rec["requested"] == 2000
+    assert rec["kept"] < rec["requested"] == loops
     assert rec["node_outcomes"]["bace"]["outcome"] == "stopped"
     assert rec["node_outcomes"]["bace"]["detail"]["summary"].startswith("stopped after")
     fs = frames(client, run_id=run_id)
@@ -708,7 +709,7 @@ def test_stop_after_shot_keeps_the_shot_and_abort_discards_it(service):
     assert r.status_code == 409 and "already stopped" in r.json()["error"]
     assert client.get(f"/runs/{run_id}/data").json()["kept"] == rec["kept"]
 
-    r = client.post("/runs", json=bace(2000, voc=0.9))
+    r = client.post("/runs", json=bace(loops, voc=0.9))
     run_id = r.json()["run_id"]
     wait_until(lambda: any(f["type"] == "StepDone" for f in frames(client, run_id=run_id)))
     r = client.post(f"/runs/{run_id}/stop", json={"mode": "abort"})
@@ -1391,6 +1392,11 @@ def test_the_cli_builds_a_sim_session_without_pyvisa_and_refuses_fast_on_the_rig
     assert main(["--fast", "--port", "1"]) == 2, "--fast is for --sim only"
     assert main(["--sim", "--ui", str(tmp_path / "nope")]) == 2
     assert main(["--sim", "--run", str(tmp_path / "nope.toml")]) == 2
+    with socket.socket() as held:                       # a config error is reported
+        held.bind(("127.0.0.1", 0))                     # whatever holds the port
+        held.listen(1)
+        busy = str(held.getsockname()[1])
+        assert main(["--sim", "--port", busy, "--run", str(tmp_path / "nope.toml")]) == 2
     assert parse_args(["--sim"]).power_monitor is None
     assert parse_args(["--sim", "--power-monitor", "0.5"]).power_monitor == 0.5
     # The temperature monitor is the other way round: on unless refused, so

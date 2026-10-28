@@ -1,21 +1,15 @@
-"""A VISA session that records everything and checks the error queue after
-every command.
+"""Record VISA exchanges and check the error queue after each command.
 
-This is the single most useful thing a bench session can produce. Every SCPI
-string in this port was recovered from a binary and has never been sent to an
-instrument; sending each one and immediately asking `:SYST:ERR?` turns "does my
-SCPI work" from a guess into a table of exactly which commands the instrument
-rejected and what it said about them.
+The bench checks LabVIEW SCPI sequences against the instruments. An immediate
+error-queue query associates each rejection with the command that causes it.
 
-`RecordingResource` wraps a pyvisa resource and presents the same `write` /
-`query` / `query_binary_values` interface, so the real drivers can be pointed at
-it **unmodified**. Nothing in `bace.drivers` knows it is being watched, which
-means the transcript is of the code that will actually run, not of a test
-double.
+`RecordingResource` exposes the resource's `write`, `query` and
+`query_binary_values` interfaces. Drivers use it without modification, so the
+transcript records the driver calls used for a run.
 
-The error query itself is configurable because not every instrument spells it
-the same way, and it can be turned off for the inner loop of an acquisition
-where an extra round trip per command would distort the timing.
+The error query is configurable because its spelling depends on the instrument.
+It can be disabled during acquisition: an extra round trip per command changes
+the timing under test.
 """
 from __future__ import annotations
 
@@ -25,15 +19,12 @@ from typing import Any
 from .report import Exchange
 
 def is_no_error(reply: str) -> bool:
-    """Is this error-queue reply the instrument saying 'nothing wrong'?
+    """Return whether an error-queue reply indicates no error.
 
-    Instruments disagree on the spelling. A Keithley or a 33220A answers
-    `0,"No error"`; the DSO9054H, with `:SYST:HEAD OFF`, answers a bare `0`.
-    Matching on the prefix `"0,"` therefore counted every scope reply as an
-    error and filled the first bench report with 28 phantom rejections.
-
-    So: parse the leading integer and compare it to zero. Anything unparsable is
-    treated as an error, because an unexpected reply is worth seeing.
+    A Keithley or 33220A returns `0,"No error"`; the DSO9054H returns bare `0`
+    with `:SYST:HEAD OFF` (docs/notes.md). The leading number therefore decides
+    whether the queue is clear. A nonempty reply that cannot be parsed counts
+    as an error so an unexpected response remains visible.
     """
     text = str(reply).strip().strip('"')
     if not text:
@@ -46,7 +37,7 @@ def is_no_error(reply: str) -> bool:
 
 
 class RecordingResource:
-    """Wraps a pyvisa resource; records every exchange into a list."""
+    """Wrap a PyVISA resource and record every exchange in a list."""
 
     def __init__(self, resource, exchanges: list[Exchange], *,
                  error_query: str | None = ":SYST:ERR?", label: str = "",
@@ -58,7 +49,7 @@ class RecordingResource:
         self.max_errors = max_errors
         self.check_errors = error_query is not None
 
-    # pyvisa attributes the drivers set or read
+    # PyVISA attributes used by the drivers
     @property
     def timeout(self):
         return self._io.timeout
@@ -67,7 +58,7 @@ class RecordingResource:
     def timeout(self, value):
         self._io.timeout = value
 
-    def __getattr__(self, name):          # anything else goes straight through
+    def __getattr__(self, name):          # other attributes pass through
         return getattr(self._io, name)
 
     # -- the recorded operations ------------------------------------------
@@ -146,10 +137,10 @@ class RecordingResource:
 
 
 class quiet:
-    """`with quiet(res):` — suspend the per-command error query.
+    """Suspend per-command error queries within `with quiet(res):`.
 
-    For the inner loop of an acquisition, where an extra round trip after every
-    write would change the timing being measured.
+    An extra round trip after each acquisition command changes the timing
+    under test.
     """
 
     def __init__(self, resource: RecordingResource):

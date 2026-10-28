@@ -1,20 +1,22 @@
-"""The staged checks.
+"""Check the bench in stages that expose increasing hardware risk.
 
-Ordered so that nothing capable of damaging a sample runs before everything
-harmless has been tried. Each stage is opt-in past the first two:
+The offline, discover and local stages run by default. Other stages are opt-in.
+Stages that move hardware need a typed confirmation unless `--yes` skips it.
 
-    offline     no instruments at all -- does the package work on this machine
-    discover    enumerate VISA, *IDN? each configured address. Read-only
-    read        read back what each instrument is currently set to. Read-only
-    configure   send the configuration commands. Outputs stay OFF
-    acquire     one scope acquisition. Needs the trigger to be running
-    dio         toggle the shutter and relay lines. Audible; nothing is driven
-    outputs     enable instrument outputs. Requires no sample connected
-    measure     one tiny real transient scan. Requires a sample
+    offline     check the package without instruments
+    discover    enumerate VISA and query `*IDN?`; read-only
+    local       check DELIB, the 1918-C and the 331
+    read        read back instrument settings; no settings sent
+    configure   send configuration commands; outputs stay off
+    acquire     acquire one scope record; a running trigger is required
+    dio         toggle shutter and relay lines; use a connected device and LED
+    outputs     enable outputs; disconnect the device first
+    measure     acquire a transient with a device connected
 
-The hypotheses this session is meant to settle are marked in the code with
-`HYPOTHESIS:` and reported as `warned` rather than `failed` when the instrument
-disagrees -- a disagreement is information, not a fault.
+`HYPOTHESIS:` marks assumptions under test. Instrument disagreement produces a
+warning rather than a failure where the assumption remains uncertain.
+`--force-configure` permits configuration of live outputs only with no device
+connected.
 """
 from __future__ import annotations
 
@@ -33,14 +35,11 @@ from .session import RecordingResource, quiet
 
 
 def fingerprint(root: str) -> str:
-    """A short hash over every .py in the package, path and content.
+    """Return a short hash of every Python source path and file in the package.
 
-    There is more than one copy of this tree on the bench: the code is edited in
-    one folder and executed from another, and on 2026-09-01 the executed copy
-    was ten files behind for about an hour without anything saying so. A report
-    that carries a fingerprint makes that a one-line comparison instead of an
-    hour, and two reports that disagree about a result are immediately
-    distinguishable from two reports of the same code.
+    The edited checkout and the executed checkout can differ. Including the hash
+    in each report distinguishes a code mismatch from different bench results
+    with identical source files.
     """
     import hashlib
 
@@ -58,7 +57,7 @@ def fingerprint(root: str) -> str:
 
 
 def _newest(root: str) -> str:
-    """Which source file was touched last, and when. Names a partial copy."""
+    """Return the most recently modified source path and its modification time."""
     newest, when = "", 0.0
     for base, dirs, files in os.walk(root):
         dirs[:] = [d for d in dirs if d != "__pycache__"]
@@ -79,7 +78,7 @@ def _newest(root: str) -> str:
 
 
 def stage_offline(report: Report, archive: str | None) -> None:
-    """Everything checkable with no instruments. Run this first, always."""
+    """Run the checks that need no instruments before the hardware stages."""
 
     def imports(c: Check) -> None:
         import bace  # noqa: F401
@@ -215,8 +214,8 @@ def stage_offline(report: Report, archive: str | None) -> None:
             c.skip(f"archive is missing {', '.join(missing)}")
             return
 
-        # read_matrix returns (corner, columns, row labels, data): the columns
-        # are the time axis and the row labels are V_pre.
+        # `L.read_matrix` returns corner, columns, row labels and data. Columns
+        # are the time axis; row labels are V_pre.
         _, t, vpre, light = L.read_matrix(paths["averages_light"])
         _, _, _, dark = L.read_matrix(paths["averages_dark"])
         _, _, _, photo_ref = L.read_matrix(paths["averages_photocurrent"])
@@ -310,11 +309,10 @@ def stage_offline(report: Report, archive: str | None) -> None:
 
 
 def _resolve_archive(folder: str, need, L) -> str:
-    """Accept either a run folder or the directory that holds them.
+    """Resolve a run folder from that folder or its parent directory.
 
-    The first bench session was pointed at `D:\\DATA\\TDCF-BACE\\data`, which
-    contains run folders rather than data files, and the check skipped. Looking
-    one level down costs nothing and removes a whole class of wasted trip.
+    The archive path can name the directory containing runs. Searching one
+    level down lets the regression find data rather than skip the check.
     """
     if any(L.find(folder, k) for k in need):
         return folder
@@ -323,7 +321,7 @@ def _resolve_archive(folder: str, need, L) -> str:
                       if os.path.isdir(os.path.join(folder, d)))
     except OSError:
         return folder
-    for sub in reversed(subs):                  # newest name last, try it first
+    for sub in reversed(subs):                  # Reverse chronology
         if all(L.find(sub, k) for k in need):
             return sub
     return folder
@@ -341,7 +339,7 @@ def _find(name: str) -> str | None:
 
 # -------------------------------------------------------------------- discover
 def open_visa(report: Report):
-    """Return a pyvisa ResourceManager, or None with the reason recorded."""
+    """Return a PyVISA resource manager, or `None` with the reason recorded."""
     rm = None
 
     def check(c: Check) -> None:
@@ -364,7 +362,7 @@ def open_visa(report: Report):
 
 
 def stage_discover(report: Report, rm, addresses: dict[str, str]) -> dict[str, str]:
-    """`*IDN?` each configured address. Returns role -> identity."""
+    """Query `*IDN?` at each configured address and map roles to identities."""
     found: dict[str, str] = {}
     for role, address in addresses.items():
         def check(c: Check, role=role, address=address) -> None:
@@ -404,7 +402,7 @@ def _expect(c: Check, role: str, idn: str) -> None:
 
 # ------------------------------------------------------------------------ read
 def stage_read(report: Report, rm, rig_config) -> None:
-    """Read back what each instrument is currently set to. Sends no settings."""
+    """Read back instrument settings without sending settings."""
 
     def scope(c: Check) -> None:
         res = _wrap(c, rm, rig_config.scope_address, ":SYST:ERR?")
@@ -469,7 +467,7 @@ def _wrap(c: Check, rm, address: str, error_query: str | None) -> RecordingResou
 
 # -------------------------------------------------------------------- non-VISA
 def stage_local(report: Report, rig_config) -> None:
-    """The things that are not VISA: the DIO DLL and the two consoles."""
+    """Check the DIO library, power meter and temperature controller."""
     from bace.drivers.shutter import Shutter
 
     def delib(c: Check) -> None:
@@ -488,10 +486,9 @@ def stage_local(report: Report, rig_config) -> None:
         usable = D.resolve(getattr(rig_config, "dio_dll_path", "") or None)
         if usable is not None:
             c.data["will load"] = usable
-            # Prove it rather than infer it: a matching PE header is not the
-            # same as a library that opens. A missing dependency, a blocked
-            # file, a wrong-arch import in the DLL itself all show up here, and
-            # would otherwise surface for the first time mid-run.
+            # A matching PE header does not prove the DLL can load. Opening it
+            # also tests dependencies, file blocking and internal imports, so
+            # these failures appear before a run.
             try:
                 sh = Shutter(module_id=rig_config.dio_module_id,
                              module_nr=rig_config.shutter_module_nr)
@@ -503,10 +500,9 @@ def stage_local(report: Report, rig_config) -> None:
             c.data["loads in-process"] = "yes — --dio needs no helper"
             return
 
-        # No DLL this interpreter can load. The fix is the 32-bit helper, but
-        # that needs a 32-bit Python -- and telling someone to run `py -3-32`
-        # without knowing whether one is installed is how a wasted trip to the
-        # bench happens. Find out here, in the same report.
+        # The 32-bit helper requires a 32-bit Python. Check installed
+        # interpreters before recommending a launcher command that may
+        # have no matching interpreter.
         thirty_two = _pythons_of_bitness(32)
         dll = next((path for path, machine in found if machine == 32), "")
         if thirty_two:
@@ -528,13 +524,11 @@ def stage_local(report: Report, rig_config) -> None:
                    "since it needs no second interpreter and no helper process")
 
     def power_meter(c: Check) -> None:
-        """The meter, opened the way a run will open it.
+        """Open the 1918-C through the same path a run uses.
 
-        With `[power_meter] console` empty (the default) this process opens
-        the USB device, so the check is the real thing and not a proxy for
-        it. The failure worth naming is the console being open beside the
-        service: it holds the handle and the device then reports itself
-        missing, which reads like a cable.
+        With `[power_meter] console` empty, this process opens the USB device.
+        A separate console can hold the handle while the service runs, making
+        the device appear absent even with its cable connected.
         """
         from bace.drivers.newport1918c import PowerMeterError, open_power_meter
         c.data["through"] = (rig_config.power_meter_console or
@@ -563,16 +557,14 @@ def stage_local(report: Report, rig_config) -> None:
             try:
                 m.close()
             except Exception:                               # noqa: BLE001
-                pass    # a check must not leave the handle held either way
+                pass    # Release the handle even if the check fails.
 
     def temperature(c: Check) -> None:
-        """The 331, opened the way a run will open it.
+        """Open the 331 through the same path a run uses.
 
-        A missing cryostat is not a fault -- most runs on this bench are at
-        room temperature and never ask for one -- so this skips rather than
-        warns. What it does say, when the instrument is there, is the
-        ceiling, because that number is the one a 400 K setpoint will be
-        refused against.
+        A missing cryostat skips the check: room-temperature runs do not need it.
+        If the controller is present, the report records its setpoint ceiling so
+        a refused setpoint can be checked against that limit.
         """
         from bace.drivers.lakeshore331 import (TemperatureError,
                                                open_temperature_controller)
@@ -604,7 +596,7 @@ def stage_local(report: Report, rig_config) -> None:
                 try:
                     t.close()
                 except Exception:                           # noqa: BLE001
-                    pass    # never leave the GPIB session held by a check
+                    pass    # Release the GPIB session even if the check fails.
 
     report.run("DELIB (shutter and relay)", "local", delib)
     report.run("1918-C power meter", "local", power_meter)
@@ -612,7 +604,7 @@ def stage_local(report: Report, rig_config) -> None:
 
 
 def _py_launcher_list() -> str:
-    """What the Windows `py` launcher says it has. Empty string elsewhere."""
+    """Return the Windows Python launcher listing, or an empty string elsewhere."""
     import subprocess
     for args in (["py", "--list-paths"], ["py", "-0p"]):
         try:
@@ -625,13 +617,12 @@ def _py_launcher_list() -> str:
 
 
 def _launcher_row(line: str) -> tuple[str, str] | None:
-    """One `py --list-paths` row as `(tag, executable)`, or None.
+    """Parse one `py --list-paths` row as `(tag, executable)`, or return `None`.
 
-    Split on the drive letter rather than on whitespace: the launcher marks its
-    default with a free-standing `*`, and install paths contain spaces
-    (`C:\\Program Files\\...`). The Python Install Manager also brackets the part
-    of a tag you may omit -- report 9 came back `-V:3.14[-64] *` -- and dropping
-    the brackets leaves `3.14-64`, which is what you can actually type.
+    The launcher marks its default with a separate `*`, and executable paths
+    can contain spaces. Splitting at the drive letter preserves both. The
+    Python Install Manager can bracket optional parts of a tag, as in
+    `-V:3.14[-64] *`. Removing the brackets gives the usable tag `3.14-64`.
     """
     import re
     m = re.search(r"[A-Za-z]:\\", line)
@@ -646,12 +637,11 @@ def _launcher_row(line: str) -> tuple[str, str] | None:
 
 
 def _pythons_of_bitness(want: int) -> list[tuple[str, str, str]]:
-    """Interpreters the `py` launcher knows about that are `want`-bit.
+    """Return launcher interpreters whose pointer size matches `want` bits.
 
-    Each entry is `(launcher tag, executable, version)`; the tag is what you can
-    actually type (`py -3.12-32`), the executable is the fallback when the tag
-    is missing. Every candidate is *run* to read its real pointer size, because
-    a `-32` in the tag is a naming convention and not a promise.
+    Each entry contains the launcher tag, executable and version. The executable
+    is the fallback if the tag is missing. Each candidate runs to report its
+    pointer size: a `-32` suffix alone does not guarantee a 32-bit interpreter.
     """
     import re
     import subprocess
@@ -682,16 +672,16 @@ def stage_configure(report: Report, rm, rig_config, run_config, *,
                     led_drive: tuple[float, float] = (1.020, 0.4),
                     pinned: tuple[float, float, float] = (0.9, -1.0, 88.0),
                     force: bool = False) -> None:
-    """Send every configuration command. **No output is enabled here.**
+    """Send configuration commands without enabling outputs.
 
-    `pinned` is the recipe's (vpre, vcoll, delay_ns) at the device -- the
-    levels a run's first step would set. Until 2026-09-04 the 81150A step
-    used the archive's 0.9 V / -1 V / 88 ns whatever run.toml said, so the
-    lab PC's report showed 88 ns beside a recipe that says 90.
+    `pinned` contains V_pre, V_coll and delay at the device, in V, V and ns,
+    from `run.toml` or the archive defaults of 0.9 V, -1 V and 88 ns. These
+    values must match the first point of the run being checked.
 
-    This is the stage that earns the whole harness: each recovered SCPI string
-    is sent once and the error queue is read immediately, so the report comes
-    back with an exact list of what the instruments rejected.
+    The stage checks the LabVIEW SCPI sequences by sending each command and
+    reading the error queue immediately. The report identifies instrument
+    rejections. A live output blocks configuration unless `force` is true;
+    that override requires no device connected.
     """
 
     def scope(c: Check) -> None:
@@ -712,10 +702,10 @@ def stage_configure(report: Report, rm, rig_config, run_config, *,
             s.configure_edge_trigger(rig_config.trigger_source,
                                      positive=rig_config.trigger_positive)
 
-            # HYPOTHESIS: timebase is ns/div, so 200 -> 2 us full screen and a
-            # trigger position of 800 ns. Recovered from the driver's own
-            # arithmetic and from the panel note "timebase*10"; never confirmed
-            # against the instrument.
+            # HYPOTHESIS: the panel timebase is ns/div: 200 gives a 2 µs record
+            # and an 800 ns screen-centre position. This follows the LabVIEW
+            # panel's `timebase*10` convention. Read-back tests the instrument's
+            # interpretation rather than assuming it.
             want_range = run_config.timebase_ns_per_div / 1e8
             want_pos = run_config.timebase_ns_per_div * 1e-9 * 4.0
             got_range = _f(res.query(":TIM:RANG?"))
@@ -727,10 +717,9 @@ def stage_configure(report: Report, rm, rig_config, run_config, *,
                 c.warn("the scope did not take the timebase we computed — the "
                        "ns/div interpretation may be wrong")
 
-            # The 5000 -> 4000 question. The first session showed :ACQ:POIN?
-            # answers 5000, so the reduction is not there: the record the scope
-            # can actually deliver is the time window times the sample rate, and
-            # 2 us at 2 GSa/s is 4000 points. Ask the sample rate and say so.
+            # `:ACQ:POIN?` can report the 5000 requested samples while a 2 µs
+            # record at 2 GSa/s contains 4000 (docs/notes.md). The delivered
+            # record depends on duration and sample rate; report both.
             got_points = _f(res.query(":ACQ:POIN?"))
             srate = _f(res.query(":ACQ:SRAT?"))
             c.data[":ACQ:POIN asked/reports"] = f"{run_config.record_length} / {got_points}"
@@ -796,8 +785,8 @@ def stage_configure(report: Report, rm, rig_config, run_config, *,
             if _output_is_live(c, res, ":OUTP?", "Keithley 2400", force):
                 return
             k.default_setup()
-            # The source/sense setup without enabling the output: exactly the
-            # commands measure_jsc would send, minus :OUTP ON.
+            # Use the source and sense sequence of `Keithley2400.measure_jsc`
+            # without enabling the output.
             res.write("*RST")
             res.write(":SOUR:FUNC:MODE VOLT;")
             res.write(":SOUR:VOLT:LEV 0;")
@@ -806,7 +795,7 @@ def stage_configure(report: Report, rm, rig_config, run_config, *,
             res.write(":SENS:CURR:NPLC 1;")
             res.write(":FORM:ELEM CURR;")
             c.data[":OUTP?"] = str(res.query(":OUTP?")).strip()
-            # and the V_oc branch, whose protection command this port corrected
+            # V_oc sensing requires voltage protection, not current protection.
             res.write(":SOUR:FUNC:MODE CURR;")
             res.write(":SOUR:CURR:LEV 0;")
             res.write(":SENS:FUNC 'VOLT:DC';")
@@ -828,9 +817,9 @@ def stage_configure(report: Report, rm, rig_config, run_config, *,
                 return
             g.set_dc(led_drive[0])
             c.data[":VOLT:OFFS?"] = str(res.query(":VOLT:OFFS?")).strip()
-            # The 81150A is armed by this generator's Sync, so the two have to
-            # agree on the period. Hard-coding 1 kHz here left the LED at twice
-            # the rig's 500 Hz after every --configure.
+            # The 33220A Sync arms the 81150A, so both generators must use the
+            # run's period. A 1 kHz driver default doubles the bench's 500 Hz
+            # frequency (manual 1.2).
             drive = led_drive
             g.set_pulse(drive[0], drive[1],
                         frequency_hz=run_config.pulse_frequency_hz,
@@ -848,15 +837,14 @@ def stage_configure(report: Report, rm, rig_config, run_config, *,
 
 
 def _output_is_live(c: Check, res, query: str, name: str, force: bool) -> bool:
-    """Refuse to reconfigure an instrument whose output is already enabled.
+    """Block configuration if the instrument reports an enabled output.
 
-    The first bench session found the 81150A sitting at `:OUTP1? = 1`, left on
-    by the LabVIEW program, and the configure stage changed its levels anyway —
-    from 1.263 V to 0.225 V high, which at the device is 5.05 V to 0.9 V, into
-    whatever was connected. The stage had only checked *its own* driver's flag,
-    which was of course False because this session had never enabled anything.
-
-    Ask the instrument, not the object.
+    Changing live generator levels changes the device voltage immediately.
+    Levels measured on this bench include 1.263 V at the generator, about
+    5.05 V at the device; a change to 0.225 V gives 0.9 V at the device.
+    The driver's output flag cannot establish safety because another program,
+    including LabVIEW, can enable the output. The instrument read-back is
+    required. The `force` override requires no device connected.
     """
     try:
         live = _f(res.query(query))
@@ -887,7 +875,7 @@ def _f(x) -> float | None:
 
 # --------------------------------------------------------------------- acquire
 def stage_acquire(report: Report, rm, rig_config, run_config, averages: int) -> None:
-    """One real acquisition. Needs whatever normally triggers the scope to be running."""
+    """Acquire one scope record with the normal trigger source running."""
 
     def acquire(c: Check) -> None:
         import numpy as np
@@ -908,16 +896,15 @@ def stage_acquire(report: Report, rm, rig_config, run_config, averages: int) -> 
             s.configure_edge_trigger(rig_config.trigger_source,
                                      positive=rig_config.trigger_positive)
             try:
-                with quiet(res):             # don't distort the acquisition timing
+                with quiet(res):             # Preserve timing
                     vrange, voffset = s.autorange(rig_config.current_source,
                                                   channel=rig_config.scope_channel,
                                                   verify=True)
                     trace = s.acquire(averages, source=rig_config.current_source,
                                       autorange_first=False, timeout_s=60.0)
             except ScopeError as exc:
-                # Not a fault: with nothing driving the sync there is nothing to
-                # trigger on. Worth distinguishing from a broken command, so it
-                # is a warning with the next thing to try.
+                # A missing Sync signal leaves nothing to trigger on. Report a
+                # warning with a remedy to distinguish it from a rejected command.
                 c.warn(f"{exc}. Is the 81150A running and its SYNC connected to "
                        f"{rig_config.trigger_source}? Alternatively the "
                        ":ADER? poll may not work on this firmware — the report "
@@ -959,12 +946,11 @@ def stage_acquire(report: Report, rm, rig_config, run_config, averages: int) -> 
             c.data["trigger sits this far into the record (ns)"] = round(
                 -trace.t0 * 1e9, 1)
             if trace.t0 < 0:
-                # The trigger is ~200 ns into the record, so this is the
-                # number that decides whether the integral starts before the
-                # transient does. `t0_int_s` is measured from the field's
-                # arrival; resolve it to record time first, as `charge` does.
-                # This stage drives no generator, so the window is shown at
-                # `:PULS:DEL1 = 0`; a scan adds its delay to both numbers.
+                # The trigger is about 200 ns into the record (docs/notes.md).
+                # Convert `t0_int_s` from field arrival to record time, as
+                # `bace.core.process.charge` requires. This stage drives no
+                # generator, so it shows the integration window for zero programmed
+                # delay. A scan adds its delay to the field arrival and window.
                 from bace.experiment.transient import resolve_window
                 t0_rec, t1_rec = resolve_window(run_config, trace.t0, 0.0,
                                                 rig_config.trigger_offset_s)
@@ -984,13 +970,13 @@ def stage_acquire(report: Report, rm, rig_config, run_config, averages: int) -> 
             res.close()
 
     def transfer(c: Check) -> None:
-        """Look at the raw bytes of `:WAV:DATA?`.
+        """Inspect the raw bytes returned by `:WAV:DATA?`.
 
-        The first bench acquisition got a preamble saying 4000 points and then
-        an empty array. That can be an indefinite-length block header the parser
-        does not accept, a read-termination character inside the binary, or a
-        record fetched while the scope was still running. Rather than guess
-        again, read the block by hand and report what it actually looks like.
+        A preamble can report 4000 samples while the parsed array is empty.
+        An indefinite-length block header, a termination byte inside binary data
+        or a fetch during acquisition can cause this mismatch. The raw block
+        distinguishes these cases; a fetch during acquisition is documented in
+        docs/notes.md.
         """
         res = _wrap(c, rm, rig_config.scope_address, ":SYST:ERR?")
         if res is None:
@@ -1043,47 +1029,37 @@ def stage_acquire(report: Report, rm, rig_config, run_config, averages: int) -> 
 def stage_dio(report: Report, rig_config, confirm, rm=None, *,
               smu_config=None, restore_outputs: bool = True,
               listen: bool = False) -> None:
-    """Find out what DIO module 0 and module 1 actually do — by measurement.
+    """Identify the shutter and relay lines through electrical measurements.
 
-    What is already known, and how well:
+    Module 0, channel 0 of module ID 9 controls the shutter; module 1 controls
+    the relay (manual 1.2). The LabVIEW shutter sequence specifies the same
+    module 0 target and a 0.1 s settle time. Module 1's LabVIEW label,
+    `open/close shutter 2`, alone does not establish its electrical role.
+    `bace.drivers.routing.BiasRouter` relies on that line selecting the
+    amplifier or Keithley path. If it controls an optical shutter instead,
+    the interlock does not protect the electrical path.
 
-    * **Module 0 is the shutter.** Not an inference: `shutter_lv2012.vi` — the
-      VI called "shutter", whose only control is `open/close shutter` — hard-codes
-      `module nr = 0`, `module ID = 9`, `ch = 0` and a 0.1 s delay.
-    * **Module 1 is something else on the same module ID.** `BACE_Mehrdad.vi`
-      drives it at four sites, and the label the binary gives it is
-      `open/close shutter 2` — *not* "relay". One of those sites sits beside
-      `:OUTP %g;` and `:VOLT:OFFS %g;`, which is what made me read it as the
-      amplifier/Keithley relay. That reading is mine, not the file's.
+    A click cannot distinguish those roles. With the LED on, photocurrent
+    at the Keithley requires both an open shutter and a connected device.
+    The stage walks all four line states and measures V at I = 0, I at V = 0,
+    and I at `DIO_PROBE_V` in each state.
 
-    The difference matters: `routing.Relay` treats module 1 as the relay and
-    guards it accordingly, and if it is really a second optical shutter then
-    that guard protects nothing and the real path switch is somewhere else.
+    A connected, illuminated device gives V_oc of about 0.9 V and photocurrent
+    of order mA, measured on this bench. A connected dark device gives about
+    0 V and little current at V = 0. These readings alone cannot establish
+    a disconnection: sourcing 0 A into an open circuit is a degenerate control
+    loop and need not reach voltage compliance (docs/notes.md). Forward
+    conduction at `DIO_PROBE_V` identifies the connected electrical path
+    independently of illumination.
 
-    Listening to it settles nothing anyway — a click does not say whether a line
-    switched an optical path or an electrical one. The Keithley does:
-
-        LED on, and photocurrent at the Keithley means the relay is on the
-        Keithley *and* the shutter is open.
-
-    So this walks all four states of the two lines and, in each, measures V at
-    I = 0 and I at V = 0. Three outcomes are distinguishable, which is what
-    breaks the symmetry between the two lines:
-
-    ==========================  ==================  ====================
-    state                       V at I = 0          I at V = 0
-    ==========================  ==================  ====================
-    connected, light            V_oc (~0.9 V)       J_sc (mA) <- the one
-    connected, dark             ~0 V                ~0
-    not connected               the voltage         ~0
-                                compliance rail
-    ==========================  ==================  ====================
-
-    Nothing is forced into the device: `measure_voc` sources 0 A and
-    `measure_jsc` sources 0 V, and each enables the output only for its own
-    reading. Both generator outputs are off for the whole stage — moving a path
-    switch under load is the one mistake here that costs hardware — and are put
-    back at the end.
+    `Keithley2400.measure_voc` sources 0 A and `Keithley2400.measure_jsc`
+    sources 0 V. `Keithley2400.measure_jsat` applies the small forward probe
+    voltage with the recipe's compliance. Each reading enables the Keithley
+    only for that reading. The 81150A stays off throughout; the Keithley
+    output is off during line changes. Switching the electrical path under
+    load can damage hardware. The line states must be restored before
+    outputs are restored. An unreadable initial line state vetoes output
+    restoration; `notes["dio restored"] = False` also vetoes it.
     """
 
     def identify(c: Check) -> None:
@@ -1111,33 +1087,36 @@ def stage_dio(report: Report, rig_config, confirm, rm=None, *,
 
 
 DIO_CONDUCTION_A = 1e-9
-"""Above this at `DIO_PROBE_V`, the device is on this path.
+"""Current above this threshold at `DIO_PROBE_V` identifies a connected device.
 
-Two decades above the open-input leakage measured on the rig (~1.5e-11 A) and
-orders below any real cell's forward current. If `smallest probe current` in a
-report ever approaches this, the constant is the thing to revisit.
+The threshold is two decades above the open-input leakage of about
+1.5e-11 A measured on this bench, and far below the device's forward
+current. Recheck it if the report's smallest probe current approaches it.
 """
 
 DIO_PROBE_V = 0.5
-"""A small forward bias, used only to ask whether the device is on this path.
+"""Probe the Keithley path with a small forward voltage, in V.
 
-Below the ~0.92 V V_oc the cell shows, so it is an ordinary point on its own
-J-V curve rather than a stress, and the recipe's compliance still applies.
+The probe is below V_oc of about 0.92 V measured on this bench. It tests
+conduction on the device's J–V curve while retaining the recipe's
+current compliance.
 """
 
 DIO_SETTLE_S = 0.3
-"""After a line moves. `shutter_lv2012.vi` waits 0.1 s; a relay and a cell
-recovering from the switch want more, and this runs four times, once."""
+"""Wait after each DIO line change, in s.
+The LabVIEW shutter sequence waits 0.1 s. The longer wait allows relay
+and device recovery after switching; it applies to each of the four states.
+"""
 
 
 def _walk_dio_states(c: Check, make, rig_config, rm, confirm, notes: dict, *,
                      smu_config=None, listen: bool = False) -> None:
-    """All four states of the two lines, each measured on the Keithley."""
+    """Measure all four shutter and relay line states with the Keithley."""
     from bace.drivers.keithley2400 import Keithley2400, SourceMeterConfig
 
-    # The recipe's compliance, not the driver's 50 mA default. `run.toml` sets
-    # 10 mA on this bench and `check_smu_limits` enforces a ceiling on it; a
-    # diagnostic has no business quietly running at five times that.
+    # Use the recipe's current compliance: `run.toml` specifies 10 mA on
+    # this bench and `bace.config.check_smu_limits` enforces its ceiling.
+    # The driver's 50 mA default would raise the diagnostic limit fivefold.
     smu_config = smu_config or SourceMeterConfig()
     c.data["compliance (A)"] = smu_config.current_compliance_a
 
@@ -1152,9 +1131,8 @@ def _walk_dio_states(c: Check, make, rig_config, rm, confirm, notes: dict, *,
     if any(v is None for v in started.values()):
         notes["dio restored"] = False
 
-    # Was the light even on? Without it no state shows photocurrent and the
-    # whole check comes back inconclusive -- so say so in the report rather
-    # than leaving it to be guessed afterwards.
+    # Without LED light, no state gives photocurrent and the roles remain
+    # inconclusive. Record the LED state to expose that condition.
     led = _led_state(rm, rig_config)
     c.data.update(led)
 
@@ -1195,7 +1173,7 @@ def _walk_dio_states(c: Check, make, rig_config, rm, confirm, notes: dict, *,
 
 
 def _led_state(rm, rig_config) -> dict:
-    """The 33220A's output state and levels, read from the instrument."""
+    """Read back the 33220A output state and levels."""
     out = {}
     try:
         with contextlib.closing(
@@ -1211,22 +1189,20 @@ def _led_state(rm, rig_config) -> dict:
 
 
 def _classify_dio(c: Check, table: dict, modules, *, led_on: bool = True) -> None:
-    """Read the four measurements back as roles, and say when they do not.
+    """Infer shutter and relay roles from four sets of measurements.
 
-    Two independent signatures, and both are needed:
+    Two independent signatures are required. Photocurrent at V = 0 identifies
+    the state with both the electrical path connected to the Keithley and the
+    shutter open. It determines the two line values but cannot distinguish
+    their roles.
 
-    * **photocurrent** (I at V = 0) marks the one state where the device is on
-      the Keithley *and* light reaches it. Huotian's rule, and it fixes the
-      *values* of the two lines but not which line is which -- both are set the
-      same way in that state, so the pair is symmetric.
-    * **forward conduction** (I at `DIO_PROBE_V`) marks every state where the
-      device is on the Keithley at all, light or no light. Flipping one line at
-      a time from the photocurrent state then breaks the symmetry: the flip that
-      stops conduction moved the electrical path; the flip that keeps it but
-      loses the photocurrent moved the light.
+    Forward conduction at `DIO_PROBE_V` identifies the connected electrical
+    path with or without light. From the photocurrent state, changing the line
+    that removes conduction switches the electrical path. Changing the line
+    that retains conduction but removes photocurrent shuts the shutter.
 
-    The first version of this used the SMU's voltage compliance as the
-    disconnect signature and was simply wrong -- see `stage_dio`.
+    Voltage compliance at I = 0 is not a reliable disconnection signature;
+    `stage_dio` explains the open-circuit limitation.
     """
     if len(table) != 4 or any(len(v) != 3 for v in table.values()):
         return
@@ -1247,16 +1223,15 @@ def _classify_dio(c: Check, table: dict, modules, *, led_on: bool = True) -> Non
         f"-> {table[lit][1]:+.4e} A, V_oc {table[lit][0]:+.4f} V. "
         "Device on the Keithley, light reaching it.")
 
-    # Conducting at a small forward bias means the device is on this path.
+    # Forward conduction indicates a connected electrical path.
     #
-    # This has to be an *absolute* threshold, not a relative one. The tempting
-    # move is to split the four readings at their largest gap, but that fails
-    # exactly where it matters: if both lines are optical the device conducts in
-    # all four states and the largest gap falls between the lit state and the
-    # dark ones, which would report three disconnections that never happened.
-    # What separates connected from disconnected is an instrument property, not
-    # a device one -- an open input reads the SMU's leakage, ~1.5e-11 A on this
-    # rig on 2026-09-01, while any real cell at +0.5 V conducts orders above it.
+    # The threshold must be absolute. Splitting at the largest gap between
+    # four readings fails if both lines control light: the device conducts
+    # in every state, but the gap between illuminated and dark readings
+    # would imply three disconnections. Open-input leakage measured on this
+    # bench is about 1.5e-11 A; device conduction at +0.5 V is orders larger.
+    # The distinction depends on instrument leakage, not relative device
+    # currents.
     probes = {k: abs(v[2]) for k, v in table.items()}
     connected = {k for k, i in probes.items() if i >= DIO_CONDUCTION_A}
     c.data["conducting at the probe bias"] = (
@@ -1291,9 +1266,9 @@ def _classify_dio(c: Check, table: dict, modules, *, led_on: bool = True) -> Non
                "on the two lines above it.")
         return
 
-    # modules[0] is whatever rig.toml calls the shutter. If it does not behave
-    # like one, the config is upside down and every run would open the relay
-    # where it meant to open the shutter.
+    # `modules[0]` is the configured shutter line. If its measured role differs,
+    # correct `rig.toml`: a run could otherwise move the relay when opening
+    # the shutter.
     if roles[modules[0]] != "switches the light (shutter)":
         c.warn(f"module {modules[0]} is configured as the shutter but behaves "
                f"as the path switch, and module {modules[1]} the other way "
@@ -1303,30 +1278,26 @@ def _classify_dio(c: Check, table: dict, modules, *, led_on: bool = True) -> Non
 
 SOURCES = (("81150A", "bias_address", ":OUTP1", ":OUTP1?"),
            ("Keithley 2400", "sourcemeter_address", ":OUTP", ":OUTP?"))
-"""The two things that can put a voltage on the device node, and how each
-answers for and controls its output. The 33220A drives the LED, not the node,
-so it is deliberately absent."""
+"""Describe output controls for sources that can put voltage on the device.
+The 33220A drives the LED and therefore has no entry here.
+"""
 
 
 @contextlib.contextmanager
 def _outputs_off(rm, rig_config, notes: dict, restore: bool = True):
-    """Turn both sources on the device node off for the duration, then back.
+    """Disable device-node sources during an operation and restore enabled outputs.
 
-    The relay cannot be moved safely while either is driving, and on this bench
-    the outputs cannot be switched off by hand -- the LabVIEW program owns them.
-    So the harness does it, and the ordering is the safety argument:
+    Moving the relay while either source drives can damage hardware. The
+    LabVIEW program can own the outputs, so software must disable them and
+    verify each instrument's read-back before moving a line. An accepted write
+    alone does not prove that an output is off. If either still reports on,
+    the context raises before the caller can move the relay.
 
-    * **off, then verify by reading the instrument.** A write that was accepted
-      is not the same as an output that is off; if either still answers 1 this
-      raises and nothing moves.
-    * **restore only what was on**, and only after the caller has finished. An
-      output that was already off stays off.
-    * **`notes` records every state change**, so the report says exactly what
-      the harness did to the rig rather than leaving it to be discovered.
-
-    The caller may set `notes["dio restored"] = False` to veto the restore --
-    re-enabling a source into a signal path that could not be put back where it
-    was found is precisely the move this whole interlock exists to prevent.
+    Only outputs enabled on entry are eligible for restoration, after the
+    caller finishes. `notes` records each state change for the report.
+    The caller can set `notes["dio restored"] = False` to veto restoration.
+    A source must stay off if the signal path cannot be restored or its
+    initial state cannot be read. `restore=False` also leaves outputs off.
     """
     was: dict[str, bool] = {}
     with contextlib.ExitStack() as stack:
@@ -1367,27 +1338,24 @@ def _outputs_off(rm, rig_config, notes: dict, restore: bool = True):
 
 
 def _basename(path: str) -> str:
-    """Last component of a path that may use either separator.
+    """Return the last path component with either slash convention.
 
-    `os.path.basename` splits on the *host's* separator, so a Windows path read
-    on any other machine comes back whole -- which is exactly what happens when
-    these checks are exercised in CI.
+    `os.path.basename` uses the host separator. A Windows path must also split
+    correctly on a non-Windows test host.
     """
     return path.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
 
 
 def _dio_backend(rig_config):
-    """How to reach the DIO lines on *this* machine, or why we cannot.
+    """Return a DIO backend or explain why neither route is available.
 
-    Deditec ships DELIB under two names -- 32-bit `delib.dll` in SysWOW64 and
-    64-bit `delib64.dll` in System32 -- and `ctypes` can load only the one
-    matching the interpreter. Which is installed is a property of the machine,
-    so `drivers.delib` decides and this only has to say what happened. Neither
-    present is not a fault to report as a failure: it is a deployment fact with
-    two fixes, and the check should name the one to apply rather than raise
-    `OSError: [WinError 193]` twice and call it a stage.
+    DELIB uses `delib.dll` for 32-bit Python and `delib64.dll` for 64-bit
+    Python (docs/notes.md). `ctypes` requires a library matching the interpreter.
+    `bace.drivers.delib` selects the installed library. If no usable library
+    or helper is available, the result names the deployment remedy rather
+    than reporting the same architecture error as multiple stage failures.
 
-    Returns `(factory, description, reason_if_unavailable)`.
+    The result is `(factory, description, reason_if_unavailable)`.
     """
     from bace.drivers import delib as D
     from bace.drivers.shutter import BridgedShutter, Shutter
@@ -1400,8 +1368,8 @@ def _dio_backend(rig_config):
             return Shutter(path, module_id=rig_config.dio_module_id,
                            module_nr=nr, settle_s=0.4)
         try:
-            # Prove it opens. A matching PE header is not the same as a library
-            # that loads: a missing dependency or a blocked file fails here.
+            # A matching PE header does not prove the DLL loads. Opening it also
+            # tests missing dependencies and blocked files.
             Shutter(path, module_id=rig_config.dio_module_id,
                     module_nr=rig_config.shutter_module_nr)
             return direct, f"{_basename(path)} in-process", ""
@@ -1447,11 +1415,11 @@ def _dio_backend(rig_config):
 # --------------------------------------------------------------------- outputs
 def stage_outputs(report: Report, rm, rig_config, run_config=None, *,
                   led_drive: tuple[float, float] = (1.020, 0.4)) -> None:
-    """Enable each output briefly, with **no sample connected**.
+    """Enable each output briefly with no device connected.
 
-    Everything before this point is either read-only or leaves the outputs off.
-    This is the first stage that could put a voltage on the device node, which
-    is why it is gated behind an explicit flag and a typed confirmation.
+    The stage can put a voltage on the device node, so it requires `--outputs`
+    and a typed confirmation unless `--yes` skips it. Disconnect the device
+    before proceeding.
     """
     from bace.experiment.transient import RunConfig
     run_config = run_config or RunConfig()
@@ -1505,9 +1473,9 @@ def stage_outputs(report: Report, rm, rig_config, run_config=None, *,
             return
         g = Agilent33220A(res)
         try:
-            # The 81150A is armed by this generator's Sync, so the two have to
-            # agree on the period. Hard-coding 1 kHz here left the LED at twice
-            # the rig's 500 Hz after every --configure.
+            # The 33220A Sync arms the 81150A, so both generators must use the
+            # run's period. A 1 kHz driver default doubles the bench's 500 Hz
+            # frequency (manual 1.2).
             drive = led_drive
             g.set_pulse(drive[0], drive[1],
                         frequency_hz=run_config.pulse_frequency_hz,
@@ -1529,13 +1497,12 @@ def stage_outputs(report: Report, rm, rig_config, run_config=None, *,
 
 # --------------------------------------------------------------------- measure
 class PromptShutter:
-    """A shutter operated by a person.
+    """Prompt the operator to open and close the shutter.
 
-    `delib.dll` is 32-bit, so a 64-bit bench session cannot drive the real
-    shutter without the helper process running. Rather than skip first light
-    entirely, this asks the operator to open and close it. Four prompts for a
-    one-point, two-loop run — tedious, and it does prove the acquisition and the
-    subtraction end to end.
+    A 64-bit session cannot load 32-bit `delib.dll`. When neither a compatible
+    library nor a helper is available, manual operation still allows the
+    acquisition and subtraction chain to be checked. A one-point, two-loop
+    run requires four shutter prompts.
     """
 
     def __init__(self, ask):
@@ -1558,19 +1525,19 @@ class PromptShutter:
 
 
 def _rail_samples(a) -> int:
-    """How many samples of `a` sit on its own most extreme value.
+    """Count samples equal to the minimum or maximum of `a`.
 
-    A digitiser that runs out of window returns the same code for every sample
-    past it, so a rail shows up as an extremum repeated dozens of times. A real
-    averaged analogue trace essentially never repeats its extremum: with 16
-    hardware averages the odds of two samples landing on the same 16-bit code
-    *at the very edge of the distribution* are negligible.
+    Clipping repeats the digitiser's limiting code. Repetition at an extremum
+    therefore checks the acquired samples independently of auto-range status.
+    With N_avg = 16, repeated extrema at the same 16-bit code are suspicious.
+    A light trace and dark trace measured on this bench share a minimum of
+    -5.83608e-03 A, repeated about 70 times in 4000 samples. Where both clip
+    to the same value, their difference is zero and the apparent transient
+    can consist only of the baseline correction.
 
-    This is the check that was missing on 2026-09-01. In report 033251 the light
-    and dark traces of the INV polarity run shared a minimum of -5.83608e-03 A,
-    repeated about seventy times in four thousand samples. Both were railed, so
-    `light - dark` was identically zero across the transient and the peak the
-    run was judged on was the residue of the baseline correction.
+    This count does not test adjacency. Consecutive repeated samples within
+    one trace are stronger clipping evidence than a shared extremum between
+    traces (docs/notes.md).
     """
     import numpy as _np
 
@@ -1581,19 +1548,17 @@ def _rail_samples(a) -> int:
 
 
 def saturation_verdict(light, dark) -> tuple[int, int, bool, str | None]:
-    """Was the light/dark pair taken inside the digitiser's window?
+    """Check the light trace and dark trace for possible digitiser saturation.
 
-    Returns `(rail_light, rail_dark, shared_extreme, warning or None)`.
+    Return `(rail_light, rail_dark, shared_extreme, warning or None)`.
+    The sample check complements auto-range status: a range set elsewhere or
+    an incomplete auto-range loop can leave clipping in the acquired data.
 
-    Two independent signals, and the second is the decisive one. The auto-range
-    reports what it *concluded*; this reports what the samples *show*, which is
-    what catches a window set somewhere else, or a loop that stopped early.
-
-    A shared extremum is close to proof. Two independently averaged acquisitions
-    do not agree on their most extreme sample to full floating-point precision
-    unless both are resting on the same hardware limit — and when they are,
-    `light - dark` is identically zero across that stretch, so the transient is
-    subtracted away rather than measured.
+    The check warns on a shared extremum or more than eight repeated extreme
+    samples. If both traces clip at the same value, their difference is zero
+    there and removes the transient. A shared extremum alone does not prove
+    clipping; consecutive repeats within one trace provide stronger evidence
+    (docs/notes.md). The warning is conservative.
     """
     rail_light, rail_dark = _rail_samples(light), _rail_samples(dark)
     shared = bool(light.min() == dark.min() or light.max() == dark.max())
@@ -1619,12 +1584,13 @@ def stage_measure(report: Report, rm, rig_config, run_config, *, averages: int,
                   loops: int, vpre: float, vcoll: float, delay_ns: float,
                   manual_shutter, ask, folder: str,
                   invert_output: bool = False) -> None:
-    """One tiny real transient scan — first light for the whole chain.
+    """Acquire a short transient run through the complete bench chain.
 
-    A single axis point, a couple of loops, few averages. Enough to answer the
-    only question the simulator cannot: does an acquisition triggered by the
-    real 81150A sync, through the real sense resistor, produce a photocurrent
-    that integrates to a sensible charge.
+    One point, a few loops and small N_avg test whether the 81150A Sync
+    triggers an acquisition through R_s with a photocurrent that integrates
+    to plausible Q. A simulator cannot establish that hardware behaviour.
+    `--measure` requires a connected device and typed confirmation unless
+    `--yes` skips it.
     """
 
     def measure(c: Check) -> None:
@@ -1672,20 +1638,15 @@ def stage_measure(report: Report, rm, rig_config, run_config, *, averages: int,
                                             "Vcoll — stepped to Vpre")
         c.data["averages / loops"] = f"{averages} / {loops}"
 
-        # -- the trigger chain, as found before the run ------------------------
-        # States this run depends on, read before it starts. Until 2026-09-02
-        # no run set any of them: the 81150A's arming source and slope and the
-        # 33220A's output polarity were inherited from whatever the last
-        # session left behind, and none reached the output -- which is how a
-        # run that extracts *during* illumination looks exactly like one that
-        # extracts after it. Since then `run_transient_scan` arms the 81150A
-        # itself (`configure_trigger`, before the pulse shape) and reads the
-        # arming back into `InstrumentState.bias_arm_source` / `bias_arm_slope`,
-        # which the recorder writes to /config/resolved. So the two :ARM lines
-        # below say what the front panel held *before* this run, not what the
-        # run ran under; for that, open the run folder this stage writes. The
-        # 33220A polarity is still only read, never written, by a run. See
-        # claude/bace-trigger-chain.md.
+        # -- trigger-chain read-back before the run ----------------------------
+        # `run_transient_scan` configures the 81150A arming source and slope
+        # before the pulse shape. `InstrumentState.values` carries their
+        # read-back as `bias_arm_source` and `bias_arm_slope`; the recorder
+        # stores these in `/config/resolved`. The queries here describe the
+        # state before setup. The run folder records the state used for the
+        # measurement. A run reads the 33220A polarity without setting it.
+        # Checking phase matters: extraction during illumination can still
+        # produce plausible Q (manual 2.2).
         for label, query in ((":ARM:SOUR1? (as found, before the run)", ":ARM:SOUR1?"),
                              (":ARM:SLOP? (as found, before the run)", ":ARM:SLOP?"),
                              (":OUTP1:POL? (read back)", ":OUTP1:POL?")):
@@ -1728,9 +1689,8 @@ def stage_measure(report: Report, rm, rig_config, run_config, *, averages: int,
         steps, fin = [], None
         try:
             with quiet(scope_res), quiet(bias_res):
-                # Recorded through the ordinary writer, so this first-light run
-                # produces a real run folder that can be opened by the same
-                # analysis as any other measurement.
+                # The ordinary recorder writes this run, so the same analysis can
+                # open its run folder and any other measurement folder.
                 for ev in record(run_transient_scan(rig, spec, cfg), rec):
                     if isinstance(ev, StepDone):
                         steps.append(ev)
@@ -1775,12 +1735,10 @@ def stage_measure(report: Report, rm, rig_config, run_config, *, averages: int,
             f"{t0_rec * 1e9:.2f} .. {t1_rec * 1e9:.2f}")
         c.data["record t0 :WAV:XOR? (ns)"] = round(steps[0].light.t0 * 1e9, 2)
 
-        # -- was the window big enough to hold the trace? --------------------
-        # `stage_acquire` has reported this since the first bench session.
-        # `stage_measure` did not, which is why report 033251 could compare two
-        # output polarities on a pair of railed traces and produce a charge that
-        # looked like the other one. Two independent signals: what the
-        # auto-range concluded, and what the samples show.
+        # -- digitiser saturation --------------------------------------------
+        # Check both auto-range status and acquired samples. A plausible Q
+        # does not establish that the light trace and dark trace fit within
+        # the digitiser range; clipping can cancel their difference.
         scope = rig.scope
         c.data["autorange passes"] = getattr(scope, "last_autorange_passes", "?")
         windows = getattr(scope, "last_autorange_windows", [])
@@ -1798,7 +1756,7 @@ def stage_measure(report: Report, rm, rig_config, run_config, *, averages: int,
         if note:
             c.warn(note)
 
-        # Downsampled traces, so the report can be plotted without being huge.
+        # Downsample traces to keep the report small enough to plot.
         step = max(1, light.size // 400)
         c.data["light[::%d]" % step] = [float(f"{v:.5e}") for v in light[::step]]
         c.data["dark[::%d]" % step] = [float(f"{v:.5e}") for v in dark[::step]]
@@ -1808,9 +1766,9 @@ def stage_measure(report: Report, rm, rig_config, run_config, *, averages: int,
             c.warn("the photocurrent peak is within three standard deviations of "
                    "the tail noise — is the light reaching the sample, and is "
                    "the trigger arriving?")
-        # Against the *resolved* window, not `cfg.t0_int_s` — that number is
-        # measured from the field, and comparing a record-time peak against it
-        # compares two different clocks.
+        # Compare the peak with the resolved integration window. `cfg.t0_int_s`
+        # is relative to field arrival; the peak is in record time. Comparing
+        # them directly mixes time origins.
         if int(np.argmax(np.abs(photo))) * fin.dt < t0_rec:
             c.warn("the peak falls before t0_int, so part of the transient is "
                    "outside the integration window")

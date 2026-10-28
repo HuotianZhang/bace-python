@@ -1,36 +1,28 @@
-"""Events on the wire: dataclasses to JSON-able dicts, with honest decimation.
+"""Wire conversion serialises event dataclasses and records array decimation.
 
-The service fans the event stream out to a browser, and a browser cannot take
-a 4000-point numpy array, a NaN, or a frozen dataclass. This is the one place
-that conversion happens, and it is reflection over `dataclasses.fields` rather
-than one hand-written case per event: a hand-written serialiser drifts from
-the dataclass it copies the first time someone adds a field, and adding an
-event to `events.py` should need nothing here.
+The browser needs JSON-compatible values. Reflection over `dataclasses.fields`
+keeps serialisation aligned with event fields without a separate case for
+each event type.
 
-Rules, in the order they are likely to surprise:
+NumPy arrays become lists, NumPy scalars become Python scalars, nested
+dataclasses become dictionaries, tuples become lists and dictionary keys
+become strings. Non-finite floats become `null`: JSON does not support NaN
+or infinity, although `json.dumps` can emit nonstandard tokens for them.
 
-* numpy arrays become lists of Python numbers; NaN and infinity become `null`.
-  JSON has no spelling for them, and `json.dumps` would otherwise emit `NaN`,
-  a token no browser's parser accepts.
-* `Trace` becomes `{"y", "dt", "t0", "n", "count"}`. `n` is the **full** record length
-  even when `y` has been decimated, so the UI can still put the samples on
-  their time axis: kept sample `i` of `len(y)` sits at `t0 + i * stride * dt`
-  for every `i` but the last, and the last sits at `t0 + (n - 1) * dt` -- it
-  is the record's final sample, appended whenever `n - 1` is not a multiple
-  of the stride (with n = 4000 and stride 5 the kept indices are 0, 5, ...,
-  3995, 3999). A client that placed it one stride after 3995 would draw the
-  tail 4 samples early.
-* nested dataclasses become dicts, tuples become lists, numpy scalars become
-  Python scalars, dict keys become strings.
-* With `max_points` set, a 1-D numeric array longer than that is
-  stride-decimated: keep the first sample, every k-th after it, and always
-  the last. The second return value records `{"<dotted.path>": {"n_full": N,
-  "stride": k}}` for each array it touched, and the array stays a plain list,
-  so the shape the UI sees is the same in a decimated frame and a full one.
-  2-D arrays are never decimated: `RunFinished.photo_averaged` (steps x
-  samples) is dropped to `null` and recorded as `{"omitted": true}` -- the
-  service serves it from a data endpoint -- while `q_all` (loops x steps) is
-  small and goes whole.
+A `Trace` carries `y`, `dt`, `t0`, `n` and `count`. `n` is the full record
+length even after decimation. Kept sample `i` lies at
+`t0 + i * stride * dt`, except that the final kept sample always lies at
+`t0 + (n - 1) * dt`. For `n = 4000` and stride 5, indices are 0, 5, ..., 3995,
+3999. Placing the last sample a full stride after 3995 misplaces the tail by
+four samples.
+
+With `max_points`, long one-dimensional numeric arrays keep the first sample,
+every stride-th sample and the last. Metadata records `n_full` and `stride`
+under each dotted field path; the array remains a plain list in both full
+and decimated frames. Two-dimensional arrays are not decimated.
+`RunFinished.photo_averaged`, with shape (points, samples), becomes `null`
+and metadata marks it `omitted`; the service provides it from a data endpoint.
+`RunFinished.q_all`, with shape (loops, points), remains complete.
 """
 from __future__ import annotations
 
@@ -43,22 +35,20 @@ import numpy as np
 from ..drivers.protocols import Trace
 from .events import Envelope, Event, RunFinished
 
-# Fields that are replaced by `null` (and reported as omitted) whenever a
-# consumer asks for decimation at all. Named per class rather than by a size
-# rule so a small run with many steps cannot silently lose `q_all`.
+# Explicit class fields become `null` with omission metadata whenever
+# `max_points` requests decimation. A size rule could discard `q_all` for a
+# run with many points, so omission is declared per event class.
 _OMIT_WHEN_DECIMATING: dict[type, tuple[str, ...]] = {
     RunFinished: ("photo_averaged",),
 }
 
 
 def _stride(n: int, max_points: int) -> int:
-    """The smallest k for which first + every k-th + last fits in `max_points`.
+    """The stride is the smallest spacing that fits both endpoints in `max_points`.
 
-    `range(0, n, k)` has `(n - 1) // k + 1` elements; with
-    `k = ceil((n - 1) / (max_points - 1))` that is at most `max_points`, and
-    appending the last sample when it was not already hit adds one only when
-    the range fell short by at least one -- so the result never exceeds
-    `max_points`.
+    `range(0, n, k)` has `(n - 1) // k + 1` samples. With
+    `k = ceil((n - 1) / (max_points - 1))`, it has at most `max_points` samples.
+    Appending the final sample adds one only if the range has room for it.
     """
     return max(1, math.ceil((n - 1) / (max_points - 1)))
 
@@ -73,7 +63,7 @@ def _decimate(arr: np.ndarray, max_points: int) -> tuple[np.ndarray, int]:
 
 
 def _finite(value: Any) -> Any:
-    """`tolist()` output with every non-finite float turned into None."""
+    """The finite-value conversion replaces non-finite floats with `None` in lists."""
     if isinstance(value, list):
         return [_finite(v) for v in value]
     if isinstance(value, float) and not math.isfinite(value):
@@ -99,8 +89,8 @@ def _join(path: str, name: Any) -> str:
 def _convert(value: Any, path: str, max_points: int | None,
              info: dict[str, dict]) -> Any:
     if isinstance(value, Trace):
-        # Special-cased for `n`: the record length survives decimation, so a
-        # consumer can tell a short record from a decimated one.
+        # `n` preserves the full record length so a consumer can distinguish
+        # a short record from a decimated one.
         return {"y": _convert(value.y, _join(path, "y"), max_points, info),
                 "dt": _scalar(value.dt), "t0": _scalar(value.t0),
                 "n": int(value.n),
@@ -135,11 +125,10 @@ def _convert(value: Any, path: str, max_points: int | None,
 
 
 def to_wire(event: Event, *, max_points: int | None = None) -> tuple[dict, dict]:
-    """`(data, decimation info)` for one event. `data` survives `json.dumps`.
+    """The wire conversion returns JSON-compatible event data and decimation metadata.
 
-    `info` is `{}` when nothing was decimated or omitted, so a consumer can
-    test it for truth. `max_points` must be at least 2: one point cannot keep
-    both the first and the last sample.
+    `info` is empty when no array is decimated or omitted. `max_points` must be
+    at least two because both endpoints must survive.
     """
     if max_points is not None and max_points < 2:
         raise ValueError(
@@ -151,9 +140,11 @@ def to_wire(event: Event, *, max_points: int | None = None) -> tuple[dict, dict]
 
 
 def envelope_to_wire(env: Envelope, *, max_points: int | None = None) -> dict:
-    """The frame a WebSocket client receives: envelope fields flattened,
-    `type` is the event's class name (what a client dispatches on), `data` the
-    event itself, `decimated` the info from `to_wire` (`{}` when full)."""
+    """The envelope conversion returns the WebSocket frame with flattened metadata.
+
+    `type` is the event class name for dispatch. `data` contains the event and
+    `decimated` contains `to_wire` metadata, empty for a full frame.
+    """
     data, info = to_wire(env.event, max_points=max_points)
     return {"seq": int(env.seq), "ts": float(env.ts), "run_id": env.run_id,
             "node_path": env.node_path, "type": type(env.event).__name__,
