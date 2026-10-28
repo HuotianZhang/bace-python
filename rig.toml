@@ -82,9 +82,10 @@ averaging = true                # DC-continuous mode and 5 Hz analog filtering a
                                 # filtering but still sets the mode.
 digital_filter = 100            # 100 samples of digital smoothing over the analog
                                 # filter; 0 disables PM:DIGITALFILTER.
-wavelength_nm = 530.0           # Sets the detector's responsivity. The source emits at
-                                # 520 nm (manual 1.2); a wrong wavelength shifts every
-                                # reading by the responsivity ratio.
+wavelength_nm = 520.0           # The source's wavelength, which sets the detector's
+                                # responsivity (manual 1.2). Readings taken at the
+                                # earlier 530 nm setting are low by the ratio of the
+                                # responsivities at 530 and 520 nm.
 on_beam_splitter = true         # The beam splitter permits power read-back during a run
                                 # (manual 1.2).
 dll_path = ""                   # Empty selects usbdll.dll for the interpreter

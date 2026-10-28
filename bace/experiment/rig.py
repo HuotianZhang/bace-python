@@ -118,7 +118,7 @@ class RigConfig:
     led_address: str = "GPIB0::15::INSTR"
     """VISA address for connecting to the 33220A, which drives the LED through a constant-gain amplifier."""
 
-    power_meter_wavelength_nm: float = 530.0
+    power_meter_wavelength_nm: float = 520.0
     power_meter_dll: str = ""
     """Path to Newport `usbdll.dll` for accessing the 1918-C power meter over USB; empty searches standard installation folders for matching interpreter bitness.
 
