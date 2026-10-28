@@ -1,155 +1,137 @@
-# One measurement. Copied verbatim into the output, so a result carries its own
-# recipe. Change freely; nothing here describes the hardware.
-#
-# 2026-09-02: brought in line with what matched the LabVIEW engine that night
-# (tools/bare.py --invert --settle 5 at 02:08 against LabVIEW at 02:16, and
-# recipes/run-labview.toml): combination-4 polarity, 200 averages, 5 s after
-# every shutter move, LED 1.000 V, delay 90 ns, t0 = 320 ns of record. The
-# earlier values here were the port's quick-check defaults, not a validated
-# recipe, and the service's first runs on the rig inherited them.
+# The recipe sets one measurement and is copied verbatim into its output.
+# Hardware properties belong in rig.toml. The polarity pair matches the
+# LabVIEW program: invert_polarity = true and output_polarity = "NORM"
+# (docs/notes.md). The manual covers timing and measurement limits.
 
 [axis]
-name = "vpre"                   # vpre | delay_ns | vcoll
-start = 0.0                     # offsets from V_oc when centre_on_voc = true
+name = "vpre"                   # Scan V_pre or V_coll in V, or delay in ns (manual
+                                # 4.1).
+start = 0.0                     # V offset from V_oc; zero selects V_pre = V_oc (manual
+                                # 4.1).
 stop = 0.0
 step = 0.0
 centre_on_voc = true
-# start = stop is a single point. Repeats come from loops, not from axis points:
-# "Q at V_oc, five times" is this block with n_loops = 5, which has no curvature
-# bias. The original's three points straddling V_oc are start = -0.001,
-# stop = 0.001, step = 0.001.
+# Equal start and stop select one point. Loops repeat the shot at V_oc
+# without averaging over curvature in Q(V_pre). For three points around
+# V_oc, use offsets -0.001 to +0.001 V in 0.001 V steps (manual 4.1).
 
 [pinned]
-vcoll = -1.0                    # V at the device
-delay_ns = 90.0   # what the LabVIEW panel held on 2026-09-02 (Delay(ns) = 90); 88 was the archive's
+vcoll = -1.0                    # V_coll in V at the device; check device limits (manual
+                                # 2.4, 4.1).
+delay_ns = 90.0   # 90 ns gives field arrival about 15 ns after light off (manual 1.2,
+                  # 2.2).
 
 [acquisition]
 n_loops = 100
-n_averages = 200   # hardware averages per trace. 200 is the panel's and the 02:16 LabVIEW run's; 50 gave three times the scatter per loop (2026-10-26)
-timebase_ns_per_div = 1000.0    # ten divisions -> 10 us: 1 us before the
-                                # trigger (the pre-trigger baseline) and 9 us
-                                # after it. 2026-10-26: at 200 ns/div (the LabVIEW
-                                # panel's and the 2026-08 archive's 2 us) the
-                                # record ended while extraction was still
-                                # running, and Q read 10-20 % low. See
-                                # docs/analysis/2026-10-26/scope-window/.
-record_length = 10000           # a request, not a promise: the instrument gives
-                                # window x sample rate. On 2026-10-26 a 5 us record
-                                # gave 6250 of 10000 asked (dt 0.8 ns) and a 20 us
-                                # one 20000 of 25000 (dt 1 ns). Nothing downstream
-                                # assumes either.
-t0_int_s = -2e-9                # where the charge integral starts, measured
-                                # from the field's arrival at the device:
-                                # trigger + :PULS:DEL1 + trigger_offset_s
-                                # (rig.toml). Negative = a little before the
-                                # step, so the whole transient is inside; the
-                                # dark trace removes the displacement spike.
-                                # The window is pinned to the pulse, so along a
-                                # delay axis it travels with every point --
-                                # the scope triggers on the Sync, which
-                                # :PULS:DEL1 does not delay, so a window fixed
-                                # to the trigger or the record would slice a
-                                # different part of each point's transient.
-                                # (The 2026-09-03 scan's `pulse` + 45 ns with a
-                                # 47 ns latency folded in is this -2 ns.)
-t_int_width_s = 6e-6            # how long the window is. The end travels with
-                                # the pulse too. 2026-10-26, 20 us records with a
-                                # null run beside them: Q is ~96 % collected by
-                                # 6 us and ~98 % by 8 us, while the amplifier's
-                                # shot-to-shot drift (+/-3 uA) adds scatter in
-                                # proportion to the window; 6 us is the balance.
-                                # The run warns once if the record ends first.
-pulse_width_ns = 10000.0        # outlasts the 6 us window and the 9 us record;
-                                # the period is 2 ms, so it costs nothing
-pulse_frequency_hz = 500.0        # read off the rig 2026-08-31: both
-                                # generators were at 500 Hz, not the
-                                # 1 kHz assumed from the old code
+n_averages = 200   # N_avg = 200 per trace; 50 gives three times the scatter per loop on
+                   # this bench (manual 2.3).
+timebase_ns_per_div = 1000.0    # 1000 ns/div gives 10 µs: 1 µs before the trigger for
+                                # baseline and 9 µs after. A 2 µs record omits
+                                # extraction current and gives Q 10-20 % low (manual
+                                # 2.2, 2.3).
+record_length = 10000           # 10000 requested samples; the instrument returns record
+                                # width times sample rate. Bench read-back gives 6250
+                                # for a 5 µs record (0.8 ns spacing) and 20000 for 20 µs
+                                # (1 ns), despite requests of 10000 and 25000.
+                                # Processing uses the returned length (measured on
+                                # this bench).
+t0_int_s = -2e-9                # Starts 2 ns before field arrival: trigger + :PULS:DEL1
+                                # + trigger_offset_s. Both window ends follow delay, so
+                                # every point includes the same part of its transient.
+                                # The dark trace removes displacement charge where
+                                # capacitance matches. A trigger-relative window would
+                                # cut different parts at different points (manual 2.2).
+t_int_width_s = 6e-6            # 6 µs balances charge collection against drift. With a
+                                # null run subtracted, 96 % is collected at 6 µs and 98
+                                # % at 8 µs relative to 15 µs. Drift is about ±3 µA
+                                # per shot, so its charge error grows with window width.
+                                # The run warns if the record ends first (manual 2.2,
+                                # 2.3).
+pulse_width_ns = 10000.0        # 10000 ns outlasts the 6 µs integration window and 9 µs
+                                # after-trigger record, excluding the return step. It
+                                # fits within the 2 ms period (manual 2.2).
+pulse_frequency_hz = 500.0        # 500 Hz on both generators is the bench operating
+                                # rate (manual 1.2).
 duty_percent = 50.0
-offset_correct = true           # subtract a constant baseline, from offset_region
-offset_region = "pre-trigger"   # the record before the trigger, not the last
-                                # 10 %, which on 2026-10-26 still held signal
-alternate_order = true          # dark trace first on even loops, so drift between
-                                # the two acquisitions cancels over loop pairs
-inverted_output = false   # unused while output_polarity is set explicitly below
-                                # what the device sits at between pulses, so with
-                                # NORM and LoLvl = Vcoll it is held in extraction
-                                # and pulsed to Vpre; with INV it is held at Vpre
-                                # and pulsed to Vcoll, which is BACE as described.
-                                # First light on 2026-09-01 gave Q = -2.07e-10 C
-                                # where the archive at the same Vcoll and delay
-                                # gives +3.65e-10 C -- see docs/bench-checkout.md.
-invert_polarity = true   # swap-and-negate the computed levels (the original's "New Sample?")
-                                # both levels for an inverted device. A sign
-                                # convention — wrong here flips every charge.
-output_polarity = "NORM"       # :OUTP1:POL. The validated pair is invert_polarity = true
-                               # WITH NORM: bare.py --invert ran at 02:08 with the generator
-                               # at NORM and matched LabVIEW to 4 %, and the 02:20 read-back
-                               # shows LabVIEW itself finishes at NORM. Through the INVERTING
-                               # x4 amplifier, NORM rests the device at v_pre and pulses to
-                               # v_coll -- BACE. The recipes' "combination 4" = INV label is
-                               # stale: every INV run (23:41-01:22, and the service run at
-                               # 14:52 on 2026-09-02) rests the device at v_coll instead,
-                               # extraction never stops, and the photo peak collapses from
-                               # ~3 mA to ~0.5 mA with Q an order of magnitude small.
-settle_s = 0.5   # after the levels are written
-dark_settle_s = 0.5   # after the dark levels, before the shutter shuts
-shutter_settle_s = 1.0          # after the shutter has moved, BOTH traces, before acquiring.
-                                # 2026-10-26, 294 K, interleaved at Voc: 0.5/0.5/1 s gave the same Q as
-                                # 2/2/5 s within the error, at 6.3 s a shot instead of 17.3, and less
-                                # scatter per loop (0.009 against 0.021 nC): the amplifier drifts less
-                                # in the shorter gap between the light and the dark trace. Check once
-                                # at the coldest temperature, where the device is slowest.
+offset_correct = true           # Subtracts the baseline selected by offset_region
+                                # before integrating Q (manual 2.3).
+offset_region = "pre-trigger"   # Uses the pre-trigger baseline; the last 10 % can
+                                # contain extraction current and bias Q low (manual
+                                # 2.3).
+alternate_order = true          # Dark trace first on even loops; stable drift cancels
+                                # over loop pairs (manual 2.3).
+inverted_output = false   # Ignored with explicit output_polarity. Under "auto",
+                                # polarity selects the level between pulses. Holding
+                                # V_coll under light prevents charge accumulation
+                                # (docs/notes.md).
+invert_polarity = true   # Swaps and negates both voltage levels for the device
+                                # orientation; a wrong sign changes every Q (manual 4.1).
+output_polarity = "NORM"       # NORM with invert_polarity = true matches the LabVIEW
+                               # program. Through the inverting bias amplifier it holds
+                               # V_pre and pulses to V_coll. INV holds V_coll and
+                               # suppresses accumulation: bench peaks fall from about 3
+                               # to 0.5 mA and Q by about a factor of ten.
+settle_s = 0.5   # 0.5 s after light levels are set; shorter trace spacing reduces drift
+                 # (manual 2.3).
+dark_settle_s = 0.5   # 0.5 s after dark levels, before shutter closure; shutter
+                      # settling follows separately (manual 4.1).
+shutter_settle_s = 1.0          # 1 s after shutter motion for both traces. At 294 K,
+                                # 0.5/0.5/1 s and 2/2/5 s agree in Q within uncertainty.
+                                # They take 6.3 and 17.3 s per shot, with scatter 0.009
+                                # and 0.021 nC per loop. Shorter spacing reduces
+                                # amplifier drift. Check settling at the coldest
+                                # temperature, where the device is slowest (manual 2.3;
+                                # docs/analysis/2026-10-26/scope-window/README.md).
 read_intensity = true
-trigger_sweep = "AUTO"          # AUTO or TRIG. AUTO is what the LabVIEW driver
-                                # used, and it sweeps even when no trigger
-                                # arrives — so a loose sync cable gives
-                                # untriggered noise that subtracts to ~0 charge
-                                # and looks like a real (bad) result. TRIG waits
-                                # instead and times out. Switch once the trigger
-                                # path is known good.
-calibrate_trigger = true        # threshold = max(CHAN3) * 0.5 * attenuation
-external_trigger = true         # arm the 81150A from its EXT input (the 33220A
-                                # Sync) -- the panel's "ext. trig?". Default
-                                # true. Written by every run since 2026-09-02;
-                                # before that only tools/scan.py set it and a
-                                # run started any other way inherited the front
-                                # panel, and a free-running pulse still gives a
-                                # plausible charge at a random LED phase.
-trigger_slope_positive = true   # arm on the rising Sync edge, which with the
-                                # 33220A at INV is light-off. Default true.
-store_shots = false             # per-shot traces: 163 MB for a 51-point,
-                                # 100-loop run. The honest version of "Big File?"
+trigger_sweep = "AUTO"          # AUTO matches the LabVIEW sequence and acquires without
+                                # a trigger. A loose Sync cable can give noise with
+                                # near-zero Q that looks plausible. TRIG waits and times
+                                # out without Sync; use it after checking the trigger
+                                # path (manual 4.2; docs/notes.md).
+calibrate_trigger = true        # Sets trigger threshold to max(CHAN3) * 0.5 *
+                                # attenuation, in V, to follow the Sync amplitude
+                                # (manual 4.1).
+external_trigger = true         # Arms the 81150A from 33220A Sync. Free-running pulses
+                                # can give plausible Q at a random LED phase (manual
+                                # 1.2, 4.1).
+trigger_slope_positive = true   # Rising Sync edge arms the 81150A at light off with the
+                                # 33220A output inverted (manual 1.2).
+store_shots = false             # false omits individual shot traces; storing 51 points
+                                # over 100 loops takes about 163 MB (manual 4.1).
 
 [sourcemeter]
-# Adjustable per run: the right compliance depends on the pixel, not the bench.
-# rig.toml carries the ceiling these may not exceed.
-current_compliance_a = 0.01     # while sourcing voltage (J_sc, J_sat, J-V)
-voltage_compliance_v = 2.0      # while sourcing current (V_oc, at 0 A)
+# The pixel determines the per-run compliance, in A and V. These values
+# must stay within rig.toml's bench limits (manual 4.2).
+current_compliance_a = 0.01     # 0.01 A ceiling while sourcing voltage for DC current
+                                # or J-V (manual 4.1).
+voltage_compliance_v = 2.0      # 2 V ceiling while sourcing 0 A for V_oc (manual 4.1).
 settle_jsc_ms = 1000
-settle_voc_ms = 1000   # a slow cell settles far more slowly here
+settle_voc_ms = 1000   # 1000 ms at 0 A before V_oc read-back; slow devices need time to
+                       # settle (manual 4.1).
 settle_jsat_ms = 1000
-nplc = 5.0                      # integration time in power-line cycles: 100 ms at
-                                # 50 Hz. 5 x 1 since 2026-09-05: the same noise
-                                # floor as 1 x 10 in the same 0.45 s a point,
-                                # with one auto-zero per point instead of ten
-averaging = 1                   # 1 is the filter off
+nplc = 5.0                      # 5 power-line cycles integrate for 100 ms at 50 Hz. One
+                                # such reading gives the noise floor of ten 1-cycle
+                                # readings in about 0.45 s per point, with one auto-zero
+                                # rather than ten (measured on this bench).
+averaging = 1                   # One reading disables the repeating filter.
 terminals = "FRON"
 four_wire = false
 
 [illumination]
-level_v = 1.000   # 33220A output; the SAME number is used for the DC V_oc measurement and the pulse high level. 1.000 is what LabVIEW ran at on 2026-09-02
-                                # DC V_oc measurement and the pulse high level
-low_level_v = 0.4               # below the LED threshold, so fully dark
-v_sat = -1.0                    # bias at which J_sat is measured
+level_v = 1.000   # 1.000 V at the 33220A is shared by DC V_oc and the pulse high level,
+                                # as required for equal illumination (manual 4.1).
+low_level_v = 0.4               # 0.4 V LED low level is below threshold for a dark
+                                # half-cycle (manual 4.1).
+v_sat = -1.0                    # -1 V at the device for saturation current (manual
+                                # 4.1).
 
 [sample]
 sample = ""
 material = ""
 pixel = ""
-# temperature_k is deliberately not typed here (2026-09-04): every recipe said
-# 290 and a run at 220 K was filed as "290 K, typed". A bench with a 331 reads
-# the controller as each node starts (how = "read"), a temperature node settles
-# it, and only a bench with no controller should type a number here -- the
-# file will say it was typed.
+# Temperature comes from the 331 read-back at each node. A temperature
+# module settles the controller before measurement. Only a bench without a
+# controller needs a typed temperature_k in K. The run records whether the
+# temperature is read or typed, so a recipe cannot mislabel it (manual 3.3, 4.1).
 operator = ""
 comment = ""

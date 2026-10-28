@@ -1,54 +1,37 @@
-# ! Corrected the evening of 2026-09-02: combination 4 (true + INV) is
-# overturned, and this recipe now uses combination 3 (true + NORM).
-# bare.py --invert at 02:08, with the generator at NORM, agreed with LabVIEW to
-# 4 %, and the bit-exact read-back at 02:20 shows LabVIEW itself finishing at
-# NORM; the service reproduced it under NORM at 15:37 (Q -1.7e-10, tail at
-# zero), while INV at 14:52 flipped the sign of the spike and collapsed the
-# photo peak to 0.23 mA -- through the inverting x4 amplifier, INV rests the
-# device at v_coll while it is lit, extraction never stops, and no charge
-# accumulates. The combination-4-era comments below are kept as history; the
-# criterion itself (light - dark must be zero in the steady state) still
-# stands.
+# The recipe measures Q against delay with the device held at V_pre
+# between pulses and stepped to V_coll. The inverting bias amplifier requires
+# invert_polarity = true with NORM. INV holds the device at V_coll under
+# light, so extraction continues and charge cannot accumulate (docs/notes.md).
 #
-# (original text) The real measurement for combination 4 -- invert_polarity =
-# true + :OUTP1:POL = INV.
+# A near-zero late difference and Q = -1.7e-10 C are measured on this
+# bench with this polarity pair. INV gives a peak as low as 0.23 mA.
+# Light trace minus dark trace must approach zero after extraction. A steady
+# current makes Q grow with the integration window and includes carriers
+# generated during extraction (manual 2.2, 2.4).
+# Bench data for a decaying difference give Q = -4.05 to -4.41e-10 C over
+# seven delay points (4 % scatter), a 1/e decay time of 248 to 301 ns, and
+# -0.035 to -0.045 mA over the last 1 µs. A steady difference of +4.455 mA
+# gives 1.9e-8 C and an integral that grows with the window. These values
+# are measured on this bench; a decaying shape alone does not validate polarity.
 #
-# Why combination 4: it is the only one of the four that **decays to zero**.
-# That is not a matter of taste but the criterion: light - dark must be zero in
-# the steady state, or carriers are still being generated during extraction and
-# what is measured is not the extracted charge.
-# The offline integrals of the seven delay points of the 18:15 round (raw
-# light - dark, integrated from the step to the end of the record):
+# Both traces contain the displacement spike. Equal peaks between traces
+# are expected and subtract; clipping within either trace is a hazard.
+# Seven or eight consecutive equal samples, an 11 ns flat peak on this bench,
+# make the peak height unusable even when Q scatters by only 4 %.
+# Auto-range has no recipe switch to disable or bound it. Reject clipped
+# shots (manual 4.2).
 #
-#   Q      = -4.05 ... -4.41e-10 C   the 7 points scatter 4 %, the integral converges
-#   tau1/e = 248 ... 301 ns          consistent
-#   level over the last 1 us = -0.035 ... -0.045 mA  ~ 0
-#
-# Against combination 2 at the same voltage (18:11): the last 1 us reads
-# +4.455 mA, the same integral gives 1.9e-8 C, and it grows linearly with the
-# integration window -- that is not a charge but a steady current times a time.
-#
-# The baseline is the shallower level (the prebias) and the pulse is the deep
-# +/-2 V level (extraction). Both the light and dark curves saturating at the
-# step is normal: that is displacement current, identical in both branches, and
-# it subtracts away.
-#
-#   py -3 tools\scan.py --run recipes\run-bace.toml --dry
-#   py -3 tools\scan.py --run recipes\run-bace.toml
-#
-# ! If the runner reports clipped, look at how many points: three of the seven
-#   in the 18:15 round hit the bottom of the range at the peak (7-8 consecutive
-#   samples at one float inside a single trace, an 11 ns flat top).
-#   Q scatters by only 4 %, so the 11 ns clipped away contributes little -- but
-#   the peak height is unusable.
-#   Autorange currently has no switch in run.toml to disable it or bound it;
-#   ask and one will be added.
+# Preview: py -3 tools\scan.py --run recipes\run-bace.toml --dry
+# Run: py -3 tools\scan.py --run recipes\run-bace.toml
 
 [axis]
 name = "delay_ns"
-start = 0.0                     # delay_ns is :PULS:DEL1; no command offset is added any more
-stop = 440.0                    # (previously -40...400 plus a 47 ns offset = 7...447 ns; equivalent)
-step = 20.0                     # 23 points. tau ~ 265 ns, so this span shows the decay
+start = 0.0                     # 0 ns is the lowest :PULS:DEL1; no latency is added to
+                                # the command (manual 2.2, 4.2).
+stop = 440.0                    # 440 ns spans the decay; delay is sent unchanged
+                                # (manual 2.2).
+step = 20.0                     # 20 ns gives 23 points across a decay near 265 ns,
+                                # measured on this bench.
 centre_on_voc = false
 
 [pinned]
@@ -57,39 +40,45 @@ vcoll = -2.00
 delay_ns = 80.0
 
 [acquisition]
-n_loops = 5                     # 23 x 5 = 115 shots, about 2.5 minutes
+n_loops = 5                     # Five loops give 115 shots for statistics over the 23
+                                # points (manual 2.3).
 n_averages = 40
 timebase_ns_per_div = 500.0
 record_length = 5000
 
-# --- the integration window follows the pulse (now the only way) ------------
-# Measured (a 49-point fit, residual 1.5 ns): the field at the device = trigger
-# + :PULS:DEL1 + 47.1 ns. Those 47.1 ns now live in rig.toml's
-# trigger_offset_s, and t0_int_s is relative to the field's arrival directly:
-#
-#   window start (record time) = t0_int_s + delay_ns + trigger_offset_s - t0
-#                              = t0_int_s + delay_ns + 547.1 ns   (t0 = -500 ns)
-#   window end                 = start + t_int_width_s
-#
-# t0_int_s = -2 ns: the window starts 2 ns before the step, every delay point is
-# treated alike, and both ends follow the pulse.
+# The integration window follows field arrival at every delay point.
+# The fitted latency is 47.1 ns over 49 points, with a 1.5 ns residual
+# (manual 2.2; docs/notes.md). It belongs in rig.toml's trigger_offset_s,
+# which positions the window without changing :PULS:DEL1.
+# Window start in record time = t0_int_s + delay_ns + trigger_offset_s - t0.
+# At t0 = -500 ns this is t0_int_s + delay_ns + 547.1 ns.
+# The end is start + t_int_width_s. Starting 2 ns before the field includes
+# the spike and treats every point alike (manual 2.2).
 t0_int_s = -2e-9
-t_int_width_s = 1.5e-6          # the furthest point's window reaches ~2.5 us, which fits in a 5 us record
+t_int_width_s = 1.5e-6          # 1.5 µs window follows delay; about six 250 ns decay
+                                # times. It fits in the 5 µs record at every point but
+                                # can omit a slow tail (manual 2.2).
 
-# In this round the tail really is baseline (the last 1 us reads ~0.04 mA), so
-# the baseline correction is doing what it should.
-# run_transient_scan checks itself with baseline_is_flat() and warns outright
-# when the tail is not flat.
+# Baseline correction requires a region without extraction current.
+# A late level near 0.04 mA is measured on this bench. A flat tail alone
+# does not prove extraction is complete; it can contain steady current.
+# baseline_is_flat() warns about a varying tail. Check the stored traces
+# before accepting Q.
 offset_correct = true
 
 pulse_width_ns = 5000.0
 pulse_frequency_hz = 500.0
 duty_percent = 50.0
 
-# --- the validated combination is 3 (corrected 2026-09-02, see the head) -----
-invert_polarity = true          # software layer: negate both voltages (their ordering flips with them)
-output_polarity = "NORM"        # instrument layer. INV rests the device at v_coll and extraction never stops
-inverted_output = false         # ignored unless output_polarity is "auto"
+# The polarity pair holds V_pre between pulses (docs/notes.md).
+invert_polarity = true          # Swaps and negates both voltage levels for the device
+                                # orientation; a wrong sign changes every Q (manual 4.1).
+output_polarity = "NORM"        # NORM with invert_polarity = true holds V_pre and steps
+                                # to V_coll through the inverting bias amplifier. INV
+                                # holds V_coll under light and prevents charge
+                                # accumulation (docs/notes.md).
+inverted_output = false         # Ignored with explicit output_polarity; applies only to
+                                # "auto".
 
 settle_s = 0.2
 dark_settle_s = 0.2
@@ -118,10 +107,9 @@ v_sat = -1.0
 sample = ""
 material = ""
 pixel = ""
-# temperature_k is deliberately not typed here (2026-09-04): every recipe said
-# 290 and a run at 220 K was filed as "290 K, typed". A bench with a 331 reads
-# the controller as each node starts (how = "read"), a temperature node settles
-# it, and only a bench with no controller should type a number here -- the
-# file will say it was typed.
+# Temperature comes from the 331 read-back at each node. A temperature
+# module settles the controller before measurement. Only a bench without a
+# controller needs a typed temperature_k in K. The run records whether the
+# temperature is read or typed, so a recipe cannot mislabel it (manual 3.3, 4.1).
 operator = ""
 comment = "BACE delay scan - combination 4"

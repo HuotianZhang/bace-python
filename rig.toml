@@ -1,169 +1,137 @@
-# The bench. Change this file when someone rewires something.
-#
-# Everything here is a property of the hardware, not of a measurement, and every
-# value is copied into each run's HDF5 file so a result carries the bench it came
-# from. The measurement recipe lives in run.toml instead — the split matters
-# because a stale rig.toml silently rescales every charge, while a stale run.toml
-# merely repeats a measurement you did not mean to repeat.
-#
-# Confirmed on 'sternwarte', 2026-08-31.
+# The bench configuration records the hardware used for each measurement.
+# Each run's HDF5 file includes these values. Update them after rewiring.
+# An incorrect R_s rescales every Q; an incorrect recipe repeats unintended
+# measurement settings. Measurement settings belong in run.toml
+# (manual 1.2, 3.3).
 
 [electrical]
-sense_resistor_ohm = 5.192      # between the device and CHAN2. Q is proportional
-                                # to 1/R, so this is the most consequential
-                                # number in the file. Panel note: "(50 old big
-                                # Amp) (5.192 new Amp)"
-pulse_amp = 4.0                 # voltage gain of the amplifier in the bias path
-                                # only; the measured current does not pass it
+sense_resistor_ohm = 5.192      # R_s = 5.192 Ω, device to CHAN2. Q scales as 1/R_s;
+                                # an error here rescales every Q (manual 2.3).
+pulse_amp = 4.0                 # Bias amplifier gain, 4 V/V; only the bias path passes
+                                # through it, not measured current (manual 1.2).
 probe_attenuation = 1.0
-trigger_offset_s = 47.1e-9      # sync-to-field latency: the field reaches the
-                                # device this long AFTER trigger + :PULS:DEL1.
-                                # Measured 2026-09-03 (delay scan, 49 points
-                                # fitted, 1.5 ns residual). It positions the
-                                # integration window (t0_int_s in run.toml is
-                                # measured from the field) and is NOT added to
-                                # what the 81150A is told: :PULS:DEL1 gets
-                                # delay_ns as it is, as the LabVIEW looping
-                                # path did (measured 2026-09-02, spike 48 ns
-                                # apart when this port still added 47 ns to
-                                # the command). See core/pulses.py.
-current_sign = -1               # multiplied once, in Infiniium._fetch, beside
-                                # the division by sense_resistor_ohm. Measured
-                                # 2026-09-02 against the LabVIEW engine, same
-                                # device, eight minutes apart: the port read
-                                # every current positive, LabVIEW every one
-                                # negative, same shape and size (dark trace
-                                # corr(-bare, lv) = 0.9988; peak 6 %, tau 3 %,
-                                # Q 4 % apart). A convention of the digitiser
-                                # chain, not physics. Do NOT fix a sign with
-                                # the generator's polarity switch: :OUTP1:POL
-                                # changes the voltage the device really sees
-                                # (which pulse edge extracts); this changes
-                                # only the sign of the number written down.
+trigger_offset_s = 47.1e-9      # Field latency: 47.1 ns after trigger + :PULS:DEL1. A
+                                # 49-point delay fit gives a 1.5 ns residual (manual
+                                # 2.2; docs/notes.md). It positions the integration
+                                # window relative to field arrival. :PULS:DEL1 receives
+                                # delay_ns unchanged, as required for the LabVIEW timing
+                                # match. Adding the latency to the command separates the
+                                # spikes by about 48 ns on this bench.
+current_sign = -1               # Dimensionless sign applied once in Infiniium._fetch
+                                # with division by R_s (manual 2.3, 3.2). It sets the
+                                # recorded current sign without changing device voltage.
+                                # Bench comparison with LabVIEW gives correlation 0.9988
+                                # after sign reversal, with peak, decay time and Q
+                                # differing by 6 %, 3 % and 4 % (measured on this
+                                # bench). Do not change generator polarity to change a
+                                # recorded sign: :OUTP1:POL changes the physical voltage
+                                # and the extracting edge.
 
 [timing]
-light_path_delay_ns = 502.0      # from the 33220A's drive edge to the light going
-                                # off at the sample: 502 ns measured 2026-09-01
-                                # (419 ns of it the 85 m fibre), see
-                                # docs/figures/bace-timing.html. Informational: the delay
-                                # axis is zeroed by trigger_offset_s, not by this.
+light_path_delay_ns = 502.0      # Drive-edge to light-off delay: 502 ns; 419 ns is the
+                                # 85 m fibre (manual 1.2;
+                                # docs/figures/bace-timing.html). Informational only:
+                                # trigger_offset_s places the integration window, not
+                                # this value.
 
 [scope]
 address = "TCPIP0::PwM-DSO9054H.local::inst0::INSTR"
-current_source = "CHAN2"        # device current through the sense resistor
+current_source = "CHAN2"        # CHAN2 reads voltage across R_s for current (manual
+                                # 1.2).
 channel = 2
-trigger_source = "CHAN3"        # 81150A sync — the only in-band record of when
-                                # the field actually arrived
+trigger_source = "CHAN3"        # 81150A Sync records trigger timing; field arrival adds
+                                # delay and latency (manual 1.2, 2.2).
 trigger_positive = true
 
 [bias]
-address = "GPIB0::12::INSTR"    # Agilent 81150A
+address = "GPIB0::12::INSTR"    # 81150A bias source, GPIB address 12 (manual 1.2).
 
 [sourcemeter]
-address = "GPIB0::24::INSTR"    # Keithley 2400, firmware C34
-# Bench ceilings, not working values. The compliance a measurement actually uses
-# depends on the pixel and lives in run.toml; these are the limits no recipe may
-# exceed, because a 2400 will happily push 1 A into a small cell.
+address = "GPIB0::24::INSTR"    # 2400 DC source, firmware C34, GPIB 24.
+# These bench limits cap the per-run compliance in run.toml, in A and V.
+# The pixel determines the working limits. The 2400 can supply 1 A, which
+# can damage a small cell (docs/ui-rules.md).
 max_current_compliance_a = 0.05
 max_voltage_compliance_v = 5.0
 
 [led]
-address = "GPIB0::15::INSTR"    # Agilent 33220A
-threshold_v = 1.0               # generator voltage at which the LED lights,
-                                # referred back through its fixed amplifier
+address = "GPIB0::15::INSTR"    # 33220A LED drive, GPIB address 15 (manual 1.2).
+threshold_v = 1.0               # LED threshold at the generator, 1 V, referred through
+                                # the LED amplifier.
 
-# The 1918-C. This program opens the USB device itself; the driver lives in
-# bace/drivers/newport1918c/ and nothing else has to be running.
-#
-# Only one process can hold the meter. That is why `console` exists and why it
-# is empty: if the meter's own console (D:/1918cPowerMeter) is started, it
-# takes the handle and this program's open fails with a bare "no Newport device
-# found" that reads like a cable fault. Name the console here and the service
-# asks it over HTTP instead -- the escape hatch, not the normal path.
+# The service opens the 1918-C USB device through bace/drivers/newport1918c/.
+# Only one process can own the meter. A separate meter console at
+# D:/1918cPowerMeter holds its USB handle and makes a direct open fail with
+# "no Newport device found", even with a connected cable. Set console to
+# that console's HTTP address when it owns the meter; leave it empty for
+# direct access.
 [power_meter]
-console = ""                    # "http://127.0.0.1:8918" only if that console runs
-averaging = true                # DC-continuous mode + the 5 Hz analog filter at
-                                # open, so a reading is the time average of the
-                                # light. The LED is pulsed at 500 Hz, 50 % duty:
-                                # unfiltered, the meter shows one instant of that
-                                # square wave (full, nothing, or a flicker); the
-                                # average -- half the DC level -- is the power.
-                                # false leaves it unfiltered (mode is set anyway).
-digital_filter = 100            # PM:DIGITALFILTER samples on top of the analog
-                                # filter; light smoothing only, 0 disables it.
-wavelength_nm = 530.0           # responsivity is wavelength dependent; a meter
-                                # left at the wrong value returns a plausible
-                                # number that is wrong by tens of percent
-on_beam_splitter = true         # so it can be read during a run
-dll_path = ""                   # empty = pick the usbdll.dll matching this
-                                # interpreter. The Newport driver package
-                                # installs both builds, so taking the first one
-                                # found picks wrong half the time and yields a
-                                # bare WinError 193. Set a path to override.
+console = ""                    # Empty selects direct USB; use http://127.0.0.1:8918
+                                # when the meter console owns it.
+averaging = true                # DC-continuous mode and 5 Hz analog filtering average
+                                # the pulsed light (docs/service-contract.md). At
+                                # 500 Hz and 50 % duty, mean power is half the on
+                                # power. Without filtering a reading samples full
+                                # power, zero or a changing phase. false disables
+                                # filtering but still sets the mode.
+digital_filter = 100            # 100 samples of digital smoothing over the analog
+                                # filter; 0 disables PM:DIGITALFILTER.
+wavelength_nm = 530.0           # 530 nm sets detector responsivity for the LED. A wrong
+                                # wavelength can shift plausible readings by tens of
+                                # percent.
+on_beam_splitter = true         # The beam splitter permits power read-back during a run
+                                # (manual 1.2).
+dll_path = ""                   # Empty selects usbdll.dll for the interpreter
+                                # architecture. The driver package includes both builds;
+                                # loading the wrong one gives WinError 193. A path
+                                # overrides selection.
 
 [dio]
-# Both assignments and both polarities MEASURED on the rig, 2026-09-01, by
-# walking all four states and reading the Keithley in each (`--dio`):
-#
-#   module 0 = 1 : photocurrent appears        -> module 0 moves the LIGHT
-#   module 1 = 1 : the device conducts at all  -> module 1 moves the PATH
-#
-#   probe current at +0.5 V, module 1 = 0 : 4.75e-11, 4.76e-11 A  (open input,
-#                                           the two agree to 0.26 %)
-#   probe current at +0.5 V, module 1 = 1 : 4.76e-07 A dark, -7.78e-05 A lit
-#
-# Four decades between them, so this is not a close call. Before that it rested
-# on `shutter_lv2012.vi` (which does hard-code module 0) plus my reading of
-# `open/close shutter 2` in BACE_Mehrdad.vi, which the binary never calls a relay.
+# The DIO assignments and polarities are measured on this bench
+# (docs/bench-checkout.md). Module 0 at 1 opens the shutter and produces photocurrent.
+# Module 1 at 1 connects the 2400; at 0 it connects the bias amplifier.
+# At +0.5 V with module 1 at 0, the 2400 reads 4.75e-11 and 4.76e-11 A
+# (open input, 0.26 % apart). At 1 it reads 4.76e-7 A in the dark and
+# -7.78e-5 A under light. The four-decade change distinguishes the routes.
+# Repeat python -m bace.bench --dio after rewiring (docs/notes.md).
 module_id = 9
-shutter_module_nr = 0           # 1 = open, 0 = closed
-relay_module_nr = 1             # 1 = Keithley 2400, 0 = amplifier
+shutter_module_nr = 0           # Module 0: 1 opens the shutter, 0 shuts it (manual
+                                # 1.2).
+relay_module_nr = 1             # Module 1: 1 selects the 2400, 0 the bias amplifier
+                                # (manual 1.2).
 channel = 0
-dll_path = ""                   # empty = pick the DELIB build matching this
-                                # interpreter. Deditec ships 32-bit as
-                                # delib.dll in SysWOW64 and 64-bit as
-                                # delib64.dll in System32; ctypes can only load
-                                # the matching one. Set a path to override.
+dll_path = ""                   # Empty selects DELIB for the interpreter architecture:
+                                # 32-bit delib.dll in SysWOW64, 64-bit delib64.dll in
+                                # System32. ctypes requires the matching build; a path
+                                # overrides selection.
 
-# Lake Shore 331. This program opens the GPIB session itself; the driver lives
-# in bace/drivers/lakeshore331/ and nothing else has to be running.
+# The service opens the Lake Shore 331 through bace/drivers/lakeshore331/.
+# A temperature loop writes the setpoint, requires the reading to remain
+# inside its tolerance for hold_s, and records each node in the journal.
+# A timeout or refusal pauses for the operator. Without a controller, the
+# operator enters the temperature at the pause; the bench card gives the reason.
 #
-# With the instrument answering, every temperature loop settles through it: the
-# service writes the setpoint, polls until the reading has held inside the
-# loop's tolerance for hold_s, marks each node in the journal, and pauses for
-# the operator only on a timeout or a refusal. With no 331 on the bench,
-# temperature stays a number someone types at the pause, and the reason is on
-# the bench card.
+# The service reads the controller every 5 s by default. The options
+# --temperature-monitor SECONDS and --no-temperature-monitor control polling.
+# Read-back and journal entries include the reading's age. Polls require the
+# worker's GPIB bus lock, so acquisition skips them and the card marks stale
+# readings (docs/service-contract.md).
 #
-# The 331 is also *watched*: the service reads it every 5 s from the moment it
-# comes up (--temperature-monitor SECONDS, --no-temperature-monitor), so the
-# number on the card and in the journal is a reading with an age rather than
-# the read-back of whenever somebody last pressed something. On GPIB that read
-# happens only while the worker's bus lock is free, so it never lands beside an
-# acquisition -- during a long run the ticks are skipped and the card says the
-# reading is stale instead of pretending it is now.
+# Only one process can query the 331: it answers the last query received.
+# The console at D:/TemperatureController and this service would read each
+# other's replies on GPIB0::7. Set console to the HTTP address when that
+# console owns the instrument; leave it empty for direct access.
 #
-# The one-owner rule still holds: the 331 answers only the last query it
-# received, so if the 331 console (D:/TemperatureController) is started beside
-# this program, both hold GPIB0::7 and both read the other's replies. Name it
-# in `console` and the service asks it over HTTP instead -- the escape hatch,
-# not the normal path.
-#
-# What a run never drives, either way: the heater range, the PID, the ramp and
-# the loop wiring. Those are set on the front panel and only read back here.
+# The run writes only the setpoint. Heater range, PID, ramp and loop wiring
+# are front-panel settings that the service only reads (manual 1.2).
 [temperature]
-console = ""                    # "http://127.0.0.1:8331" only if that console runs
-address = "GPIB0::7::INSTR"     # address 7 is what this instrument answers on;
-                                # the manual's factory default is 12, so a
-                                # fresh box would differ. Clear this AND
-                                # `console` to say there is no cryostat on
-                                # this bench: then nothing is opened and the
-                                # card says nothing, rather than reporting a
-                                # missing instrument nobody expected
-max_setpoint_k = 350.0          # REFUSED above this, never clamped: quietly
-                                # giving 350 K for a requested 400 K hides the
-                                # mistake. Set for the current cryostat.
-control_loop = 1                # 1 = heater output, 2 = analog voltage output.
-                                # A choice, not something to infer -- both can
-                                # be active and writing to the wrong one fails
+console = ""                    # Empty selects direct GPIB; use http://127.0.0.1:8331
+                                # when the 331 console owns it.
+address = "GPIB0::7::INSTR"     # The bench 331 answers at GPIB 7; its factory default
+                                # is 12. Empty address and console disable the
+                                # controller without a missing-instrument warning.
+max_setpoint_k = 350.0          # 350 K cryostat ceiling; higher requests are refused.
+                                # Clamping would conceal an unsafe request (manual 1.2).
+control_loop = 1                # 1 selects heater output; 2 selects analog output. Both
+                                # can be active, so choosing the wrong loop can fail
                                 # silently.
