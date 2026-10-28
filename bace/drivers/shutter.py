@@ -1,24 +1,18 @@
-"""Optical shutter on a Deditec USB digital-output module.
+"""Control an optical shutter through a Deditec digital-output line.
 
-Driven through Deditec's `delib.dll`, exactly as the LabVIEW program did — the
-`Dapi *.vi` wrappers add nothing but the Call Library Node, so `ctypes` talks to
-the same entry points directly. The C prototypes below were read out of those
-VIs' Call Library Nodes:
+The DLL calls match the LabVIEW `Dapi *.vi` interface:
+`DapiOpenModule(ULONG moduleID, ULONG nr)` returns a `ULONG` handle;
+`DapiDOSet1(ULONG handle, ULONG ch, ULONG data)` and `DapiDOSet8` return
+no value; `DapiCloseModule(ULONG handle)` returns `ULONG`.
 
-    ULONG DapiOpenModule(ULONG moduleID, ULONG nr);
-    void  DapiDOSet1(ULONG handle, ULONG ch, ULONG data);
-    void  DapiDOSet8(ULONG handle, ULONG ch, ULONG data);
-    ULONG DapiCloseModule(ULONG handle);
+The bench uses module ID 9, module number 0, channel 0; 1 opens the
+shutter and 0 shuts it (`docs/notes.md`).
 
-Rig settings, confirmed against the current VI's front panel: one shutter on
-module ID 9, module number 0, channel 0; 1 opens, 0 closes.
-
-The copy on the rig — `D:\\BACE\\shutter\\builds\\data\\delib.dll` — is **32-bit**
-(PE32, machine 0x014C). `Shutter` therefore only works in a 32-bit interpreter,
-which cannot host the measurement core (SciPy stopped shipping win32 wheels at
-Python 3.10). The 64-bit service uses `BridgedShutter` instead, which reaches the
-same DLL through the 32-bit helper in `bace.drivers.win32bridge`.
-"""
+The bench DLL at `D:/BACE/shutter/builds/data/delib.dll` is PE32,
+machine 0x014C, and requires a 32-bit interpreter. `Shutter` can also load
+a matching 64-bit DELIB installation through `bace.drivers.delib`.
+`BridgedShutter` lets the 64-bit service use a 32-bit DLL through the helper.
+The measurement core requires a 64-bit environment with SciPy wheels."""
 from __future__ import annotations
 
 import ctypes
@@ -39,18 +33,16 @@ class ShutterError(RuntimeError):
 
 
 class Shutter:
-    """One digital-output line driving the optical shutter."""
+    """Control one digital-output line for an optical shutter."""
 
     def __init__(self, dll_path: str | None = None, *,
                  module_id: int = DEFAULT_MODULE_ID,
                  module_nr: int = DEFAULT_MODULE_NR,
                  channel: int = DEFAULT_CHANNEL,
                  settle_s: float = 0.05):
-        # `dll_path=None` means "whichever build this interpreter can load".
-        # Deditec ships 32-bit as `delib.dll` in SysWOW64 and 64-bit as
-        # `delib64.dll` in System32; hard-coding either name makes the driver a
-        # property of one machine. See `drivers/delib.py` -- the API and every
-        # argument width are identical across the two.
+        # `dll_path=None` selects a DLL matching this interpreter. Deditec's
+        # 32-bit `delib.dll` and 64-bit `delib64.dll` share the API and argument
+        # widths. `bace.drivers.delib` handles discovery across installations.
         from .delib import load_candidates
         opener = ctypes.WinDLL if hasattr(ctypes, "WinDLL") else ctypes.CDLL
         tried: list[str] = []
@@ -82,7 +74,7 @@ class Shutter:
             self._lib.DapiDOReadback32.argtypes = [ctypes.c_ulong, ctypes.c_ulong]
             self._lib.DapiDOReadback32.restype = ctypes.c_ulong
             self._readback = self._lib.DapiDOReadback32
-        except AttributeError:              # older DELIB without the export
+        except AttributeError:              # DELIB build without this export
             self._readback = None
 
         self.module_id = module_id
@@ -112,15 +104,12 @@ class Shutter:
                 self._handle = None
 
     def release(self) -> None:
-        """Close the module handle and leave the line where it is.
+        """Close the module handle without changing the output line; return `None`.
 
-        `close()` drives the line low first, which for the shutter is the
-        safe state. The relay is driven through this same class on another
-        module number, and low there is a relay throw to the amplifier --
-        the one move on this rig that must go through the router's
-        interlock, never through a shutdown path. Its owner releases the
-        handle with this instead.
-        """
+        `close` first drives low, which shuts the shutter. The same class drives
+        the relay on another module; low moves it to the amplifier. That move
+        requires the router interlock, including during shutdown, so the relay
+        owner releases its handle without changing the line."""
         if self._handle is not None:
             self._lib.DapiCloseModule(self._handle)
             self._handle = None
@@ -143,14 +132,12 @@ class Shutter:
             time.sleep(self.settle_s)
 
     def read_line(self) -> int | None:
-        """The line's state as the module reports it, or None if it cannot say.
+        """Read the DIO line and return 0 or 1, or `None` if unavailable.
 
-        `DapiDOReadback32(handle, ch)` returns a word of 32 digital outputs
-        starting at `ch` (delib.h, DELIB 2009-2021), so bit `channel` of the
-        word read from 0 is this line. Asking the hardware matters where a
-        caller has to put a line back where it found it -- the cached `_state`
-        only knows what *this* object has set, and is None on a fresh open.
-        """
+        `DapiDOReadback32(handle, ch)` returns 32 outputs starting at `ch`.
+        Bit `channel` of a word read from 0 describes this line. Read-back is
+        needed to restore a line's prior state: `_state` only records this
+        object's writes and starts as `None`."""
         if self._handle is None or self._readback is None:
             return None
         try:
@@ -160,15 +147,17 @@ class Shutter:
         return (word >> self.channel) & 1
 
     def set_line(self, value: int) -> None:
-        """Drive the line directly. `unblock`/`shut` are the named forms."""
+        """Drive the line with `DapiDOSet1` and return `None`.
+
+        `unblock` and `shut` name the shutter states."""
         self._set(1 if value else 0)
 
     def unblock(self) -> None:
-        """Open the shutter — light reaches the sample."""
+        """Drive the line high to open the shutter and return `None`."""
         self._set(OPEN)
 
     def shut(self) -> None:
-        """Close the shutter — the dark trace."""
+        """Drive the line low to shut the shutter and return `None`."""
         self._set(CLOSED)
 
     @property
@@ -177,11 +166,9 @@ class Shutter:
 
     @contextmanager
     def dark(self):
-        """Close for the duration of the block, then restore the previous state.
+        """Shut the shutter for the context and restore its preceding state.
 
-        Used per acquisition step: the light trace is taken with the shutter
-        open, the dark trace inside this block.
-        """
+        The light trace uses an open shutter; the dark trace uses this context."""
         was_open = self.is_open
         self.shut()
         try:
@@ -192,15 +179,13 @@ class Shutter:
 
 
 class BridgedShutter(Shutter):
-    """Same interface as `Shutter`, driven through the 32-bit helper process.
+    """Control a DIO line through the 32-bit helper process.
 
-    This is what the 64-bit service uses. The helper owns the DLL and the module
-    handle; this class holds only the cached state, so `dark()` and `is_open`
-    behave identically to the direct backend.
-    """
+    The helper owns the DLL and handle. This class caches the state so
+    `dark` and `is_open` follow the direct backend's interface."""
 
     def read_line(self) -> int | None:
-        """The helper does not expose a readback; the cached state is all there is."""
+        """Return cached state because the helper exposes no hardware read-back."""
         return self._state
 
     def __init__(self, client, *,
@@ -247,7 +232,7 @@ class BridgedShutter(Shutter):
 
 
 class SimulatedShutter(Shutter):
-    """Stand-in for offline work — no DLL, no hardware."""
+    """Model a shutter line without a DLL or connected hardware."""
 
     def read_line(self) -> int | None:
         return self._state

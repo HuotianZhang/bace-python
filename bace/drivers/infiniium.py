@@ -1,74 +1,42 @@
-"""Agilent 90000-series Infiniium — transient acquisition.
+"""The Agilent 90000-series Infiniium acquires transient current traces.
 
-Every command below is the literal format string recovered from the LabVIEW
-driver in `instr.lib/Agilent 90000 Series`. Three behaviours in that driver are
-not obvious and are reproduced deliberately:
+The timebase follows the LabVIEW command sequence: ns per division divided
+by 1e8 sets `:TIM:RANG` for ten divisions; four divisions set `:TIM:POS`.
+`:ACQ:POIN` receives the requested record length.
 
-1.  **Timebase is nanoseconds per division.** The panel control `Timebase
-    (200 ns)` is divided by 1e8 before it reaches `:TIM:RANG` -- that is a ns
-    to seconds conversion times ten divisions -- so 200 becomes a 2 us full
-    screen. `Timebase * 1e-9 * 4` goes to `:TIM:POS`. `Record Length` goes to
-    `:ACQ:POIN` unmodified.
+On this bench, `:TIM:POS` denotes the record centre. At 200 ns/div the
+record spans -200 to +1800 ns relative to the trigger; `:WAV:XOR?` reads
+-1.995e-7 s. Field arrival is delay plus `trigger_offset_s`. The latency
+is 47.1 ns, fitted over a delay scan (`docs/notes.md`). At delay 90 ns
+the field arrives about
+337 ns into this record. The LabVIEW reference at delay 88 ns starts integration at
+318 ns, about 16 ns before its field arrival. Record origin is needed
+to place the integration window relative to the field.
 
-    **Measured on the rig, 2026-09-01.** `:TIM:POS` is the time at the
-    *centre* of the screen, so the record spans `TIM:POS +/- range/2`. With
-    200 ns/div that is -200 ns to +1800 ns about the trigger, and the scope
-    duly reported `:WAV:XOR? = -1.995e-7`. So **the trigger sits ~200 ns into
-    the record**, not at its start.
+The requested record length can differ from the delivered length. On this
+bench `:ACQ:POIN?` reads 5000 while `:WAV:POIN?` reads 4000 and
+`:WAV:XINC?` reads 5.0e-10 s: 2 us at 2 GSa/s gives 4000 samples.
 
-    That is what makes the integration window make sense. The window is
-    measured from the field's arrival -- `delay + trigger_offset_s` after the
-    trigger, 137 ns at delay 90 with the 47 ns latency, i.e. 337 ns into this
-    record -- and `resolve_window` needs `:WAV:XOR?` to say so. The archive's
-    record-time 318 ns was 16 ns before that, which is what a window should be
-    and could not be checked until the scope said where its record begins.
+The DSO9054H retains averages across `:STOP`/`:RUN`, the LabVIEW double
+configuration of counts 64 and N_avg, and a rewrite of the same range.
+A changed range clears them. Without clearing, dark counts exceed light
+counts by about 27, mixing light into dark; a point within the range
+deadband also inherits the preceding dark trace. Q can scale as 25/count,
+falling to about one half or one third of its value. `:CDIS` clears a count
+of 200 to 0; averaging off and on clears 1 to 0. `:DIG` with `*OPC?` waits
+for N_avg: 32 averages take 0.42 s. While running, `:WAV:COUN?` reports the
+configured count. Counts must be read stopped. These measurements are in
+`docs/analysis/2026-09-06/README.md`.
 
-    **And `:ACQ:POIN` is a request, not a promise.** The scope reported
-    `:ACQ:POIN? = 5000` while `:WAV:POIN?` returned **4000**, with
-    `:WAV:XINC? = 5.0e-10`. The record it can deliver is the window times the
-    sample rate: 2 us at 2 GSa/s is 4000 points. That is where the archive's
-    4000 comes from.
+Each averaged acquisition therefore stops, disables averaging, sends
+`:CDIS`, enables averaging and rejects a nonzero count. Autorange uses
+unaveraged acquisitions. `:DIG` and `*OPC?` complete the average; `:ADER?`
+only marks an individual acquisition. The fetched count must reach N_avg.
 
-2.  **The averager is restarted by a double configure** -- averaging set once
-    with a count of 64, then again with the real count -- is what the LabVIEW
-    driver does, and **on the DSO9054H it does nothing.** Measured 2026-09-06
-    (`runs/260826-6_*`, the `averages_*` diagnostics): `:WAV:COUN?` climbed
-    across the double configure, across `:STOP`/`:RUN`, and from the light
-    acquisition straight into the dark one -- every dark count was the light
-    count plus ~27 -- and fell back to zero only when the auto-range wrote a
-    new channel range. So each dark trace was half light, and a step whose
-    range sat inside the deadband inherited the *previous step's dark* into its
-    light trace: `Q ~ 25 / count`, a third of the value on the third point of
-    every scan, and half of it everywhere else. The LabVIEW original waits on
-    `:ADER?` and uses the same double configure.
-
-    `tools/probe_averager.py` then asked the scope directly (2026-09-06,
-    `runs/probe_averager_20260906_030246.txt`): `:CDIS` empties the averager
-    (200 -> 0) and so does averaging off-then-on (1 -> 0); `:STOP`/`:RUN`,
-    the double configure and a rewrite of the same range all continue it; a
-    *changed* range empties it; and `:DIGitize` with averaging on runs to the
-    whole count, `*OPC?` answering only then (32 in 0.42 s). Two things the
-    probe did not settle, and the first fix tripped over: `:WAV:COUN?` read
-    while running answered the *configured* count, so it is only read stopped.
-
-    This driver therefore empties the averager before every averaged
-    acquisition (`:CDIS` between averaging off and on, then reads the count
-    back stopped and refuses anything but zero), takes the auto-range passes
-    un-averaged so they cannot inherit anything either, and acquires with
-    `:DIG` + `*OPC?` -- never `:ADER?`, which is set per acquisition rather
-    than per completed average -- then checks the folded count against the
-    recipe before the trace is believed.
-
-3.  **Range once, on the light trace; never between light and dark.** The
-    light acquisition auto-ranges (`scale to maximum`) and the dark one does
-    not. Re-ranging between the pair would change the digitiser scaling and
-    invalidate the subtraction.
-
-The fetch divides the scaled voltage by the sense resistor, so the arrays this
-returns are **currents in amps**, matching `Fetch (Waveform).vi` with
-`50 Ohm? = TRUE` -- and multiplies by `current_sign`, the one place the rig's
-sign convention is applied (see `RigConfig.current_sign`).
-"""
+Only the light trace sets the range. Both traces of a shot share digitiser
+scaling and range-dependent offset calibration for subtraction. Fetching
+converts V to A with R_s and applies `current_sign` once, matching the
+LabVIEW current convention."""
 from __future__ import annotations
 
 import time
@@ -77,7 +45,7 @@ import numpy as np
 
 from .protocols import Trace
 
-# ring index -> SCPI source token, decoded from the driver's own array constant
+# LabVIEW source-ring index to SCPI source token.
 SOURCE = {0: "CHAN1", 1: "CHAN1", 2: "CHAN2", 3: "CHAN3", 4: "CHAN4",
           5: "FUNC1", 6: "FUNC2", 7: "FUNC3", 8: "FUNC4",
           9: "WMEM1", 10: "WMEM2", 11: "WMEM3", 12: "WMEM4"}
@@ -88,7 +56,7 @@ class ScopeError(RuntimeError):
 
 
 class Infiniium:
-    """One scope session. Not thread-safe -- VISA sessions never are."""
+    """Control one Infiniium VISA session without concurrent access."""
 
     def __init__(self, resource, *, sense_resistor_ohm: float = 5.192,
                  current_sign: float = -1.0,
@@ -97,10 +65,10 @@ class Infiniium:
         self._io.timeout = timeout_ms
         self.sense_resistor_ohm = sense_resistor_ohm
         self.current_sign = float(current_sign)
-        """`RigConfig.current_sign`. Applied in `_fetch` only. Every
-        construction site passes it from the rig config explicitly; the
-        default here matches the bench so a bare `Infiniium(res)` in a test
-        still reports in the rig's convention."""
+        """Apply the rig's current sign in `_fetch` only.
+
+        The default -1 matches the bench. Explicit construction from
+        `RigConfig.current_sign` keeps tests and runs in the same convention."""
         self.probe_attenuation = probe_attenuation
         self._ranged = False
         self.window: tuple[float, float] | None = None
@@ -118,17 +86,11 @@ class Infiniium:
 
     def default_setup(self) -> None:
         self._io.write(":SYST:LONG OFF;\n:SYST:HEAD OFF;\n*CLS;\n*ESE 1;\n*SRE 32;")
-        # :WAV:STR OFF, not ON. The LabVIEW driver turned streaming on, which is
-        # for records too large for a definite-length block header (>999,999,999
-        # bytes); a 4000-point WORD record is 8000 bytes and needs none of it.
-        #
-        # This was my first suspect for the empty fetch on the rig, on the
-        # theory that pyvisa could not parse the indefinite `#0` header it
-        # produces. That theory is wrong -- pyvisa 1.16.2 parses `#0` correctly.
-        # Streaming off is still right, because a definite-length header lets
-        # the reader know how many bytes to expect and lets `_fetch_volts`
-        # notice a short transfer, but the empty fetch has another cause and
-        # `_read_waveform` no longer depends on knowing what it is.
+        # Streaming serves records above 999,999,999 bytes; a 4000-sample WORD
+        # record needs only 8000 bytes. A definite-length header lets
+        # `_fetch_volts` detect short transfers. On this bench PyVISA 1.16.2 also
+        # parses indefinite `#0` headers, so streaming does not explain an empty
+        # fetch. `_read_waveform` handles a short PyVISA result independently.
         self._io.write(":WAV:BYT MSBF;\n:WAV:FORM WORD;\n:WAV:VIEW MAIN;\n:WAV:STR OFF;")
 
     def configure_channel(self, channel: int, *, vertical_range: float,
@@ -140,7 +102,10 @@ class Infiniium:
         self._io.write(f"{ch}:PROB:EXT:GAIN {self.probe_attenuation:g};")
 
     def configure_timebase(self, timebase_ns_per_div: float, record_length: int) -> None:
-        """`timebase_ns_per_div` is the panel number, e.g. 200."""
+        """Send the ten-division range, centre position and requested sample count.
+
+        `timebase_ns_per_div` is in ns/div. The range and position commands use s.
+        Return `None`; the delivered sample count can differ from the request."""
         full_screen_s = timebase_ns_per_div / 1e8          # ns -> s, x10 divisions
         position_s = timebase_ns_per_div * 1e-9 * 4.0      # four divisions in
         self._io.write(f":TIM:RANG {full_screen_s:g};")
@@ -151,25 +116,16 @@ class Infiniium:
                                high_threshold: float | None = None,
                                level: float | None = None,
                                sweep: str = "AUTO") -> None:
-        """`sweep` is `AUTO` or `TRIG`, and the choice has consequences.
+        """Send edge source, slope, sweep and optional thresholds in V; return `None`.
 
-        The recovered driver used **AUTO**, so that is the default here. But
-        AUTO means the scope sweeps anyway when no trigger arrives: if the
-        81150A sync came loose, every trace would be untriggered noise, the dark
-        subtraction would cancel it, and Q would come out near zero — a
-        plausible-looking result from a disconnected cable.
-
-        **TRIG** instead waits, so a missing trigger becomes a timeout with a
-        message. That is the safer setting for a measurement and the reason this
-        is exposed rather than fixed; it is a change to acquisition behaviour,
-        so it is Huotian's to make, not mine.
-        """
+        `AUTO` matches the LabVIEW sequence but acquires without trigger edges.
+        A loose Sync cable can therefore yield noise and a plausible near-zero Q.
+        `TRIG` waits for an edge, making a missing trigger a timeout."""
         self._io.write(":TRIG:MODE EDGE;")
         if source.upper().startswith("CHAN"):
-            # The sync is fetched out of the same record as the current
-            # (`_sync_trace`), and :DIG acquires only displayed channels -- a
-            # `:DIG CHAN2` had switched CHAN3's display off, and the next run
-            # (2026-09-06, 032124-001) found no CHAN3 samples at all.
+            # `:DIG` acquires displayed channels. The trigger channel must remain
+            # visible so the same record contains both Sync and current. A channel
+            # list such as `:DIG CHAN2` disables other channel displays on this bench.
             self._io.write(f":{source}:DISP ON;")
         self._io.write(f":TRIG:EDGE:SOUR {source};")
         self._io.write(f":TRIG:EDGE:SLOP {'POS' if positive else 'NEG'};")
@@ -188,17 +144,14 @@ class Infiniium:
                        ":ACQ:INT OFF;")
 
     def _reset_averager(self, count: int) -> None:
-        """Empty the averager and arm it for `count` acquisitions.
+        """Stop, clear and configure N_avg as `count`; return `None`.
 
-        Measured on the DSO9054H, 2026-09-06 (`tools/probe_averager.py`):
-        `:STOP`/`:RUN` continues the average, so does rewriting the count
-        (the LabVIEW double configure: 52 -> 125), so does rewriting the same
-        channel range; `:CDIS` empties it (200 -> 0), and so does turning
-        averaging off and on again (1 -> 0). Both are done here, and the
-        count is read back stopped as `last_count_after_reset`, which must be
-        zero -- anything else is a buffer that was not emptied, and the fetch
-        would fold the previous acquisition into this one.
-        """
+        On the DSO9054H, `:STOP`/`:RUN`, count changes (52 to 125 under the
+        LabVIEW double configuration) and an unchanged range retain averages.
+        `:CDIS` clears 200 to 0; averaging off and on clears 1 to 0
+        (`docs/analysis/2026-09-06/README.md`). Both clearing operations precede
+        the stopped count check. A nonzero `last_count_after_reset` means the
+        buffer can mix a preceding acquisition into this trace and raises."""
         self._io.write(":STOP;")
         self._configure_acquisition(averaging=False, count=count)
         self._io.write(":CDIS;")
@@ -213,24 +166,18 @@ class Infiniium:
             )
 
     def _digitize(self, timeout_s: float) -> None:
-        """`:DIGitize` and block on `*OPC?` until the record is complete.
+        """Send `:DIG`, wait on `*OPC?` and leave the scope stopped; return `None`.
 
-        With averaging on, that is the whole count: the probe measured 32
-        averages complete in 0.42 s with `*OPC?` answering only then, and
-        `:WAV:COUN?` reading 32 after. `:ADER?`, by contrast, is set after the
-        first acquisition, which is why the driver used to fetch at ~25 of 200.
-        Leaves the scope stopped, which is where a fetch wants it.
-        """
+        `timeout_s` is in s. With averaging enabled, completion covers N_avg:
+        32 averages take 0.42 s on this bench, with a stopped count of 32
+        (`docs/analysis/2026-09-06/README.md`). `:ADER?` marks the first
+        acquisition and can allow a fetch at about 25 of 200 averages."""
         previous = self._io.timeout
         self._io.timeout = max(1000, int(timeout_s * 1000))
         try:
-            # Bare :DIG, not `:DIG {source}`: with a channel list the scope
-            # digitizes only those channels *and switches the others' display
-            # off*, and the first verification run (2026-09-06, 031419-001)
-            # then had no CHAN3 record for the sync trace that `_sync_trace`
-            # reads beside the current. Bare, it acquires every displayed
-            # channel -- what `:RUN` did -- and `configure_edge_trigger`
-            # keeps the trigger source displayed.
+            # Bare `:DIG` acquires all displayed channels. A channel list disables
+            # the others on this bench, removing CHAN3 Sync from the record fetched
+            # beside current. `configure_edge_trigger` keeps that source displayed.
             self._io.write(":DIG;")
             self._io.query("*OPC?")
         except Exception as exc:                            # noqa: BLE001
@@ -244,34 +191,29 @@ class Infiniium:
             self._io.timeout = previous
 
     def _single_shot(self, timeout_s: float) -> None:
-        """One un-averaged record, from an emptied display.
+        """Clear the display and send one unaveraged `:DIG`; return `None`.
 
-        For the auto-range passes: they only need the extremes of the signal in
-        the window now in force, and an averaged record here would be whatever
-        the buffer held from before -- on the rig, the previous step's dark
-        trace (2026-09-06).
-        """
+        `timeout_s` is in s. Autorange needs signal extrema in the active range.
+        A retained average can instead contain the preceding point's dark trace."""
         self._io.write(":STOP;:ACQ:AVER OFF;:CDIS;")
         self._digitize(timeout_s)
 
     def _query_count(self) -> int | None:
-        """`:WAV:COUN?` as an integer, or None when the firmware does not
-        answer it with a number. Zero is a real answer -- nothing folded yet.
-        Read it stopped: the probe never saw it climb while running."""
+        """Query stopped `:WAV:COUN?` and return an integer or `None`.
+
+        Zero means an empty average. While running, the DSO9054H reports the
+        configured count rather than progress
+        (`docs/analysis/2026-09-06/README.md`)."""
         try:
             return int(float(self._io.query(":WAV:COUN?").strip()))
         except Exception:                                   # noqa: BLE001
             return None
     def _clear_acquisition_flag(self) -> None:
-        """Read and discard `:ADER?` so the next read means *this* acquisition.
+        """Read and discard the `:ADER?` latch; return `None`.
 
-        The Acquisition Done Event Register is a latch, cleared on read. Left
-        set by a previous acquisition it returns `+1` immediately and the wait
-        ends before anything has been captured -- which with 200 hardware
-        averages would mean fetching a partial average and never knowing. The
-        bench transcript showed `:ADER?` answering `+1` about a millisecond
-        after `:RUN`, which is what prompted looking.
-        """
+        Reading clears the latch. A retained flag can end a wait before an
+        acquisition completes, allowing a partial average to be fetched.
+        On this bench a retained flag answers `+1` about 1 ms after `:RUN`."""
         try:
             self._io.query(":ADER?;")
         except Exception:
@@ -293,56 +235,30 @@ class Infiniium:
                   passes: int = 6, growth: float = 1.8,
                   max_range_v: float = 8.0, deadband: float = 0.02,
                   verify: bool = False) -> tuple[float, float]:
-        """Iterate to a vertical range that holds the whole signal.
+        """Acquire unaveraged traces and set a range and offset in V that fit them.
 
-        Once the trace fits inside the window, the range and offset are exactly
-        what `scale to maximum.vi` computes:
+        Return `(range, offset)` in V. For an unclipped trace the LabVIEW
+        `scale to maximum.vi` sequence gives range = |`scale_factor` * (max - min)|
+        and offset = (max + min) / `offset_divisor`. Its panel uses factors 1.5
+        and 2. A span below 1 mV substitutes 10 mV to avoid range collapse.
 
-            vertical range  = |scale_factor * (max - min)|      (volts)
-            vertical offset = (max + min) / offset_divisor      (volts)
+        Clipped extrema bound the excursion but cannot reveal its full size.
+        On this bench a 0.15 V range clips a 0.127 V peak at 0.075 V. Applying
+        the fit formula to clipped data gives ranges 0.150, 0.118, 0.152 and
+        0.191 V over four acquisitions. Geometric growth spends the added span
+        on the clipped side, anchored on the other edge, and reaches the same
+        fit in two acquisitions. At about 150 ms per acquisition, saving two
+        passes at each of 300 points saves about three minutes on this bench.
 
-        Recovered from the wire graph: Array Max & Min -> Subtract -> Divide by
-        `Scale off.` -> Multiply by `Scale_fac.` -> Absolute Value -> the
-        Vertical Range input of Configure Channel; and Add -> Divide by
-        `Scale off.` -> the Vertical Offset. The panel supplies Scale_fac. = 1.5
-        and Scale off. = 2, and a peak-to-peak under 1 mV falls back to a 10 mV
-        span rather than collapsing the range.
+        Stop after an unclipped pass, `passes` attempts, `max_range_v`, or the
+        instrument's range ceiling. `last_autorange_passes` and
+        `last_autorange_clipped` report the outcome. Clipping a light trace
+        underestimates the magnitude of Q.
 
-        **It has to iterate, and the original does.** `scale to maximum.vi`
-        wraps all of that in a FOR loop, which I first flattened to a single
-        pass. The rig showed why on 2026-09-01: the channel sat at 0.15 V while
-        the true peak was 0.127 V, so the first acquisition clipped at 0.075 V.
-
-        **Deviation from the original, deliberate.** The original applies the
-        formula above on every pass, clipped or not. That is wrong in a way that
-        only costs time: max and min read off a clipped trace are *lower bounds*
-        on the real excursion, so the range they produce is too small and the
-        next pass clips again. On the rig that formula crept 0.150 -> 0.118 ->
-        0.152 -> 0.191 V, four acquisitions to reach a window it could have
-        reached in two. So while the trace is clipped this ignores the numbers
-        the trace reports -- they carry no information about how far past the
-        rail the signal went -- and instead grows the window geometrically by
-        `growth`, anchored on whichever edge did *not* clip so the new span is
-        spent on the side the signal actually ran off. The formula is applied
-        once, to the first unclipped acquisition. Same answer, fewer passes: at
-        ~150 ms per acquisition and 300 steps a run, two saved passes is about
-        three minutes.
-
-        Stops as soon as a pass comes back **unclipped**, after `passes`
-        attempts, or when the instrument stops honouring a larger range (it is
-        at its own ceiling, or `max_range_v`). `last_autorange_passes` and
-        `last_autorange_clipped` record how many it took and whether it gave up
-        while still clipping -- the second is worth reporting, because a clipped
-        light trace makes every charge from that point an underestimate.
-
-        **Light trace only.** `Read unblocked TDCF.vi` calls this
-        unconditionally; `Read blocked.vi` contains the same call behind a
-        hard-coded FALSE, so the dark trace inherits whatever range the light
-        trace left on the instrument. That is not merely a convention -- the two
-        ranges must match for the pair to share a quantisation, and the
-        instrument's per-range offset calibration would otherwise put a small
-        step into the difference.
-        """
+        Only the light trace ranges. This matches the LabVIEW light/dark
+        sequence: the dark trace inherits the range. Equal ranges preserve
+        quantisation and prevent per-range offset calibration from adding a
+        step to light minus dark."""
         vrange = self._channel_range(channel) or 1.0
         voffset = self._channel_offset(channel) or 0.0
         self.last_autorange_passes = 0
@@ -379,20 +295,11 @@ class Infiniium:
                 new_range = abs(scale_factor * pk)
                 new_offset = (hi + lo) / offset_divisor
 
-                # Deadband. `Read unblocked TDCF.vi` re-ranges on every step, and
-                # after the first one the answer barely moves -- so on nearly
-                # every step of a real run this would rewrite the channel to
-                # within a percent of where it already is, and then spend 150 ms
-                # reading it back. Report 9 timed that `:CHAN2:RANG?`: 145, 149
-                # and 135 ms, because the query blocks while the front end
-                # settles. Over 300 steps that is a minute of nothing.
-                #
-                # Leaving it alone is also better physics. The light and dark
-                # traces of a step must share a quantisation, which is why the
-                # dark trace inherits the light trace's range; holding the range
-                # still across *steps* extends the same property to the whole
-                # run, so loops are averaged on one scale rather than 100
-                # slightly different ones.
+                # The deadband avoids near-identical range writes and settling queries.
+                # `:CHAN2:RANG?` takes 145, 149 and 135 ms on this bench while the front
+                # end settles, about a minute over 300 points. Holding range across
+                # points also keeps loops on one quantisation scale, extending the
+                # shared scaling required for light and dark traces.
                 moved = (abs(new_range - vrange) > deadband * abs(vrange)
                          or abs(new_offset - voffset) > deadband * abs(new_range))
                 if not moved:
@@ -402,20 +309,14 @@ class Infiniium:
                 vrange, voffset = new_range, new_offset
                 self.configure_channel(channel, vertical_range=vrange, offset=voffset)
                 if verify:
-                    # Report what the instrument took *if it disagrees* -- a
-                    # scope that quantises its ranges would otherwise put a
-                    # fiction in the run metadata. But only if it disagrees:
-                    # this one answers `:CHAN2:RANG? = 1.91E-01` to a request
-                    # for 0.191561, three significant figures of its own
-                    # display, and taking that at face value would throw away
-                    # precision rather than gain it.
+                    # Read-back replaces metadata only for a material difference.
+                    # On this bench a 0.191561 V request reads `1.91E-01`, rounded
+                    # to three significant figures. Using it directly loses precision.
                     #
-                    # Off by default, because the pair is metadata and nothing
-                    # else: every sample is scaled by the preamble's own
-                    # y_increment and y_origin at fetch time, never by these. So
-                    # a quantising scope could not corrupt a single data point
-                    # through them -- and the query costs ~150 ms per step. The
-                    # bench harness turns it on; a 300-step run does not.
+                    # Verification is optional: samples use preamble `yinc` and `yor`,
+                    # independently of this metadata. Quantised settings cannot corrupt
+                    # sample scaling here. The query costs about 150 ms per point on
+                    # this bench, so verification is reserved for bench checks.
                     vrange = self._settled(self._channel_range(channel), vrange)
                     voffset = self._settled(self._channel_offset(channel), voffset)
                 break
@@ -432,19 +333,15 @@ class Infiniium:
             vrange = grown
             self.configure_channel(channel, vertical_range=vrange, offset=voffset)
 
-            # Read back what the instrument actually took. This is not
-            # bookkeeping: the clip test above compares the trace to `top` and
-            # `bottom`, which are computed from these two numbers, so a scope
-            # that clamped or quantised the request would leave the driver
-            # testing against a window that does not exist -- and a clipped
-            # trace would come back looking clean. A test with a scope capped at
-            # 0.10 V caught exactly that when this readback was briefly removed.
+            # Read-back is required after growth: `top` and `bottom` must describe
+            # the applied range, including any instrument clamp or quantisation.
+            # Otherwise a scope capped at 0.10 V can appear unclipped against a
+            # larger requested window.
             #
-            # A range that did not grow means the instrument is at its ceiling;
-            # every remaining pass would clip identically. Compare against the
-            # range *before* the request, not against the request itself: this
-            # scope replies to three significant figures, so 1.5746 comes back
-            # as 1.57 and an equality test would read that as a refusal.
+            # No growth means further passes clip identically at the range ceiling.
+            # Compare with the preceding range, not the request: this scope reports
+            # three significant figures, so a 1.5746 V request reads 1.57 V. Exact
+            # equality to the request would mistake rounding for refusal.
             applied = self._channel_range(channel)
             if applied is not None:
                 vrange = applied
@@ -462,13 +359,11 @@ class Infiniium:
     @staticmethod
     def _settled(reported: float | None, asked: float,
                  tolerance: float = 0.02) -> float:
-        """Which of the two to believe about a setting just written.
+        """Return the reported setting only when it differs beyond `tolerance`.
 
-        The instrument's reply wins only when it differs by more than
-        `tolerance` -- enough to see a quantised range (a 1-2-5 step is at least
-        25 % away) and to ignore a reply rounded for display (three significant
-        figures is at most 0.5 % away).
-        """
+        A 1-2-5 range step differs by at least 25 %, while three-significant-
+        figure display rounding differs by at most 0.5 %. The tolerance keeps
+        rounding from discarding request precision."""
         if reported is None:
             return float(asked)
         scale = max(abs(asked), abs(reported))
@@ -489,19 +384,13 @@ class Infiniium:
             return None
 
     def _read_waveform(self, expected_points: int) -> np.ndarray:
-        """`:WAV:DATA?`, by whichever route actually delivers the samples.
+        """Query `:WAV:DATA?` and return raw integer samples.
 
-        The first two bench acquisitions got a preamble promising 4000 points
-        and then an empty array from `query_binary_values`, with no error in the
-        instrument's queue. Several explanations were plausible and the obvious
-        one (an indefinite `#0` block from `:WAV:STR ON`) turned out to be
-        wrong, so this stopped depending on the diagnosis: take pyvisa's answer
-        when it is the right length, and otherwise read the bytes and parse the
-        IEEE block here.
-
-        `last_fetch_method` records which route was used, so a bench report says
-        whether the fallback was needed.
-        """
+        On this bench, `query_binary_values` can return an empty array for a
+        4000-sample preamble without an instrument error-queue entry. PyVISA
+        1.16.2 parses indefinite `#0` blocks, so that header does not explain
+        the empty transfer. A wrong-length result triggers a raw IEEE-block
+        read. `last_fetch_method` records whether the fallback supplies data."""
         try:
             raw = self._io.query_binary_values(":WAV:DATA?", datatype="h",
                                                is_big_endian=True,
@@ -523,7 +412,10 @@ class Infiniium:
         return raw
 
     def _read_waveform_raw(self) -> np.ndarray:
-        """Read `:WAV:DATA?` as bytes and parse the IEEE block by hand."""
+        """Query `:WAV:DATA?` as bytes and return decoded integer samples.
+
+        Parse the IEEE block header directly. Missing or unreadable data returns
+        an empty array. Samples are signed 16-bit, most-significant byte first."""
         try:
             self._io.write(":WAV:DATA?")
             data = bytes(self._io.read_raw())
@@ -547,15 +439,11 @@ class Infiniium:
         return np.frombuffer(payload, dtype=">i2")
 
     def _fetch_volts(self, source: str) -> Trace:
-        """The raw channel trace, in **volts at the scope input**.
+        """Query the waveform preamble and data and return a `Trace` in V.
 
-        This is what `scale to maximum.vi` works in. Its `Fetch (Waveform).vi`
-        call leaves the `50 Ohm?` boolean unwired, so no resistor division
-        happens there, and the range it computes goes straight back to
-        `:CHAN:RANG` -- which is a volts setting. Computing the range from
-        resistor-divided data would set it a factor R too small and clip every
-        light trace.
-        """
+        `dt` and `t0` are in s. The LabVIEW range sequence leaves `50 Ohm?`
+        unwired, so it also works in input V. Dividing by R_s before calculating
+        a range makes the range too small by that factor and clips light traces."""
         self._io.write(f":WAV:SOUR {source};")
         pre = self._io.query(":WAV:POIN?;:WAV:XOR?;:WAV:XINC?;"
                              ":WAV:YOR?;:WAV:YINC?;:WAV:YREF?;")
@@ -573,75 +461,54 @@ class Infiniium:
                 f"{int(npts)} — the transfer was truncated, most likely by a "
                 "read termination character inside the binary block."
             )
-        # The digitiser step is proportional to the vertical range in force, so
-        # it is a free readback of that range -- see `autorange`, which uses it
-        # instead of a `:CHAN:RANG?` query that costs 150 ms on this scope.
+        # `yinc` in V per code tracks the applied vertical range. Keeping it
+        # allows scaling checks without a separate `:CHAN:RANG?` query, which
+        # takes about 150 ms on this bench.
         self.last_y_increment = yinc
         volts = (raw.astype(float) - yref) * yinc + yor
         return Trace(y=volts, dt=xinc, t0=xor)
 
     def _fetch(self, source: str) -> Trace:
-        """The trace in **amps**, as `Read (Single Waveform).vi` returns it.
+        """Fetch a waveform and return a `Trace` in A with `dt` and `t0` in s.
 
-        That VI passes `50 Ohm? = TRUE` and `Resistor = 5.192` into the fetch,
-        so the engine's arrays are currents. Both `Read blocked.vi` and
-        `Read unblocked TDCF.vi` wire the constant TRUE explicitly.
-
-        `current_sign` is applied here and nowhere else. It is the digitiser
-        chain's convention (this port read every current positive, the LabVIEW
-        engine every one negative, 2026-09-02), so it belongs beside the
-        resistor division that is the rest of that chain -- not in
-        `_fetch_volts`, which the auto-range uses to compute a window in volts,
-        and not in `core.process`, which is validated numerics.
-        """
+        The LabVIEW light and dark fetches use `50 Ohm? = TRUE` and
+        `Resistor = 5.192`, so their arrays are currents. Division by R_s and
+        `current_sign` occur here once. The bench convention makes extraction
+        current negative, matching LabVIEW. `_fetch_volts` remains in V for
+        range calculations; `bace.core.process` receives currents."""
         tr = self._fetch_volts(source)
         return Trace(y=self.current_sign * tr.y / self.sense_resistor_ohm,
                      dt=tr.dt, t0=tr.t0)
 
     @property
     def clipped(self) -> bool:
-        """`Digitizer.clipped` — the auto-range gave up while still on a rail.
+        """Return whether autorange ends with the light trace on a rail.
 
-        An alias for `last_autorange_clipped`, which is the name this driver has
-        always used and the reason `StepDone.clipped` read `False` on every real
-        shot until 2026-09-01: `transient.py` asked the scope for `clipped`,
-        only the simulator had it, and the `getattr` default swallowed the
-        difference. The property is now in the `Digitizer` protocol, so the two
-        cannot drift apart again without a test failing.
+        This exposes `last_autorange_clipped` through `Digitizer.clipped`.
+        Both traces share that range; the dark trace does not update this flag.
+        The protocol requires the property so a missing name cannot silently
+        become `False` through a caller's default.
 
-        Only the light trace updates it — the dark trace inherits the light
-        trace's window by design — so this describes the window *both* traces of
-        a step were taken in, which is what a consumer wants.
-
-        It reports what the auto-range concluded, not what the samples show. A
-        trace can sit on a rail without the auto-range noticing (the range was
-        set elsewhere, or the loop stopped early), so the bench check separately
-        counts samples resting on the extreme code.
-        """
+        The flag describes autorange's conclusion. A range set elsewhere or an
+        early stop can still leave samples on a rail. Bench checks therefore
+        also count samples at the extreme code."""
         return bool(self.last_autorange_clipped)
 
     def fetch_volts(self, source: str) -> Trace:
-        """One channel's trace in **volts at the input**, with no sense-resistor
-        division and no averaging or ranging of its own.
+        """Fetch a channel from the stopped record and return its `Trace` in V.
 
-        `acquire` returns amps because the channel it is built around carries a
-        current through the 5.192 ohm resistor. The sync lines and the LED drive
-        are voltages, and a caller reading several channels out of one record
-        wants them as they are. Public because `bench.sync` needs exactly this
-        and going through the private name would be pretending it does not.
-        """
+        `dt` and `t0` are in s. No averaging, ranging, resistor division or sign
+        change occurs. Sync and LED drive channels carry voltage; the current
+        channel's conversion through R_s belongs in `acquire`."""
         return self._fetch_volts(source)
 
     def single_acquisition(self, timeout_s: float = 30.0) -> None:
-        """Arm, wait for one complete acquisition, stop. Nothing else.
+        """Clear `:ADER?`, send `:RUN`, wait and send `:STOP`; return `None`.
 
-        No averaging, no auto-range, no fetch — for a caller that has configured
-        the window itself and wants several channels out of the same record. It
-        exists so that sequence is written once: clear `:ADER?` first because it
-        is a latch cleared on read and a stale one ends the wait immediately,
-        and `:STOP` before any fetch because reading a running scope returns a
-        partial record or none. Both were bench defects (#5 and #4).
-        """
+        `timeout_s` is in s. The caller configures the range and fetches channels
+        from this record. Clearing the latch prevents immediate false completion.
+        Stopping before fetch avoids a partial or empty record on this bench.
+        This method does not configure averaging or autorange."""
         self._clear_acquisition_flag()
         self._io.write(":RUN;")
         self._wait_for_acquisition(timeout_s)
@@ -650,12 +517,13 @@ class Infiniium:
     def acquire(self, n_averages: int, *, source: str = "CHAN2",
                 autorange_first: bool = False, timeout_s: float = 30.0,
                 window: tuple[float, float] | None = None) -> Trace:
-        """One hardware-averaged acquisition.
+        """Send averaging and acquisition commands and return a current `Trace` in A.
 
-        `autorange_first=True` for the light trace, False for the dark one —
-        see the module docstring. `window` writes a known (range, offset)
-        instead, for a pair taken dark first (`Digitizer.acquire`).
-        """
+        `dt` and `t0` are in s. `n_averages` sets N_avg and `timeout_s` is in s.
+        `autorange_first=True` ranges the light trace only. For a dark trace
+        taken first, `window` supplies the light trace's range and offset in V.
+        `:DIG` and `*OPC?` wait for completion; the stopped count must reach
+        N_avg when the instrument supplies it."""
         self._io.write(":RUN;:WAV:FORM WORD;")
         if autorange_first:
             self.autorange(source)
@@ -684,11 +552,10 @@ class Infiniium:
         return Trace(y=trace.y, dt=trace.dt, t0=trace.t0, count=count)
 
     def _averages_folded(self) -> int | None:
-        """`:WAV:COUN?` for the source just fetched: how many acquisitions the
-        averager folded into the record. `acquire` waits on this number, so it
-        should be `n_averages` or a little over; short means the firmware did
-        not answer the count and the wait fell back to `:ADER?`, which is set
-        per acquisition, not per completed average (2026-09-05)."""
+        """Query `:WAV:COUN?` and return the folded count or `None` for zero or failure.
+
+        Read after fetch while stopped. `acquire` rejects a count below N_avg:
+        `:ADER?` indicates an acquisition, not completion of the average."""
         n = self._query_count()
         return n if n else None
 

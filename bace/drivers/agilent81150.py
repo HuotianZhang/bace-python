@@ -1,28 +1,15 @@
-"""Agilent 81150A pulse function generator — the collection-field stimulus.
+"""The Agilent 81150A supplies the bias step.
 
-The call order below is `Agilent 81150StandardWaveformTDCF20131120.vi`, the
-custom VI the engine actually uses, not the generic driver's example. Its
-sequence and its embedded constants:
+The LabVIEW sequence disables the initialization identity query. It configures
+external edge arming, pulse shape, levels, frequency, duty, leading-edge
+time, delay, width, polarity and output.
+Its external trigger threshold is 1.0 V into 10 kohm. The leading-edge time
+is 2.5 ns, a lower limit on the applied edge time. Internal `:ARM:FREQ` has
+no effect under external arming.
 
-    Initialize                       ID Query = FALSE
-    if Ext Trig?                     Configure Trigger        source EXT, sense EDGE
-                                     Configure External Trigger  level 1.0 V, Zin 10 kohm
-    Configure Internal Trigger       :ARM:FREQ  (moot under external arming)
-    Configure Standard Waveform      shape PULSE, VOLT:HIGH = prebias, VOLT:LOW = Vcoll, FREQ
-    Configure Pulse Waveform         PULS:DCYC, PULS:TRAN = 2.5 ns, PULS:DEL = delay
-    Configure Pulse Width            FUNC1:PULS:WIDT
-    Configure Output Polarity        NORM / INV
-    Enable Output                    ON
-
-Two constants are easy to miss and both matter: the external trigger threshold
-is **1.0 V into 10 kohm**, and the pulse leading-edge time is **2.5 ns** -- the
-field's actual rise, and a floor on how sharply the collection bias can be
-applied.
-
-`prebias` and `vcoll` are the levels at the generator output: already divided
-by the amplifier gain by `core.pulses`, and already swapped-and-negated if the
-sample architecture is inverted.
-"""
+`bace.core.pulses` divides V_pre and V_coll by the bias amplifier gain.
+It swaps and negates the levels for inverted device polarity. The driver
+receives levels in V at the generator output, not at the device."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -44,12 +31,12 @@ class TriggerConfig:
 
 
 class Agilent81150:
-    """One channel of an 81150A. Not thread-safe."""
+    """Control one 81150A channel without concurrent access."""
 
     def __init__(self, resource, *, channel: int = 1, timeout_ms: int = 5000):
         self._io = resource
         self.output_polarity = "?"
-        """`NORM`, `INV` or `?` -- what `configure_shape` set or found."""
+        """Record the `NORM`, `INV` or `?` polarity set or read by `configure_shape`."""
         self._io.timeout = timeout_ms
         self.ch = int(channel)
         self._output = False
@@ -70,14 +57,11 @@ class Agilent81150:
     def configure_trigger(self, cfg: TriggerConfig | None = None, *,
                           external: bool | None = None,
                           positive_slope: bool | None = None) -> None:
-        """Arm the generator. Two spellings, one behaviour.
+        """Send immediate or external edge arming settings and return `None`.
 
-        The bench harness and `tools/scan.py` pass a `TriggerConfig`, which
-        also carries the recovered threshold and impedance; the run path
-        speaks the `BiasSource` protocol and passes only the two booleans, so
-        the 1.0 V / 10 kohm constants never leave this file. Booleans given
-        beside a `TriggerConfig` override its fields.
-        """
+        `TriggerConfig` supplies the threshold in V and impedance in ohm. Explicit
+        boolean arguments override its fields. The `BiasSource` interface uses
+        only booleans and retains the LabVIEW sequence's 1.0 V and 10 kohm defaults."""
         base = cfg if cfg is not None else TriggerConfig()
         ext = base.external if external is None else bool(external)
         pos = base.positive_slope if positive_slope is None else bool(positive_slope)
@@ -91,12 +75,10 @@ class Agilent81150:
         self._io.write(f":ARM:IMP {base.impedance_ohm:g};")
 
     def trigger_state(self) -> dict[str, str]:
-        """`BiasSource.trigger_state`: `:ARM:SOUR1?` and `:ARM:SLOP?` read back.
+        """Query `:ARM:SOUR{ch}?` and `:ARM:SLOP?` and return their string values.
 
-        A readback, not an echo of what `configure_trigger` sent -- the point
-        is to record what the instrument holds, which is also what
-        `tools/scan.py` checked by hand before this existed.
-        """
+        Read-back records the instrument state, including sources other than
+        `EXT` and `IMM`. A failed or empty reply gives `?`."""
         def ask(query: str, known: tuple[str, ...]) -> str:
             try:
                 reply = str(self._io.query(query)).strip().upper()
@@ -118,13 +100,10 @@ class Agilent81150:
         self._io.write(f":FREQ{self.ch} {frequency_hz:g};")
         self._io.write(f":FUNC{self.ch}:PULS:DCYC {duty_percent:g};")
         self._io.write(f":FUNC{self.ch}:PULS:TRAN {edge_time_s:g};")
-        # `None` = leave the instrument's polarity alone. Which level the device
-        # rests at between pulses depends on how the sample is wired, and that is
-        # not always known -- writing a polarity then is guessing, and a wrong
-        # guess moves the extraction to the other edge of the pulse, 5 us away
-        # and outside the record, without any symptom in the data. So a caller
-        # may decline to set it; the value found is read back and kept so the run
-        # still records which convention it ran under.
+        # `None` preserves polarity when device wiring is uncertain. Wrong polarity
+        # moves extraction to the other pulse edge, 5 us away and outside the record,
+        # without an obvious data error. Read-back preserves the convention in the
+        # run record even when the caller leaves the setting unchanged.
         if inverted_output is None:
             self.output_polarity = str(
                 self._io.query(f":OUTP{self.ch}:POL?")).strip().upper()
@@ -136,23 +115,26 @@ class Agilent81150:
     # -- per axis point ---------------------------------------------------
     def set_levels(self, high_v: float, low_v: float, *,
                    delay_s: float, width_s: float) -> None:
-        """The four numbers that change from one measurement point to the next.
+        """Send high and low levels in V, delay in s and width in s; return `None`.
 
-        Order matters on this instrument: set the levels before the width, so
-        the width is never briefly applied against the previous amplitude.
-        """
+        Levels precede width so the width is not briefly applied at the previous
+        amplitude."""
         self._io.write(f":VOLT{self.ch}:HIGH {high_v:g};")
         self._io.write(f":VOLT{self.ch}:LOW {low_v:g};")
         self._io.write(f":PULS:DEL{self.ch} {delay_s:e};")
         self._io.write(f":FUNC{self.ch}:PULS:WIDT {width_s:g};")
 
     def apply(self, levels, *, inverted_output: bool = False) -> None:
-        """Take a `core.pulses.PulseLevels` and apply its *light* pair."""
+        """Send the light trace settings from `bace.core.pulses.PulseLevels`.
+
+        Levels are in V and delay and width in s. Return `None`."""
         self.set_levels(levels.high_light, levels.low_light,
                         delay_s=levels.delay_s, width_s=levels.width_s)
 
     def apply_dark(self, levels) -> None:
-        """The reference pair: same swing, referenced to 0 V."""
+        """Send the dark trace levels in V and delay and width in s; return `None`.
+
+        The supplied dark reference determines the voltage step."""
         self.set_levels(levels.high_dark, levels.low_dark,
                         delay_s=levels.delay_s, width_s=levels.width_s)
 
@@ -166,30 +148,30 @@ class Agilent81150:
 
     @property
     def output_enabled(self) -> bool:
-        """Read by `drivers.routing.BiasRouter` before it moves the relay.
+        """Return the cached output state used by `bace.drivers.routing.BiasRouter`.
 
-        The driver's memory of what it last sent -- or, after `read_output`,
-        of what the instrument last answered. The service refreshes it with
-        `read_output()` before every relay move and every read-back, because
-        a generator left ON by the LabVIEW VI is invisible to a flag that
-        starts False."""
+        The service refreshes it with `read_output` before relay moves and
+        read-back. A generator enabled outside this object is invisible to its
+        initial `False` flag."""
         return self._output
 
     # -- read-back, for the service's bench card --------------------------
-    # Not protocol members: the run path never asks these questions, the
-    # service does, through `getattr` with a cached fallback. Each one asks
-    # the instrument and answers None/"?" when it will not say. The spellings
-    # are the ones tools/scan.py checked by hand until 2026-09-02.
+    # The service calls these methods through `getattr` with a cached fallback.
+    # Each queries the instrument and returns `None` or `?` for a missing reply.
     def read_output(self) -> bool | None:
-        """`:OUTP1?`, and the cached flag `output_enabled` follows it."""
+        """Query output, update `output_enabled` and return a boolean or `None`.
+
+        The command is `:OUTP{ch}?`."""
         on = on_off(ask(self._io, f":OUTP{self.ch}?"))
         if on is not None:
             self._output = on
         return on
 
     def read_polarity(self) -> str:
-        """`:OUTP1:POL?` -> `NORM`, `INV` or `?`; `output_polarity` follows it,
-        so the chain can be judged before any run has configured the shape."""
+        """Query `:OUTP{ch}:POL?` and return the polarity or `?`.
+
+        Update `output_polarity` so read-back can check the chain before a run
+        configures its shape."""
         pol = ask(self._io, f":OUTP{self.ch}:POL?")
         if pol is None:
             return "?"
@@ -198,10 +180,10 @@ class Agilent81150:
         return pol
 
     def read_state(self) -> dict[str, Any]:
-        """Everything the bench card shows for this generator, read from the
-        instrument: `output`, `polarity`, `high_v`, `low_v`, `frequency_hz`,
-        `delay_s`, `width_s`. A value the instrument would not give is None
-        (`?` for the polarity)."""
+        """Query and return output, polarity, levels, frequency, delay and width.
+
+        Levels are in V, frequency in Hz and times in s. Missing replies give
+        `None`, or `?` for polarity."""
         ch = self.ch
         return {
             "output": self.read_output(),

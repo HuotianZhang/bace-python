@@ -1,26 +1,13 @@
-"""Typed instrument API, configuration discovery, and the safety guard rails.
+"""Provide typed Lake Shore 331 operations and enforce safety limits.
 
-VENDORED, 2026-09-03, from the 331 console project
-(D:/TemperatureController, console/ls331/), unchanged. It is the device
-truth; when this file and that project disagree, they have drifted and one
-of them is wrong. "The console" in the prose below means whichever program
-owns the GPIB session -- in this repository that is the BACE service, and
-`controller.DirectTemperatureController` is the owner.
+Exactly one owner holds a `Lakeshore331`. The service uses
+`controller.DirectTemperatureController` and a lock for all exchanges.
+The instrument answers only its last query, so concurrent callers can
+consume one another's replies.
 
-Two rules hold this layer together.
-
-**One owner.**  Exactly one object in the process may hold a
-:class:`Lakeshore331`.  Everything else - the poller, the web handlers, a sweep
-script - goes through that owner's queue.  The instrument answers only the last
-query it received and cannot arbitrate between callers, so two callers sharing a
-session will eventually read one another's replies.
-
-**The instrument owns its configuration.**  Loop wiring (``CSET``), the analog
-output (``ANALOG``) and sensor setup (``INTYPE``, ``INCRV``) are set on the
-front panel and only ever *read* here.  The console discovers how the box is
-wired at connect and adapts, which means what is on screen cannot drift away
-from what the hardware is actually doing.
-"""
+The front panel owns loop wiring (`CSET`), analog output (`ANALOG`) and
+sensor setup (`INTYPE`, `INCRV`). Connection discovery reads these settings
+so the console describes the instrument configuration it actually controls."""
 from __future__ import annotations
 
 import logging
@@ -36,24 +23,18 @@ AuditHook = Callable[[str, str], None]
 
 
 class SafetyError(RuntimeError):
-    """A request was refused because it would breach a configured limit."""
+    """Report a request that breaches a configured limit."""
 
 
 @dataclass(frozen=True)
 class Discovery:
-    """What the instrument reported about itself at connect.
+    """Describe instrument configuration read at connection.
 
-    ``control_loop`` is the loop this console drives.  It is **not** inferred
-    from the instrument, and that is deliberate: the 331's two loops can both
-    be active at once - Loop 1 running the main heater while Loop 2 drives the
-    analog output for a shield - so "the analog output is in control mode"
-    says nothing about which loop matters to you.  Guessing it wrong is silent:
-    ``SETP 2`` on a Loop 1 system is accepted, stored, and changes nothing.
-
-    Loop 1 is the default because it is the main control loop and drives the
-    heater output.  Pass ``--loop 2`` if the analog output is the one you
-    actually control from.
-    """
+    `control_loop` explicitly selects the driven loop. Both loops can be
+    active, so analog control mode does not identify the intended heater.
+    `SETP 2` on a loop-1 system is accepted and stored without affecting
+    that heater. Loop 1 drives the main heater; loop 2 drives analog output.
+    Loop 1 is the default. A loop-2 installation must select it explicitly."""
 
     idn: str
     control_loop: int
@@ -71,17 +52,19 @@ class Discovery:
 
     @property
     def heater_query(self) -> str:
-        """``HTR?`` reads Loop 1 only; Loop 2 reads back through ``AOUT?``."""
+        """Return `HTR?` for control loop 1 or `AOUT?` for control loop 2."""
         return "AOUT?" if self.control_loop == 2 else "HTR?"
 
     @property
     def has_range_control(self) -> bool:
-        """Loop 1 has Off/Low/Med/High; Loop 2's output is only on or off."""
+        """Return whether the selected heater has multiple power ranges.
+
+        Control loop 1 has off, low, medium and high; loop 2 is only off or on."""
         return self.control_loop == 1
 
     @property
     def analog_is_control_output(self) -> bool:
-        """True when Loop 2 is also enabled, whether or not we are using it."""
+        """Return whether control loop 2 is enabled, regardless of the selected loop."""
         return self.analog.mode is p.AnalogMode.LOOP
 
     def describe(self) -> str:
@@ -108,7 +91,7 @@ class Discovery:
 
 
 class Lakeshore331:
-    """Everything the console is allowed to ask the instrument to do."""
+    """Expose instrument reads and writes through configured safety limits."""
 
     def __init__(
         self,
@@ -142,12 +125,10 @@ class Lakeshore331:
     # -- discovery --------------------------------------------------------
 
     def discover(self, control_loop: int = None) -> Discovery:
-        """Read back how the instrument is configured, and remember it.
+        """Query identity, both `CSET?` replies and `ANALOG?`; return `Discovery`.
 
-        ``control_loop`` says which loop this console drives; it defaults to
-        the settings value, which is Loop 1.  Nothing here infers it - see the
-        note on :class:`Discovery`.
-        """
+        `control_loop` defaults to the configured loop, normally 1. It must be
+        selected explicitly because both instrument control loops can be active."""
         if control_loop is None:
             control_loop = self.settings.control_loop
         if control_loop not in (1, 2):
@@ -182,7 +163,9 @@ class Lakeshore331:
         return p.parse_reading_status(self._query("RDGST? %s" % channel.upper()))
 
     def heater_output_percent(self) -> float:
-        """Heater output, from whichever channel this configuration uses."""
+        """Query the configured heater output and return percent.
+
+        Loop 1 uses `HTR?`; loop 2 uses `AOUT?`. Discovery must precede the read."""
         if self.discovery is None:
             raise RuntimeError("call discover() first")
         return p.parse_float(self._query(self.discovery.heater_query))
@@ -214,11 +197,10 @@ class Lakeshore331:
     # -- writes, each through its guard rail ------------------------------
 
     def set_setpoint(self, kelvin: float, reason: str = "") -> None:
-        """Set the control setpoint, refusing anything above the ceiling.
+        """Send `SETP` with the control setpoint in K and return `None`.
 
-        Refused rather than silently clamped: a request for 400 K is a mistake,
-        and quietly giving the user 350 K hides it.
-        """
+        Requests outside configured bounds raise `SafetyError`. Clamping a
+        400 K request to 350 K hides a setup error, so the request is refused."""
         if kelvin > self.limits.max_setpoint_k:
             raise SafetyError(
                 "setpoint %.3f K exceeds the %.1f K limit for this cryostat"
@@ -232,7 +214,7 @@ class Lakeshore331:
         self._write("SETP %d,%s" % (self._loop, p.fmt_number(kelvin)), reason)
 
     def set_heater_range(self, rng: p.HeaterRange, confirmed: bool = False, reason: str = "") -> None:
-        """Change the heater range.  Lowering is free; raising needs a confirm."""
+        """Send `RANGE` and return `None`, requiring confirmation for an increase."""
         rng = p.HeaterRange(rng)
         current = self.heater_range()
         if rng > current and not confirmed:
@@ -268,35 +250,25 @@ class Lakeshore331:
         self._write("CMODE %d,%d" % (self._loop, int(p.ControlMode(mode))), reason)
 
     def take_remote_control(self) -> None:
-        """MODE 1 - remote, front panel still live.
+        """Send `MODE 1` for remote control with the front panel live; return `None`.
 
-        MODE 2 adds local lockout.  The keypad-lock feature keeps Alarm Reset
-        and Heater Off working, but the manual documents the bus LLO message
-        only as "prevents the use of instrument front panel controls" and does
-        not promise the same carve-out, so this console does not use it.
-        """
+        `MODE 2` adds local lockout. Keypad lock preserves Alarm Reset and Heater
+        Off, but the bus `LLO` description does not guarantee those controls
+        remain usable. This driver therefore avoids local lockout."""
         self._write("MODE 1", reason="console taking remote control")
 
     # -- the kill path ----------------------------------------------------
 
     def emergency_stop(self, reason: str) -> None:
-        """Cut heater power as directly as this configuration allows.
+        """Send `RANGE 0` to cut heater power and return `None`.
 
-        ``RANGE 0`` is the documented off switch and is harmless in any
-        configuration.  For a heater driven from the analog output there is no
-        separate documented remote off, so the manual output is zeroed and the
-        loop dropped to open loop.  VERIFY THIS ON THE BENCH before relying
-        on it (see README, "Bench checks").
+        For a heater on analog output, also zero `MOUT` before selecting open
+        loop with `CMODE`. Analog output has no separate documented remote-off
+        command. `MOUT` alone does not stop PID output. Switching mode before
+        zeroing can apply a stale manual output to the heater.
 
-        **Diverges from the console project, 2026-09-03.**  That copy zeroed
-        ``MOUT`` and stopped, which its own docstring already contradicted:
-        ``MOUT`` is the *manual* output and a Loop 2 still in PID mode goes on
-        driving the analog output from its setpoint, so the kill path did not
-        kill anything on a loop-2 cryostat.  ``CMODE`` follows the zero -- in
-        that order, because switching to open loop first would drive whatever
-        stale value ``MOUT`` happened to hold.  This rig is loop 1, so the
-        branch is untested on hardware here.
-        """
+        This bench uses control loop 1. The loop-2 stop sequence is untested on
+        hardware here; verify it on the intended bench before relying on it."""
         log.error("EMERGENCY STOP: %s", reason)
         self._write("RANGE 0", reason="emergency stop: %s" % reason)
         if self.discovery is not None and self.discovery.control_loop == 2:
@@ -306,7 +278,7 @@ class Lakeshore331:
                         reason="emergency stop: drop loop to open loop")
 
     def check_faults(self) -> Optional[str]:
-        """Return a description of any fault worth cutting the heater for."""
+        """Query sensor and heater status and return a fault reason or `None`."""
         status = self.reading_status(self.discovery.control_input if self.discovery else "A")
         if not status.ok:
             return "control sensor reports %s" % status

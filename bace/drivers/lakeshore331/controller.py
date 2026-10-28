@@ -1,46 +1,20 @@
-r"""The 331 driven from this process: the service is the owner.
+"""Drive the Lake Shore 331 from the service's GPIB session.
 
-The console in `D:\TemperatureController` was written first, and this package's
-`console.py` talks to it. That arrangement assumed the console was running.
-It is not, on this rig -- nobody starts it -- and a driver whose precondition
-is a program nobody starts is a driver that never works. So the instrument
-code moved in here (`instrument.py`, `protocol.py`, `transport.py`,
-`simulator.py`, vendored from that project) and this class opens the GPIB
-session itself.
+The 331 answers only the last query received. `_LOCK` serialises monitor
+polls, setpoint writes and read-back to prevent callers reading each other's
+replies. The separate 331 console must not hold a second session on the
+same address. Liveness checks cannot detect that competing owner.
 
-**The one-owner rule did not go away; it moved inside.** The 331 answers only
-the last query it received and cannot arbitrate between callers, so two
-callers sharing a session eventually read each other's replies. In the console
-that was solved by being a separate process with a bus-owner thread. Here it
-is solved by `_LOCK`: every exchange with the instrument -- the monitor's
-poll, a temperature node's setpoint, the bench read-back -- passes through it,
-the same way `service.rigs._POWER_LOCK` serialises the meter. What must not
-happen now is a *second* owner appearing: if the console is ever started
-beside the service, both hold `GPIB0::7` and both read the other's replies.
-`available()` cannot see that, so `rig.toml` documents it and
-`bace.bench.checks` says it out loud.
+The safety layer refuses setpoints above 350 K without clamping. `_watch`
+counts consecutive control-sensor or heater faults and sends `RANGE 0` at
+`max_consecutive_faults`. A failed sensor can otherwise leave the heater
+energised for hours during a run. Heater range, PID, ramp and wiring are
+read from the instrument; normal runs change only the setpoint. Raising
+heater range requires confirmation that this driver never supplies.
+The watchdog can lower range to zero.
 
-What the console kept and this keeps:
-
-* the **350 K ceiling** (`config.Limits`), refused with `TemperatureError`
-  and never clamped -- quietly giving 350 K for 400 K hides the mistake;
-* the **heater watchdog** (`_watch`): `max_consecutive_faults` bad readings
-  of the control sensor and the heater is cut with `RANGE 0`. This lived in
-  the console's poller, which did not come with the instrument code -- so
-  for one commit `emergency_stop` sat here with nothing calling it while a
-  run could leave the heater energised behind a dead sensor;
-* the **heater range, PID, ramp and loop wiring** read, never driven: the
-  front panel owns them, `discover()` reads back how the box is wired, and
-  a run gets whatever is set. Raising the heater range needs an explicit
-  confirm that this class never passes. Lowering it to zero is the one
-  write the watchdog is allowed, because that is the safe direction.
-
-What is different from the console, deliberately: `note()` has no separate
-audit file. The console kept one because it was the only program on the
-instrument; here the session journal is where an operator looks, so a note
-goes to the `audit` hook the service installs (`service.temperature`) and to
-the log, not to a second file that nobody would read.
-"""
+`note` records through the service's `audit` hook and log. The session
+journal holds the record without a second audit file."""
 from __future__ import annotations
 
 import logging
@@ -59,19 +33,20 @@ from ..protocols import TemperatureReading
 log = logging.getLogger(__name__)
 
 _LOCK = threading.RLock()
-"""One owner, now a lock rather than a process. Re-entrant because `read()`
-makes several exchanges and a caller may already hold it."""
+"""Serialise all instrument exchanges under one owner.
+
+The lock is reentrant because a read performs several exchanges and its
+caller can also hold the lock."""
 
 __all__ = ["DirectTemperatureController", "open_temperature_controller"]
 
 
 class DirectTemperatureController:
-    """`TemperatureController` over this process's own GPIB session.
+    """Implement temperature control through this process's GPIB session.
 
-    Constructing it opens the session and runs `discover()`, so a controller
-    that exists is one that answered; anything else raises and the bench
-    records the reason on the card rather than failing the service.
-    """
+    Construction opens the session and calls `Lakeshore331.discover`.
+    Failure raises so the bench can report an unavailable instrument while
+    keeping the service running."""
 
     def __init__(self, resource: str = Connection.resource, *,
                  timeout_ms: int = Connection.timeout_ms,
@@ -112,7 +87,7 @@ class DirectTemperatureController:
 
     # -- plumbing ---------------------------------------------------------
     def _on_write(self, message: str, reason: str) -> None:
-        """Every write the instrument layer makes, for the audit hook."""
+        """Send an instrument write and its reason to the audit hook; return `None`."""
         text = f"331 <- {message}" + (f" ({reason})" if reason else "")
         log.info("%s", text)
         if self.audit is not None:
@@ -129,9 +104,10 @@ class DirectTemperatureController:
 
     # -- liveness ---------------------------------------------------------
     def probe(self) -> dict | None:
-        """The shape `ConsoleTemperatureController.probe` returns, so the
-        bench can treat the two the same. None when the instrument did not
-        answer at all."""
+        """Poll the instrument and return a console-shaped status object or `None`.
+
+        The matching interface lets bench checks use direct and HTTP adapters
+        without a branch for the transport."""
         try:
             r = self.read()
         except TemperatureError:
@@ -146,14 +122,11 @@ class DirectTemperatureController:
 
     # -- reading ----------------------------------------------------------
     def read(self) -> TemperatureReading:
-        """One poll: the control input's temperature, the setpoint, whether a
-        ramp is still walking it, and the heater range.
+        """Poll temperature and setpoint in K, ramp state and heater range.
 
-        A single bus error makes this `connected=False` with the reason in
-        `status_text`, rather than raising -- the same contract the console
-        client has, so the monitor and the bench card need no branch. Only a
-        controller that cannot even be asked raises.
-        """
+        Return `TemperatureReading`. A bus error sets `connected=False` and
+        `status_text`, matching the console adapter. Only an unavailable
+        controller object raises; callers can share one status interface."""
         try:
             with _LOCK:
                 channel = self.discovery.control_input if self.discovery else "A"
@@ -186,16 +159,11 @@ class DirectTemperatureController:
 
     # -- the watchdog -----------------------------------------------------
     def _fault_text(self, status: Any) -> str | None:
-        """Anything worth cutting the heater for, or None.
+        """Return a control-sensor or heater fault reason, or `None`.
 
-        Both halves, as the vendored `check_faults()` defines them: a bad
-        control-sensor reading (`RDGST?`) **and** a heater fault (`HTRST?`).
-        The console's own watchdog counted only the sensor, which leaves the
-        case this exists to catch -- an open or shorted heater load while the
-        sensor reads perfectly well, so `status.ok` resets the counter on
-        every poll and the drive is never cut. One extra query per read
-        against a fault that would otherwise never be seen.
-        """
+        Both `RDGST?` and `HTRST?` are required. A working sensor alone does not
+        rule out an open or shorted heater load, and must not reset the watchdog
+        counter while that fault persists."""
         if not getattr(status, "ok", True):
             return f"control sensor reports {status}"
         try:
@@ -207,14 +175,13 @@ class DirectTemperatureController:
         return None
 
     def poll_faults(self) -> str | None:
-        """One watchdog tick without a full read: two queries, no state.
+        """Query sensor and heater faults without a full state read; return the reason.
 
-        For the worker to call at safe points inside a long job
-        (`service.rigs.Bench.sleeper`). The monitor cannot read while a run
-        holds the bus, and the watchdog rides on reads -- so without this a
-        fault that begins after a temperature settles, with the heater on and
-        hours of measurement to go, would go unseen until the run ended.
-        """
+        `bace.service.rigs.Bench.sleeper` calls this between operations during
+        a long job. The monitor cannot poll while the worker holds the bus.
+        Without worker polls, a fault after settling can leave a heater
+        energised and unobserved for hours. An unavailable poll returns `None`
+        without raising through the run."""
         try:
             with _LOCK:
                 fault = self.device.check_faults()
@@ -224,24 +191,13 @@ class DirectTemperatureController:
         return fault
 
     def _watch(self, fault: str | None) -> None:
-        """Cut the heater after `max_consecutive_faults` consecutive faults,
-        and reset the count on the first clean one.
+        """Cut heater output after `max_consecutive_faults` consecutive bad polls.
 
-        This is `ls331/service.py::_check_faults`, which lived in the console's
-        poller. The poller did not come with the instrument code, so when the
-        service took the bus this protection was left behind: `emergency_stop`
-        and `check_faults` sat in `instrument.py` with nothing calling them,
-        and a sensor going open-circuit with the heater energised had nobody
-        watching. A run only ever writes setpoints, so the heater can stay on
-        for hours after the thing measuring it stopped making sense.
-
-        Counted per read, as the console counted per poll -- so the monitor
-        and the settle feed it, and `poll_faults` feeds it from the worker
-        while a run holds the bus. `RANGE 0` is the documented off switch and
-        is harmless in any configuration; a failure to send it is swallowed,
-        because a watchdog that raises out of a read would take the read
-        with it.
-        """
+        A clean poll resets the counter. Monitor and settle reads feed the
+        watchdog; `poll_faults` feeds it while a run owns the bus. A sensor or
+        heater fault must not leave the heater energised through hours of
+        measurement. `RANGE 0` disables output in every configuration. A failed
+        stop write is logged without raising through the read or aborting a run."""
         if not self.watchdog:
             return
         if fault is None:
@@ -264,23 +220,20 @@ class DirectTemperatureController:
             log.error("heater cut FAILED: %s", self.heater_cut)
 
     def _elapsed(self) -> float | None:
-        """Seconds since this controller last wrote a setpoint. The console
-        reported the same thing from its own clock; a temperature node uses
-        it only for display, never to decide settling."""
+        """Return elapsed s after this controller's last setpoint write.
+
+        Temperature nodes use it for display, not to decide settling."""
         if self._setpoint_written_at is None:
             return None
         return time.monotonic() - self._setpoint_written_at
 
     # -- writing ----------------------------------------------------------
     def set_setpoint(self, kelvin: float) -> float:
-        """Write the control setpoint and read back what the instrument holds.
+        """Send the setpoint in K and return the instrument's read-back in K.
 
-        A setpoint above the ceiling raises `TemperatureError` with
-        `refused=True` and the safety layer's own sentence -- the same shape
-        the console's HTTP 403 produced, so `service.temperature` and every
-        verdict that renders `console_message` keep working unchanged.
-        Nothing is clamped.
-        """
+        An out-of-limit request raises `TemperatureError` with `refused=True`
+        and the safety layer's message. This matches the console adapter's
+        refusal interface; no value is clamped."""
         try:
             with _LOCK:
                 self.device.set_setpoint(float(kelvin),
@@ -299,8 +252,9 @@ class DirectTemperatureController:
         return float(confirmed)
 
     def note(self, text: str) -> bool:
-        """A line into the audit trail. Never raises: a log mark must not
-        stop a run. Returns whether anything recorded it."""
+        """Record a journal note and return whether an audit sink accepts it.
+
+        An audit failure never raises because logging must not stop a run."""
         try:
             log.info("331 note: %s", text)
             if self.audit is not None:
@@ -311,16 +265,11 @@ class DirectTemperatureController:
 
 
 def open_temperature_controller(rig_config: Any, *, simulate: bool = False):
-    """The controller a rig should use, given `[temperature]` in rig.toml.
+    """Build the temperature driver selected by `[temperature]` in `rig.toml`.
 
-    Three states. Direct by default -- this process opens `address` and owns
-    it. A non-empty `console` is the explicit escape hatch for the case the
-    direct path exists to remove: somebody is running the 331 console and
-    wants the service to go through it instead of fighting for the bus. Both
-    empty means there is no cryostat on this bench, which is a configuration
-    and not a failure -- the caller decides what to do with the refusal, and
-    `service.rigs.Bench.build_real` records nothing at all.
-    """
+    By default this process owns `address`. A nonempty `console` selects the
+    HTTP adapter when the separate console owns GPIB. Both empty means no
+    cryostat is configured; the caller handles the refusal."""
     console = getattr(rig_config, "temperature_console", "") or ""
     address = getattr(rig_config, "temperature_address", Connection.resource) or ""
     if console:

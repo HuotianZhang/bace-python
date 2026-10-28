@@ -1,21 +1,10 @@
-r"""Lake Shore 331 temperature controller.
+"""Provide direct and console-backed Lake Shore 331 drivers.
 
-Two ways to reach the same instrument, and the choice is `[temperature]` in
-rig.toml:
-
-* `controller.DirectTemperatureController` -- **the default.** This process
-  opens `GPIB0::7::INSTR` and owns it. The instrument code under here
-  (`protocol`, `transport`, `instrument`, `simulator`) is vendored from the
-  `D:\TemperatureController` console project so the service needs no second
-  program running to take a temperature.
-* `console.ConsoleTemperatureController` -- the escape hatch, used only when
-  `[temperature] console` names a URL. That console owns the GPIB session
-  when it runs, and then the service must go through it rather than open a
-  second session on the bus.
-
-Exactly one of the two may be live at a time, because exactly one owner of
-the bus may exist. That is the whole reason this module has two halves.
-"""
+`[temperature]` in `rig.toml` selects the owner.
+`controller.DirectTemperatureController` opens GPIB in the service by default.
+`console.ConsoleTemperatureController` uses the HTTP URL in `console` when
+the separate controller console owns GPIB. Exactly one backend may be live;
+competing sessions can read each other's replies."""
 from __future__ import annotations
 
 from ..protocols import TemperatureReading

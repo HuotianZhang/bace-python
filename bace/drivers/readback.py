@@ -1,31 +1,23 @@
-"""Read-only queries for the real drivers, spelt once.
+"""Parse read-only instrument replies for the real drivers.
 
-Three instruments answer the same three shapes of question -- is the output
-on, what is this level, what is this word -- and each driver used to keep a
-cached flag instead of asking. That cache is exactly what the service's bench
-card and the relay interlock must not trust: the 81150A the LabVIEW VI left
-ON shows as off in a driver that was constructed a minute ago, and the relay
-would be thrown under it. These helpers ask the instrument and turn the reply
-into a Python value, or into `None` / `"?"` when it will not answer, on the
-principle the whole read-back path follows: a plausible default is a lie in
-the file, an honest blank is not.
+The console and relay interlock need instrument state, not an initial cached
+flag. A generator enabled outside this driver can otherwise appear off and
+allow a relay move under load. Helpers return a parsed value, `None` or `?`
+for an unavailable reply; a plausible default conceals missing evidence.
 
-Not protocol members. The experiment layer never calls them; the service's
-`rigs.Bench` reaches for them with `getattr` and falls back to the cached
-properties on a driver (the simulator) that has none.
-"""
+The service calls driver read-back methods through `getattr` and uses cached
+properties for implementations without those methods. The experiment
+protocols do not require these service queries."""
 from __future__ import annotations
 
 from typing import Any
 
 
 def ask(io: Any, query: str) -> str | None:
-    """The instrument's reply, stripped, or None when the query fails.
+    """Query the instrument and return stripped text, or `None` on failure.
 
-    Never raises: a read-back that raised inside a run's unwind would mask
-    the exception already propagating, and a bench card must render on a
-    bench where one instrument is dead.
-    """
+    Failure must not mask a pending exception during cleanup. Read-back also
+    needs to render when one instrument does not answer."""
     try:
         reply = io.query(query)
     except Exception:                                       # noqa: BLE001
@@ -35,7 +27,7 @@ def ask(io: Any, query: str) -> str | None:
 
 
 def on_off(reply: str | None) -> bool | None:
-    """`:OUTP?` and friends: `1`/`ON` -> True, `0`/`OFF` -> False, else None."""
+    """Parse `1` or `ON` as `True`, `0` or `OFF` as `False`, else `None`."""
     if reply is None:
         return None
     up = reply.strip().upper().rstrip(";")
@@ -47,7 +39,7 @@ def on_off(reply: str | None) -> bool | None:
 
 
 def number(reply: str | None) -> float | None:
-    """A SCPI number (`+1.02000E+00`) as a float, or None."""
+    """Parse a SCPI number as a float, or return `None`."""
     if reply is None:
         return None
     try:
@@ -57,9 +49,9 @@ def number(reply: str | None) -> float | None:
 
 
 def word(reply: str | None, known: tuple[str, ...]) -> str:
-    """The first of `known` that the reply starts with, the reply itself when
-    it is none of them (information, not to be hidden), `?` when there is
-    no reply."""
+    """Return the first matching prefix in `known`, or the reply itself.
+
+    An unknown word remains useful read-back information. No reply gives `?`."""
     if reply is None:
         return "?"
     up = reply.strip().upper().rstrip(";")

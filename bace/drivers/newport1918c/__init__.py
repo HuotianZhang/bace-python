@@ -1,21 +1,12 @@
-r"""Newport 1918-C optical power meter.
+"""Provide direct and console-backed Newport 1918-C power-meter drivers.
 
-Two ways to reach the same instrument, and the choice is `[power_meter]` in
-rig.toml:
+`[power_meter]` in `rig.toml` selects the owner. `direct.DirectPowerMeter`
+opens USB in the service by default. `console.ConsolePowerMeter` uses a
+configured console URL when that program holds the handle.
 
-* `direct.DirectPowerMeter` -- **the default.** This process opens the USB
-  device through `meter.py`, the driver vendored from the
-  `D:\1918cPowerMeter` console project (real 1918-C v2.1.7, SN10259).
-* `console.ConsolePowerMeter` -- the escape hatch, used only when
-  `[power_meter] console` names a URL. That console holds the USB handle
-  when it runs, and then the service must ask it rather than fight for the
-  device.
-
-Only one process can hold the meter, so exactly one of the two may be live.
-Opening the device while the console has it fails with a bare "no Newport
-device found" that looks like a cable problem; `DirectPowerMeter` catches
-that and says what it actually means.
-"""
+Only one process can hold the meter. A second open gives a device-not-found
+error that can resemble a cable fault; the direct adapter explains the
+possible competing owner."""
 from __future__ import annotations
 
 import warnings
@@ -30,13 +21,10 @@ __all__ = ["DEFAULT_CONSOLE", "WATTS", "ConsolePowerMeter", "DirectPowerMeter",
 
 
 def open_power_meter(rig_config: Any, *, simulate: bool = False):
-    """The meter a rig should use, given `[power_meter]` in rig.toml.
+    """Open the power-meter backend selected by `[power_meter]` in `rig.toml`.
 
-    Direct by default. A non-empty `console` is the explicit escape hatch for
-    the case the direct path exists to remove: somebody is running the 1918-C
-    console and the service must go through it instead of failing to open a
-    device that program already holds.
-    """
+    Direct USB is the default. A nonempty `console` uses HTTP to the program
+    that holds the USB handle, avoiding a competing open."""
     console = getattr(rig_config, "power_meter_console", "") or ""
     wavelength = getattr(rig_config, "power_meter_wavelength_nm", None)
     averaging = bool(getattr(rig_config, "power_meter_averaging", True))
@@ -52,23 +40,19 @@ def open_power_meter(rig_config: Any, *, simulate: bool = False):
     else:
         meter = DirectPowerMeter(dll=getattr(rig_config, "power_meter_dll", "") or None,
                                  simulate=simulate)
-    # Both paths, in this order: a meter in amps or dBm reads plausibly and
-    # wrongly, and the wavelength decides the responsivity that turns the
-    # detector current into those watts.
+    # Units must be W; A or dBm can look plausible but are wrong for power.
+    # Wavelength selects the responsivity used to convert detector current.
     #
-    # Under try/finally because the direct meter already holds the exclusive
-    # USB device by now. `set_wavelength` refuses a value outside the head's
-    # calibrated range, and `Bench.build_real` registers its closer only on
-    # the value this returns -- so a rejected rig.toml wavelength would have
-    # left the meter held, with the service running and reporting it missing.
+    # Configuration runs under cleanup because direct opening owns the
+    # exclusive handle. A rejected wavelength must release it; the bench
+    # registers a closer only after this factory returns successfully.
     try:
         meter.set_units_watts()
         if wavelength is not None:
             meter.set_wavelength(wavelength)
-        # Then the averaging (2026-09-05): a pulsed LED is a 500 Hz square
-        # wave at the detector, and a meter that samples it at one instant
-        # shows a phase, not a power. `[power_meter] averaging = false` is
-        # the opt-out; the mode is written either way.
+        # A 500 Hz pulsed LED requires averaging to read mean power rather than
+        # a sampled phase. `[power_meter] averaging = false` selects instantaneous
+        # readings; both paths explicitly set the measurement mode.
         took = meter.set_averaging(averaging, digital_samples=digital)
         if console and took is False:
             warnings.warn(

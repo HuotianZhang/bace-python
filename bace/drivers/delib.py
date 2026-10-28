@@ -1,37 +1,15 @@
-"""Finding the DELIB DLL this interpreter can actually load.
+"""Find a DELIB DLL that matches the running interpreter.
 
-Deditec ships the library under **two names**, and which one is present is a
-property of the machine, not of the code:
+Deditec installs `delib.dll` for 32-bit Python in `C:/Windows/SysWOW64`
+and `delib64.dll` for 64-bit Python in `C:/Windows/System32`. A wrong
+architecture raises `OSError` with WinError 193. The search reads each PE
+header and prefers the matching build rather than assuming a machine layout.
 
-* `delib.dll`   — 32-bit, installed into `C:\\Windows\\SysWOW64`
-* `delib64.dll` — 64-bit, installed into `C:\\Windows\\System32`
-
-`ctypes` cannot load the wrong one: a 64-bit interpreter given the 32-bit file
-raises `OSError: [WinError 193] %1 is not a valid Win32 application`, which is
-how the bench PC spent an evening unable to run `--dio` at all. So rather than
-hard-coding a name, this module looks at what is installed, reads each
-candidate's PE header, and returns the one whose machine type matches the
-running interpreter.
-
-The API is identical across the two. Deditec's own header (`delib.h`, DELIB
-2009-2021) declares
-
-    #ifdef _WIN64
-      #define DAPI_FUNCTION_PRE64  extern "C" _declspec(dllexport)
-    #else
-      #define DAPI_FUNCTION_PRE64  extern
-    #endif
-    ...
-    DAPI_FUNCTION_PRE64 ULONG DAPI_FUNCTION_PRE DapiOpenModule(ULONG moduleID, ULONG nr);
-    DAPI_FUNCTION_PRE64 ULONG DAPI_FUNCTION_PRE DapiCloseModule(ULONG handle);
-    DAPI_FUNCTION_PRE64 void  DAPI_FUNCTION_PRE DapiDOSet1(ULONG handle, ULONG ch, ULONG data);
-
-so the x64 build exports **undecorated `extern "C"` names**, and every argument
-and the handle stay `ULONG` — 32 bits on Windows in both builds. `c_ulong`
-argtypes are therefore right for both, and `__stdcall` is moot on x64 where
-there is only one calling convention. Nothing in `Shutter` changes with the
-bitness except which file it opens.
-"""
+Both builds expose the same API: `DapiOpenModule` and `DapiCloseModule`
+return `ULONG`; `DapiDOSet1` returns no value. Handles and arguments remain
+32-bit `ULONG` on Windows, so `ctypes.c_ulong` applies to both. The x64
+exports have undecorated C names and one calling convention; `__stdcall`
+does not change them. Only the DLL choice depends on interpreter bitness."""
 from __future__ import annotations
 
 import os
@@ -47,8 +25,8 @@ SEARCH_PATHS: tuple[str, ...] = (
     r"D:\BACE\shutter\builds\data\delib.dll",
 )
 
-#: Also looked for beside the package and in the working directory, so a DLL
-#: simply dropped next to the .bat files is found.
+#: Search beside the package and in the working directory so a DLL beside
+#: launcher files can be loaded.
 LOCAL_NAMES: tuple[str, ...] = ("delib64.dll", "delib.dll")
 
 #: PE machine types, from the COFF header.
@@ -60,7 +38,7 @@ def interpreter_bits() -> int:
 
 
 def pe_bitness(path: str) -> int | None:
-    """32 or 64 from a Windows PE header, or None if it is not readable as one."""
+    """Return 32 or 64 from a PE header, or `None` if the header is unreadable."""
     try:
         with open(path, "rb") as fh:
             head = fh.read(0x400)
@@ -71,11 +49,10 @@ def pe_bitness(path: str) -> int | None:
 
 
 def survey(explicit: str | None = None) -> list[tuple[str, int | None]]:
-    """Every candidate that exists, as `(path, bitness)`, search order preserved.
+    """Return existing `(path, bitness)` candidates in search order.
 
-    `explicit` (from `rig.toml`, or `BACE_DELIB` in the environment) goes first,
-    so a deliberate choice always wins over the installed defaults.
-    """
+    `explicit`, from `rig.toml` or `BACE_DELIB`, precedes installed defaults
+    so a configured DLL takes priority."""
     here = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     local = [os.path.join(d, n) for d in (os.getcwd(), here) for n in LOCAL_NAMES]
 
@@ -87,22 +64,17 @@ def survey(explicit: str | None = None) -> list[tuple[str, int | None]]:
 
 
 def bare_name() -> str:
-    """What to hand `ctypes` when no file was found in the known places.
+    """Return the DLL name for Windows to resolve through its search path.
 
-    Windows searches its own DLL path, so a library installed somewhere this
-    module does not know about still loads by name -- and gets the bitness right
-    by itself, since `System32` and `SysWOW64` are each redirected to the build
-    matching the calling process.
-    """
+    This permits installations outside the known locations. Windows redirects
+    system directories according to process bitness."""
     return "delib64.dll" if interpreter_bits() == 64 else "delib.dll"
 
 
 def load_candidates(explicit: str | None = None) -> list[str]:
-    """Everything worth handing `ctypes`, best first.
+    """Return DLL candidates in preferred load order.
 
-    Files whose PE header matches come first, then files we could not read a
-    header from, then the bare name as a last resort.
-    """
+    Matching PE headers precede unreadable headers, followed by a bare name."""
     bits = interpreter_bits()
     found = survey(explicit)
     out = [p for p, machine in found if machine == bits]
@@ -112,13 +84,10 @@ def load_candidates(explicit: str | None = None) -> list[str]:
 
 
 def resolve(explicit: str | None = None) -> str | None:
-    """The first candidate this interpreter can load, or None.
+    """Return the first loadable DLL candidate, or `None`.
 
-    A candidate whose PE header cannot be read is still offered -- `pe_bitness`
-    returning None means "unrecognised file", not "wrong architecture", and
-    letting `ctypes` have a go at it beats refusing on a header we failed to
-    parse.
-    """
+    An unreadable PE header does not prove the architecture is wrong.
+    `ctypes` still attempts those candidates rather than rejecting them."""
     bits = interpreter_bits()
     found = survey(explicit)
     for path, machine in found:
@@ -131,12 +100,10 @@ def resolve(explicit: str | None = None) -> str | None:
 
 
 # ------------------------------------------------------------ [dio] in rig.toml
-# Reading the DIO half of rig.toml belongs here rather than in `bace.config`,
-# which is the whole bench and reaches `core.axis` -- and so imports numpy.
-# `tools/shutter.py`, which drives a DIO line by hand, has to run under
-# whichever interpreter can load the DELIB build on the machine, and that one
-# may have nothing installed at all. So: `tomllib`, the five keys, and the two
-# refusals, with no other import.
+# DIO configuration stays independent of `bace.config`, which imports NumPy
+# through `bace.core.axis`. `tools/shutter.py` must run with any interpreter
+# that can load DELIB, including one without measurement dependencies.
+# Only TOML parsing, DIO defaults and DIO validation are needed here.
 
 DIO_DEFAULTS: dict[str, object] = {
     "module_id": 9,
@@ -145,23 +112,22 @@ DIO_DEFAULTS: dict[str, object] = {
     "channel": 0,
     "dll_path": "",
 }
-"""What `[dio]` means when a key -- or the whole file -- is absent. The same
-values `RigConfig` and `bace.config.load_rig` apply, repeated because neither
-can be imported here; `tests/test_shutter_tool.py` asserts they still agree,
-so drift fails a test rather than pointing a tool at the wrong line."""
+"""Provide DIO defaults when a key or the file is absent.
+
+These match `bace.config.RigConfig` and `bace.config.load_rig` without
+importing their dependencies. `tests/test_shutter_tool.py` checks agreement
+so a standalone tool cannot silently select a different line."""
 
 
 class DioError(RuntimeError):
-    """A `[dio]` block that will not be acted on."""
+    """Report DIO settings that cannot safely select a hardware line."""
 
 
 def find_rig(explicit: str | None = None) -> str | None:
-    """rig.toml as `bench.checks._find` finds it: a named path, else the working
-    directory, else beside the package.
+    """Find `rig.toml` by explicit path, working directory or package directory.
 
-    A *named* file that is missing is an error -- a typo in `--rig` that
-    silently ran the built-in defaults would be a bench nobody described.
-    """
+    An explicit missing path raises: silently using defaults after a path
+    typo can select hardware the operator does not intend."""
     if explicit:
         if not os.path.isfile(explicit):
             raise DioError(f"no such file: {explicit}")
@@ -175,13 +141,10 @@ def find_rig(explicit: str | None = None) -> str | None:
 
 
 def dio_settings(path: str | None) -> dict:
-    """The `[dio]` block with its defaults filled in, or `DioError`.
+    """Return validated DIO settings with defaults, or raise `DioError`.
 
-    The two refusals are the DIO half of `bace.config.load_rig`'s validation.
-    A rig.toml the service refuses to start on must not be one a by-hand tool
-    acts on: the point of the file is that every program on this bench agrees
-    about which line is the shutter.
-    """
+    Validation matches `bace.config.load_rig` so the service and standalone
+    tools agree about the shutter line and reject the same unsafe settings."""
     import tomllib
 
     block: dict = {}
@@ -212,17 +175,12 @@ def dio_settings(path: str | None) -> dict:
 
 def make_line(cfg: dict, *, module_nr: int | None = None, channel: int | None = None,
               dll_path: str | None = None, settle_s: float = 0.4):
-    """One DIO line from a `[dio]` dict -- built, not opened.
+    """Build a DIO line from settings without opening it.
 
-    Beside `dio_settings` because they are read together: the block says which
-    module, this turns it into a line, and the caller keeps its own error
-    handling around `open()`. `Shutter` is imported inside rather than at
-    module scope: it reaches back into this module for the library search.
-
-    The standalone console in `examples/shutter_console/` deliberately does
-    none of this -- it carries its own `ctypes`, so that folder can be copied
-    to a machine without the package.
-    """
+    The caller owns errors from `open`. `Shutter` imports locally because
+    it also imports this module for DLL discovery. The standalone console
+    in `examples/shutter_console/` carries a separate `ctypes` implementation
+    so it can run without the package."""
     from .shutter import DEFAULT_CHANNEL, Shutter
 
     return Shutter(dll_path or cfg["dll_path"] or None,

@@ -1,34 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-newport1918c.py -- driver for the Newport 1918-C optical power meter.
+"""Drive the Newport 1918-C optical power meter through its USB DLL.
 
-VENDORED, 2026-09-03, from the meter's console project (D:/1918cPowerMeter),
-unchanged except for the two flag names at the bottom of this file. It is the
-device truth, written against real hardware; when this file and that project
-disagree, they have drifted and one of them is wrong. In this repository the
-one process that holds the meter is the BACE service, so "the console" in the
-prose below means whichever program owns the device -- here, us.
+All callers share `PowerMeter` because only one process can hold the device.
+Newport Computer Interface Software v3.0.2 supplies `usbdll.dll` in 32-bit
+and 64-bit builds. Ophir PMManager does not support this meter.
 
-The single place in this project that touches the instrument. Everything else
-(the service, any measurement script) goes through PowerMeter, because only
-one process can hold the USB device at a time.
+Bench firmware v2.1.7, SN10259, uses `PM:UNITS 2` for W; the other codes are
+0 A, 1 V, 3 W/cm2, 4 J, 5 J/cm2, 6 dBm and 11 Sun. `PM:PWS?` returns a
+value and hexadecimal status field. `PM:DS:INT` uses ms on this firmware,
+not the 0.1 ms claimed by some drivers. Verify intervals on other hardware.
 
-Transport is Newport's usbdll.dll, installed by Computer Interface Software
-v3.0.2 -- NOT PMManager, which is the newer Ophir-generation application and
-does not support this meter.
-
-Facts below were measured on a 1918-C v2.1.7 (SN10259), not assumed:
-  * PM:UNITS 2 is watts (0 A, 1 V, 2 W, 3 W/cm2, 4 J, 5 J/cm2, 6 dBm, 11 Sun).
-  * PM:PWS? returns "<value>, <status>" where status is a HEX bitfield.
-  * PM:DS:INT is in MILLISECONDS on this firmware. A widely-copied driver
-    claims 0.1 ms units; that is wrong here. Re-measure on other hardware.
-
-probe_1918c.py is the standalone first-contact diagnostic and carries its own
-copy of the ctypes layer so it can be dropped onto a bare PC by itself. This
-module is the library the console and measurement code import. If you change
-the transport, change it in both.
-"""
+The meter echoes each command before its reply and terminates with CR.
+`PowerMeter.query` strips the echo. The standalone diagnostic carries a
+separate DLL layer for computers without this package; transport changes
+must remain consistent with that diagnostic."""
 
 from __future__ import annotations
 
@@ -71,7 +57,7 @@ TERMINATOR = "\r"
 
 
 class MeterError(RuntimeError):
-    """Anything that went wrong talking to the meter."""
+    """Report a power-meter communication or configuration error."""
 
 
 # --------------------------------------------------------------------------- #
@@ -83,7 +69,7 @@ def python_bitness() -> int:
 
 
 def pe_bitness(path: str) -> int | None:
-    """Read a PE file's machine type. Returns 32, 64 or None."""
+    """Return PE architecture as 32 or 64, or `None` if unreadable."""
     try:
         with open(path, "rb") as handle:
             header = handle.read(0x400)
@@ -95,11 +81,10 @@ def pe_bitness(path: str) -> int | None:
 
 
 def find_dll(explicit: str | None = None) -> str | None:
-    """Return the usbdll.dll matching this interpreter's bitness.
+    """Return the `usbdll.dll` matching this interpreter's bitness.
 
-    The driver package installs both builds, so taking the first path that
-    exists picks the wrong one half the time and yields a bare WinError 193.
-    """
+    The package installs both builds. Selecting by existence alone can load
+    the wrong architecture and raise WinError 193."""
     if explicit:
         return explicit if os.path.isfile(explicit) else None
     present = [p for p in DLL_CANDIDATES if os.path.isfile(p)]
@@ -115,18 +100,13 @@ def find_dll(explicit: str | None = None) -> str | None:
 # --------------------------------------------------------------------------- #
 
 def decode_status(word: str) -> dict:
-    """Decode the status field of a PM:PWS? reply.
+    """Decode the hexadecimal status field returned by `PM:PWS?`.
 
-    It is a bitfield in HEXADECIMAL:
-        bits 9-7  units   (PM:UNITS? codes)
-        bits 6-4  range   (PM:RANge? index)
-        bit  3    detector present
-        bit  2    measurement taken while ranging
-        bit  1    detector saturated
-        bit  0    overrange
-    A large non-zero status is normal -- the units and range fields alone are
-    usually non-zero. Only bits 0-2 indicate a problem.
-    """
+    Bits 9 to 7 encode units using `PM:UNITS?` codes; bits 6 to 4 encode
+    range. Bit 3 marks detector presence; bit 2 marks ranging during the
+    measurement; bit 1 marks detector saturation; bit 0 marks overrange.
+    Units and range normally make the word nonzero. Only bits 0 to 2
+    indicate a reading problem."""
     try:
         value = int(str(word).strip(), 16)
     except (ValueError, TypeError):
@@ -151,7 +131,7 @@ def decode_status(word: str) -> dict:
 # --------------------------------------------------------------------------- #
 
 class DllTransport:
-    """ctypes wrapper over Newport's usbdll.dll."""
+    """Exchange ASCII commands and replies through Newport `usbdll.dll`."""
 
     def __init__(self, dll_path: str, product_id: int = PID_1918C):
         import ctypes
@@ -266,12 +246,10 @@ class DllTransport:
 
 
 class SimulatedTransport:
-    """A fake meter, so the console can be developed and demonstrated dry.
+    """Model meter commands without hardware for console and driver checks.
 
-    Values mirror the real instrument closely enough to be useful: hex status
-    word built from its own units and range, PM:DS:INT in milliseconds, a
-    slowly drifting power with noise on top.
-    """
+    Replies include hexadecimal units and range status, store intervals
+    in ms, and slowly drifting power with noise."""
 
     def __init__(self) -> None:
         self.description = "SIMULATED 1918-C"
@@ -398,12 +376,10 @@ class SimulatedTransport:
 # --------------------------------------------------------------------------- #
 
 class PowerMeter:
-    """High-level, thread-safe access to one 1918-C.
+    """Provide serialised access to one Newport 1918-C.
 
-    Every method serialises on an internal lock, so a background acquisition
-    thread and an HTTP handler can share one instance without interleaving
-    a command with somebody else's reply.
-    """
+    An internal lock keeps background acquisition and request handlers from
+    interleaving one caller's command with another caller's reply."""
 
     def __init__(self, transport):
         self._t = transport
@@ -425,14 +401,10 @@ class PowerMeter:
                     "with --sim." % python_bitness())
             transport = DllTransport(path)
         transport.open()
-        # DIVERGES from the console project, 2026-09-03: identification runs
-        # inside try/finally there and did not here. `transport.open()` has
-        # taken the *exclusive* USB handle by this point, so an `identify()`
-        # that times out left the device held by a process that has no object
-        # for it -- unavailable to a retry, to the meter's own console, and to
-        # anything else until the interpreter exits. That mattered little in a
-        # console which would be restarted; the BACE service is long-lived, so
-        # one bad query at start-up would have cost the meter for the session.
+        # The transport holds the exclusive USB handle. If identification raises,
+        # close it before propagating the error. A failed constructor leaves no
+        # object for the caller to close; retaining the handle blocks retries
+        # and other owners for the service lifetime.
         try:
             meter = cls(transport)
             meter.info = meter.identify()
@@ -488,10 +460,8 @@ class PowerMeter:
         mode = self._query_number("PM:MODE?")
         analog = self._query_number("PM:ANALOGFILTER?")
         return {
-            # ADDED 2026-09-05 (see set_mode below): which of the eight
-            # measurement modes the meter is in, and which analog filter --
-            # the two settings that decide whether a pulsed LED reads as its
-            # average or as garbage.
+            # Mode and analog filter determine whether a pulsed LED reading is
+            # mean power or a different quantity.
             "mode": mode,
             "modeName": MODE_NAMES.get(int(mode), "?") if mode is not None else "?",
             "analogFilter": analog,
@@ -509,11 +479,10 @@ class PowerMeter:
         }
 
     def set_wavelength(self, nm: float) -> dict:
-        """Set wavelength, refusing values outside the head's calibration.
+        """Send `PM:Lambda` in whole nm and return wavelength read-back in nm.
 
-        Outside the calibrated range the responsivity is an extrapolation, so
-        the meter would return a confident, wrong number.
-        """
+        Values outside the detector calibration range raise. Extrapolating
+        responsivity can give plausible wrong power values."""
         target = int(round(nm))
         low = self.info.get("lambdaMin")
         high = self.info.get("lambdaMax")
@@ -540,27 +509,28 @@ class PowerMeter:
         if digital is not None:
             self.write("PM:DIGITALFILTER %d" % int(digital))
 
-    # DIVERGES from the console project, 2026-09-05: the two writes below did
-    # not exist there. The BACE rig pulses its LED at 500 Hz, 50 % duty, and a
-    # meter in a mode other than DC-continuous -- or in DC-continuous with no
-    # filter -- samples the square wave at one instant and shows whatever
-    # phase it landed in. Only the *average* of the pulsed light is a power
-    # (half the DC level at 50 % duty), and that is what the analog 5 Hz
-    # filter delivers. MODE_NAMES and ANALOG_FILTER_NAMES were already in
-    # this file; the commands they name were never sent.
+    # A 500 Hz LED at 50 % duty needs DC-continuous mode and the 5 Hz analog
+    # filter to read mean power. Other modes or unfiltered DC sample a phase
+    # of the square wave. Mean power is half the DC level at 50 % duty
+    # (manual 1.2, `docs/manual/1.2-bench.md`).
 
     def set_mode(self, code: int) -> None:
-        """PM:MODE -- 0 is DC continuous, the only mode a monitor wants.
-        See MODE_NAMES for the other seven."""
+        """Send `PM:MODE` and return `None`.
+
+        Code 0 selects DC-continuous power. `MODE_NAMES` lists the other modes."""
         self.write("PM:MODE %d" % int(code))
 
     def set_analog_filter(self, code: int) -> None:
-        """PM:ANALOGFILTER -- see ANALOG_FILTER_NAMES; 4 is the 5 Hz filter
-        that turns a 500 Hz pulse train into its mean."""
+        """Send `PM:ANALOGFILTER` and return `None`.
+
+        Code 4 selects 5 Hz to average a 500 Hz pulse train.
+        `ANALOG_FILTER_NAMES` lists the other bandwidths."""
         self.write("PM:ANALOGFILTER %d" % int(code))
 
     def zero(self) -> None:
-        """Store the dark offset. The beam must be blocked when this runs."""
+        """Send `PM:ZEROSTO` to store the dark offset and return `None`.
+
+        The beam must be blocked during this operation."""
         self.write("PM:ZEROSTO")
 
     def errors(self) -> str:
@@ -569,11 +539,11 @@ class PowerMeter:
     # -- reading ------------------------------------------------------------ #
 
     def read(self) -> dict:
-        """One reading, with the status word decoded.
+        """Query `PM:PWS?` and return value, decoded status and raw reply.
 
-        PM:PWS? is preferred over PM:P? because it carries the status field --
-        silently clipped data is the classic way to ruin a long log.
-        """
+        Units follow the meter setting. Status exposes saturation and overrange
+        so clipping cannot silently enter a log. An unparseable value falls back
+        to `PM:P?`, with status unavailable."""
         raw = self.query("PM:PWS?")
         value = None
         status = None
@@ -595,12 +565,13 @@ class PowerMeter:
 
     def capture(self, size: int, interval_ms: int, fetch: bool = True,
                 progress=None) -> dict:
-        """Fill the instrument's data store and read it back.
+        """Configure the store, acquire samples and return data and capture statistics.
 
-        PM:DS:INT is in milliseconds on firmware v2.1.7 -- measured, not
-        assumed. Sampling happens on the meter's own clock, which is the whole
-        point: a polled loop cannot give a deterministic rate over USB.
-        """
+        `interval_ms` is in ms on bench firmware v2.1.7. The meter clock sets
+        the sampling interval; USB polling cannot guarantee it. `PM:DS:BUFFER 0`
+        prevents wrap so the store holds one capture. `fetch=False` returns
+        statistics without sample transfer. Time fields are in s except keys
+        ending in `Ms`; values retain the meter's configured units."""
         interval_ms = max(1, int(interval_ms))
         size = max(1, int(size))
         self.write("PM:DS:CLEAR")
@@ -648,11 +619,10 @@ class PowerMeter:
         return result
 
     def _fetch_samples(self, count: int, chunk: int = 100) -> list:
-        """Pull the buffer back in chunks.
+        """Query `PM:DS:GET?` in chunks and return numeric samples.
 
-        The reply format is not documented precisely, so parse permissively:
-        take every token that looks like a number and ignore the rest.
-        """
+        The exact reply format is unspecified. Parse numeric tokens and ignore
+        others; stop on no progress rather than retry an empty reply forever."""
         samples: list[float] = []
         # Loop on actual progress, not on the number asked for: if the meter
         # returns fewer values than requested, asking again for the remainder
@@ -685,12 +655,10 @@ class PowerMeter:
 
 def read_once(dll: str | None = None, simulate: bool = False,
               wavelength: float | None = None) -> dict:
-    """Open, read, close. For a script that wants a single number.
+    """Open the meter, read it and close it; return reading, settings and identity.
 
-    Only use this when nothing else holds the meter -- not while the service
-    is up, which owns the device, and not while the meter's own console is
-    running, which owns it instead.
-    """
+    `wavelength` is in nm. The value uses the configured units. No service
+    or separate meter console may hold the USB device during this call."""
     meter = PowerMeter.open(dll=dll, simulate=simulate)
     try:
         if wavelength is not None:

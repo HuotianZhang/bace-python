@@ -1,14 +1,9 @@
-"""32-bit helper process: owns delib.dll and Newport's usbdll.dll.
+"""Serve DIO and power-meter calls from a 32-bit helper process.
 
-Run under a **32-bit** Python on the measurement PC:
-
-    py -3.11-32 -m bace.drivers.win32bridge.server \
-        --delib "D:/BACE/shutter/builds/data/delib.dll" \
-        --newport "C:/Program Files (x86)/Newport/Newport USB Driver/Bin/usbdll.dll"
-
-Either DLL may be omitted; its target then reports as unavailable rather than
-taking the whole helper down. Binds to loopback only.
-"""
+Run `py -3.11-32 -m bace.drivers.win32bridge.server` with `--delib` and
+`--newport` paths for the installed 32-bit DLLs. An omitted DLL leaves its
+target unavailable without stopping the helper. The server binds only to
+loopback."""
 from __future__ import annotations
 
 import argparse
@@ -28,10 +23,12 @@ from .protocol import DEFAULT_HOST, DEFAULT_PORT, decode, encode
 
 
 class DelibTarget:
-    """Deditec digital output. Prototypes read from the Dapi *.vi Call Library
-    Nodes:  ULONG DapiOpenModule(ULONG moduleID, ULONG nr);
-            void  DapiDOSet1(ULONG handle, ULONG ch, ULONG data);
-            ULONG DapiCloseModule(ULONG handle);"""
+    """Expose Deditec digital output through its DLL.
+
+    `DapiOpenModule(ULONG moduleID, ULONG nr)` returns `ULONG`;
+    `DapiDOSet1(ULONG handle, ULONG ch, ULONG data)` returns no value;
+    `DapiCloseModule(ULONG handle)` returns `ULONG`. These signatures match
+    the LabVIEW Call Library Nodes."""
 
     def __init__(self, dll_path: str):
         self._lib = ctypes.WinDLL(dll_path)
@@ -78,7 +75,7 @@ class DelibTarget:
 
 
 class NewportTarget:
-    """Newport usbdll.dll. ASCII commands go through send/get, not VISA."""
+    """Send ASCII commands through Newport DLL send/get calls without VISA."""
 
     PRODUCT_ID = 0xCEC7
 

@@ -1,61 +1,27 @@
-"""The relay that decides which instrument is connected to the device.
+"""Route the shared device terminals to one source at a time.
 
-The device terminals are shared. A relay connects them either to the ×4
-amplifier fed by the 81150A (transient path) or to the Keithley 2400 (DC path).
-Only one at a time, and switching while either source is driving is the one
-software mistake on this rig that can damage hardware rather than a dataset.
+The relay selects the Keithley 2400 or the bias amplifier driven by the
+81150A. Moving it while either source drives can damage hardware.
+`BiasRouter` owns the line and permits movement only when both outputs
+report disabled.
 
-So this module does not expose a bare "set the relay" call. `BiasRouter` owns
-the relay line and will only move it when both sources report their outputs
-disabled; the sources are registered with it, not commanded around it.
+DIO module ID 9, module 0, channel 0 is the shutter: 1 opens and 0 shuts.
+Module 1 is the relay: 1 selects the Keithley and 0 the amplifier
+(`docs/notes.md`). The LabVIEW sequence holds module 1 high throughout J-V;
+for transient measurement it drives module 1 low after DC measurements
+and source-meter output disable. The shutter sequence waits 0.1 s.
 
-    router = BiasRouter(dio, keithley=k, pulse_path=fgen)
-    with router.dc():          # Keithley connected, 81150A output off
-        voc = k.measure_voc()
-    with router.transient():   # amplifier connected, Keithley output off
-        trace = scope.acquire(...)
-
-RESOLVED from the binaries. Two independent lines of evidence:
-
-1. `shutter_lv2012.vi` hard-codes its own target: module nr **0**, module ID 9,
-   channel 0, values 1/0, plus a 0.1 s settling wait. Its only input is the
-   boolean `open/close shutter`. And `TDCF-BACE.vi` -- the standalone
-   measurement, which has a shutter and no relay -- calls that VI and nothing
-   else on the DIO. So module 0 is the shutter.
-
-2. In `BACE_Mehrdad.vi`, tracing every `Dapi DO Set1` by event frame and depth:
-
-       J-V frame    entry   module 0 <- 1,  module 1 <- 1
-                            ... Keithley sweep ...
-                            (module 1 is never driven low: the SourceMeter
-                             stays connected for the whole J-V measurement)
-
-       BACE frame   entry   module 0 <- 1,  module 1 <- 1
-                            Enable Output -> measJsc,Voc -> Enable Output off
-                            module 1 <- 0            <-- immediately after the
-                                                          Keithley block
-                            ... engine runs the transients ...
-
-   Module 1 goes low exactly once, in the BACE frame, between the SourceMeter
-   measurement and the transient. That is the relay.
-
-So: module 0 = shutter, module 1 = relay, and the polarity is
-
-       1 = Keithley 2400        0 = amplifier
-
-Note the un-driven state (0) leaves the device on the amplifier, so the rig
-powers up on the transient path with the 81150A output off. That is safe but
-worth knowing.
-"""
+The undriven relay state is the amplifier path. It is safe at power-up
+only with the 81150A output disabled."""
 from __future__ import annotations
 
 from contextlib import contextmanager
 
 MODULE_ID = 9
-MODULE_NR = 1        # confirmed: the shutter is module 0, the relay is module 1
+MODULE_NR = 1        # Module 0 is the shutter; module 1 is the relay.
 CHANNEL = 0
 
-TO_AMPLIFIER = 0     # confirmed from the BACE frame write order
+TO_AMPLIFIER = 0     # High selects the source meter; low selects the amplifier.
 TO_SOURCEMETER = 1
 
 
@@ -64,11 +30,10 @@ class RoutingError(RuntimeError):
 
 
 class BiasRouter:
-    """Exclusive access to the device terminals.
+    """Provide exclusive access to the device terminals.
 
-    `dio` is any object with `set(channel, value)` -- the Deditec backend, the
-    bridged one, or the simulated one from `bace.drivers.shutter`.
-    """
+    `dio` supplies `set(channel, value)` through the direct, bridged or
+    simulated DIO backend."""
 
     def __init__(self, dio, *, sourcemeter=None, pulse_path=None,
                  module_nr: int = MODULE_NR, channel: int = CHANNEL,
@@ -126,14 +91,11 @@ class BiasRouter:
     # -- the two positions -------------------------------------------------
     @contextmanager
     def dc(self):
-        """Device connected to the SourceMeter.
+        """Connect the source meter and disable its output on context exit.
 
-        On exit the SourceMeter output is disabled but the relay is left where
-        it is. Safety comes from the outputs being off, not from the relay
-        position, and a mechanical relay has a finite operation count -- a run
-        of 300 points would otherwise cost 600 needless throws plus their
-        settling time.
-        """
+        Leave the relay in position on exit. Output disable provides safety;
+        unnecessary relay movement consumes its finite operation count. A run
+        of 300 points otherwise adds 600 movements and their settle time."""
         self._move(TO_SOURCEMETER)
         try:
             yield
@@ -146,7 +108,7 @@ class BiasRouter:
 
     @contextmanager
     def transient(self):
-        """Device connected to the amplifier driven by the 81150A."""
+        """Connect the bias amplifier after checking both source outputs are off."""
         self._move(TO_AMPLIFIER)
         try:
             yield
@@ -163,7 +125,7 @@ class BiasRouter:
                 TO_SOURCEMETER: "sourcemeter"}[self._position]
 
     def park(self) -> None:
-        """Leave the rig in the safe state: both outputs off, relay untouched."""
+        """Disable both source outputs and leave the relay in position."""
         for dev in (self._sourcemeter, self._pulse_path):
             if dev is not None:
                 try:
