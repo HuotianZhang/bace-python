@@ -1,47 +1,30 @@
-// The transient: light and dark, their difference, and the running integral.
-//
-// `docs/ui-rules.md` §4 is most of the specification, and three of its rules
-// are the reason this is not a line chart with a library:
-//
-//   * **light, dark and photocurrent belong together.** Showing the
-//     photocurrent alone hides exactly the failure where both parents sit on
-//     the digitiser's rail and the difference is identically zero — which is
-//     what `verdict.rail_light` / `rail_dark` count, and what the shared
-//     vertical window makes visible at a glance.
-//   * **the running integral is worth the space**: `cumulative_charge_c`
-//     saturates at Q, so the charge is where the curve flattens. It is the one
-//     plot the LabVIEW panel had that the operator will look for.
-//   * **the integration window is a region, not a number.** `t0_int` decides
-//     which part of the transient is charge and which part is discarded, and a
-//     window that starts after the transient is over is a run that measures
-//     nothing while producing a plausible number.
-//
-// Two sources, one model. A live `StepDone` carries traces decimated for the
-// wire; `GET /runs/{id}/data` carries them whole with the service's own
-// `cumulative_q` beside them. `traceSet` folds both into record time, which is
-// the axis the design's own chart uses and the axis the window is resolved
-// into (`experiment/transient.py` `resolve_window`: `t0_int_s` is measured
-// from the field's arrival — `:PULS:DEL1` plus the rig's `trigger_offset_s`
-// after the trigger — so record time is that plus minus the trace's `t0`, and
-// the window ends `t_int_width_s` later). A `StepDone` carries the window the
-// service actually integrated over (`t0_int_record_s`, `t1_int_record_s`);
-// the arithmetic here is only for a shot that has not reported one.
+// The transient chart shows light trace, dark trace, their difference and the running
+// integral. A shared view exposes traces at the digitiser's rail even if their
+// difference is zero. The running integral approaches Q, and the integration-window
+// region shows which current contributes (`docs/ui-rules.md` §4). Live data is
+// decimated; the data endpoint supplies full traces and `cumulative_q`. `traceSet`
+// normalizes both to record time. The window starts at field arrival plus `t0_int_s`
+// minus trace origin, with width `t_int_width_s` (manual 2.2). Reported
+// `t0_int_record_s` and `t1_int_record_s` take precedence over form arithmetic.
 
 import * as scale from '../scale.js';
 import * as fmt from '../format.js';
 import { layout, axisTicks, heightFor, headLines, HEAD_LINE, ASPECT, MARGIN } from './frame.js';
 
 /**
- * Where the integration window starts, **in record time** — the service's own
- * arithmetic. `pulseDelayS` is the field's arrival after the trigger:
- * `:PULS:DEL1` plus the rig's `trigger_offset_s` (`results.js` `pulseDelayS`).
+ * The helper resolves integration-window start in record time. `pulseDelayS` includes
+ * programmed delay and `trigger_offset_s`, as supplied by `pulseDelayS` in
+ * `ui/lib/results.js` (manual 2.2).
  */
 export function windowRecordS(t0IntS, { traceT0 = 0, pulseDelayS = 0 } = {}) {
   if (t0IntS === null || t0IntS === undefined) return null;
   return t0IntS + pulseDelayS - traceT0;
 }
 
-/** Where it ends: `t_int_width_s` after the start, or null when either is unknown. */
+/**
+ * The window ends `t_int_width_s` after its start, or is `null` if either input is
+ * unknown.
+ */
 export function windowEndRecordS(startS, widthS) {
   if (startS === null || startS === undefined) return null;
   if (widthS === null || widthS === undefined || !(widthS > 0)) return null;
@@ -49,13 +32,9 @@ export function windowEndRecordS(startS, widthS) {
 }
 
 /**
- * The time of kept sample `i`, in record time.
- *
- * The last sample is **not** one stride after the one before it. The service
- * keeps the first sample, every k-th after that, and always the last one, so
- * with `n = 4000` and `stride = 5` the kept indices are 0, 5, … 3995, 3999 —
- * and a client that placed the tail one stride past 3995 would draw the whole
- * end of the record four samples early (`experiment/wire.py`).
+ * The helper places retained sample `i` in record time. Decimation always retains the
+ * last sample (`docs/service-contract.md` §3). For 4000 samples at stride 5, the
+ * final indices are 3995 and 3999; assuming a full final stride misplaces the tail.
  */
 export function sampleTime(i, { dt, stride, n, kept }) {
   if (kept && i === kept - 1 && n) return (n - 1) * dt;
@@ -63,13 +42,10 @@ export function sampleTime(i, { dt, stride, n, kept }) {
 }
 
 /**
- * A store shot or a `GET /runs/{id}/data` body, as one shape in record time.
- *
- * `absent` is the two ways a shot arrives with no arrays — the ring dropped
- * them after a reconnect (`decimated[…].replay`), or the journal never stored
- * them (`decimated[…].omitted`). The store already folds both into
- * `tracesGone`; they differ only in the sentence, and both mean *no curve, the
- * loop point comes from the scalars* rather than *nothing happened*.
+ * The helper normalizes a store shot or data-endpoint payload to record time. Ring
+ * replay can drop arrays and journals omit them; both set `tracesGone` but need
+ * distinct explanations. Missing curves still leave scalar loop points available
+ * (`docs/service-contract.md` §3).
  */
 export function traceSet(input, { t0_int_s = null, t_int_width_s = null, pulse_delay_s = 0 } = {}) {
   if (!input) return { absent: { text: 'no shot yet', detail: null } };
@@ -140,8 +116,8 @@ export function traceSet(input, { t0_int_s = null, t_int_width_s = null, pulse_d
       ? 'photocurrent = light − dark  ·  I / mA  ·  averaged over the loops so far'
       : null,
     cumulative: null,
-    // The event says which window it integrated; the form's numbers are the
-    // fallback for a shot that arrived without one.
+    // The reported integration window takes precedence; form arithmetic supplies a
+    // fallback only without it.
     window: input.t0_int_record_s
       ?? windowRecordS(t0_int_s, { traceT0: env.t0 ?? 0, pulseDelayS: pulse_delay_s }),
     windowEnd: input.t1_int_record_s
@@ -160,18 +136,11 @@ export function traceSet(input, { t0_int_s = null, t_int_width_s = null, pulse_d
 }
 
 /**
- * The running integral of the photocurrent on screen, from the window.
- *
- * The service computes this properly and serves it on `GET /runs/{id}/data`;
- * live, there is no such field and the choice is to draw nothing or to draw
- * the *shape* from the trace that is already on the chart. It draws it, and
- * says so — the panel's caption names which of the two it is. What it never
- * does is call the endpoint a charge: Q is a number the service owns and the
- * event carries, and it is shown from the event beside this, not read off the
- * end of a curve integrated from a decimated copy of the trace.
- *
- * Trapezoidal, on the samples' own spacing, because the last kept sample is
- * not one stride from the one before it.
+ * The live running integral shows the shape computed from the displayed, decimated
+ * trace. Its caption distinguishes it from the full-precision service integral. Its
+ * endpoint must not replace Q, which comes from the service event. Trapezoidal
+ * integration uses each sample's spacing because the last retained interval can be
+ * shorter than the stride.
  */
 export function runningIntegral(photo, x, from, to = null) {
   const out = new Array(photo.length).fill(null);
@@ -195,17 +164,15 @@ const NS = 1e9;
 const MA = 1e3;
 
 /**
- * The chart model. Three panels on one x axis — never two y scales in one
- * panel, see `frame.js` — and every absence stated rather than drawn as a
- * value.
+ * The model uses three panels on one x axis to avoid ambiguous dual y scales. Missing
+ * data remains an explicit absence.
  */
 /** The plot's own width, which is what a label has to fit inside. */
 const plotWidth = (width) => width - MARGIN.left - MARGIN.right;
 
 /**
- * The panels an unrun slot stands for: the two every shot has. The running
- * integral is not among them — whether there is one depends on a window this
- * shot has not resolved yet.
+ * The empty frame reserves the two panels every shot has. An integral panel requires
+ * a resolved integration window and is omitted before that exists.
  */
 const ABSENT_PANELS = [
   { key: 'traces', weight: 1.25, label: 'light and dark  ·  I / mA' },
@@ -222,10 +189,8 @@ export function transientModel(input, options = {}) {
   if (set.absent) {
     return {
       key: 'transient',
-      // The slot keeps the shape of the chart that will land in it: the two
-      // panels every shot has, named, over the axis they share. The running
-      // integral is not drawn, because whether there is one depends on a
-      // window this shot has not resolved yet.
+      // The empty slot retains the trace panels and shared axis. The integral cannot
+      // appear before a shot resolves its integration window.
       absent: {
         ...set.absent,
         frame: {
@@ -245,31 +210,25 @@ export function transientModel(input, options = {}) {
   const derived = !hasCumulative && photo && set.window !== null && set.window !== undefined;
   const integral = derived ? runningIntegral(photo, set.x, set.window, set.windowEnd) : null;
 
-  // Two of the notes under this chart were settings restated as prose, about a
-  // curve drawn a few pixels above them. They belong **on** the panel they
-  // define: `dark_reference` is what the photocurrent *is* (`ui-rules` §7 —
-  // `translated` and `same` are not interchangeable), and the offset
-  // correction is what the light and dark baselines have already had done to
-  // them. A reader who has to carry a line from below the axis back up to the
-  // trace has been given a footnote where a label was wanted.
+  // `dark_reference` and baseline correction define the plotted current, so they
+  // label its panel rather than sit below the chart. `translated` and `same` are not
+  // interchangeable (`docs/ui-rules.md` §7).
   const panels = [
     { key: 'traces', weight: 1.25, label: 'light and dark  ·  I / mA' + offsetClause(offset_corrected, offset_region) },
-    // `suffix`, not a baked-in label: `photoPanel` swaps the whole label for
-    // `set.photoLabel` when the run stored loop averages, and a clause written
-    // into the base label would be dropped in exactly that case.
+    // The clause uses `suffix` because `photoPanel` can replace the base label with
+    // `set.photoLabel` for loop averages. A clause stored only in the base label
+    // would disappear.
     { key: 'photo', weight: 1, label: 'photocurrent = light − dark  ·  I / mA', suffix: darkClause(dark_reference) },
   ];
   if (hasCumulative || derived) {
     panels.push({ key: 'charge', weight: 0.8, label: 'running integral  ·  Q / C' });
   }
-  // Every panel here carries a caption and a label that names what the curve
-  // *is*, and both live above the plot. How many lines that takes depends on
-  // the width, so the room for it is worked out rather than guessed: reserve
-  // the tallest header in `top`, and the same again in the gap between panels.
+  // Panel headers contain both captions and labels. Their wrapped height depends on
+  // plot width, so the tallest header sets `top` and the inter-panel gap.
   const head = Math.max(...panels.map((p) => headLines(p.label + (p.suffix || ''), plotWidth(width), true)));
   const margin = { top: 5 + head * HEAD_LINE, gap: MARGIN.gap + (head - 1) * HEAD_LINE };
-  // The height is the aspect's, not a number chosen here: three panels of a
-  // quantity against time, each at `ASPECT.trace` for its weight.
+  // `ASPECT.trace` and panel weights set the height so time traces keep consistent
+  // proportions.
   const frame = layout({
     width, panels, margin,
     height: height ?? heightFor(width, panels, { margin, aspect: ASPECT.trace }),
@@ -296,14 +255,12 @@ export function transientModel(input, options = {}) {
     }
   }
 
-  // The window spans every panel: it is one region of time, and shading it in
-  // the photocurrent alone would suggest the light and dark traces are
-  // integrated over something else.
+  // The integration window shades every panel because it is the same time region for
+  // all traces.
   if (set.window !== null && set.window !== undefined) {
     const x0 = X(set.window * NS);
-    // The window has an end as well as a start: it is `t_int_width_s` long and
-    // both edges travel with the pulse. A window that runs past the record is
-    // drawn to the record's edge, and the mark says where it would have ended.
+    // Both integration-window edges move with the pulse. A window extending beyond
+    // the record is clipped at its edge and marked with its intended endpoint.
     const endS = set.windowEnd;
     const plotRight = plot.x + plot.w;
     const x1 = endS === null || endS === undefined ? plotRight : Math.min(plotRight, X(endS * NS));
@@ -321,8 +278,8 @@ export function transientModel(input, options = {}) {
         + (endS === null || endS === undefined ? '' : ` → ${fmt.sig(endS * NS, 4)} ns`),
       colour: 'accent', size: 8.5,
     },
-    // Where the window came from, beside the window — it was a note under the
-    // chart, which is the one place it cannot be read against the line it dates.
+    // Window provenance belongs beside its boundary so the operator can read it
+    // against the interval it defines.
     ...(set.windowSource ? [{
       x: x0 + 5, y: built[0].rect.y + 32, halo: true,
       text: set.windowSource, colour: 'grey', size: 8.5,
@@ -356,10 +313,8 @@ export function transientModel(input, options = {}) {
       { label: 'photocurrent', colour: 'ink', width: 1.4 },
       ...(hasCumulative || derived ? [{ label: 'running integral', colour: 'accent', width: 1.6, dash: '3 2' }] : []),
     ],
-    // The readout row belongs to the crosshair, and at rest it used to restate
-    // Q, the running mean and σ — the same three numbers the shot block prints
-    // above the chart, there with the shot and the point they belong to. One
-    // statement of a number, in the place that can say which number it is.
+    // The readout row serves the crosshair. At rest it leaves Q, running mean and
+    // uncertainty in the shot block, where their shot and point are identified.
     readout: '',
     notes: notes(set, { hasCumulative, derived }),
   };
@@ -374,10 +329,9 @@ function nearest(set, xValue) {
 }
 
 function tracesPanel(panel, set, X, cols, at) {
-  // One vertical window for both traces, because that is what the digitiser
-  // had: the autorange runs on the light trace only and the dark trace
-  // inherits the range (`ui-rules` §7). Scaling them independently would draw
-  // two traces that look comparable and are not.
+  // Light and dark share a vertical scale because autorange runs on the light trace
+  // and the dark trace inherits that range (`docs/ui-rules.md` §7). Separate scaling
+  // would conceal a mismatch.
   const domain = scale.extent([set.light, set.dark], { includeZero: true }) || [-1, 1];
   const Y = scale.linear([domain[0] * MA, domain[1] * MA], [panel.rect.y + panel.rect.h, panel.rect.y]);
   const series = [];
@@ -421,9 +375,8 @@ function photoPanel(panel, set, X, cols, at) {
 }
 
 function chargePanel(panel, set, X, cols, at, values, fromService) {
-  // The service's `cumulative_q` starts at the window, not at the record, so
-  // its index 0 is `t0_int_record_s`. A curve drawn from the record's start
-  // would put the whole integral one window too early.
+  // Service `cumulative_q` begins at `t0_int_record_s`, not the record origin.
+  // Starting at the record origin would shift the entire integral.
   const offset = fromService ? indexOf(set, set.cumulativeFrom ?? set.window) : 0;
   const finite = values.filter((v) => Number.isFinite(v));
   const domain = scale.extent([finite], { includeZero: true }) || [-1, 1];
@@ -481,7 +434,7 @@ function darkClause(dark_reference) {
     : '  ·  dark translated to zero';
 }
 
-/** What has already been taken off the light and dark baselines, if anything. */
+/** The label identifies baseline correction applied to the traces. */
 function offsetClause(offset_corrected, offset_region = null) {
   if (offset_corrected === true && offset_region === 'pre-trigger') return '  ·  offset corrected, before the trigger';
   if (offset_corrected === true) return '  ·  offset corrected, last 10 % of the record';
@@ -490,14 +443,9 @@ function offsetClause(offset_corrected, offset_region = null) {
 }
 
 /**
- * What is left for the notes: the two statements that are about the **data**
- * rather than about any one panel.
- *
- * Everything else moved onto the thing it describes. `dark_reference` and the
- * offset correction became panel labels; `windowSource` became the third line
- * of the `t_0,int` mark, beside the window it dates; and the two "the running
- * integral is …" lines were already the charge panel's own label, printed
- * again four pixels below it.
+ * The notes describe data-wide constraints. Panel-specific facts belong in labels:
+ * dark reference and baseline correction on the current panel, window provenance
+ * beside the boundary, and integral source on the Q panel.
  */
 function notes(set, { hasCumulative, derived }) {
   const out = [];

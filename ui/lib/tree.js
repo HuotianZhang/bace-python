@@ -1,39 +1,17 @@
-// The pipeline tree — the model half of M5, and the only file in `ui/` that
-// knows the shape `docs/service-contract.md` §7 posts.
-//
-// Three things it is careful about, and each is a rule from somewhere:
-//
-//   * **Nothing is re-derived.** A range typed as `1.010 → 1.030 step 0.005`
-//     is five levels or four depending on how the ratio is rounded, and the
-//     service settled that once (`pipeline.range_values`: rounded, never
-//     truncated, because the LabVIEW truncation wrote a four-level loop as
-//     five). So the editor holds the tree *as typed* and reads every count,
-//     every level and every cost off `POST /pipelines/validate`'s answer —
-//     which returns the resolved tree beside the schedule. `treeRows` walks
-//     the two in lockstep; before the first answer a row says what it can and
-//     no more.
-//   * **A `temperature` module binds the rest of the run**, not the rest of
-//     one iteration (`docs/ui-plan.md` M5, `executor._Open`). The schedule
-//     the service sends does not say so — `Step.detail.temperature_k` is the
-//     enclosing *loop's* setpoint and is `null` under a module — so
-//     `scheduleTree` re-walks the steps with the executor's own rule and
-//     stamps what the cryostat will be at on every module below it.
-//   * **`lower_bound` is "at least", never a promise** (`cost.lower_bound`
-//     is set whenever any temperature has no measured settle behind it).
-//     `costModel` carries the word, so no caller has to remember it.
-//
-// The DOM is `views/pipeline.js`; this is pure, and `ui/tests/tree.test.mjs`
-// holds it down against a recorded validate with no browser in the way.
+// The tree model follows the pipeline schema (`docs/service-contract.md` §7). It
+// retains typed ranges and takes resolved counts, levels and cost from validation to
+// avoid conflicting rounding. `treeRows` aligns typed and resolved nodes.
+// `scheduleTree` propagates temperature-module bindings through the remaining run,
+// including later loop iterations, because schedule detail alone reports only
+// enclosing-loop setpoints. `costModel` labels unknown settling time as a lower bound
+// rather than promising a finish. Pure models support fixture tests;
+// `ui/views/pipeline.js` renders them.
 
 /**
- * The three loops, as data — label, fields, and how a row summarises one.
- *
- * Written out here rather than fetched because there is nowhere to fetch it
- * from: `GET /modules` describes module parameters, and a loop is not a
- * module. The tree schema lives in `docs/service-contract.md` §7 and in
- * `pipeline._LOOP_KEYS`, and this is that table. Every field carries its one
- * sentence, for the same reason a module parameter does (`ui-rules` §1): the
- * name is the label, not the explanation.
+ * Loop specifications supply labels, fields and summaries. `/modules` describes
+ * modules rather than loops, so these follow the pipeline schema
+ * (`docs/service-contract.md` §7). Fields include explanations because names alone
+ * are insufficient (`docs/ui-rules.md` §1).
  */
 export const LOOPS = {
   temperature: {
@@ -74,20 +52,19 @@ export const LOOPS = {
 export const LOOP_ORDER = ['temperature', 'illumination', 'repeat'];
 
 /**
- * Modules that are never a useful tree node on their own.
- *
- * `park` is what every run ends with (`executor` runs it in `finally`), so a
- * `park` node asks for it twice; the bench strip is where a park by hand
- * belongs. Everything else in the catalogue is offered, including the
- * utilities — `wait`, `note` and `light` are exactly the nodes a pipeline is
- * composed of, and `light` is refused only when it is the run's *only*
- * module (`light.undone-by-park`), which is the service's check to make.
+ * Park is excluded from node choices because every run parks on exit
+ * (`docs/service-contract.md` §7). Manual park belongs in the strip. Other utilities
+ * remain available; a standalone light-only tree is the service validator's
+ * responsibility.
  */
 export const NOT_A_NODE = new Set(['park']);
 
 // -- constructing -----------------------------------------------------------
 
-/** A fresh loop node, with the defaults the contract names. */
+/**
+ * The constructor returns a loop with service-schema defaults
+ * (`docs/service-contract.md` §7).
+ */
 export function newLoop(kind) {
   const base = { kind: 'loop', loop: kind, children: [] };
   if (kind === 'temperature') return { ...base, values_k: [290], tolerance_k: 0.2, hold_s: 60, timeout_s: 1800 };
@@ -96,22 +73,18 @@ export function newLoop(kind) {
 }
 
 /**
- * A fresh module node. `params` is empty on purpose and stays that way until
- * something is typed: "as on the bench · only what differs is typed here" is
- * the contract's own sentence for a module node, and an override written at
- * creation would pin the bench's value of the moment into the tree.
+ * Module nodes start with empty `params` so they inherit bench values. Inserting an
+ * override at creation would pin a transient bench setting into the tree
+ * (`docs/service-contract.md` §7).
  */
 export function newModule(name) {
   return { kind: 'module', module: name, params: {} };
 }
 
 /**
- * The mark a tree row carries for a node that differs from the bench: the
- * same `↺` the node form puts beside each override, with the list in the
- * title. `null` for a node with nothing typed on it — the absence of the
- * mark is the statement, as a Figma instance with no overrides carries
- * nothing. (The row used to say "as on the bench, except n_loops 100", a
- * sentence in the one place that has no room to grow.)
+ * The row marks node overrides with the same reset glyph as the form and lists them
+ * on hover. No overrides gives `null`; an absent mark avoids a growing sentence in
+ * the compact row.
  */
 export function overrideMark(row) {
   const overrides = (row && row.overrides) || [];
@@ -123,12 +96,9 @@ export function overrideMark(row) {
   };
 }
 
-// -- walking and editing ----------------------------------------------------
-//
-// A path is a list of child indices from the root: `[]` is the root itself,
-// `[0, 1]` the second child of the first. Every operation returns a new tree
-// and leaves the old one alone, so an edit that the service refuses can be
-// dropped by keeping the tree that was there.
+// Paths contain child indices: `[]` identifies root and `[0, 1]` its first child's
+// second child. Edits return independent trees so a refused edit can leave the
+// accepted tree intact.
 
 /** The node at `path`, or null. */
 export function nodeAt(tree, path) {
@@ -149,7 +119,7 @@ export function updateAt(tree, path, fn) {
   return { ...tree, children };
 }
 
-/** Insert `node` as a child of the node at `path`, at `index` (default: last). */
+/** Insertion adds `node` below `path` at `index`, defaulting to the end. */
 export function insertAt(tree, path, node, index = null) {
   return updateAt(tree, path, (parent) => {
     const children = (parent.children || []).slice();
@@ -159,9 +129,8 @@ export function insertAt(tree, path, node, index = null) {
 }
 
 /**
- * Remove the node at `path`. Removing the root gives `null`, which is a
- * pipeline with no nodes — one of the empty states `ui-rules` §9 asks to be
- * drawn rather than crashed on.
+ * Removing root returns `null`, the empty pipeline state that must render without an
+ * exception (`docs/ui-rules.md` §9).
  */
 export function removeAt(tree, path) {
   if (!path.length) return null;
@@ -174,7 +143,7 @@ export function removeAt(tree, path) {
   });
 }
 
-/** Move the node at `path` `delta` places among its siblings. */
+/** The helper moves a node by `delta` sibling positions. */
 export function moveAt(tree, path, delta) {
   if (!path.length) return tree;
   const parent = path.slice(0, -1);
@@ -191,13 +160,10 @@ export function moveAt(tree, path, delta) {
 }
 
 /**
- * Where a path ends up when the node at `path` moves `delta` places among its
- * siblings — the companion `moveAt` needs, and the reason it needs one:
- * a path is a list of child indices, so a move renumbers the moved node *and*
- * every sibling it passed. A selection left at the old index is then pointing
- * at whichever node took that place, and with two `bace` siblings — which the
- * schema supports and the service numbers `bace` and `bace#2` — the next
- * override lands on the wrong node with nothing on screen saying so.
+ * The helper remaps selection after a sibling move. Child-index paths change for the
+ * moved node and siblings it passes. Keeping the old index would silently select
+ * another node, especially with two `bace` siblings, and send the next override to
+ * the wrong one.
  */
 export function remapPath(sel, path, delta) {
   if (!sel || !path.length) return sel;
@@ -217,10 +183,8 @@ export function remapPath(sel, path, delta) {
 }
 
 /**
- * Set one of a module node's `params` overrides. `null` **removes** the key
- * rather than storing a null, which is the same meaning `PUT null` has on a
- * bench card: drop what was typed here and fall back to the layer below —
- * here, the module's resolved ParamSet as it stands on the bench.
+ * The helper changes one node override. `null` removes the key so it falls back to
+ * resolved bench parameters rather than storing null.
  */
 export function setParam(tree, path, name, value) {
   return updateAt(tree, path, (node) => {
@@ -231,12 +195,12 @@ export function setParam(tree, path, name, value) {
   });
 }
 
-/** Drop every override a module node types: the node is the bench's module again. */
+/** Node reset removes all overrides and restores bench inheritance. */
 export function clearParams(tree, path) {
   return updateAt(tree, path, (node) => ({ ...node, params: {} }));
 }
 
-/** Set a field on a loop node; `null` removes it, so the service's default returns. */
+/** Loop-field reset removes its key so the service default applies. */
 export function setField(tree, path, name, value) {
   return updateAt(tree, path, (node) => {
     const next = { ...node };
@@ -247,17 +211,10 @@ export function setField(tree, path, name, value) {
 }
 
 /**
- * Switch a temperature or illumination loop between its list form and its
- * range form, on the values it has — so a range becomes the levels it
- * actually made, not the three numbers that made them.
- *
- * **Returns the tree unchanged when the conversion would have to invent
- * something**, and the caller says so rather than performing it. That is one
- * case, and it is a common one: a range typed a moment ago and not yet
- * validated has no levels anywhere — only the service expands a range — so
- * the first cut turned it into an empty list, and the inverse turned an
- * unvalidated list into `0 → 0`. Either way the operator's setpoints were
- * gone, silently, on a click meant to change how they are written.
+ * The helper converts list and range forms without inventing setpoints. A range
+ * requires service-expanded values before conversion; otherwise the tree stays
+ * unchanged and the caller explains why. Replacing an unresolved range with an empty
+ * list or zero range would silently discard the requested experiment.
  */
 export function setValueForm(tree, path, form, resolved) {
   const node = nodeAt(tree, path);
@@ -274,10 +231,8 @@ export function setValueForm(tree, path, form, resolved) {
     }
     next[spec.range[0]] = values[0];
     next[spec.range[1]] = values[values.length - 1];
-    // The step the values already have, where there are two to read it off.
-    // A single value is a one-iteration loop whatever the step says
-    // (`range_values` returns `(start,)` when start == stop), so the spacing
-    // there is a placeholder and not a claim.
+    // Two values determine spacing. A single value always means one iteration, so its
+    // step is a placeholder rather than a measured interval.
     next[spec.range[2]] = values.length > 1
       ? Math.abs(Number((values[1] - values[0]).toFixed(9)))
       : (spec.decimals === 3 ? 0.005 : 5);
@@ -286,19 +241,10 @@ export function setValueForm(tree, path, form, resolved) {
 }
 
 /**
- * Whether `setValueForm` can convert this loop **without changing what it
- * runs**, and the sentence for when it cannot.
- *
- * Two ways it cannot, and the second is the one that matters:
- *
- *   * to a **list**, from a range nothing has expanded yet — only the service
- *     expands a range, so there are no values anywhere to list;
- *   * to a **range**, from a list that is not evenly spaced. A range is three
- *     numbers and a rounding rule, and it cannot say `295, 290, 280 …`: the
- *     canonical temperature list steps 5 K once and 10 K after, so read as
- *     `295 → 220 step 5` it is **sixteen** temperatures where the list is
- *     nine. That is a different experiment, arrived at by one click on a
- *     control that only claims to change how the values are written.
+ * The helper checks whether a form conversion preserves execution. An unresolved
+ * range has no values to list. An uneven list cannot become a range: a
+ * nine-temperature list starting 295, 290, 280 K would expand to sixteen temperatures
+ * with a 5 K step. Changing representation must not change the experiment.
  */
 export function canSwitchForm(node, resolved, form = 'list') {
   const spec = node && LOOPS[node.loop];
@@ -325,14 +271,14 @@ export function canSwitchForm(node, resolved, form = 'list') {
   return { ok: true, why: '' };
 }
 
-/** Every gap the same, to the nine decimals the service rounds its own to. */
+/** Spacing comparison uses the service's nine-decimal rounding precision. */
 function evenlySpaced(values) {
   if (values.length < 3) return true;
   const first = values[1] - values[0];
   return values.every((v, i) => i === 0 || Math.abs((v - values[i - 1]) - first) < 1e-9);
 }
 
-/** Which form a loop's values are typed in — the range wins if any of it is set. */
+/** Any populated range field selects range representation. */
 export function valueForm(node) {
   const spec = LOOPS[node.loop];
   if (!spec || !spec.list) return null;
@@ -342,29 +288,13 @@ export function valueForm(node) {
 // -- the rows the structure card draws --------------------------------------
 
 /**
- * The tree flattened to rows, each with the node **as typed**, the node **as
- * the service resolved it**, and the schedule entries it produced.
- *
- * Three sources rather than one because they answer different questions and
- * only the first is editable: the typed tree is what an input writes into and
- * what gets posted; the resolved tree is where the level list and the counts
- * come from; the schedule is where everything else does — the defaults the
- * service filled in (`tolerance_k`, `led_settle_s`), the resolved ParamSet of
- * a module node with its provenance, whether a temperature step will pause,
- * which relay boundary a node crosses, and which measurement supplies its
- * V_oc.
- *
- * They line up because `Loop.as_wire` emits its children in order and the
- * schedule is a walk of the same tree, so index paths address the first two —
- * and `zip` below matches the third **using only what a step says about
- * itself**: a module child takes one entry, a loop child takes the `count`
- * consecutive iterations its own `detail` declares. Nothing here reconstructs
- * a node path or a `#2` sibling token; those are the service's spelling and
- * stay there.
- *
- * `iterations` is every entry a node produced, not one: a `bace` inside 9
- * temperatures × 5 levels is 45 of them, all with different values bound into
- * their params. The form shows the first and says which it is.
+ * The helper aligns typed nodes, resolved nodes and produced schedule entries. Only
+ * the typed tree is editable; resolution supplies levels and counts, while schedule
+ * entries supply defaults, provenance, pauses, relay boundaries and V_oc sources.
+ * Ordered children and step-declared iteration counts align them without
+ * reconstructing service path spelling or duplicate-sibling tokens. `iterations`
+ * retains every execution: a node inside nine temperatures and five levels has 45
+ * entries. The form identifies the first iteration it shows.
  */
 export function treeRows(tree, resolved = null, scheduled = null) {
   const out = [];
@@ -373,11 +303,9 @@ export function treeRows(tree, resolved = null, scheduled = null) {
 }
 
 /**
- * Which schedule entries belong to each child, in order.
- *
- * A module child is one entry. A loop child is `count` of them, and `count`
- * is on the iteration itself (`Step.detail.count`), so this needs no second
- * copy of how the service names or numbers a node.
+ * Schedule entries map to ordered children. Modules consume one entry; loops consume
+ * their declared `Step.detail.count` iterations. Service path spelling needs no local
+ * reconstruction.
  */
 function zip(children, entries) {
   const list = entries || [];
@@ -403,7 +331,7 @@ function walkRows(node, resolved, entries, path, depth, out) {
   const row = {
     path, depth, node, resolved: resolved || null, kind: node.kind,
     iterations, first,
-    /** The service's own defaults for this node, where it filled any in. */
+    /** The helper reads defaults filled by the service for this node. */
     detail: (first && first.detail) || null,
     needs_operator: iterations.some((it) => it && it.needs_operator),
   };
@@ -416,17 +344,14 @@ function walkRows(node, resolved, entries, path, depth, out) {
     row.owns = spec ? spec.owns : null;
     row.measure_s = iterations.reduce((sum, it) => sum + (it.measure_s || 0), 0);
     row.shots = iterations.reduce((sum, it) => sum + (it.shots || 0), 0);
-    // How many times this loop is *entered*, which for a loop inside another
-    // is not its own length: the canonical tree's illumination loop has five
-    // levels and runs forty-five times.
+    // Execution count differs from loop length: five illumination levels under nine
+    // temperatures produce 45 iterations.
     row.runs = iterations.length;
     out.push(row);
     const children = node.children || [];
     const rc = (resolved && resolved.children) || [];
-    // Every iteration has the same children, so the first is the one whose
-    // entries the child rows are drawn from — and a child's own `iterations`
-    // gathers them from all of them, which is how a `bace` under two loops
-    // reports 45 runs rather than one.
+    // The first iteration supplies child rows; each child's `iterations` gathers
+    // executions from all iterations so nested nodes retain their full count.
     const perIteration = iterations.map((it) => zip(children, it.children));
     children.forEach((child, i) => walkRows(
       child, rc[i] || null,
@@ -448,25 +373,19 @@ function walkRows(node, resolved, entries, path, depth, out) {
 }
 
 /**
- * The values a loop will run, from the **resolved** tree. `null` until the
- * service has answered: a range is not a count until something has rounded
- * it, and rounding it here is the one thing this file must not do.
+ * Values come from the resolved tree. Ranges remain `null` before service resolution
+ * because local rounding could disagree.
  */
 export function loopValues(node, resolved) {
   const spec = LOOPS[node.loop];
   if (!spec) return null;
-  // A repeat has no values, only a count. `1, 2, 3 …` is not information —
-  // and building it was a hazard: the count is typed into a text field, so
-  // `4294967296` (a plausible slip) threw `RangeError: Invalid array length`
-  // on the render *before* the validate that would have refused it, and
-  // anything merely large froze the tab allocating it. `loopCount` is what
-  // the summary needs.
+  // Repeats need only `loopCount`, not allocated value arrays. A typed count such as
+  // 4294967296 can throw an array-length error before validation; smaller huge arrays
+  // can freeze the tab.
   if (spec.count) return null;
-  // A typed list is its own answer — `pipeline._loop_values` returns it
-  // unchanged — so the node is authoritative for it, and an answer describing
-  // the list before the last edit cannot stand in front of what is on screen.
-  // A range is the other way round: only the service expands one, and until
-  // it has there is no count to show.
+  // Typed lists are authoritative without range expansion, so stale resolution cannot
+  // override an edited list. Ranges require the service answer before displaying a
+  // count.
   const list = valueForm(node) === 'list'
     ? node[spec.list]
     : (resolved ? resolved[spec.list] : null);
@@ -479,7 +398,7 @@ export function loopCount(node, resolved) {
   return count === undefined || count === null ? null : count;
 }
 
-/** `295 → 220 K · 9 · tol 0.2` — the row's one line, R3·3's own wording. */
+/** The summary shows loop limits, count and tolerance in one row. */
 export function loopSummary(node, resolved) {
   const spec = LOOPS[node.loop];
   if (!spec) return String(node.loop || '');
@@ -524,23 +443,12 @@ export function structureSummary(tree) {
 // -- what it will do, in order ----------------------------------------------
 
 /**
- * The flat schedule as the nesting it came from, with what the cryostat will
- * be at stamped on every module.
- *
- * Nested rather than flat because §5 is the whole argument of this screen:
- * the canonical tree is 198 steps and `step 3 of 198` says nothing an
- * operator can act on. Three scales — which temperature, which level, how far
- * into the scan — is what the monitor draws during the run, and it is what
- * the schedule has to say before it.
- *
- * `temperature` is the executor's rule, not the resolver's: a temperature
- * *loop* writes its setpoint into its own subtree and each iteration writes
- * it again, and a temperature *module* writes into the root and every open
- * scope — so it binds the rest of the run, including the next iteration of a
- * loop enclosing it (`executor.ExecCtx`, `docs/service-contract.md` §7). The
- * resolver cannot say this: `Step.detail.temperature_k` is the enclosing
- * loop's setpoint and `null` under a module, so a schedule drawn from it
- * alone shows a nine-hour sweep with no temperature on any node.
+ * The helper nests the flat schedule and propagates temperature to each module.
+ * Temperature, LED level and scan progress need separate scales (`docs/ui-rules.md`
+ * §5). A temperature loop binds its subtree per iteration; a temperature module binds
+ * root and all open scopes, including later iterations (`docs/service-contract.md`
+ * §7). Resolver detail alone cannot represent module bindings and would leave those
+ * modules without a temperature.
  */
 export function scheduleTree(steps) {
   const root = { node_path: '', kind: 'root', children: [], depth: -1 };
@@ -566,11 +474,9 @@ export function scheduleTree(steps) {
       };
       stack[stack.length - 1].children.push(group);
       stack.push(group);
-      // An illumination level's own settle is **measuring** to the cost model
-      // (`pipeline.estimate` folds it in through `measured`), so it is
-      // measuring here too — 2 s a level is 90 s over the canonical tree, and
-      // a bar drawn 90 s shorter than the total printed beside it is the one
-      // discrepancy on this screen nobody could explain.
+      // Illumination settling counts as measuring in service cost. At 2 s per level
+      // over 45 levels, omitting it would make the timeline 90 s shorter than its
+      // printed total.
       if (step.loop === 'illumination') {
         for (const open of stack) {
           if (open.kind === 'loop') open.measure_s += step.estimate_s || 0;
@@ -604,9 +510,9 @@ export function scheduleTree(steps) {
       open.modules += 1;
     }
     if (step.module === 'temperature') {
-      // The cryostat is now here and stays here until another temperature
-      // node moves it: root and every open scope, exactly as the executor
-      // writes it, so the next iteration of an enclosing loop keeps it too.
+      // A temperature module updates root and every open scope so its binding
+      // persists into the next enclosing-loop iteration, matching execution
+      // semantics.
       const setpoint = (step.params && step.params.setpoint_k && step.params.setpoint_k.value);
       const bound = { k: setpoint ?? null, how: 'module', node_path: step.node_path };
       for (const scope of scopes) scope.t = bound;
@@ -625,23 +531,17 @@ export function scheduleLeaves(nodes, out = []) {
 }
 
 /**
- * The temperature blocks the time bar draws: one per temperature iteration —
- * the settle it is expected to take, then the measuring under it.
- *
- * A settle the journal has never measured is `null`, and stays `null`: the
- * cost model refuses to invent one (`docs/service-contract.md` §7, "Never
- * invent a settle time") and so does this. A run with no temperature loop in
- * it is one block with no settle, which is what such a run is.
+ * The timeline has a block per temperature iteration with settling followed by
+ * measurement. Unmeasured settling stays `null` rather than invented
+ * (`docs/service-contract.md` §7). A run without temperature loops has no settling
+ * block.
  */
 export function timeline(nodes) {
   const out = [];
   /**
-   * `carry` is measuring that is not inside any temperature loop; `current`
-   * is the innermost temperature block open right now. Every module's time
-   * goes to one of the two — never to both, and never to none — which is
-   * what makes the bar total exactly what the cost totals: `pipeline.
-   * estimate` adds a module once to `measuring` and its temperature's settle
-   * and hold once to `waiting`, however deep the nesting goes.
+   * `carry` holds measurement outside temperature loops; `current` holds the
+   * innermost temperature block. Each module contributes exactly once. Settles and
+   * holds contribute once to waiting regardless of nesting, matching service cost.
    */
   let carry = null;
   let current = null;
@@ -662,11 +562,9 @@ export function timeline(nodes) {
   const visit = (list) => {
     for (const node of list) {
       if (node.kind === 'module') {
-        // Outside a temperature loop, what the cryostat is at is whatever a
-        // `temperature` module last bound — and when that changes, so does
-        // the block. Overwriting one block's setpoint instead put a run's
-        // whole measuring under its *last* temperature: three scans at
-        // ambient, 250 K and 200 K drawn as one block of 18 shots at 200 K.
+        // Outside temperature loops, a module's temperature binding starts another
+        // block when it changes. Replacing one block's setpoint would mislabel
+        // ambient, 250 K and 200 K scans as all at 200 K.
         if (!current) {
           const k = node.temperature && node.temperature.k !== null
             && node.temperature.k !== undefined ? node.temperature.k : null;
@@ -681,19 +579,13 @@ export function timeline(nodes) {
         continue;
       }
       if (node.loop === 'temperature') {
-        // A temperature iteration is a block of its own: settle, hold, and
-        // what is measured at *this* temperature. Whatever was accumulating
-        // outside one is a block too — it happened, at another temperature.
-        //
-        // Nested inside another temperature loop, which is legal and which
-        // the cost model handles (`open_temperatures` is a list), the inner
-        // iterations get their own blocks and the outer keeps only what runs
-        // directly under it. Drawn as one block instead, the canonical
-        // nested case lost 40 s of inner holds and the bar read 62 s against
-        // a cost of 102. The bar's *order* is approximate there — a module
-        // after an inner loop is drawn inside the outer block, which sits
-        // before it — and its total is exact, which is the property the
-        // number beside it has to have.
+        // Each temperature iteration retains its own settle, hold and direct
+        // measurement. Measurement outside it retains a separate block. Nested
+        // temperature loops are legal: inner blocks retain their holds and outer
+        // blocks retain only direct work. Collapsing them can turn a 102 s cost into
+        // a 62 s bar by losing 40 s of holds. Total time is exact; nested ordering is
+        // approximate because direct outer work following an inner loop remains in
+        // the earlier outer block.
         flush();
         const block = {
           node_path: node.node_path, setpoint_k: node.value, settles: true,
@@ -721,13 +613,9 @@ export function timeline(nodes) {
 }
 
 /**
- * The cells the run fills: temperature × LED level, with what lands in each.
- *
- * R3·3 draws this grid with a V_oc in every cell "from the last run in grey".
- * The V_oc of a run that has not happened is not knowable and is not drawn
- * here — what is drawn is which modules will write into the cell, which comes
- * straight off the schedule. `ui-rules` §9's empty state, `a pipeline with
- * zero nodes`, is the empty return.
+ * The grid shows scheduled modules at temperature-by-LED coordinates. Future V_oc is
+ * unknown and must not be invented. A tree with no nodes returns the empty state
+ * (`docs/ui-rules.md` §9).
  */
 export function gridModel(nodes) {
   const leaves = scheduleLeaves(nodes);
@@ -744,10 +632,8 @@ export function gridModel(nodes) {
     if (!cells.has(key)) cells.set(key, []);
     cells.get(key).push(leaf);
   }
-  // One cell is not a grid. A run at one temperature and one level fills a
-  // single box, and drawing it as a table says nothing the node list did not
-  // — `ui-rules` §9's empty state, which is a state to draw rather than an
-  // empty table to draw it in.
+  // One temperature and LED level needs no grid: the node list already describes the
+  // single cell. The empty state avoids a redundant table.
   if (temperatures.length * levels.length < 2) return null;
   return {
     temperatures, levels, cells,
@@ -759,13 +645,9 @@ export function gridModel(nodes) {
 // -- the checks and the cost ------------------------------------------------
 
 /**
- * `16 checks · 15 ok · 1 warn · show` — R3·3's collapsed list, and §11's
- * already-answered question: *"Should `ok` preflight entries collapse to a
- * count? Yes."*
- *
- * `blocking` is `invalid` **and** `crit`, because `pipeline.validate` is
- * `valid = not any(level in ("invalid", "crit"))` and a Start that blocked on
- * only one of them would offer a click the service answers 422.
+ * The model collapses successful checks to a count (`docs/ui-rules.md` §11). Both
+ * `invalid` and `crit` block Start, matching service validation; either alone would
+ * allow a request rejected with 422 (`docs/service-contract.md` §7).
  */
 export const LEVELS = ['crit', 'invalid', 'warn', 'info', 'ok'];
 
@@ -780,20 +662,16 @@ export function checkSummary(checks) {
     counts,
     blocking,
     notable,
-    // Ordered loudest first, which is the order §3 puts them in.
+    // Checks follow severity order (`docs/ui-rules.md` §3).
     ordered: LEVELS.flatMap((level) => list.filter((c) => c.level === level)),
     worst: LEVELS.find((level) => counts[level] > 0) || null,
   };
 }
 
 /**
- * The cost, with the one word that keeps it honest.
- *
- * `lower_bound` is set whenever any temperature's settle is unmeasured, and
- * on the first run of a device that is every one of them — the artboard's own
- * table shows `—` for the first temperature. So the total is rendered
- * *"at least 1 h 24"*, never *"1 h 24"*, and `finish_at` is dropped with it:
- * a clock time is a promise in a way a duration is not.
+ * The cost model labels total duration as at least when any temperature lacks
+ * measured settling. It also omits wall-clock finish because a lower bound cannot
+ * promise one (`docs/service-contract.md` §7).
  */
 export function costModel(cost) {
   if (!cost) return null;
@@ -810,15 +688,14 @@ export function costModel(cost) {
     t_shot_s: cost.t_shot_s ?? null,
     t_shot_source: cost.t_shot_source || null,
     unestimated: cost.unestimated_modules || 0,
-    /** Which temperatures have no measured settle behind them. */
+    /** The helper lists temperatures without measured settling time. */
     unmeasured: (cost.per_temperature || []).filter((t) => t.settle_s === null || t.settle_s === undefined),
   };
 }
 
 /**
- * Whether two trees are the same pipeline. Used to decide whether the
- * validate in hand still describes what is on screen — a cost and a check
- * list for a tree the operator has since edited is worse than none.
+ * Tree equality determines whether validation still describes the editor. Stale
+ * checks and cost cannot authorize Start for a different tree.
  */
 export function sameTree(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);

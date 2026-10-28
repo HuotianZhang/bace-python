@@ -1,55 +1,24 @@
-// Which fields sit above the fold on each card, and in what order — the table
-// `docs/ui-plan.md` M2 said would be produced during this phase, and which
-// `docs/ui-fields.md` argues out in prose. This file is that table as data,
-// plus `cardModel`, the pure function that turns one `GET /modules` entry into
-// the rows a card draws.
-//
-// Three things it is careful about, each of them a rule from somewhere:
-//
-//   * **Nothing is re-derived** (`ui-rules` §6). `{value, source, detail,
-//     editable}` are the service's answer and are rendered as they came. The
-//     point count in a range row is *read out of* `estimate_text`, which the
-//     service recomputes and returns on every `PUT` — the span is rounded,
-//     never truncated, and a second implementation of that rounding would
-//     eventually disagree in the one case that mattered.
-//   * **Every field carries its explanation** (`ui-rules` §1). `doc` is the
-//     line under the field; `doc_full` is the whole of it, revealed on hover.
-//     A name like `smu_nplc`, `trigger_sweep` or `duty_percent` means nothing
-//     on its own, and `inverted_output` means something other than it looks.
-//   * **Counts are computed, never typed.** The Round 3 artboard's "17 more"
-//     was stale the day the SMU fields landed. Every fold count here is the
-//     length of what is actually in the fold.
-//
-// The model is separate from the DOM (`card.js`) for the reason `rail.js` is:
-// `ui/tests/fields.test.mjs` holds these rules down against a recorded
-// `/modules` with no browser in the way.
+// The field layout maps catalogue entries to card rows through pure `cardModel`;
+// `ui/lib/card.js` renders them. Values, provenance, editability and estimates come
+// from the service (`docs/ui-rules.md` §6). Range counts come from `estimate_text` to
+// avoid duplicating rounding. Each field retains `doc` and `doc_full` for accessible
+// explanations (§1). Fold counts derive from their actual fields. Separating models
+// from DOM permits fixture tests without a browser.
 
-/** Fold groups, in the order an operator reaches for them on a rig day. */
+/** Fold groups follow expected bench-setup access order. */
 export const FOLD_ORDER = [
   'illumination', 'led', 'acquisition', 'timing', 'trigger', 'processing',
   'output', 'sourcemeter', 'axis', 'pinned',
 ];
 
 /**
- * The layout, per module. `above` is an ordered list of row specs; anything a
- * module has and `above` does not name falls into the fold, grouped.
- *
- * A row spec is a parameter name, or one of the composite rows `card.js`
- * knows how to draw. `when` is given the resolved values and decides whether
- * the row is drawn; `otherwise` says where it goes when it is not, and the
- * distinction is not cosmetic:
- *
- *   * `'hide'` — **the run will not read this value in this configuration.**
- *     The pinned field that *is* the axis; the V_oc flag the other axis owns
- *     (`vpre_on_voc` is invalid with the vpre axis, and `centre_on_voc` is the
- *     flag there); `v_sat`, which only the `measure_dc` branch reads; the
- *     pulse levels when the LED is not being pulsed. Showing these would offer
- *     a knob that does nothing, which is the trap the polarity pair was.
- *   * `'fold'` — it applies, it just is not worth a line right now. It goes
- *     into its group in the fold and is one click away.
- *
- * Default is `'hide'`, because a conditional row is usually conditional for
- * the first reason.
+ * The layout defines ordered visible rows and grouped folds. Row specifications name
+ * parameters or composites supported by `ui/lib/card.js`. `when` tests resolved
+ * values. `otherwise: 'hide'` removes controls that do not apply, including pinned
+ * fields owned by the axis, inapplicable V_oc flags, unused `v_sat` and non-pulsed
+ * LED levels. `otherwise: 'fold'` retains applicable controls behind disclosure.
+ * Conditional rows default to hidden because an ineffective control must not invite
+ * edits.
  */
 export const LAYOUT = {
   jv: {
@@ -63,11 +32,9 @@ export const LAYOUT = {
 
   jv_bace: {
     above: [
-      // The inherited level wins the row: inside an illumination loop the loop
-      // owns the LED and the range is not what runs (`ui-rules` §6).
-      // Not inherited is not *ignored*: a typed `led_v` still wins for the
-      // run ("inherited from an illumination loop, or typed"), so it folds
-      // rather than disappearing.
+      // An illumination loop owns the inherited LED level, so that level replaces the
+      // range (`docs/ui-rules.md` §6). A typed `led_v` still applies outside that
+      // binding and folds rather than disappearing.
       { kind: 'field', name: 'led_v', when: (v, w) => isBound(w.led_v), otherwise: 'fold' },
       {
         kind: 'range', label: 'LED levels', names: ['led_start_v', 'led_stop_v', 'led_step_v'],
@@ -83,18 +50,15 @@ export const LAYOUT = {
 
   bace: {
     above: [
-      // §3: the accent is the swept quantity, and which quantity is swept *is*
-      // the choice of experiment — `vpre` is BACE, `delay_ns` is TDCF. It was
-      // spent on the polarity pair, which is a knob, not the experiment.
-      // Labelled for the operator, not after the parameter: "scan parameter"
-      // is the question the control answers, and "scan range" what the three
-      // numbers under it are. The wire names stay `axis_*`.
+      // The accent marks the swept quantity (`docs/ui-rules.md` §3). The axis chooses
+      // the experiment: `vpre` is BACE and `delay_ns` is TDCF. Operator labels
+      // identify the scan parameter and range; wire identifiers retain `axis_*`
+      // names.
       { kind: 'segmented', name: 'axis_name', label: 'scan parameter', accent: true },
       { kind: 'range', label: 'scan range', names: ['axis_start', 'axis_stop', 'axis_step'], accent: true, stepUnusedAtZeroWidth: true },
-      // Exactly one of these two is ever valid, and `axis_name` decides which:
-      // with the vpre axis the whole sweep is centred on V_oc; with any other
-      // the *pinned* vpre is an offset from it. The other is not folded, it is
-      // hidden — it does not apply.
+      // `axis_name` selects the applicable V_oc flag. The `vpre` axis centres its
+      // sweep on V_oc; other axes offset pinned V_pre from it. The inapplicable flag
+      // is hidden rather than folded.
       { kind: 'field', name: 'centre_on_voc', when: (v) => v.axis_name === 'vpre' },
       { kind: 'voc' },
       'measure_dc',
@@ -109,20 +73,16 @@ export const LAYOUT = {
     ],
     run: [{ label: 'Shot', kind: 'shot' }, { label: 'Scan', kind: 'run' }],
     chips: [
-      // A parameter whose cost is measured in gigabytes is not invisible.
+      // High storage cost must stay visible before a run can allocate gigabytes.
       { when: (v) => Boolean(v.store_shots), text: 'store_shots · every shot kept' },
     ],
   },
 
   light: {
-    // The `light` node's form. There is no light *card* any more: on the
-    // bench the shutter and the LED are two rows of the Instruments panel
-    // (`lib/instruments.js`), switches whose lit position is the read-back.
-    // A node is different: it runs later, inside a tree, and reads all
-    // seven — `shutter` and `led_mode` to know what to do, the levels to do
-    // it at, `settle_s` to know how long to hold before the next step.
-    // `node: true` marks the three no switch sends, which the node form
-    // always shows: they are what the node *is*.
+    // The `light` node form reads all seven parameters to control shutter, LED,
+    // levels and settle time. Bench controls instead live in the Instruments panel.
+    // `node: true` marks the three node-defining parameters with no bench switch and
+    // keeps them visible in the node form.
     above: [
       { kind: 'segmented', name: 'shutter', node: true },
       { kind: 'segmented', name: 'led_mode', node: true },
@@ -132,10 +92,8 @@ export const LAYOUT = {
   },
 
   power: { above: ['wavelength_nm', 'samples'], run: [{ label: 'Read', kind: 'run' }] },
-  // `Settle` is the service's own word for what this run does
-  // (`service.temperature.settle`: write the setpoint, wait for the band, dwell
-  // `hold_s`) and the word the card's subtitle already uses. `Hold` read as the
-  // dwell alone, and collided with `hold_s` two rows above it.
+  // Settle names the complete temperature operation: setpoint, band wait and `hold_s`
+  // dwell. Calling it Hold would imply only the dwell and duplicate the field label.
   temperature: {
     above: ['setpoint_k', 'tolerance_k', 'hold_s', 'timeout_s'],
     run: { label: 'Settle', kind: 'run' },
@@ -143,18 +101,15 @@ export const LAYOUT = {
 };
 
 /**
- * Which modules get a bench card, in the order the artboard lays them out.
- * `light` is not one: the shutter and the LED are rows of the Instruments
- * panel above the cards, and the `light` *node* is edited where it runs,
- * on the pipeline tab.
+ * The list orders bench cards. Shutter and LED controls live in Instruments; the
+ * `light` node form lives on the pipeline tab.
  */
 export const BENCH_CARDS = ['jv', 'jv_bace', 'bace', 'power', 'temperature'];
 
 /**
- * Whether a card's primary control is a Run — the only kind of card that has
- * a Start to gate, and so the only kind sent to `POST /pipelines/validate`.
- * A module with no Run (`light`) validated as its own one-node tree is the
- * light-only run the service refuses by design (`light.undone-by-park`).
+ * Only cards with a Run need Start validation. A standalone `light` tree is refused
+ * because park undoes its action, so action-only cards must not submit it to
+ * validation.
  */
 export function cardRuns(name) {
   const layout = LAYOUT[name];
@@ -164,24 +119,20 @@ export function cardRuns(name) {
 /** An enum small enough to be a segmented control rather than a select. */
 export const SEGMENTED_MAX = 4;
 
-/** A value the pipeline supplies: shown as what it is, never as an empty input. */
+/**
+ * Pipeline-supplied values appear resolved rather than as empty inputs
+ * (`docs/ui-rules.md` §6).
+ */
 function isBound(wire) {
   return Boolean(wire && (wire.source === 'inherited' || wire.source === 'derived'));
 }
 
 /**
- * The parameters that are on screen and **not read** in the configuration on
- * screen — the mirror of `hidden`. `centre_on_voc` was the case that bit:
- * hidden because it did not apply, still read, and it refused the run.
- * The rule since is that a parameter the run will not read is inert *both*
- * ways: the service does not read it (`core.axis.voc_flags`,
- * `_smu_config` under `measure_dc`), and the card says so and takes no
- * typing into it. Each entry is the reason, as the row shows it, or `null`
- * when the parameter applies. The bench-dependent ones fall silent with no
- * bench (the pipeline's node form), where the answer is not known.
- *
- * Every rule here is a fact about the code that reads the parameter, named
- * in the reason; none is a guess about what the operator meant.
+ * The table identifies visible parameters that the current configuration does not
+ * read. Each value is its explanation or `null` when applicable. Inert parameters
+ * must agree with service behaviour so a hidden or disabled control cannot reject the
+ * run. Bench-dependent rules remain silent in node forms without a bench snapshot.
+ * Reasons identify the consuming code rather than infer operator intent.
  */
 const SMU_FIELDS = ['smu_current_compliance_a', 'smu_voltage_compliance_v', 'smu_settle_jsc_ms',
   'smu_settle_voc_ms', 'smu_settle_jsat_ms', 'smu_nplc', 'smu_averaging', 'smu_terminals', 'smu_four_wire'];
@@ -198,27 +149,26 @@ const dcOnly = () => 'only measure_dc reads it · a J–V sweep settles settle_s
 
 const INERT = {
   bace: {
-    // `run_transient_scan`: `dark_settle_s` sleeps inside `dark levels`,
-    // which `dark_reference = same` skips whole (`charts/timing.js`).
+    // `dark_settle_s` belongs to dark levels, which `dark_reference = "same"` skips.
     dark_settle_s: (v) => (v.dark_reference === 'same'
       ? 'dark_reference = same · the dark levels are not rewritten, so nothing settles after them' : null),
-    // `RunConfig.trigger_slope_positive`: "Moot when external_trigger is False."
+    // `trigger_slope_positive` has no effect without `external_trigger`.
     trigger_slope_positive: (v) => (v.external_trigger === false
       ? 'external_trigger = false · the 81150A is not armed by the Sync, so its slope is not read' : null),
-    // `_settle_led`: on the power meter when the rig has one, on the clock otherwise.
+    // LED settling uses the power meter when present and elapsed time otherwise.
     led_settle_max_s: settleOnClock,
     led_settle_tolerance: settleOnClock,
-    // The Keithley is touched inside `if measure_dc:` and nowhere else in a bace run.
+    // A `bace` run accesses the source-meter only with `measure_dc` enabled.
     ...Object.fromEntries(SMU_FIELDS.map((n) => [n, smuNotSourced])),
   },
-  // A J–V sweep is `smu.sweep(...)` with `settle_s`; `measure_jsc/voc/jsat`
-  // and their settles are `measure_dc`'s, which no J–V module calls.
+  // J–V sweeps use `settle_s`. DC metric toggles and their settle times belong to
+  // `measure_dc`, which J–V modules do not call.
   jv: Object.fromEntries(SMU_DC_ONLY.map((n) => [n, dcOnly])),
   jv_bace: Object.fromEntries(SMU_DC_ONLY.map((n) => [n, dcOnly])),
   temperature: {
-    // `service.temperature.settle`: with no 331 the node pauses for the
-    // operator; `hold_s` is slept after the resume and `tolerance_k` judges
-    // the typed value, but nothing counts down `timeout_s`.
+    // Without a 331, temperature settling pauses for operator input. `hold_s` follows
+    // resume and `tolerance_k` checks the entered value; no automatic wait consumes
+    // `timeout_s`.
     timeout_s: (v, bench) => (unwired331(bench)
       ? '331 not wired · the pause waits for the operator and has no timeout' : null),
   },
@@ -231,28 +181,18 @@ export function inertReason(module, name, values, bench = null) {
 }
 
 /**
- * One card, as rows. `entry` is a `GET /modules` entry (or the one a `PUT`
- * answers with — same shape, which is why an edit re-renders from the
- * response). `bench` is the `/bench` snapshot, for the read-back rows.
- * `form` is which form this is: `'bench'` (the card) or `'node'` (the
- * pipeline editor). **A node form shows only what differs from the bench**:
- * a value a loop binds or a run derives, a value this node overrides, and
- * the rows marked `node: true` in the layout (what a node is, with no bench
- * counterpart). Everything else folds, under `same as bench` — the node is
- * the module as it stands on the bench, and the form says so by being
- * small. A bench card never shows a `node: true` row at all.
- *
- * Returns `{name, title, status, kind, estimate, needs, chips, above, fold,
- * run, actions, hidden}`. `hidden` is the parameters the run will not read in
- * this configuration, kept apart from `fold` so a card can say "32 folded,
- * 3 not applicable" and mean both halves. `above + fold + hidden` is always
- * every parameter the module has.
+ * `cardModel` turns a catalogue entry into bench or node rows. `bench` supplies
+ * read-back rows. A node form keeps differences visible: loop-bound or derived
+ * values, node overrides and `node: true` rows. Unchanged bench values fold under the
+ * same-as-bench group; bench cards omit node-only rows. The result separates `above`,
+ * `fold` and `hidden`, whose union covers every parameter. Hidden values do not
+ * apply; folded values remain applicable, so their counts must stay distinct.
  */
 export function cardModel(entry, { bench = null, form = 'bench' } = {}) {
   const layout = LAYOUT[entry.name] || { above: (entry.params || []).map((p) => p.name) };
   const values = Object.fromEntries((entry.params || []).map((p) => [p.name, p.value]));
-  // Every spec carries its `inert` reason from here on, above the fold and
-  // in it, so one rule table serves both and the fold cannot disagree.
+  // All specifications carry the same inert reason above and below the fold to
+  // prevent conflicting controls.
   const specs = (entry.params || []).map((p) => {
     const inert = inertReason(entry.name, p.name, values, bench);
     return inert ? { ...p, inert } : p;
@@ -263,7 +203,7 @@ export function cardModel(entry, { bench = null, form = 'bench' } = {}) {
   const hidden = new Set();
   const above = [];
 
-  // What a node form keeps above the fold: the differences.
+  // Node forms keep differences from the bench above the fold.
   const differs = (n) => Boolean(wire[n] && (wire[n].node || isBound(wire[n])));
 
   for (const spec of layout.above || []) {
@@ -284,7 +224,8 @@ export function cardModel(entry, { bench = null, form = 'bench' } = {}) {
     if (built) above.push(built);
   }
 
-  // The axis's own pinned field is not folded — it *is* the axis.
+  // The swept axis replaces its pinned field, so that duplicate field is hidden
+  // rather than folded.
   if (entry.name === 'bace' && values.axis_name in wire) hidden.add(values.axis_name);
 
   const fold = foldGroups(specs, used, hidden);
@@ -323,9 +264,8 @@ function rowNames(row) {
 function buildRow(row, wire, values, entry) {
   if (row.kind === 'range') {
     const [start, stop, raw] = row.names.map((n) => wire[n]);
-    // `Axis.values()` and `_jv_levels` take `start == stop` as one point and
-    // never read the step. (`JVConfig.points()` still insists on a positive
-    // `step_v`, so a J–V sweep's is left alone.)
+    // Equal range limits give one point without consulting the step. J–V sweep
+    // validation still requires positive `step_v`, so its field remains active.
     const zeroWidth = start.value !== null && start.value !== undefined
       && Number(start.value) === Number(stop.value);
     const step = row.stepUnusedAtZeroWidth && zeroWidth && !raw.inert
@@ -333,19 +273,16 @@ function buildRow(row, wire, values, entry) {
     return { kind: 'range', label: row.label, start, stop, step, points: points(entry.estimate_text), accent: Boolean(row.accent) };
   }
   if (row.kind === 'voc') {
-    // The needs row. Both states the artboard draws are the two the service
-    // answers: `⚠ none · run jv_bace first` from `needs[]`, and the derived
-    // entry `1.0423 V @ 1.020 · jv_bace 20:58`. `led_v` lives *in* this row
-    // because the coupling invariant is that the level V_oc was measured at
-    // and the level the transient pulses at are one number.
+    // The V_oc row shows the service's missing-value reason or derived provenance.
+    // `led_v` stays beside it because the measurement level must equal the transient
+    // pulse high level (`docs/ui-rules.md` §6).
     const need = (entry.needs || []).find((n) => n.code === 'voc') || null;
     return { kind: 'voc', voc: wire.voc, led: wire.led_v, need };
   }
   if (row.kind === 'polarity') {
-    // One control, not two. `RunConfig.polarity_instruction()` reads
-    // `inverted_output` only when `output_polarity` is `auto` — at NORM, INV
-    // or leave the boolean is inert, and two fields where one is silently
-    // dead at three of four settings is a trap however they are laid out.
+    // `RunConfig.polarity_instruction()` consults `inverted_output` only for
+    // `output_polarity = "auto"`. Showing it independently would offer an ineffective
+    // control for three of the four choices.
     return {
       kind: 'polarity',
       mode: wire.output_polarity, fallback: wire.inverted_output,
@@ -359,7 +296,7 @@ function buildRow(row, wire, values, entry) {
   return { kind: segmented ? 'segmented' : 'field', spec, accent: Boolean(row.accent), label: row.label || null };
 }
 
-/** What the 81150A will actually be told, given the pair. */
+/** The helper resolves the polarity instruction sent to the 81150A. */
 export function effectivePolarity(values) {
   const mode = String(values.output_polarity || 'auto').toLowerCase();
   if (mode === 'leave') return { write: false, text: 'left as found, and read back' };
@@ -369,9 +306,9 @@ export function effectivePolarity(values) {
 }
 
 /**
- * Everything not above the fold, by group, in `FOLD_ORDER`. A group that ends
- * up empty does not render — which is how the `output` group disappears once
- * `inverted_output` is drawn inside the polarity control above.
+ * The helper groups folded fields in `FOLD_ORDER`. Empty groups do not render,
+ * including the output group when its only field appears in the composite polarity
+ * control.
  */
 function foldGroups(specs, used, hidden) {
   const by = new Map();
@@ -389,16 +326,14 @@ function foldGroups(specs, used, hidden) {
   }));
 }
 
-/** How many folded, across every group — the number the disclosure counts. */
+/** The count includes fields across every fold group. */
 export function foldCount(model) {
   return model.fold.reduce((n, g) => n + g.count, 0);
 }
 
 /**
- * The point count, read out of the service's own `estimate_text`
- * (`1 curves × 141 pts ≈ 16 s`). Never recomputed: `PUT` returns a fresh
- * entry with a fresh estimate, so the card gets the count and the cost
- * together and there is no second rounding rule to get wrong.
+ * The point count comes from service `estimate_text`. Each edit returns a fresh count
+ * and cost together, avoiding a second rounding implementation.
  */
 export function points(estimateText) {
   const m = /×\s*(\d+)\s*pts/.exec(String(estimateText || ''));
@@ -406,10 +341,9 @@ export function points(estimateText) {
 }
 
 /**
- * The bench read-back row: not a parameter, and from `/bench` rather than
- * `/modules`. On `jv` it is the whole of the module's relationship with the
- * light — the same six parameters give a dark curve or a light one, and only
- * this says which.
+ * The light row uses `/bench` read-back rather than module parameters. A `jv` run can
+ * produce dark or light curves with the same parameters, so read-back must identify
+ * its illumination.
  */
 function readbackRow(kind, bench) {
   if (!kind || !bench) return null;
@@ -421,9 +355,8 @@ function readbackRow(kind, bench) {
   if (kind === 'shutter') {
     return { kind: 'shutter', open: shutter.open, inferred: isInferred };
   }
-  // `lit` needs all three, and any of them being unreadable makes it unknown
-  // rather than dark — the same rule `experiment.jv.illumination_state`
-  // applies, because this row has to predict the label that run will write.
+  // Light requires all three state values. An unreadable value means unknown
+  // illumination, matching the run's recorded label rather than implying dark.
   const open = shutter.open;
   const on = led.output;
   const mode = led.mode;
@@ -431,11 +364,9 @@ function readbackRow(kind, bench) {
     || !mode || mode === '?')
     ? null
     : Boolean(open && on && String(mode).toUpperCase() !== 'OFF');
-  // In DC the level is the *offset*: `set_dc` writes `:VOLT:OFFS`, and
-  // `/bench` reports it separately from `high_v`, which keeps the previous
-  // pulse amplitude. Rendering `high_v` there would have this row predict one
-  // level while the `jv` that follows records another — and the two are the
-  // same reading, so disagreeing is worse than either being wrong alone.
+  // In DC mode, `set_dc` writes `:VOLT:OFFS`, reported separately from `high_v`. The
+  // latter retains pulse amplitude and would predict a different LED level from the
+  // run's recorded read-back.
   const level = driveLevel(led);
   return {
     kind: 'illumination', lit, open, mode, level, inferred: isInferred,
@@ -443,7 +374,10 @@ function readbackRow(kind, bench) {
   };
 }
 
-/** The level the LED is actually driven at, by mode. Undefined where unread. */
+/**
+ * The helper selects the driven LED level by mode, returning `undefined` without
+ * read-back.
+ */
 export function driveLevel(led) {
   const dc = String((led || {}).mode || '').toUpperCase() === 'DC';
   const level = dc ? (led || {}).offset_v : (led || {}).high_v;

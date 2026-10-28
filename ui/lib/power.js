@@ -1,36 +1,10 @@
-// The power panel — the 1918-C, always on the screen, under the rail.
-//
-// `docs/ui-rules.md` §8 names the two uses of the meter: a *spot check* (one
-// number, now, to confirm the lamp is on) and a *live monitor* that stays
-// visible while a scan runs. The rail's cell is the first. This is the
-// second, and it is shell furniture like the run monitor: whichever tab is
-// open, the switch, the number and the trace are here.
-//
-// What it owes, taken from the meter's own console (`D:\1918cPowerMeter`,
-// whose driver is the one vendored under `bace/drivers/newport1918c/`):
-//
-//   * **a switch that stays on.** The monitor is a thread in the service
-//     (`POST /monitors/power`), so it runs whether or not a browser is open;
-//     the switch here starts and stops it, and the console remembers the
-//     wish (`localStorage`) and re-asserts it on every connect — a reload, a
-//     service restart — so "on" means on until somebody switches it off.
-//     `--power-monitor SECONDS` on the service does the same from boot.
-//   * **the reading**, big, with what the meter said about it: averaged or
-//     not (the 5 Hz filter that makes a pulsed LED read as its mean — half
-//     the DC level at 50 % duty), the wavelength, saturation.
-//   * **the trace below it**, over a window the operator picks, with the
-//     statistics over that window, from the store's `powerLog` (every
-//     `PowerReading` frame, merged with `GET /monitors/power/history` on
-//     connect so a reload does not start the chart blank) — and a fold beside
-//     the `⋯` that puts those 210 px away without stopping the monitor, since
-//     wanting the shell out of the way is not wanting the meter unread.
-//   * **export**: the whole history the service holds as a CSV
-//     (`/monitors/power/history.csv`), and the chart on screen as an SVG.
-//
-// `powerPanelModel` is pure; the DOM is beside it, keyed in parts so a
-// reading arriving every 200 ms redraws the number and the trace and never
-// the switch under the operator's pointer (`dom.keyed`, and the run
-// monitor's argument for the same split).
+// The power panel keeps monitoring accessible on every tab; the rail supplies spot
+// checks (`docs/ui-rules.md` §8). Browser preferences are reapplied on connect, but
+// the service monitor runs independently. Readings show wavelength, saturation and
+// averaging. The 5 Hz filter yields mean power, half the DC level at 50 % duty
+// (`docs/service-contract.md` §8). History merges by timestamp. A separate fold hides
+// 210 px without stopping readings. CSV exports service history; SVG exports the
+// visible chart. Separate keys keep 200 ms readings from replacing the switch.
 
 import { h, keyed } from './dom.js';
 import * as fmt from './format.js';
@@ -47,9 +21,8 @@ export const DEFAULT_UI = { on: false, interval_s: 1, window: 'auto', chart: tru
 export const AUTO_CAP_S = 7200;
 
 /**
- * `auto`: every reading there is, so the trace fills the axis from the
- * first one — until the monitor has run longer than `AUTO_CAP_S`, when it
- * becomes the last two hours. Nobody chooses a window for a spot check.
+ * Auto uses all readings up to `AUTO_CAP_S`, then the last two hours. Spot checks
+ * need no window choice.
  */
 export function autoWindow(log, now) {
   const first = log.length ? log[0].ts : now;
@@ -61,12 +34,8 @@ export function autoWindow(log, now) {
 export const STALE_INTERVALS = 3;
 
 /**
- * The panel as one plain object.
- *
- * The number shown is the newest reading the console has: the stream's
- * `PowerReading` when the monitor is running, else the read-back's (`GET
- * /bench`), whichever is later. Both are watts at the meter and both carry
- * `averaged`; neither is invented here.
+ * The model uses the most recent stream or bench reading. Both supply watts at the
+ * meter and averaging state; the panel invents neither.
  */
 export function powerPanelModel(state, ui = DEFAULT_UI, { now = Date.now() / 1000 } = {}) {
   const bench = state.bench || {};
@@ -111,10 +80,8 @@ export function powerPanelModel(state, ui = DEFAULT_UI, { now = Date.now() / 100
   return {
     running,
     wanted: Boolean(ui.on),
-    // Live is running *or* wanted: the wish counts, so the panel opens the
-    // moment the switch is flipped rather than a round trip later. The
-    // definition lives here rather than in the renderer, so `panelShape` and
-    // the tests see the same one.
+    // The panel opens when monitoring is active or requested so a click responds
+    // without a round trip. The model keeps `panelShape` consistent with rendering.
     live: running || Boolean(ui.on),
     interval_s: interval,
     available: inst ? inst.available !== false : null,
@@ -135,29 +102,12 @@ export function powerPanelModel(state, ui = DEFAULT_UI, { now = Date.now() / 100
 // -- what the panel draws, and what it rebuilds it on ------------------------
 
 /**
- * What the panel draws: the collapsed line or the open one, whether the trace
- * is folded away, which rows the `⋯` carries, and whether the chart is on
- * screen. Pure and exported, so the decisions are held down by
- * `ui/tests/power.test.mjs` — the renderer only obeys it.
- *
- * The rule that shapes it: **switching the monitor off may take away the
- * always-on chart; it must not take away what the monitor recorded.** So the
- * `⋯` is there off as well as on, carrying Export CSV and Clear — and the
- * interval, which is not a view filter at all but a control that acts on the
- * bench the moment it lands (`app.js` stops and restarts the service's
- * polling), and the one thing worth setting *before* the switch is flipped.
- * What a panel with no chart drops is only what describes a chart that is not
- * drawn: the window, the y-axis toggle, and Export SVG, which serialises the
- * SVG on screen and has none to serialise.
- *
- * **Two things can take the chart away, and they are not the same thing.**
- * The switch is about the bench — it starts and stops a thread in the service
- * that reads the meter whether or not a browser is open. The fold is about
- * this screen and nothing else: an operator watching a card wants the meter's
- * number on the rail and the 210 px of trace out of the way, and folding it
- * must not cost them a reading. So `fold` is drawn whenever the monitor is
- * live, it is the operator's own `ui.chart`, and switching it does not touch
- * the service. Off, there is no fold: the panel is already one quiet line.
+ * `panelShape` determines collapse, fold and menu rows. Hiding a chart leaves
+ * interval, CSV and Clear available so recorded data stays reachable. Window, y-axis
+ * and SVG controls require a chart. Interval changes service polling; fold changes
+ * only `ui.chart` (`docs/ui-rules.md` §14). Only live monitoring needs a fold;
+ * inactive panels already occupy one line. The pure model makes these distinctions
+ * testable.
  */
 export function panelShape(model) {
   const chart = model.live && model.chart;
@@ -177,29 +127,18 @@ export function panelShape(model) {
 }
 
 /**
- * What each keyed part is rebuilt on. Pure and exported for the same reason:
- * a key that carries too much is invisible in the DOM and ruinous in the hand.
- *
- * The reading count is the trap. It moves with every `PowerReading` — five
- * times a second at the 0.2 s interval — and the menu is a `<details>` the
- * operator holds open while they pick. Keyed on `count` it was torn down and
- * rebuilt under the pointer at that rate, in the one state where it is drawn
- * at all: `dom.keyed`'s argument and the run monitor's M2 finding, on this
- * panel. Only *whether* there is anything to export or clear changes what the
- * menu draws, so only that is in its key.
- *
- * The status sentence is keyed on itself and on nothing else. Keyed on `live`
- * as well, it was drawn for the one round trip before `refreshMonitors` came
- * back and then silently removed — taking the answer to *switching the
- * monitor off*, and any error that answer carried, with it.
+ * Keys include only state affecting each part. A count changing five times per second
+ * must not replace an open menu; only data availability affects export controls. The
+ * status key contains only the message so monitor responses cannot erase an
+ * acknowledgement or error from switching off.
  */
 export function panelKeys(model, status) {
   return {
     switch: JSON.stringify([model.running, model.wanted, model.available]),
     reading: JSON.stringify([model.value, model.sub, model.level, model.reason, model.live]),
     status: JSON.stringify([status]),
-    // The fold carries its own state and no reading: it is a button the
-    // operator clicks, and the trace under it is redrawn five times a second.
+    // The fold key contains its own state, never readings, so frequent redraws cannot
+    // replace the button.
     fold: JSON.stringify([model.live, model.chart]),
     menu: JSON.stringify([model.live, model.interval_s, model.window.key, model.chart, model.fromZero,
       model.count > 0, model.points.length > 0]),
@@ -211,8 +150,8 @@ export function panelKeys(model, status) {
 // -- the DOM ----------------------------------------------------------------
 
 /**
- * Into `el`, in six keyed parts: the switch, the reading, the sentence the
- * last click came back with, the fold, the `⋯` menu and the chart.
+ * The renderer keys switch, reading, reply, fold, menu and chart independently in
+ * `el`.
  */
 export function renderPowerPanel(el, state, ui, handlers = {}) {
   const model = powerPanelModel(state, ui);
@@ -243,9 +182,8 @@ export function renderPowerPanel(el, state, ui, handlers = {}) {
         width: w, seconds: model.window.seconds, fromZero: model.fromZero,
       })));
   } else if (chartEl.__key !== undefined) {
-    // Emptied, not merely hidden: `app.js`'s Export SVG serialises whatever
-    // `svg` sits under `.pw-chart`, and one left there is the trace from
-    // before the monitor was switched off.
+    // The hidden chart is emptied because SVG export serializes `.pw-chart`. A
+    // retained SVG would export a stale trace after monitoring stops.
     chartEl.__key = undefined;
     chartEl.textContent = '';
   }
@@ -271,22 +209,10 @@ function switchRow(model, { onToggle }) {
 }
 
 /**
- * The fold — `▾ trace` / `▸ trace`, beside the `⋯` and independent of the
- * switch.
- *
- * The trace is 210 px of the shell on every tab, and the shell sits above the
- * view the operator is actually working in: a card being filled in, a tree
- * being edited. Before this there was one way to be rid of it — switch the
- * monitor off — and that answer is wrong twice over: it stops the service
- * reading the meter, which is the thing the operator wanted to keep running,
- * and it leaves the run with no power record for the minutes the panel was
- * out of the way. So the fold is a button of its own, it is remembered like
- * every other panel wish (`ui.chart` in `localStorage`), and it touches
- * nothing but this screen — the monitor goes on reading, the readings go on
- * arriving, and the number stays big at the top of the panel.
- *
- * It is drawn only where there is something to fold: off, the panel is
- * already one quiet line and the chart is not on it.
+ * The fold hides the 210 px chart without stopping readings or interrupting the power
+ * record. `ui.chart` is remembered in browser storage and the number stays visible.
+ * Its separate button keeps a frequent action beside the trace. Inactive panels have
+ * no chart to fold (`docs/ui-rules.md` §14).
  */
 function foldButton(shape, { onChart }) {
   if (!shape.fold) return [];
@@ -316,20 +242,11 @@ function readingEl(model, live) {
 }
 
 /**
- * Everything the operator touches less than once a session, behind one
- * `⋯`: the interval and the window (with the defaults that suit a scan),
- * `y from 0`, and the three actions. `<details>` so it needs no script to
- * open, and closes itself when the pointer leaves it.
- *
- * `rows` is `panelShape(model).menu` — which of them this state carries. With
- * no chart on screen — the monitor off, or the trace folded away — that is the
- * interval, Export CSV and Clear: nothing the panel recorded is out of reach.
- *
- * The trace itself is not in here. It was a toggle in this menu, two clicks
- * behind a `⋯` that closes itself on `mouseleave`, which is the wrong depth
- * for something the operator reaches for whenever the view underneath needs
- * the room — it is the fold beside the `⋯` now, and this menu keeps only
- * `y from 0`, which describes how the trace is drawn rather than whether.
+ * The menu holds infrequent interval, window, scaling and export controls
+ * (`docs/ui-rules.md` §14). Native `details` opens without script and closes on
+ * pointer exit. `panelShape(model).menu` retains interval, CSV and Clear without a
+ * chart. The frequent fold stays beside it; `y from 0` controls scaling rather than
+ * visibility.
  */
 function menu(model, rows, { onInterval, onWindow, onZero, onClear, onExportCsv, onExportSvg }) {
   const pick = (label, opts, current, onPick, title) => h('div.pw-opt',
@@ -365,9 +282,8 @@ function menu(model, rows, { onInterval, onWindow, onZero, onClear, onExportCsv,
 }
 
 /**
- * The chart on screen as a file that stands on its own: the SVG uses the
- * page's colour tokens (`var(--ink)`), which mean nothing outside it, so
- * their current values are written into the file.
+ * SVG export resolves page colour tokens to literal values so the file renders
+ * independently of the console.
  */
 export function svgFileOf(svg, tokens) {
   const clone = svg.cloneNode(true);

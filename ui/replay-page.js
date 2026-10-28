@@ -1,16 +1,7 @@
-// The offline bench, as a page. `docs/ui-plan.md` M0: "this is a deliverable,
-// not a test written later — from here on every phase has a deterministic
-// real-data bench to develop against, and the UI can be worked on with no
-// service running."
-//
-// The journals need the repo root on the server, because they live in
-// `acceptance/` and are not copied into `ui/`:
-//
-//     python3 tools/serve_ui.py          # repo root, then /ui/replay.html
-//
-// Under the service's own `--ui` mount only the `fixtures/` entries load; the
-// journals 404 there, which is the honest outcome — with a service running you
-// have the real stream.
+// The offline page exercises the console with deterministic fixtures and journals.
+// Journals live under `acceptance/`, so `python3 tools/serve_ui.py` must serve the
+// repository root for `/ui/replay.html`. The service's `--ui` mount serves only
+// `ui/`; fixtures load there but journals return 404.
 
 import { createStore, currentRun } from './lib/store.js';
 import { FIXTURES, loadFixture, replayInto, replayPaced } from './lib/replay.js';
@@ -43,15 +34,12 @@ let openRecord = null;
 let openNode = null;
 /** The two endpoint fixtures, which are payloads rather than frames. */
 const payloads = {};
-// The real rail and the real strip, off the same store: M1 is developed and
-// looked at here, with no service and no bench. `bench_running_sim.json` is
-// the mid-scan snapshot, and it is the only fixture that carries an inferred
-// anything.
+// The rail and strip share the console store. `bench_running_sim.json` supplies a
+// mid-scan read-back and is the only bench fixture with inferred values.
 const railEl = h('header.rail');
-// The real monitor too (M4): a paced replay of the tree fixture is the one
-// place the pauses, the counters at three scales and the segment indicator
-// can be watched with no service — the prompt's Resume says what it would
-// have posted, since nothing here can answer it.
+// Paced tree replay exposes pauses, three progress scales and the segment indicator
+// without a service. Resume displays the request it would send because no service can
+// answer it.
 const monitorEl = h('section.monitor', { hidden: true });
 const stripEl = h('div.strip');
 const app = document.getElementById('app');
@@ -92,35 +80,30 @@ async function load(entry, { pace }) {
     return renderControls(`${error.message} — serve the repo root for the journals: python3 tools/serve_ui.py`);
   }
   if (!Array.isArray(frames)) {
-    // `hello_*.json` is one frame; `bench_*.json` is a `GET /bench` answer,
-    // which the store takes as a read-back; `jv_*.json` is an endpoint's
-    // answer and not a frame at all — it is shown as what it is.
+    // `hello_*.json` contains a frame; `bench_*.json` contains a read-back response.
+    // `jv_*.json` contains endpoint data and bypasses frame folding.
     if (frames.type === 'Hello') { store.applyHello(frames); renderControls('Hello folded'); }
     else if (entry.kind === 'modules') {
-      // The catalogue, so the bench tab's cards can be generated with no
-      // service at all — which is the whole point of this page.
+      // The catalogue fixture lets the bench cards render without a service.
       store.applyModules(frames);
       renderControls(`${(frames.modules || []).length} modules, `
         + `${(frames.modules || []).reduce((n, m) => n + m.params.length, 0)} parameters`);
     } else if (entry.kind === 'bench') {
-      // `readBack`, exactly as a mid-run refetch lands: the instruments and
-      // the chain, and not the run, the queue or the bench state.
+      // `readBack` updates instruments and chain while leaving run, queue and bench
+      // state untouched.
       store.applyBench(frames, { readBack: loaded.length > 0 });
       renderControls(`bench applied — ${(frames.inferred || []).length} inferred: ${(frames.inferred || []).join(', ') || 'none'}`);
     } else if (entry.kind === 'validate') {
-      // `POST /pipelines/validate`. Not frames and not a run: a tree nobody
-      // ran, with the schedule and the cost the pipeline tab draws from. It
-      // is the one endpoint whose fixture is the whole screen — M5's time
-      // bar, its three scales and its "at least" all come out of this.
+      // The `POST /pipelines/validate` fixture supplies the schedule, cost, three
+      // progress scales and lower-bound estimate without executing the tree.
       payloads[entry.key] = frames;
       renderCharts();
       renderControls(`${entry.url} — ${frames.counters.modules} module runs, `
         + `${(frames.schedule || []).length} steps, ${frames.checks.length} checks, `
         + `cost ${frames.cost.lower_bound ? 'a floor' : 'known'}`);
     } else if (entry.kind === 'index' || entry.kind === 'record') {
-      // `GET /runs` and `GET /runs/{id}`: what the results tab (M6) reads,
-      // and nothing a store folds -- the grid is drawn from the record's
-      // `nodes`, the same shape from this process and from a journal file.
+      // Results use `GET /runs` and `GET /runs/{id}` payloads directly. Record
+      // `nodes` have the same shape for an active session and a journal.
       payloads[entry.key] = frames;
       if (entry.kind === 'record') { openRecord = entry.key; openNode = null; }
       renderResults();
@@ -128,10 +111,9 @@ async function load(entry, { pace }) {
         ? `${entry.url} — ${frames.length} rows, ${new Set(frames.map((r) => r.session_id)).size} session(s)`
         : `${entry.url} — ${Object.keys(frames.nodes || {}).length} nodes, ${frames.state}`);
     } else if (entry.kind === 'data') {
-      // `GET /runs/{id}/data`: full precision, and the only place the running
-      // integral and the J–V arrays exist offline. The journals cannot draw a
-      // curve at all — the payload policy keeps the scalars and drops the
-      // traces — so M3 develops against these two.
+      // `GET /runs/{id}/data` supplies full-precision running-integral and J–V arrays
+      // offline. Journals retain scalars but omit traces (`docs/service-contract.md`
+      // §3), so they cannot supply these curves.
       payloads[entry.key] = frames;
       renderCharts();
       renderControls(`${entry.url} folded as an endpoint payload — ${Object.keys(frames).join(', ')}`);
@@ -150,13 +132,10 @@ async function load(entry, { pace }) {
 }
 
 /**
- * The M3 charts, off whatever this page has been given.
- *
- * The timing diagram needs only the catalogue and the bench — it is a function
- * of the form, so it draws before anything has run. The transient and the J–V
- * need arrays, which means an endpoint fixture or a recorded stream; a journal
- * replay leaves them saying so, which is the honest outcome and the reason the
- * fixture set has both kinds.
+ * The charts render the data loaded on this page. Timing needs only the form's
+ * catalogue and bench. Transient and J–V charts need arrays from endpoint fixtures or
+ * a recorded stream; journal replay cannot supply them. Both fixture types are
+ * required.
  */
 function renderCharts() {
   const state = store.getState();
@@ -184,9 +163,8 @@ function renderCharts() {
     const source = payloads.transient || shot;
     return [
       h('h2', 'charts · M3'),
-      // The `load a fixture` lines below are the harness's own state, not a
-      // bench's: the console's framed empty slot says what the *rig* has not
-      // done yet, which is not what an unloaded fixture means here.
+      // An unloaded fixture describes the harness, not an unmeasured bench. Its empty
+      // message must distinguish those states.
       h('p.chart-note', 'the timing diagram is a function of the form and draws with no run at all; '
         + 'the transient and the J–V need arrays, which a journal does not carry'),
       timing ? h('h3', 'the shot this form describes') : h('p.absent', 'load the modules fixture for the timing diagram'),
@@ -227,9 +205,9 @@ function renderCharts() {
 }
 
 /**
- * The results tab, off the two endpoint fixtures — M6's grid, summary,
- * node list and panel, drawn by the same functions the tab uses. Re-queue
- * says what it would have posted, since nothing here can answer it.
+ * The results panel uses the same rendering functions as the results tab. Endpoint
+ * fixtures supply the grid, summary, node list and details. Re-queue displays its
+ * request because no service can answer it.
  */
 function renderResults() {
   const rows = payloads['runs-index'];
@@ -284,8 +262,8 @@ store.subscribe((state) => {
   });
   renderCharts();
   renderChainStrip(stripEl, state, {
-    // Offline there is no service to answer, so the strip says what it would
-    // have posted rather than pretending to have posted it.
+    // Without a service, the strip displays the intended request without claiming
+    // success.
     onFix: (name) => renderControls(`offline: the strip would POST /bench/actions/${name}`),
     onPark: () => renderControls('offline: the strip would POST /bench/actions/park'),
   });
@@ -315,8 +293,8 @@ store.subscribe((state) => {
         detail('axis', run.axis ? `${run.axis.name} ${run.axis.start} … ${run.axis.stop} step ${run.axis.step}` : fmt.ABSENT),
         detail('V_oc / V', run.voc === null || run.voc === undefined ? fmt.ABSENT : fmt.volts(run.voc, { unit: false })),
         detail('Q / C', run.q_mean ? run.q_mean.map((q) => fmt.charge(q, { unit: false })).join('  ') : fmt.ABSENT),
-        // σ_Q = 0 means *not recorded*, and is rendered as an absence, never
-        // as a zero-length error bar (`docs/ui-rules.md` §2).
+        // Zero Q standard deviation denotes unrecorded uncertainty, so it renders as
+        // absence rather than a zero-length bar (`docs/ui-rules.md` §2).
         detail('σ_Q / C', run.q_std ? run.q_std.map((s) => fmt.sigmaQ(s) ?? 'not recorded').join('  ') : fmt.ABSENT),
         detail('shots with traces', String(run.shots.filter((s) => s.traces).length)),
         detail('shots whose traces the ring dropped', String(run.shots.filter((s) => s.tracesGone).length)),

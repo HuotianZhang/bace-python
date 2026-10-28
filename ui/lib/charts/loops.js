@@ -1,48 +1,23 @@
-// Q per loop, or Q(axis) — `docs/ui-plan.md` M4, the fourth component.
-//
-// `docs/ui-rules.md` §4 is the whole reason this is one component with a
-// switch inside it rather than two charts a caller picks between:
-//
-//   * **a zero-width axis plots Q per loop, not a curve.** `start == stop` is
-//     a *repeat* — "Q at V_oc twenty times" is twenty loops of one point,
-//     which has no curvature bias — and a swept axis plots Q(axis) with error
-//     bars that tighten as loops complete. *The chart switches on this, and the
-//     switch is visible, not silent*: the panel says which of the two it is
-//     drawing and why, in the caption, on every render.
-//   * **σ_Q = 0 is not recorded** (§2). One loop leaves `q_std = 0` — the
-//     service's sample deviation needs two — and a zero-length error bar
-//     drawn as a bare dot is a lie. R2·3's answer is the legend here:
-//     `□ σ_Q not recorded · ● σ_Q measured`.
-//   * **a truncated run is normal** (§9): the archive declares 100 loops and
-//     holds 20. The loops that were never acquired are drawn as the region
-//     they would have filled, hatched and captioned, and the count reads
-//     *kept of requested* — never a curve that stops early as if that were
-//     the whole run.
-//
-// The data is the store's per-node record: `shots` (every scalar of every
-// `StepDone`, arrays or not — this chart never needs a trace, which is what
-// lets it survive a reconnect that replayed the shots without them), `loops`
-// (`LoopDone`), `values`/`axis` (`AxisResolved`), and `q_mean`/`q_std`, which
-// the service recomputes at every `LoopDone` and `RunFinished` and the client
-// fills in from `GET /runs/{id}/data` when the ring fell short.
-//
-// **`step`, not `index`.** A `StepDone`'s `index` is the shot's number in the
-// whole scan (0 … n_shots − 1); `step` is its 1-based place on the axis. The
-// second loop's first point is `index 3, step 1` on a three-point axis, and a
-// chart that used `index` as the point would draw every loop after the first
-// off the end of the axis.
+// The component selects Q per loop for a zero-width axis and Q(axis) for a sweep. The
+// caption makes that switch explicit; repeated points avoid curvature bias
+// (`docs/ui-rules.md` §4). Zero Q standard deviation denotes unrecorded uncertainty,
+// including a single loop, and uses a hollow marker (§2). Truncated runs show
+// kept/requested counts and hatch the unacquired region. Scalar `StepDone`,
+// `LoopDone` and `AxisResolved` data preserve this chart when replay omits traces.
+// Endpoint hydration supplies service statistics when the ring is incomplete. `step`
+// is the 1-based axis position; `index` counts shots across all loops. Using `index`
+// would place later loops beyond the axis.
 
 import * as scale from '../scale.js';
 import * as fmt from '../format.js';
 import { layout, axisTicks, heightFor, ASPECT } from './frame.js';
 
-/** The unit each swept quantity is read in — `ui-rules` §2's slash convention. */
+/** Swept quantities use slash-unit labels (`docs/ui-rules.md` §2). */
 export const AXIS_UNITS = { vpre: 'V', vcoll: 'V', delay_ns: 'ns' };
 
 /**
- * Whether this node's axis is zero-width. `true` is a repeat, `false` a sweep,
- * `null` is a node whose axis has not been resolved yet (the ring's tail, or a
- * run that has not started).
+ * The helper classifies an axis as repeat (`true`), sweep (`false`) or unresolved
+ * (`null`). Ring-tail hydration and unstarted runs can lack an axis.
  */
 export function isRepeat(node) {
   const values = (node && node.values) || [];
@@ -56,15 +31,10 @@ export function isRepeat(node) {
 const finite = (v) => typeof v === 'number' && Number.isFinite(v);
 
 /**
- * One row per axis point: its shots so far, and the mean and σ the service
- * holds for it.
- *
- * The mean comes from the newest source. A shot carries the running mean *at
- * that point, including itself*, so the last shot at a point is exactly the
- * service's number until the next `LoopDone` — which recomputes the same
- * thing. After a reconnect that lost the tail of the ring, or a boot that
- * hydrated from `GET /runs/{id}/data`, `node.q_mean` may be newer than any
- * shot the client holds, and then it wins.
+ * The helper builds one row per axis point with its shots and service statistics. The
+ * last shot carries the running mean including itself. `LoopDone` recomputes it;
+ * hydrated `node.q_mean` takes precedence when its record is more recent than
+ * retained shots.
  */
 export function pointSummary(node) {
   const values = node.values || [];
@@ -85,21 +55,18 @@ export function pointSummary(node) {
       n: p.shots.length,
       q: p.shots.map((s) => s.q),
       mean: finite(mean) ? mean : null,
-      // A zero is *not recorded*, not a σ of zero (`ui-rules` §2).
+      // Zero Q standard deviation means unrecorded uncertainty (`docs/ui-rules.md`
+      // §2).
       sigma: finite(std) && std !== 0 ? std : null,
     };
   });
 }
 
 /**
- * The loops of a repeat, in order: each shot's Q, and the mean and sample
- * deviation so far — **the service's own**, carried on every `StepDone` as
- * `q_mean`/`q_std` over every loop that ran, not recomputed here from the
- * shots this client happens to hold. A long scan outgrows the ring, so a
- * console that opened late or was dropped holds a *tail* of the shots, and a
- * mean summed from that tail would be a statistic of the replay rather than
- * of the run (`ui-rules` §6: render, never re-derive). `q_std` is `0` until
- * there are two loops, which is *not recorded*, so it reads as `null`.
+ * The repeat series uses each shot's Q and service-provided running mean and sample
+ * deviation. A replay can contain only a tail, so recomputing from retained shots
+ * would describe the replay rather than the run. `q_std` is zero before two loops and
+ * renders as absent uncertainty (`docs/ui-rules.md` §2).
  */
 export function loopSeries(node) {
   const shots = (node.shots || []).slice().sort((a, b) => (a.loop - b.loop) || (a.index - b.index));
@@ -115,7 +82,9 @@ export function loopSeries(node) {
   return out;
 }
 
-/** `Q / 1e-12 C`: one power of ten for the axis, chosen from the data, never per value. */
+/**
+ * `Q / 1e-12 C`: one power of ten for the axis, chosen from the data, never per value.
+ */
 export function chargeUnit(values) {
   let peak = 0;
   for (const v of values) if (finite(v) && Math.abs(v) > peak) peak = Math.abs(v);
@@ -123,7 +92,7 @@ export function chargeUnit(values) {
   return { factor: 10 ** e, label: `Q / 1e${e} C` };
 }
 
-/** How the run this node belongs to ended, for the caption on a truncated one. */
+/** The caption uses the run outcome to identify truncation. */
 function ending(record, node) {
   const state = record && record.state;
   if (node && node.outcome && node.outcome !== 'ok') return node.outcome;
@@ -133,8 +102,8 @@ function ending(record, node) {
 }
 
 /**
- * The chart model: one panel, and the switch. `found` is `{record, node}` as
- * `results.runFor` answers it.
+ * The model draws one panel and selects repeat or sweep presentation. `found` has the
+ * `{record, node}` shape returned by `results.runFor`.
  */
 export function loopsModel(found, options = {}) {
   const { width = 560, height = null } = options;
@@ -146,9 +115,9 @@ export function loopsModel(found, options = {}) {
   if (!node) {
     return {
       key: 'loops',
-      // Named `Q`, not `Q(axis)` or `Q per loop`: which of the two this panel
-      // becomes is `ui-rules` §4's visible switch, and it is decided by the
-      // axis the run resolves — not by this slot, which stands for both.
+      // The empty panel is named Q because the resolved axis determines whether it
+      // becomes Q per loop or Q(axis). The measured chart must make that switch
+      // visible (`docs/ui-rules.md` §4).
       absent: {
         text: 'no run yet — Q lands here, per loop or along the axis',
         detail: null,
@@ -198,12 +167,10 @@ function repeatModel(common, panel, node, counts, options) {
   const where = axis.name
     ? `${axis.name} ${fmt.sig(axis.start, 4)}${unit ? ' ' + unit : ''} = stop`
     : 'start = stop';
-  // Where the acquired loops end, by **loop number**. A long repeat outgrows
-  // the ring, so `series` can be loops 81–90 of a hundred: measured by its
-  // length the chart would hatch from loop 11 and cross out ten loops it is
-  // drawing. `loopsDone` is the run's own count, which never moves backwards
-  // and is hydrated from `GET /runs/{id}/data`; the last shot held names the
-  // loop it belongs to. The larger of the two is the boundary.
+  // The acquired boundary uses loop numbers rather than retained-series length. A
+  // replay holding loops 81–90 must not hatch from loop 11. `loopsDone` is hydrated
+  // from the run record and cannot decrease; the last retained shot also supplies a
+  // loop number. The larger value sets the boundary.
   const firstLoop = series.length ? series[0].loop : 1;
   const lastLoop = series.length ? series[series.length - 1].loop : 0;
   const done = Math.max(lastLoop, counts.loopsDone);
@@ -225,7 +192,7 @@ function repeatModel(common, panel, node, counts, options) {
   const marks = [];
   const rules = [];
   if (counts.ended && counts.loopsRequested && done < counts.loopsRequested) {
-    // The loops that never ran, as the space they would have filled.
+    // Hatching retains the space requested for unacquired loops.
     const x0 = X(done + 0.5);
     shades.push({ x: x0, w: rect.x + rect.w - x0, hatch: true, colour: 'rule', opacity: 1 });
     rules.push({ x1: x0, colour: 'accent', width: 1.5 });
@@ -404,7 +371,7 @@ function sweepModel(common, panel, node, counts, options) {
   };
 }
 
-/** The point the newest shot landed on, while the node is still running. */
+/** The helper locates the latest shot's point while its node runs. */
 function currentPoint(node, points) {
   if (node.outcome) return null;
   const last = node.lastShot;
@@ -431,7 +398,8 @@ function readoutSweep(points, counts, withSigma) {
 function notesFor(counts, loopsDone, node, { repeat, withSigma = 0, points = 0, firstLoop = 1 }) {
   const out = [];
   if (counts.loopsRequested) {
-    // `ui-rules` §9: "100 loops requested, 20 completed."
+    // Truncated-run captions retain requested and completed loop counts
+    // (`docs/ui-rules.md` §9).
     out.push(`${counts.loopsRequested} loop${counts.loopsRequested === 1 ? '' : 's'} requested, ${loopsDone} completed`
       + (counts.ended ? ` · ${counts.ended}` : ''));
   }
@@ -439,8 +407,8 @@ function notesFor(counts, loopsDone, node, { repeat, withSigma = 0, points = 0, 
     out.push(`σ_Q needs two loops at a point: ${points - withSigma} of ${points} still carry one`);
   }
   if (repeat && firstLoop > 1) {
-    // The chart is a suffix, and says so rather than letting the empty space
-    // before the first dot read as loops that never ran.
+    // The caption identifies a retained suffix so the space before its first point
+    // does not imply unacquired loops.
     out.push(`loops 1 – ${firstLoop - 1} ran before this console's view of them: the ring keeps the last shots, `
       + 'so their Q is not drawn — the mean and σ still cover every loop');
   }

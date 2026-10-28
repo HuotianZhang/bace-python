@@ -1,51 +1,17 @@
-// What is mounted — the session's `[sample]` block, and the way to type it.
-//
-// The one finding in `docs/history/ux-screening.md` whose cost was permanent. Until
-// `PUT /session/sample` existed the block came only from `run.toml`, which is
-// empty on a fresh checkout, and the only way to fill it was to edit the file
-// and restart the process that owns every instrument. So an operator who
-// mounted a device and started measuring filed every run of that session under
-// a name with no device in it — and the folder name *is* the record
-// (`docs/history/naming-plan.md`), which cannot be repaired afterwards without
-// renaming folders that other files point at. The top bar knew: it said
-// `no sample named`, and offered nothing.
-//
-// Three things this has to get right, and none of them is the input box:
-//
-//   * **Show the consequence, not the field.** Three of these five go into
-//     every folder name this session writes, in this order, and a fourth goes
-//     in as a slug. So the panel draws the stem the next run will be filed
-//     under — `s4_PTQ10IT4F_pxa_…` — and the operator is typing a filename,
-//     which is what they are actually doing.
-//   * **Show the reduction, because the name is not always the value.** All
-//     three are slugged into the folder name since 2026-09-05
-//     (`naming-plan.md` §2, brought forward because this panel made the
-//     defect typeable rather than only editable), and kept verbatim in the
-//     record. So a field can be right and still be filed as something else —
-//     `PTQ10:IT-4F` as `PTQ10IT-4F`, `px a` as `px-a`, and, where the limit
-//     bites, `PTQ10IT4F-batch-2026-08-A` and `…-B` as one string. That last
-//     is the one no character rule explains and the one a lab most needs to
-//     learn at the keyboard rather than from the archive, so every reduced
-//     field says what it will be filed as, with the reason and a way to
-//     adopt it.
-//   * **`temperature_k` is not offered.** It is a legal `[sample]` key and the
-//     route takes it, and `run.toml` says in a comment dated 2026-09-04 why
-//     nobody should type it: every recipe said 290, and a run at 220 K was
-//     filed as "290 K, typed". A field here would rebuild that defect with a
-//     nicer surface. The panel says the number is read from the 331 instead.
-//
-// `identityModel` is pure and `ui/tests/identity.test.mjs` holds it down; the
-// DOM is beside it, the same split the rail has.
+// The identity panel edits `[sample]` and previews filing. Anonymous runs lack device
+// identity in folder names, and renaming folders can break references. The panel
+// shows the stem and service-reduced spelling, including character removal and
+// truncation. Distinct long names can collapse to one filename, so reductions include
+// reasons and an action to adopt them. Metadata retains typed values. `temperature_k`
+// is omitted because stale typed values can mislabel runs; the panel identifies
+// controller readings instead. Pure `identityModel` supports tests without a browser.
 
 import { h, keyed } from './dom.js';
 
 /**
- * The five the console offers, in the order the folder name uses them.
- *
- * `doc` is the one sentence `ui-rules` §1 requires of every field — which
- * instrument or file it touches, and what a wrong value produces. `in_name`
- * is whether it reaches the folder name, because that is the difference
- * between a typo you can fix later and one you cannot.
+ * The five fields follow folder-name order. `doc` explains the affected file or
+ * instrument and consequences (`docs/ui-rules.md` §1). `in_name` marks values
+ * affecting persistent paths.
  */
 export const IDENTITY_FIELDS = [
   { name: 'sample', in_name: true, placeholder: 's4',
@@ -61,14 +27,9 @@ export const IDENTITY_FIELDS = [
 ];
 
 /**
- * Why a value is not the string it will be filed as.
- *
- * The *what* comes from the service (`sample_in_name` — `slug()` at
- * `NAME_MAX`, which is what `folder_name()` will actually do); this is only
- * the reason, in the words `naming-plan.md` §"Fields collide" uses. Splitting
- * them that way is deliberate: a second `slug()` in the browser would be a
- * second answer to "what will this be called", and the two would drift on the
- * case nobody tested.
+ * The helper explains filename reductions. The service supplies `sample_in_name`,
+ * including truncation, so the browser cannot produce a conflicting preview through
+ * separate reduction logic.
  */
 const REASONS = [
   [/[<>:"/|?*\\]/, 'a folder name cannot hold that character'],
@@ -78,20 +39,10 @@ const REASONS = [
 ];
 
 /**
- * What a field will be filed as, and why it differs — or `null` when it does
- * not.
- *
- * Until 2026-09-05 nothing reduced these three: `sample`, `material` and
- * `pixel` reached `folder_name()` raw, so `material = "PTQ10:IT-4F"` — the
- * contract's own example — put a colon in a Windows path segment, which fails
- * on the lab PC and passes on Linux (`naming-plan.md` §2). They are slugged
- * now, so nothing here is an error: the value is kept verbatim in the
- * metadata and reduced in the name, exactly as the comment has always been.
- * What the operator needs is to *see* the reduction, and to see it while they
- * are typing rather than in a folder listing afterwards — most of all when
- * the limit bites, because `PTQ10IT4F-batch-2026-08-A` and `…-B` are the
- * same 24 characters and a lab with two batches would otherwise find out from
- * the archive.
+ * The helper shows filename reductions during typing. Colons cannot appear in Windows
+ * path segments. Metadata retains full values; filenames use the service's reduced
+ * spelling. Truncation after character 24 can merge batch names, so the result must
+ * be visible before filing.
  */
 export function nameHazard(value, inName) {
   const text = String(value == null ? '' : value);
@@ -100,8 +51,8 @@ export function nameHazard(value, inName) {
   const reason = REASONS.find(([re]) => re.test(text));
   return {
     filed,
-    // Reduced to nothing: the field drops out of the name altogether, which
-    // is worth saying plainly rather than showing an empty suggestion.
+    // A value reduced to empty disappears from the name. An empty suggestion would
+    // hide that consequence.
     text: filed
       ? (text.length > filed.length && !reason
         ? `too long for a name — filed as` : `filed as`)
@@ -110,7 +61,7 @@ export function nameHazard(value, inName) {
   };
 }
 
-/** `s4 · PTQ10IT4F · pxa`, or null — what the bar's chip has always shown. */
+/** The helper formats bar identity or returns `null` when absent. */
 export function identityOf(sample) {
   if (!sample) return null;
   const parts = [sample.sample, sample.material, sample.pixel].filter(Boolean);
@@ -118,21 +69,16 @@ export function identityOf(sample) {
 }
 
 /**
- * Everything the panel and the chip draw from.
- *
- * `stem` is the folder name the next run starts with, built the way
- * `storage.naming.folder_name` builds it — the three fields that are present,
- * joined by `_`. It is a preview and says so with the ellipsis: what follows
- * is the temperature, the LED level, the V_oc and the stamp, none of which is
- * this panel's.
+ * The model supplies panel and bar content. `stem` joins present device fields with
+ * underscores; its ellipsis marks temperature, LED level, V_oc and timestamp
+ * components determined outside this panel.
  */
 export function identityModel(state) {
   const session = (state && state.session) || {};
   const sample = session.sample || {};
   const file = session.sample_file || {};
-  // What the folder will carry, the service's own reduction. Absent from a
-  // service older than this, in which case a field is shown as typed and the
-  // stem is what that service would have written.
+  // The service supplies filename spelling. Without `sample_in_name`, the panel shows
+  // the typed fields used by the responding service.
   const inName = session.sample_in_name || sample;
   const rows = IDENTITY_FIELDS.map((spec) => {
     const value = sample[spec.name] == null ? '' : String(sample[spec.name]);
@@ -141,28 +87,29 @@ export function identityModel(state) {
       ...spec,
       value,
       file: was,
-      // Typed here rather than opened with. The way back is a `null`, which
-      // the service resolves to the file's value — so the reset is offered on
-      // exactly the rows where it would change something.
+      // A `null` reset restores the file value. Only edits differing from it need a
+      // reset (`docs/service-contract.md` §3a).
       typed: value !== was,
       hazard: spec.in_name === true ? nameHazard(value, inName[spec.name]) : null,
     };
   });
-  // The chip is the identity as recorded; the stem is the identity as the
-  // folder will spell it, which after `slug()` is not always the same string.
+  // The bar shows recorded identity; the stem shows reduced filename spelling. They
+  // can differ.
   const named = identityOf(sample);
   const stem = [inName.sample, inName.material, inName.pixel].filter(Boolean).join('_');
   return {
     rows,
     named,
     chip: named || 'no sample named',
-    /** No device named at all: the state the console used to have no answer for. */
+    /** The predicate identifies a session without a named device. */
     unnamed: !named,
     stem,
-    // `folder_name` starts with the temperature when there is no identity, so
-    // an unnamed session's folders open on `290K_…` and carry no device.
+    // Without identity fields, filenames begin with temperature and carry no device
+    // name.
     preview: stem ? `${stem}_…` : '290K_… — no device in the name',
-    /** The fields the folder name will not spell the way they were typed. */
+    /**
+     * The helper lists fields whose filename spelling differs from their typed value.
+     */
     hazards: rows.filter((r) => r.hazard),
   };
 }
@@ -170,15 +117,10 @@ export function identityModel(state) {
 // -- the DOM ----------------------------------------------------------------
 
 /**
- * The panel, into `el`. `onSet(name, value)` PUTs one key — `null` for the
- * way back — and `onClose` shuts it.
- *
- * Keyed on the model plus the answer: an edit committing must not rebuild the
- * field the caret is still in, which on this panel means the row the operator
- * just tabbed out of keeps its element while the four beside it redraw. The
- * whole panel is one key because the rows are five inputs and a `PUT` answers
- * in a millisecond on localhost — the measured case `views/bench.js` guards
- * against is a scan's worth of frames, and nothing here moves with a run.
+ * The renderer mounts the panel in `el`. `onSet(name, value)` edits one key; `null`
+ * resets it and `onClose` closes the panel. Model and response keys preserve the
+ * active input. Five fields and a localhost response of about 1 ms, measured on this
+ * bench, permit one panel key. Run frames do not update it.
  */
 export function renderIdentity(el, state, { open, onSet, onClose, status = null } = {}) {
   const model = identityModel(state);
@@ -197,15 +139,13 @@ export function renderIdentity(el, state, { open, onSet, onClose, status = null 
       h('button.btng', { onclick: () => onClose && onClose() }, 'close')),
     h('div.id-rows', model.rows.map((row) => identityRow(row, onSet))),
     h('div.id-foot',
-      // "starts", not "is": the temperature, the LED level, the V_oc, the
-      // offset flag and a slug of the comment follow, and the ellipsis is all
-      // of them. A label promising the whole name would be wrong by five
-      // fields.
+      // The preview is a stem: temperature, LED level, V_oc, baseline flag and
+      // comment slug follow. Its ellipsis must not imply a complete filename.
       h('span.l', 'next folder starts'),
       h('span', { class: 'id-stem' + (model.stem ? '' : ' absent'), text: model.preview }),
       h('span', { style: { flex: '1' } }),
-      // The one legal `[sample]` key deliberately not offered, and why —
-      // `run.toml`'s own comment, on the screen that would otherwise reopen it.
+      // The panel explains why it omits `temperature_k`, avoiding a stale temperature
+      // claim.
       h('span.cs', 'temperature_k is not typed here: a bench with a 331 reads the '
         + 'controller as each node starts, and a typed 290 filed a 220 K run as 290 K once already')),
   ]);
@@ -242,10 +182,9 @@ function identityRow(row, onSet) {
           h('span', { text: `${hazard.text}` }),
           hazard.filed ? h('b', { text: hazard.filed }) : null,
           hazard.why ? h('i', { text: `— ${hazard.why}` }) : null,
-          // The name as typed is kept in the metadata, so this is not an
-          // error to fix; it is offered because a lab whose two batches
-          // differ after character 24 would otherwise find out from the
-          // archive. One click and the record says what the folder says.
+          // Adopting reduced spelling makes metadata match the folder. It is
+          // optional, but truncation after character 24 can merge otherwise distinct
+          // batches.
           hazard.filed
             ? h('button.link', {
               title: `type ${hazard.filed} instead, so the record and the folder agree`,

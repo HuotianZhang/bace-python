@@ -1,35 +1,11 @@
-// The results tab's models — `docs/ui-plan.md` M6, from R2·3.
-//
-// Everything here is a pure function of what `GET /runs` and `GET /runs/{id}`
-// answer, and nothing else: the tab opens no HDF5 and parses no folder name.
-// That is what `docs/history/naming-plan.md` rule 1 bought — the identity travels
-// with every run (`sample`), the temperature triple and the LED level sit on
-// every module node, and what a node measured (its axis, `q_mean`/`q_std`
-// per point, its curves' metrics, its shot counts) is on the node record
-// whichever process answers. The DOM is in `lib/grid.js`, beside these, the
-// same split the rail and the monitor have.
-//
-// Three rules from R2·3 that the models make true by construction:
-//
-//   * **The partial cell is outlined, never averaged in silently, never
-//     dropped.** A cell whose node ended with fewer shots than it asked for is
-//     a cell with `partial: true`; a cell in the T × LED product with no node
-//     at all is `missing: true` and stays in the grid as the space it would
-//     have filled. Neither is left out of a count without the count saying so.
-//   * **σ_Q = 0 is *not recorded*** (`ui-rules` §2): `fmt.sigmaQ` answers
-//     `null` for it and the legend says `□ σ_Q not recorded · ● σ_Q measured`.
-//   * **Every flag states its reason.** A flag is a sentence in the voice of
-//     `ui-rules` §10 — what happened and what it means for the number on
-//     screen — never a code with a triangle beside it.
-//
-// And two decisions the design pass settled, recorded here because the
-// artboard predates them (`docs/design/README.md`): R2·3 reads a `flags.json`
-// the service never writes, so the flags are built from the record — the run's
-// own verdicts, the node's outcome and counts, the temperature and V_oc
-// provenance; and its `saturation` line is the corrected wording — the
-// digitiser's verdict on each shot is the service's judgment, so the line
-// counts the shots the service *flagged*, and says nothing about a shared
-// extreme it judged as nothing.
+// Results models consume `GET /runs` and `GET /runs/{id}` without opening HDF5 or
+// parsing folder names. Records carry identity, temperature provenance, LED level,
+// statistics, curve metrics and shot counts (`docs/service-contract.md` §6). Partial
+// cells remain outlined and missing cells remain hatched in the grid product, with
+// exclusions stated in counts. Zero Q standard deviation denotes unrecorded
+// uncertainty (`docs/ui-rules.md` §2). Flags state reasons derived from verdicts,
+// outcomes, counts and provenance. Saturation counts follow service-flagged shots; a
+// shared extreme alone is not a flag.
 
 import * as fmt from './format.js';
 
@@ -43,14 +19,17 @@ const finite = (v) => typeof v === 'number' && Number.isFinite(v);
 
 // -- identity ---------------------------------------------------------------
 
-/** `s4 · PTQ10:IT-4F · pixel a`, or `null` when nothing was named. */
+/** The helper formats sample identity or returns `null` when unnamed. */
 export function identityOf(sample) {
   if (!sample) return null;
   const parts = [sample.sample, sample.material, sample.pixel ? `pixel ${sample.pixel}` : ''].filter(Boolean);
   return parts.length ? parts.join(' · ') : null;
 }
 
-/** `2026-09-02 15:37`, for a run's row; the session log's `fmt.time` is too fine here. */
+/**
+ * The run row uses minute precision; the session log's `fmt.time` is unnecessarily fine
+ * here.
+ */
 export function stamp(ts) {
   if (!ts) return fmt.ABSENT;
   const d = new Date(ts * 1000);
@@ -72,14 +51,16 @@ export function spanOf(started, finished) {
 
 // -- the run list -----------------------------------------------------------
 
-/** What a row is called: the module for a manual run, the tree's shape for a pipeline. */
+/**
+ * What a row is called: the module for a manual run, the tree's shape for a pipeline.
+ */
 export function runLabel(row) {
   if (!row) return fmt.ABSENT;
   if (row.kind === 'pipeline') return row.tree_summary ? `pipeline · ${row.tree_summary}` : 'pipeline';
   return row.module || row.kind || 'run';
 }
 
-/** The loudness of a row's state (`ui-rules` §3): a failure is the one alert. */
+/** Row severity reserves alert for failure (`docs/ui-rules.md` §3). */
 export function stateLevel(state) {
   if (state === 'failed' || state === 'blocked') return 'crit';
   if (state === 'aborted' || state === 'stopped' || state === 'cancelled') return 'warn';
@@ -88,15 +69,9 @@ export function stateLevel(state) {
 }
 
 /**
- * The rows of `GET /runs?session=all`, grouped by session, newest first —
- * which is the order the service answers in, kept rather than re-sorted. A
- * session is a bench day, and the identity is per run: a session whose runs
- * were queued under two devices shows two identities in one group, which is
- * exactly the case rule 1 was written for.
- *
- * `live` is the store's view of this session's runs — a run still holding the
- * worker reads its state off the stream rather than off an index that was
- * fetched a minute ago.
+ * The helper groups index rows by session in service order, most recent first.
+ * Identity belongs to each run, so a session can show multiple devices. `live`
+ * supplies active run state from the stream rather than a stale index response.
  */
 export function runGroups(rows, { live = {} } = {}) {
   const groups = [];
@@ -124,9 +99,9 @@ export function runGroups(rows, { live = {} } = {}) {
       identity,
       voc: vocRange(row),
       folder: row.folder || (row.folders && row.folders[0]) || null,
-      // `node_count_done` is module *runs* -- eight on a 2 x 2 grid of two
-      // modules -- and `node_count` is the tree's leaves, two; the row says
-      // the first, and never "8/2".
+      // `node_count_done` counts module executions; `node_count` counts tree leaves.
+      // Two modules on a 2 × 2 grid give eight executions and two leaves, so these
+      // values cannot form a completed/requested ratio.
       nodes: row.node_count_done ?? null,
     });
   }
@@ -144,33 +119,29 @@ function vocRange(row) {
 // -- the record's nodes -----------------------------------------------------
 
 /**
- * The module nodes of a record, in the order they ran. `nodes` is keyed by
- * path in insertion order, which is arrival order from both sources; the
- * timestamps are the tie-break for a record assembled some other way.
+ * The helper orders module nodes by execution. Insertion order reflects arrival from
+ * both record sources; timestamps break ties for records assembled differently.
  */
 export function moduleNodes(record) {
   const nodes = Object.values((record && record.nodes) || {}).filter((n) => n && n.module);
   return nodes.sort((a, b) => (a.started_at || a.finished_at || 0) - (b.started_at || b.finished_at || 0));
 }
 
-/** `partial`: it asked for more than it kept. Never a state, a count. */
+/** `partial` compares requested and retained counts rather than run state. */
 export function isPartial(node) {
   return finite(node.kept) && finite(node.requested) && node.kept < node.requested;
 }
 
-/** Whether the node's statistics have a σ behind them anywhere: zero is *not recorded*. */
+/** The predicate identifies recorded Q uncertainty; zero denotes absence. */
 export function sigmaRecorded(node) {
   return (node.q_std || []).some((s) => finite(s) && s !== 0);
 }
 
 /**
- * The one number a cell shows, and where on the axis it comes from.
- *
- * A `bace` at V_oc has a zero-width axis — one point, and the number is its
- * mean. A swept axis has many, and the cell shows the point nearest the V_oc
- * it was centred on, saying so; without a V_oc it shows the middle point and
- * says that instead. Never an average over the axis: Q(V_pre) is a curve, and
- * the mean of a curve is nobody's charge.
+ * The cell shows one axis point's mean Q. A zero-width axis has one point. A sweep
+ * uses the point nearest its V_oc, or the middle point without V_oc, and identifies
+ * that choice. Averaging across Q(V_pre) would erase the curve and produce no defined
+ * point measurement.
  */
 export function cellQ(node) {
   const means = node.q_mean || [];
@@ -214,14 +185,10 @@ export const tKey = (k) => (finite(k) ? (Math.round(k * 10) / 10).toFixed(1) : '
 export const ledKey = (v) => (finite(v) ? (Math.round(v * 1000) / 1000).toFixed(3) : 'none');
 
 /**
- * The T × LED grid of a record: one cell per `bace` node, every row and
- * column that occurs, and the cells of the product that never ran kept as
- * `missing`. A record with no grid module at all has `shape: 'none'`; one
- * whose cells all share a temperature (a bench day of manual runs) is still
- * a grid — one row — because a manual result is a result (`ui-rules` §8).
- *
- * Two nodes on one cell — a `bace` run twice at the same T and level — keep
- * both: the cell holds every node, shows the newest, and says how many.
+ * The grid retains missing cells in the product of temperatures and LED levels. No
+ * grid module gives `shape: 'none'`; one temperature still gives one row because
+ * manual results remain results (`docs/ui-rules.md` §8). Repeated nodes at the same
+ * coordinates remain in the cell, which shows the most recent and their count.
  */
 export function gridModel(record) {
   const nodes = moduleNodes(record).filter((n) => GRID_MODULES.has(n.module));
@@ -229,12 +196,11 @@ export function gridModel(record) {
   const rowsBy = new Map();
   const colsBy = new Map();
   const byKey = {};
-  // The axes are what was *asked for*, not only what ran: a pipeline stopped
-  // before any bace at its last temperature has no node at that temperature,
-  // and a row that vanished would make the summary count no missing cell.
+  // Requested axes retain temperatures with no completed `bace` node. Otherwise
+  // stopping early would remove rows and hide missing cells.
   const asked = requestedAxes(record);
   for (const t of asked.temperatures) {
-    // `t` is what was reached, and nothing has been: the setpoint is `asked`.
+    // No temperature is reached for a missing node; `asked` retains its setpoint.
     rowsBy.set(tKey(t), { key: tKey(t), t: null, asked: t, how: 'setpoint', source: '',
       label: fmt.kelvin(t), ran: false });
   }
@@ -243,11 +209,10 @@ export function gridModel(record) {
       label: `led_v ${fmt.volts(v, { decimals: 3 })}`, ran: false });
   }
   for (const node of nodes) {
-    // Which row a node belongs to is the setpoint it ran *under* -- a node
-    // the operator resumed at 280.1 K is the 280 K row's, and the row then
-    // says what was reached and how. The step the service scheduled for
-    // this path says the setpoint; without a schedule (a journal record)
-    // the nearest asked temperature inside the loop's tolerance does.
+    // Nodes group under the requested setpoint, even when confirmed nearby. The
+    // schedule supplies it; without a schedule, the nearest requested temperature
+    // within loop tolerance determines the row. Cells retain confirmed values and
+    // provenance.
     const setpoint = asked.byPath[node.node_path];
     const t = finite(node.temperature_k) ? node.temperature_k : null;
     const askedT = finite(setpoint && setpoint.temperature_k) ? setpoint.temperature_k
@@ -305,17 +270,11 @@ function nearestWithin(values, value, tol) {
 }
 
 /**
- * The temperatures and LED levels the run asked for, from the tree it
- * posted and the schedule the service resolved for it — so the grid's
- * axes exist before, and survive without, a `bace` at every one of them.
- *
- * Nothing is counted here (`docs/ui-plan.md` M5): a range on the tree
- * (`led_start_v … led_step_v`) is read off the schedule's steps, which
- * carry the levels the service made of it; a journal record has no
- * schedule, so for last week's run a range contributes nothing and the
- * axes are the tree's explicit lists plus whatever ran. A temperature
- * *module* is a setpoint too, but only its loop's or the session's typed
- * value is bound on the steps' `detail`, so it is read off the tree.
+ * The helper reads requested axes from the tree and resolved schedule so they survive
+ * missing measurements. Ranges use service-resolved steps rather than local counting.
+ * Journal records lack schedules, so their ranges contribute no inferred levels;
+ * explicit lists and recorded nodes supply the axes. Temperature-module setpoints
+ * come from the tree because step detail can carry only loop or session bindings.
  */
 export function requestedAxes(record) {
   const temperatures = new Set();
@@ -352,7 +311,7 @@ function _moduleOf(step) {
   return String(step.node_path || '').split('/').pop().split('#')[0];
 }
 
-/** One cell from its nodes: the newest node's numbers, and how many there were. */
+/** The cell uses its most recent node's values and retains the total node count. */
 function cellOf(nodes) {
   const node = nodes[nodes.length - 1];
   const q = cellQ(node);
@@ -374,10 +333,9 @@ function cellOf(nodes) {
 // -- the summary strip ------------------------------------------------------
 
 /**
- * R2·3's four lines, each a sentence about the whole run: the span of Q, where
- * σ was recorded, whether the meter answered, and how many cells are not what
- * they were asked to be. A partial cell is excluded from the span *and the
- * line says so* — that is what "never averaged in silently" means here.
+ * The summary reports Q span, uncertainty, power availability and incomplete cells.
+ * Partial cells are excluded from the span and named as excluded so it cannot imply a
+ * complete run.
  */
 export function summaryModel(grid, record) {
   const present = grid.cells.filter((c) => !c.missing);
@@ -459,10 +417,8 @@ export function cellName(grid, cell) {
 // -- the temperature and V_oc, in words --------------------------------------
 
 /**
- * The temperature triple as a sentence — `docs/history/ui-kickoff.md`: *how* alone
- * does not separate the pause the operator typed a number into from the one
- * that ended without one, so both are rendered, and a `simulated` source
- * never reads as a measurement.
+ * Temperature text includes method and value. An unanswered pause must differ from a
+ * confirmed temperature; a simulated source must never read as a measurement.
  */
 export function temperatureText(node) {
   const k = node.temperature_k;
@@ -476,8 +432,8 @@ export function temperatureText(node) {
     case 'setpoint':
       return { text: `${value} · requested, not reached: nothing read back`, level: 'warn', measured: false };
     case 'read':
-      // Nobody asked for a setpoint: the controller was read once as the
-      // node started -- the bench as found, a measurement of it.
+      // Without a requested setpoint, the value is controller read-back at node
+      // start.
       if (source === 'simulated') return { text: `${value} · read on the simulated 331 as the node started, not a measurement`, level: 'warn', measured: false };
       return { text: `${value} · read on the ${source || 'controller'} as the node started; no setpoint was asked for`, level: 'ok', measured: true };
     case 'settled':
@@ -492,7 +448,10 @@ export function temperatureText(node) {
   }
 }
 
-/** Which measurement supplied the V_oc, and at what LED level (`ui-rules` §6). */
+/**
+ * V_oc provenance includes its source measurement and LED level (`docs/ui-rules.md`
+ * §6).
+ */
 export function vocText(node) {
   if (!finite(node.voc)) return { text: 'none', level: node.module === 'bace' ? 'warn' : '' };
   const how = node.voc_how || '';
@@ -509,10 +468,8 @@ export function vocText(node) {
 // -- the flags --------------------------------------------------------------
 
 /**
- * Every flag on a node, each with its reason — R2·3's list, built from the
- * record because there is no `flags.json`. Order is loudness: what stops the
- * number meaning anything first, then what qualifies it, then what is merely
- * on record.
+ * Node flags include their reasons. Ordering puts invalidating conditions first,
+ * qualifications next and informational records last.
  */
 export function flagsFor(record, node) {
   const flags = [];
@@ -550,11 +507,9 @@ export function flagsFor(record, node) {
   if (node.offset_corrected === false) {
     flags.push({ level: 'info', code: 'baseline', text: 'baseline not subtracted (offset_correct = false) · the dark trace is taken as it came' });
   }
-  // The run's own verdicts, where they apply: the whole run (no path), this
-  // node, or a loop above it -- `temperature.not-wired` is said on the
-  // temperature node and is true of every cell under it. `info` stays: the
-  // `trigger.auto` one is `ui-rules` §9's cable-out case, worth saying beside
-  // a charge near zero.
+  // Verdicts apply to the run, node or containing loop. Informational `trigger.auto`
+  // remains visible because disconnected sync can produce plausible near-zero Q
+  // (`docs/ui-rules.md` §9).
   for (const verdict of (record && record.verdicts) || []) {
     if (!['warn', 'crit', 'info'].includes(verdict.level)) continue;
     if (!verdictApplies(verdict.node_path || '', node.node_path || '')) continue;
@@ -575,10 +530,8 @@ export function verdictApplies(verdictPath, nodePath) {
 // -- provenance -------------------------------------------------------------
 
 /**
- * `resolved from: run.toml 17 · last-used 2 · inherited 2 (led_v, voc) ·
- * edited 1 (n_loops)` — the layers of `params_as_executed[path]`, which a run
- * of this process carries and a journal record does not; `null` then, and the
- * screen says the layers were not kept rather than counting nothing.
+ * The helper counts layers in `params_as_executed[path]`. Journal records omit them,
+ * so `null` means unavailable provenance rather than zero contributing layers.
  */
 export function provenanceSummary(params) {
   if (!params || typeof params !== 'object') return null;
@@ -601,12 +554,10 @@ export function provenanceSummary(params) {
 }
 
 /**
- * The overrides a cell can be run again with, as a manual run of its module:
- * what the tree typed on the node (`edited`) plus what the loop gave it
- * (`inherited`: the level, the low level, the settle) — a manual bace outside
- * any loop owns all three itself. Never the V_oc: the bench's own is the
- * source for a manual run, and a number measured at another hour under
- * another lamp level is not a parameter.
+ * Re-queue carries node overrides and loop-supplied LED level, low level and settle
+ * time into a manual run, which owns them outside a loop. It excludes V_oc: manual
+ * runs use the bench source at the applicable illumination rather than a copied
+ * measurement.
  */
 export function rerunParams(params) {
   const out = {};
@@ -621,7 +572,9 @@ export function rerunParams(params) {
 
 // -- export -----------------------------------------------------------------
 
-/** The grid as CSV: one row per cell, the numbers at full precision, the absences empty. */
+/**
+ * The grid as CSV: one row per cell, the numbers at full precision, the absences empty.
+ */
 export function csvOf(grid, record) {
   const head = ['run_id', 'node_path', 'temperature_k', 'temperature_how', 'temperature_source',
     'led_v', 'voc_v', 'voc_how', 'q_c', 'sigma_q_c', 'kept', 'requested', 'outcome', 'folder'];

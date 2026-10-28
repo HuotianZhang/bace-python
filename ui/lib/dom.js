@@ -1,8 +1,10 @@
-// The whole DOM layer. There is no framework and no build step: the lab PC
-// has neither, and `docs/ui-plan.md` says so. What a framework would give us
-// here is `h()` and a place to put a subscription, so that is what this is.
+// The DOM helpers support a console with no framework or build step, allowing direct
+// use on the lab PC. `h` constructs elements and callers own subscriptions.
 
-/** `h('div.card', {onclick}, ...children)` — tag[.class][#id], attrs, children. */
+/**
+ * The element constructor accepts selector, attributes and children through
+ * `h('div.card', {onclick}, ...children)`.
+ */
 export function h(spec, attrs, ...children) {
   const [tag, ...rest] = String(spec).split(/(?=[.#])/);
   const el = document.createElement(tag || 'div');
@@ -36,37 +38,21 @@ export function append(el, children) {
   return el;
 }
 
-/** Replace an element's children in one go. */
+/** The helper replaces an element's children together. */
 export function fill(el, ...children) {
   el.textContent = '';
   return append(el, children);
 }
 
 /**
- * Rebuild `el` only when `key` differs from the key it was last built from.
- *
- * The store notifies on every batch of frames, and a `--sim --fast` scan
- * batches one per animation frame for the length of the run. Every renderer in
- * the shell is a pure function of the state, so without this the rail, the
- * chips and the strip are torn down and rebuilt sixty times a second to draw
- * the characters they already had — measured over one 21 x 60 scan: 99 421
- * elements built for a rail that changed twice.
- *
- * That is not only waste. A rebuilt element is a *different* element: it drops
- * the operator's text selection mid-copy, and from M2 it would take the focus
- * and the caret out of a parameter field the moment a frame arrived. So the
- * rule is the one the models already make possible — **the model is the render
- * key**: build it (it is cheap and pure), and touch the DOM only where it
- * differs. Nothing has to remember to invalidate anything, which is the one
- * thing a hand-maintained dirty flag always gets wrong.
- *
- * **`keyed` owns the element's children.** The key it compares lives on the
- * element, so anything else that adds, removes or replaces a child behind its
- * back leaves that key describing content which is no longer there — and the
- * next call with a matching key does nothing, for ever. `views/bench.js`
- * manages its six cards itself, one at a time, so that a rebuild of one does
- * not blur a field in another; a container managed that way must not also be
- * handed to `keyed`, and that mistake shipped once before this paragraph did.
+ * `keyed` rebuilds an element only when its model changes. Stream batches can arrive
+ * every animation frame; rebuilding unchanged content wastes work and destroys text
+ * selection, focus and the caret. A 21 × 60 scan measured on this bench creates 99
+ * 421 rail elements without this guard even though the rail changes twice. Pure
+ * models serve as render keys without manual invalidation. `keyed` exclusively owns
+ * its element's children: external mutations leave the cached key describing absent
+ * content, so a matching call cannot restore it. Independently managed card
+ * containers must never also use `keyed`.
  */
 export function keyed(el, key, build) {
   if (el.__key === key) return false;

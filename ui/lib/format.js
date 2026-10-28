@@ -1,12 +1,8 @@
-// Rendering numbers, per `docs/ui-rules.md` §2 — significant figures carry
-// meaning, because they are what the measurement resolves, and two zeros in
-// the archive are not zeros at all.
-//
-// Every function here returns a string for the screen, and returns the em dash
-// for an absence. None of them invents a value: a formatter that turned `null`
-// into `0.0000` would be the same lie the two zeros are.
+// Formatters use measurement precision and render missing values as an em dash
+// (`docs/ui-rules.md` §2). Sentinel zeros must not become measured zeros, and `null`
+// must not become a numeric value.
 
-export const ABSENT = '—';           // an em dash: nothing was recorded
+export const ABSENT = '—';           // The em dash denotes an unrecorded value.
 
 /** Significant figures, in fixed or scientific notation as the magnitude asks. */
 export function sig(value, figures) {
@@ -32,33 +28,25 @@ export function charge(q, { unit = true } = {}) {
 }
 
 /**
- * σ_Q. **A zero is not a zero**: most of the 9 x 5 grid carries `0.000000`
- * because the loops were never recorded, and a zero-length error bar drawn as
- * a bare dot is a lie (`docs/ui-rules.md` §2). So this answers `null` for it,
- * and the caller renders the absence — the legend's hollow marker, not a dot.
+ * The formatter treats zero Q standard deviation as unrecorded uncertainty
+ * (`docs/ui-rules.md` §2). It returns `null` so the caller uses the hollow marker
+ * rather than a zero-length error bar that implies a measurement.
  */
 export function sigmaQ(std) {
   return (std === null || std === undefined || std === 0) ? null : scientific(std, 3);
 }
 
-/** V_oc and every other potential: four decimals. */
+/** Potential values, including V_oc, use four decimal places. */
 export function volts(v, { decimals = 4, unit = true } = {}) {
   if (v === null || v === undefined || Number.isNaN(v)) return ABSENT;
   return v.toFixed(decimals) + (unit ? ' V' : '');
 }
 
 /**
- * Current density to 3 significant figures, in **mA/cm²** — the unit the
- * service sends and the only one J–V is shown in anywhere in this project.
- * `JVCurveDone.density` is `current × 1000 / pixel_area_cm2`
- * (`experiment.jv.current_density`), so there is nothing to convert here and,
- * more to the point, nothing to choose: an SI prefix picked per value printed
- * one sweep as `20.0 mA/cm²` at one end and `1.90 nA/cm²` at the other, which
- * is a column no reader can compare down and an axis nobody can label.
- *
- * `pixel_area_cm2 = 0` means there is no density at all — the service sends
- * `null` and the caller reports amps instead, rather than defaulting to 1 cm²
- * and silently mislabelling A as mA/cm² (`docs/ui-rules.md` §6).
+ * Current density uses three significant figures in mA/cm², the service's wire unit.
+ * No conversion or per-value SI prefix applies, so a column and axis keep one
+ * comparable unit (`docs/service-contract.md` §6). Without area, the service sends
+ * `null` and the caller reports A rather than assuming 1 cm² (`docs/ui-rules.md` §6).
  */
 export function density(j, { unit = true } = {}) {
   if (j === null || j === undefined || Number.isNaN(j)) return ABSENT;
@@ -66,9 +54,8 @@ export function density(j, { unit = true } = {}) {
 }
 
 /**
- * A current, prefixed where it is natural: `50.0 mA`, `1.20 µA`. The
- * compliance the rail shows is a ceiling on what a 2400 may push into a small
- * cell (`docs/ui-rules.md` §6), so it is never rendered in bare amps.
+ * The current formatter uses readable SI prefixes. Compliance is the source-meter's
+ * ceiling and must remain legible beside the field (`docs/ui-rules.md` §6).
  */
 export function amps(a) {
   if (a === null || a === undefined || Number.isNaN(a)) return ABSENT;
@@ -77,16 +64,16 @@ export function amps(a) {
   return sig(value, 3) + ' ' + prefix + 'A';
 }
 
-/** Temperature to one decimal. */
+/** Temperature uses one decimal place. */
 export function kelvin(k, { unit = true } = {}) {
   if (k === null || k === undefined || Number.isNaN(k)) return ABSENT;
   return k.toFixed(1) + (unit ? ' K' : '');
 }
 
 /**
- * The power meter's reading, in **watts at the meter**. Never mW/cm²: the
- * beam-splitter/area factor is not recoverable, so an irradiance here would be
- * a number that looks calibrated and is not (`docs/ui-rules.md` §2).
+ * Power is watts at the meter. The beam-splitter and area factor is unavailable, so
+ * reporting irradiance would imply an unsupported calibration (`docs/ui-rules.md`
+ * §2).
  */
 export function intensity(watts) {
   if (watts === null || watts === undefined || Number.isNaN(watts)) return ABSENT;
@@ -123,7 +110,7 @@ export function clock(ts) {
   return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
 }
 
-/** `20260902_153722` -> `15:37:22`, for the session log. */
+/** The formatter extracts the session's time of day from its timestamp identifier. */
 export function time(ts) {
   if (!ts) return ABSENT;
   const d = new Date(ts * 1000);
@@ -131,16 +118,18 @@ export function time(ts) {
 }
 
 /**
- * The slash-unit convention the rest of the project uses: `V_pre / V`.
- * The label is the **real parameter name** — the operator already knows
- * `v_pre` and `n_averages`, and a prettier synonym is a second vocabulary
- * to learn (`docs/ui-rules.md` §1).
+ * Axis labels use the parameter name and slash-unit convention, such as V_pre / V. A
+ * second display vocabulary would make identifiers harder to recognize
+ * (`docs/ui-rules.md` §1).
  */
 export function label(name, unit) {
   return unit ? `${name} / ${unit}` : name;
 }
 
-/** `100 loops requested, 20 completed` — a truncated run is normal (§9). */
+/**
+ * The formatter reports requested and completed loops for truncated runs
+ * (`docs/ui-rules.md` §9).
+ */
 export function keptOf(kept, requested) {
   if (kept === null || kept === undefined) return ABSENT;
   if (requested === null || requested === undefined) return String(kept);
@@ -148,17 +137,9 @@ export function keptOf(kept, requested) {
 }
 
 /**
- * `1 folder`, `4 folders` — a count and the thing it counts.
- *
- * The schedule footer said "writes 1 folders" (#42), and it was not alone:
- * every counter on the pipeline tab was a template literal with a hard `s`
- * on the end. A count of one is the ordinary case for most of them — one
- * module, one level, one shot — so it is not a corner worth spelling out
- * inline eight times.
- *
- * English, and only where English already agrees with itself: the irregular
- * plurals this console needs are none, so the rule is the `s`, with `many`
- * there for a word that would not take it.
+ * The helper formats a count with its singular or plural noun. One module, level or
+ * shot is a common case, so shared handling avoids repeated plural rules. English
+ * regular plurals append s; `many` permits a different plural.
  */
 export function plural(n, one, many = `${one}s`) {
   return `${n} ${Math.abs(n) === 1 ? one : many}`;

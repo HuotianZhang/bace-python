@@ -1,7 +1,5 @@
-// The hash as the console reads it — `#/bench?module=bace` is the route
-// `bench` with the query `{module: 'bace'}`. One place, so a link written on
-// the pipeline tab and the router that answers it cannot disagree about the
-// shape.
+// Shared hash parsing keeps pipeline links and router queries consistent.
+// `#/bench?module=bace` resolves to bench with a module query.
 
 /** `{route, query}` from a location hash. Unknown or empty hash → route ''. */
 export function parseHash(hash) {
@@ -22,19 +20,10 @@ export function benchHash(module) {
 }
 
 /**
- * Take the mounted view down and put the next one up.
- *
- * The teardown is wrapped because a `dispose` that throws must not stop the
- * swap, and one did: `views/bench.js` cleared a timer under the name
- * `views/pipeline.js` gives its own, which in a module is a `ReferenceError`.
- * It threw out of the router *after* the hash had changed, so every click from
- * the bench to another tab moved the address bar and left the bench on the
- * screen — a console that looked frozen until the page was reloaded, and
- * looked fine from every other tab.
- *
- * The view coming down is gone as far as the operator is concerned; whatever
- * it failed to release is a leak, and a leak is a smaller thing than a tab
- * that does not open.
+ * View swaps catch teardown errors so they cannot block the next tab. The hash
+ * already names the destination; leaving the old view would make navigation appear
+ * frozen. Incomplete cleanup is a leak but must not prevent opening the requested
+ * tab.
  */
 export function swapView(mounted, mount, { onError = viewFailed } = {}) {
   try {

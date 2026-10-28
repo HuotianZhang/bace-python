@@ -1,16 +1,9 @@
-// Q across the grid — R2·3's `plot Q(led_v) per T`, and its transpose.
-//
-// One panel: Q on y, one of the grid's two axes on x, one series per value of
-// the other. A cell's marker is the statement R2·3's legend makes — `● σ_Q
-// measured` with its ±σ bar, `□ σ_Q not recorded` hollow — and a partial
-// cell is drawn in the accent, hollow, with its `kept of requested` beside
-// it: it is on the curve because it was measured, and marked because it is
-// not what was asked for. A cell that never ran is not on the curve at all,
-// and the caption counts it.
-//
-// The series are a sequential ramp (the J–V's, `charts/jv.js`), because the
-// other axis is ordered — nine temperatures, five levels — and five hues that
-// cannot be put in order are not an encoding of an ordered quantity.
+// The grid chart plots Q against LED level or temperature, with one series per value
+// of the other axis. Measured Q uncertainty uses a filled marker and error bar;
+// absent uncertainty uses a hollow square (`docs/ui-rules.md` §2). Partial cells stay
+// visible as hollow accent markers with kept/requested counts. Missing cells have no
+// point and are counted in the caption. A sequential ramp preserves the order of
+// temperatures and LED levels in colour and greyscale.
 
 import * as scale from '../scale.js';
 import * as fmt from '../format.js';
@@ -22,8 +15,8 @@ import { cellName } from '../history.js';
 const finite = (v) => typeof v === 'number' && Number.isFinite(v);
 
 /**
- * `by: 'led'` puts led_v on x with a series per temperature; `by: 'T'` the
- * other way round. Either is the same cells read along the other axis.
+ * `by: 'led'` plots `led_v` with one series per temperature. `by: 'T'` transposes the
+ * same cells.
  */
 export function gridChartModel(grid, { by = 'led', width = 620, height = null } = {}) {
   const present = (grid && grid.cells ? grid.cells : []).filter((c) => !c.missing && finite(c.q));

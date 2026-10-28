@@ -1,48 +1,13 @@
-// The pipeline tab — `docs/ui-plan.md` M5, and R3·3.
-//
-// Two cards: the tree that gets posted, and what the service says it will do
-// with it. Everything on the right-hand side, and every number on the left
-// below the tree itself, comes from one `POST /pipelines/validate` — the
-// checks, the schedule in order, the counters, the cost and the folder. The
-// editor holds the tree; the service holds every conclusion about it.
-//
-// Four decisions, each of them a rule from somewhere:
-//
-//   * **The console validates on every commit, not only on Dry run.** The
-//     bench tab already does this per card (M2: a `jv` with `step_v = 0` left
-//     Start enabled and `/runs` answered 422), and a pipeline has more ways to
-//     be wrong than a card: a V_oc with no source in scope, an LED level under
-//     turn-on, a module inside an illumination loop typing `led_v`. So the
-//     check list, the cost and the counters are never older than the tree.
-//     Measured on the canonical 9 × 5 tree: 110 ms and 340 kB an answer,
-//     nearly all of it the schedule's 90 resolved ParamSets — so the calls are
-//     coalesced (`VALIDATE_MS`) and a commit that lands during one supersedes
-//     it rather than queueing behind it. **Dry run** is the same request made
-//     deliberately: it re-asks and opens the schedule, which is what a Dry run
-//     after a bench read-back is for.
-//   * **Nothing is counted here.** How many levels `1.010 → 1.030 step 0.005`
-//     makes is a rounding question the service settled once and this file must
-//     not answer a second time. Until a validate has answered, a range row
-//     says the range and no count.
-//   * **The schedule is drawn at three scales** (`ui-rules` §5), because the
-//     canonical tree is 198 steps and *step 3 of 198* is the number that
-//     paragraph exists to refuse. Which temperature, which level, how far into
-//     the scan — the same three the monitor draws during the run.
-//   * **The tree is the one thing here that can be lost, so it can be taken
-//     back.** Every value on a bench card is the service's, and the way back
-//     from an edit is the `↺` beside the row; the tree is the client's own
-//     until Start, and three of its controls destroyed work in one click with
-//     nothing offering it back — `✕` takes a node *and everything under it*,
-//     the recipe picker replaces the whole tree, `↺ bench` drops every
-//     override a node types. `change` is already the one funnel every mutation
-//     goes through, so the history hangs off it and covers all of them,
-//     including the two that are not buttons on this screen.
-//   * **A module node's form is the bench's form.** `cardModel` and the field
-//     component from `lib/card.js`, over the ParamSet the *schedule* resolved
-//     for that node — so `led_v` reads as inherited from the illumination
-//     loop, `voc` as derived from the `jv_bace` two nodes earlier, and which
-//     rows sit above the fold is the one table in `lib/fields.js` rather than
-//     a second opinion about what matters.
+// The pipeline editor owns the typed tree; validation supplies checks, resolved
+// schedule, counters, cost and folder (`docs/service-contract.md` §7). Every commit
+// validates so Start reflects missing V_oc, unsafe LED levels and illegal inherited
+// overrides. Calls coalesce: the 9 × 5 tree measures 110 ms and 340 kB per response
+// on this bench, mainly 90 resolved parameter sets. Dry run deliberately rechecks and
+// opens the schedule. Counts use service rounding rather than local expansion.
+// Scheduling separates temperature, LED and scan scales (`docs/ui-rules.md` §5). All
+// mutations use `change` so undo covers subtree removal, recipe replacement and
+// override reset. Node forms share bench field components but use schedule-resolved
+// values and provenance, including inherited LED and derived V_oc.
 
 import { h, fill, keyed } from '../lib/dom.js';
 import * as fmt from '../lib/format.js';
@@ -57,14 +22,10 @@ import { createHistory } from '../lib/undo.js';
 import { benchHash } from '../lib/route.js';
 
 /**
- * How long a burst of edits is collapsed into one validate.
- *
- * A commit is a `change` event or a click, so this is not a keystroke
- * throttle — it is there for the clicks that come in threes (move a node up
- * three places) and for an edit that lands while an answer is in flight. The
- * same shape as `lib/watch.js`'s bench throttle and `lib/results.js`'s redraw
- * one, and for the same reason: 110 ms of service time and a third of a
- * megabyte, per answer.
+ * The interval coalesces committed changes, not keystrokes. Reordering several
+ * positions and edits during validation can share work. Responses measure about 110
+ * ms and a third of a megabyte on this bench, so repeated requests need the same
+ * pending-request discipline as bench refetches and chart redraws.
  */
 const VALIDATE_MS = 250;
 
@@ -74,7 +35,9 @@ export default {
 
   mount(container, { store, api, notify }) {
     // -- the state this view owns ------------------------------------------
-    /** The tree as typed. `null` is a pipeline with no nodes (`ui-rules` §9). */
+    /**
+     * A `null` typed tree represents the empty pipeline state (`docs/ui-rules.md` §9).
+     */
     let typed = null;
     let name = '';
     /** The last answer, and the tree it describes. */
@@ -93,37 +56,30 @@ export default {
     let showAllChecks = false;
     let showFlat = false;
     /**
-     * A Save that would write over an existing recipe, armed.
-     *
-     * The console arms every action that costs the *sample* something — Park
-     * on a busy bench, Abort — and armed nothing that costs the operator their
-     * own work. A recipe is the only thing this screen writes to disk, the
-     * service overwrites `<out>/recipes/<name>.json` without asking
-     * (`app.py: save_pipeline`), and unlike an edit to the tree it is outside
-     * the undo history: the file that was there is gone. So it arms, and
-     * disarms itself six seconds later, exactly as Park does.
+     * Overwriting a recipe needs confirmation because the service replaces its file
+     * and undo cannot recover it. Arming lasts six seconds, matching Park's
+     * confirmation window.
      */
     let saveArmed = null;
     let saveArmedTimer = null;
     let recipes = [];
     /**
-     * The recipe the tree was reopened from, until the operator dismisses
-     * the note or reopens another. A recipe is an instance of the bench: the
-     * file records the bench values it was saved with, and while any of them
-     * has moved since, the note under the name row says which and offers to
-     * put them back. Nothing else changes — Start still runs with the bench
-     * as it is, which is what it always did; now it is visible.
+     * `loaded` retains the opened recipe for bench comparison. Its note lists
+     * differing values and offers restoration. Start still uses the current bench, so
+     * the comparison must make any changed execution visible
+     * (`docs/service-contract.md` §7).
      */
     let loaded = null;
     /**
-     * The way back — `lib/undo.js`. It holds whole snapshots rather than
-     * inverse operations because the states are small JSON and the operations
-     * are not all invertible: `↺ bench` drops an unknown number of overrides
-     * and `open recipe` replaces everything, and an inverse for each is a
-     * second implementation of the tree that can disagree with the first.
+     * Undo retains whole snapshots because tree states are small JSON and operations
+     * such as clearing overrides or opening a recipe are not invertible.
+     * Per-operation inverses would duplicate mutation logic.
      */
     const history = createHistory();
-    /** Everything a mutation can move, so undo restores the screen and not only the tree. */
+    /**
+     * Undo snapshots include every mutable view value so restoration covers selection
+     * and recipe identity as well as tree structure.
+     */
     const snapshot = () => ({ typed, name, selected, loaded });
 
     const body = h('div.pipe');
@@ -135,22 +91,19 @@ export default {
     const scheduleEl = h('div.card.pipe-col');
     fill(body, structureEl, scheduleEl);
 
-    // Sections, keyed apart: an edit to the tree must not rebuild the schedule
-    // chart, and an answer arriving must not take the caret out of a field
-    // the operator is still typing in (`dom.keyed`, and M2's finding).
+    // Separate section keys prevent tree edits from rebuilding schedule charts and
+    // validation responses from replacing fields while the operator types.
     const headEl = h('div.ch');
     const treeEl = h('div.tree');
     const nodeEl = h('div.nodeform');
     const valuesEl = h('div.vlists');
     const costEl = h('div.costs');
     const checksEl = h('div.checks');
-    // The drift note stays in the flow; it is a reading, and `docs/ui-rules.md`
-    // lets the bar pin a control and not a reading.
+    // The drift reading remains in flow. Only controls belong in a pinned bar
+    // (`docs/ui-rules.md` §1).
     const noteEl = h('div.pipe-note');
-    // The action row: what the run will be called, and the buttons that act on
-    // it. It is the card body's own child rather than a nested box because a
-    // sticky box may only travel inside its containing block, and this one has
-    // to rise the whole panel.
+    // The action row is a direct card-body child so sticky positioning can span the
+    // panel. A nested containing block would restrict its travel.
     const actionsBarEl = h('div.pipe-actions-bar');
     fill(structureEl, headEl,
       h('div.cb', treeEl, nodeEl, valuesEl, h('div.hr'), costEl, h('div.hr'), checksEl, noteEl, actionsBarEl));
@@ -167,13 +120,10 @@ export default {
     // -- validate ----------------------------------------------------------
 
     /**
-     * Ask again. `now` skips the coalescing window — the Dry run button and
-     * a bench read-back, both of which are deliberate rather than incidental.
-     *
-     * A request in flight is never awaited by the next one: the tree may have
-     * moved on twice while the first answer was on the wire, and an answer is
-     * discarded unless it still describes the tree on screen. `answered` is
-     * that test, and it is why `Start` can be stale without being wrong.
+     * `now` bypasses coalescing for deliberate Dry run and read-back requests. A
+     * response applies only if `answered` still matches the displayed tree; edits
+     * during an in-flight request must not accept obsolete validation. Stale Start
+     * remains unavailable.
      */
     function revalidate({ now = false } = {}) {
       clearTimeout(timer);
@@ -190,9 +140,8 @@ export default {
           answer = out;
           answered = asked;
         } catch (error) {
-          // A validator that will not answer must not leave a stale `valid`
-          // on screen unlocking Start: what it would have said is unknown,
-          // not absent. The same rule `views/bench.js` applies per card.
+          // Validation failure clears authorization to Start. Unknown checks cannot
+          // preserve a stale valid result.
           answer = { valid: false, checks: [{ level: 'invalid', code: 'validate.unreachable',
             text: error.text || String(error), node_path: '' }], schedule: [], counters: {}, cost: null };
           answered = asked;
@@ -206,19 +155,13 @@ export default {
     }
 
     /**
-     * Every mutation goes through here, so nothing can change the tree quietly
-     * — and, since 2026-09-05, so nothing can change it irrecoverably either.
-     *
-     * `label` names the action for the Undo button, because "undo" alone asks
-     * the operator to remember what they last did; after four clicks and a
-     * look away, they do not. A mutation that leaves the tree byte-identical
-     * records nothing: a `change` from a field re-committed at the same value
-     * is not a step back anybody wants to take.
+     * Every mutation records undo through this function. `label` names the action so
+     * Undo does not require memory of prior clicks. Byte-identical trees add no
+     * history entry because recommitting a value changes nothing.
      */
     function change(next, { select = undefined, label = '', before = null } = {}) {
-      // `before` is for the one caller that has to move `name` and `loaded`
-      // before it can call this — the recipe picker — and would otherwise
-      // record a snapshot already carrying the new recipe's name.
+      // The recipe picker captures `before` ahead of changing `name` and `loaded`;
+      // otherwise undo would retain the replacement recipe's identity.
       if (!tree.sameTree(typed, next)) history.push(before || snapshot(), label);
       typed = next;
       if (select !== undefined) selected = select;
@@ -228,11 +171,8 @@ export default {
     }
 
     /**
-     * Take one step back, or forward. The whole snapshot goes back — the
-     * selection and the recipe the tree was opened from with it — because a
-     * `✕` that cleared the selection and an `open recipe` that replaced the
-     * name both have to undo to the screen the operator was looking at, not
-     * only to the tree they had.
+     * Undo and redo restore the whole snapshot, including selection and recipe
+     * identity, so removing nodes or opening files returns to the same screen state.
      */
     function step(direction) {
       const entry = direction === 'redo' ? history.redo(snapshot()) : history.undo(snapshot());
@@ -245,13 +185,9 @@ export default {
     }
 
     /**
-     * Ctrl/⌘-Z, and Ctrl/⌘-Shift-Z to put it back.
-     *
-     * Not while the caret is in a field: there the browser's own undo is the
-     * one the operator means, and stealing it would take back the whole node
-     * instead of the digit they mistyped. On `window` rather than on the view,
-     * so it works with nothing focused — which after a `✕` is exactly where
-     * the focus is.
+     * Keyboard undo leaves focused fields to browser text undo; stealing it would
+     * reverse a node action instead of a digit. The window listener also works
+     * without focus, including after node deletion.
      */
     function onKey(e) {
       if (e.key !== 'z' && e.key !== 'Z') return;
@@ -267,21 +203,14 @@ export default {
     // -- the model the whole view renders from -----------------------------
 
     /**
-     * Everything derived from the tree and the answer, computed once per
-     * change of either.
-     *
-     * Not per render, because `render` runs on every store notify and the
-     * canonical tree is a 198-step schedule that nests into 9 groups, 45
-     * groups and 90 leaves — walked three more times for the timeline, the
-     * grid and the rows. That is M1's finding at pipeline scale: the work is
-     * pure and cheap *once*, and sixty times a second it is neither.
-     *
-     * The identities are the cache key rather than a stringify, because both
-     * are replaced wholesale by the two functions allowed to move them
-     * (`change` and `revalidate`) and never edited in place.
+     * Derived models recompute only when tree or validation identity changes. A
+     * 198-step schedule nests into 9 groups, 45 subgroups and 90 leaves, then gets
+     * walked for timeline, grid and rows. Repeating that work per frame is
+     * unnecessary. Identity keys are safe because `change` and `revalidate` replace
+     * objects rather than mutate them.
      */
     let memo = null;
-    /** Stamped on each fold, so a renderer can key on "this answer". */
+    /** Answer stamps let fold render keys distinguish revalidation results. */
     let folds = 0;
 
     function derived() {
@@ -289,22 +218,11 @@ export default {
       folds += 1;
       const fresh = Boolean(answer) && tree.sameTree(typed, answered);
       /**
-       * **The schedule keeps describing the previous tree while the next
-       * answer is on the wire, and says so.**
-       *
-       * Blanked instead — which is what the first cut did, for the ~350 ms
-       * between a commit and its answer — the right-hand card read *"no nodes
-       * yet — add a loop or a module"* on a tree with four nodes in it, on
-       * every keystroke that committed. A screen saying something false is
-       * worse than one saying something a moment old, and `stale` is already
-       * on the header, on the check line and on the Start button, which
-       * refuses while it is set.
-       *
-       * The **tree rows** are the exception and stay fresh-only: they match a
-       * node to its schedule entries by counting iterations, so zipped
-       * against a schedule for a tree with a different shape they would put
-       * one node's shots on another node's row. An absent tag for a third of
-       * a second is the right cost for that.
+       * While validation is pending, the schedule retains the prior answer with stale
+       * labels and Start disabled. Blanking it for about 350 ms, measured on this
+       * bench, would falsely show no nodes despite a populated editor. Tree rows use
+       * only matching answers: their iteration-based alignment could otherwise attach
+       * another node's counts to the current row.
        */
       const nodes = tree.scheduleTree((answer && answer.schedule) || []);
       memo = {
@@ -312,9 +230,9 @@ export default {
         typed,
         answer,
         fresh,
-        /** The answer, only while it still describes what is on screen. */
+        /** Only validation matching the displayed tree is current. */
         answered: fresh ? answer : null,
-        /** The answer as drawn — a moment old while a validate is in flight. */
+        /** The drawn answer can remain stale while validation is pending. */
         shown: answer,
         stale: Boolean(answer) && !fresh,
         nodes,
@@ -361,16 +279,10 @@ export default {
     }
 
     /**
-     * Where the next node lands: **inside the selected loop**, or beside the
-     * selected module.
-     *
-     * A module for a parent rather than the root, because adding a module
-     * selects it — so without this, composing `jv_bace` then `bace` inside an
-     * illumination loop put the second one at the root. Which the console
-     * then described perfectly: 45 J-Vs, 9 scans, and `⚠ V_oc` on every one
-     * of them, because a `bace` outside the loop has no `jv_bace` at its own
-     * drive level in scope. It was right, and it was not the tree anyone was
-     * building.
+     * Insertion targets the selected loop's children or the selected module's
+     * siblings. Adding a module selects it, so defaulting the next insertion to root
+     * would move a paired `bace` outside its illumination loop and lose access to the
+     * matching `jv_bace` V_oc.
      */
     function addTarget() {
       if (!typed || !selected) return null;
@@ -380,10 +292,9 @@ export default {
     }
 
     /**
-     * Add a loop or a module. Adding a loop to a tree whose root is a module
-     * **wraps** it, because "put this under a temperature sweep" is what an
-     * operator means by adding a loop above a single scan, and the contract
-     * allows either at the root.
+     * Adding a loop above a root module wraps that module, matching a single scan
+     * placed under a sweep. The service permits either root shape
+     * (`docs/service-contract.md` §7).
      */
     function addControls(v) {
       const into = addTarget();
@@ -409,8 +320,7 @@ export default {
         return change(tree.insertAt(typed, into, node), { select: [...into, index], label });
       }
       if (typed.kind === 'module' && node.kind === 'loop') {
-        // Wrap: the module becomes the loop's only child, which is the tree
-        // the operator was describing.
+        // Wrapping preserves the root module as the loop's only child.
         return change({ ...node, children: [typed] }, { select: [], label });
       }
       if (typed.kind !== 'loop') {
@@ -443,10 +353,9 @@ export default {
       const tags = [];
       if (row.kind === 'loop') {
         if (row.owns) tags.push(h('span.inh', { text: `owns ${row.owns.split(' ')[0]}` }));
-        // `needs_operator` on a temperature step is the bench's answer, not
-        // the tree's: `ok` only when the read-back showed the 331 attached
-        // and answering (`temperature.not-wired`). It is drawn as the pause
-        // it will be, because a pause is hours and must not look like a step.
+        // `needs_operator` comes from bench capability, not tree shape. Only an
+        // answering attached controller removes the pause. Long operator waits must
+        // remain visibly distinct from acquisition.
         if (row.needs_operator) tags.push(h('span.tag.nb', { title: 'the 331 is not answering, so the run pauses here for a manual set', text: 'pauses' }));
         if (row.measure_s) tags.push(h('span.cs', { text: fmt.duration(row.measure_s) }));
       } else {
@@ -472,8 +381,7 @@ export default {
         h('span.nk' + (row.kind === 'module' ? '.mod' : ''),
           icon(row.kind === 'loop' ? 'loop' : 'module')),
         h('span.n', { text: row.kind === 'loop' ? row.loop : row.module }),
-        // A module row says nothing about the bench: it *is* the bench's
-        // module, and only a node that differs carries the mark.
+        // A module node uses bench values by default; only overrides need a row mark.
         row.kind === 'loop' ? h('span.d', { text: row.summary }) : overrideTag(row),
         h('span', { style: { flex: '1' } }),
         tags,
@@ -488,14 +396,9 @@ export default {
     }
 
     /**
-     * Reorder a node, and take the selection with it.
-     *
-     * A path is a list of child indices, so a move renumbers the node and
-     * every sibling it passed — and a selection left at the old index is now
-     * pointing at whichever node took that place. With two `bace` siblings,
-     * which the tree schema supports and the service numbers `bace` and
-     * `bace#2`, the form would quietly switch to the other one and the next
-     * override would land on the wrong node.
+     * Reordering remaps selection with child indices. Otherwise moving past another
+     * `bace` would silently show its form and send subsequent overrides to the wrong
+     * node.
      */
     function moveNode(path, delta) {
       const next = tree.moveAt(typed, path, delta);
@@ -529,8 +432,8 @@ export default {
           h('div.nfh',
             h('span.cn', { text: node.kind === 'loop' ? `${node.loop} loop` : node.module }),
             h('span.cs', { text: node.kind === 'loop' ? 'the values it runs, and how it settles' : 'as on the bench' }),
-            // The way to the main component: this module's card on the bench,
-            // where every value the node does not override is set.
+            // The bench link opens the module card supplying every unoverridden node
+            // value.
             node.kind === 'module'
               ? h('a.btng.goto', {
                 href: benchHash(node.module),
@@ -538,9 +441,8 @@ export default {
               }, '→ bench')
               : null,
             h('span', { style: { flex: '1' } }),
-            // The way back for the whole node, offered only while there is
-            // something to take back: every override dropped, the node is the
-            // bench's module again, and the form shrinks to say so.
+            // Node reset appears only with overrides. Dropping them restores bench
+            // inheritance and reduces the form to its remaining differences.
             node.kind === 'module' && Object.keys(node.params || {}).length
               ? h('button.btng.undo', {
                 title: 'drop every override this node types — back to the module as it stands on the bench',
@@ -559,10 +461,9 @@ export default {
     }
 
     /**
-     * A loop's own form. The values are a list or a range and the switch is
-     * explicit, because the two are not the same statement: a list is nine
-     * temperatures, a range is a rule that made them, and the operator has to
-     * be able to see which they typed.
+     * The loop form explicitly distinguishes a list from a range. A list names
+     * setpoints; a range specifies their construction, and the operator must see
+     * which representation applies.
      */
     function loopForm(node, row) {
       const spec = tree.LOOPS[node.loop];
@@ -605,11 +506,9 @@ export default {
     }
 
     /**
-     * Switch how a loop's values are written — and refuse rather than change
-     * what it runs. `tree.canSwitchForm` owns both refusals and both
-     * sentences: a range nothing has expanded yet has no values to list, and
-     * a list that is not evenly spaced cannot be a range without becoming a
-     * different sweep.
+     * Form switching preserves execution or refuses. `tree.canSwitchForm` explains
+     * unresolved ranges with no list values and uneven lists that cannot become an
+     * equivalent range.
      */
     function switchForm(form, row) {
       const node = tree.nodeAt(typed, selected);
@@ -622,7 +521,7 @@ export default {
       change(tree.setValueForm(typed, selected, form, resolved), { label: `values as a ${form}` });
     }
 
-    /** A text input over the value list — `295, 290, 280` — parsed on commit. */
+    /** The list input parses comma-separated values on commit. */
     function listInput(node, spec) {
       const values = node[spec.list] || [];
       return h('input.v.vlist', {
@@ -642,11 +541,9 @@ export default {
     }
 
     /**
-     * One loop field as the same spec shape a module parameter has, so it goes
-     * through the same component: value, provenance and the sentence under it.
-     * `node` says whether the *tree* types this one, which is what decides
-     * whether a reset is offered — the service's own filled-in default is not
-     * this node's to drop.
+     * Loop fields use module-field specifications for shared value, provenance and
+     * explanation rendering. `node` identifies tree-owned values eligible for reset;
+     * service defaults cannot be removed as node overrides.
      */
     function loopSpec(node, row, f) {
       const typedHere = node[f.name] !== undefined;
@@ -671,11 +568,9 @@ export default {
     }
 
     /**
-     * Loop fields are numbers on the wire, and the service refuses a string:
-     * `pipeline._number` wants a finite number, where a module parameter goes
-     * through `ParamSpec.coerce` and would have taken one. So the parse is
-     * here, and a value that will not parse is refused with a sentence rather
-     * than posted for the service to reject in a language about JSON.
+     * Loop fields require finite numbers on the wire, unlike coercible module
+     * parameters. Parsing here gives a field-specific refusal rather than a service
+     * error about JSON (`docs/service-contract.md` §7).
      */
     function commitField(key, raw) {
       if (raw === null || raw === '') return change(tree.setField(typed, selected, key, null), { label: `clear ${key}` });
@@ -689,17 +584,10 @@ export default {
     }
 
     /**
-     * A module node's form: the bench's own card, over the ParamSet the
-     * *schedule* resolved for this node.
-     *
-     * The provenance is the schedule's and is rendered as it came — `led_v`
-     * inherited from the illumination loop, `voc` derived from the `jv_bace`
-     * two nodes earlier — which is the whole of `ui-rules` §6 and is only
-     * true because the value shown is the one that node will run with. The
-     * one thing added is `spec.node`: whether *this node* types the override,
-     * which decides whether a reset is offered, because a bench edit and a
-     * node override both resolve as `edited` and only one of them is the
-     * tree's to drop.
+     * The module form renders schedule-resolved parameters through the bench
+     * components. Inherited `led_v` and derived `voc` retain their actual node
+     * provenance (`docs/ui-rules.md` §6). `spec.node` identifies which edited values
+     * this node owns because bench edits and node overrides share the edited layer.
      */
     function moduleForm(node, row, v, open) {
       const catalogue = v.catalogue[node.module];
@@ -708,34 +596,23 @@ export default {
       }
       const overrides = node.params || {};
       /**
-       * The node's resolved ParamSet, when the tree resolves at all.
-       *
-       * A tree the validator refuses answers `schedule: null` — one bad value
-       * and there is no schedule for any node in it. Drawn from the schedule
-       * alone the form would then vanish at exactly the moment it is needed:
-       * type `100.9` into `n_loops`, and the row that holds the typo, and the
-       * reset beside it, are gone with it. So the catalogue stands in, with
-       * this node's own overrides on top of it — every field still there and
-       * still editable, and only what the loops above would have bound is
-       * missing, which is what the note says.
+       * The form prefers the resolved node parameters. Invalid trees can return
+       * `schedule: null`; relying only on schedule would hide a mistyped field and
+       * its reset precisely when needed. Catalogue values plus node overrides keep
+       * the form available, with a note that loop bindings are unresolved.
        */
       const resolved = (row && row.params) || null;
       const entry = {
         ...catalogue,
-        // The point count is read out of `estimate_text` and the catalogue's
-        // is the *bench's*, computed from the bench's axis rather than this
-        // node's. An absent count is better than one describing another form.
+        // Catalogue `estimate_text` describes the bench axis rather than this node.
+        // The fallback omits point count instead of showing another form's estimate.
         estimate_text: '', estimate_s: row ? row.estimate_s : null, last: null, needs: [],
         params: (catalogue.params || []).map((p) => {
-          // A schedule's `ParamValue` carries `{value, source, detail}` and no
-          // `editable`, and the catalogue's is the answer for the *bench's*
-          // ParamSet — where `led_v` is a `run.toml` value and editable. So it
-          // has to be recomputed against this node's own source, by the
-          // service's own rule (`params.LOCKED`: inherited and derived are not
-          // editable on the wire, whatever the spec says). Without it the form
-          // offered an input on `led_v` inside an illumination loop, took the
-          // override, and the loop that owns it had `tree.owned-param` refuse
-          // the tree — an edit that could only ever end in an invalid.
+          // Schedule values omit `editable`; catalogue editability describes bench
+          // sources. Node editability must also exclude inherited and derived
+          // sources, matching `params.LOCKED`. Otherwise an illumination-loop `led_v`
+          // input would offer an override guaranteed to fail `tree.owned-param`
+          // validation.
           const pv = resolved
             ? (resolved[p.name] || {})
             // No schedule: the value is what this node types, or the bench's.
@@ -751,14 +628,10 @@ export default {
           };
         }),
       };
-      // `bench: null` on purpose: the read-back row on a bench card says what
-      // the light is doing *now*, and a node that runs in four hours inside an
-      // illumination loop is not described by it. `form: 'node'` keeps only
-      // what differs from the bench above the fold — a loop's binding, this
-      // node's override, and the rows a node has and a card does not
-      // (`light`'s shutter, mode and settle) — and folds the rest as `same
-      // as bench`. A node with nothing typed on it is one or two rows and a
-      // fold, which is what it is.
+      // `bench: null` excludes present instrument state from a node that can run
+      // hours later. `form: 'node'` keeps loop bindings, overrides and node-only
+      // shutter, mode and settle fields visible. Unchanged parameters fold under
+      // same-as-bench.
       const model = cardModel(entry, { bench: null, form: 'node' });
       const ctx = moduleCtx(catalogue);
       const first = (row && row.first) || null;
@@ -799,17 +672,10 @@ export default {
     }
 
     /**
-     * A typed value as the tree should carry it. The service would coerce a
-     * string — `ParamSpec.coerce` is what `PUT /modules/{m}/params` leans on —
-     * but a tree is also what `POST /pipelines/save` writes to disk, and a
-     * recipe holding `"n_loops": "100"` is a file that reads wrong.
-     *
-     * **A value this cannot convert is left exactly as typed**, so the
-     * refusal is the service's own sentence about that parameter rather than
-     * this file's about JSON — and `100.9` in an `int` field is one of those.
-     * `ParamSpec._as_int` refuses a number that is not whole ("100.9 is not a
-     * whole number"); truncating it here would run the scan at 100 loops with
-     * nothing on screen saying the typo had been read as something else.
+     * The converter retains numeric types in saved trees rather than storing numeric
+     * strings. Unconvertible values stay exactly typed so service validation supplies
+     * its own reason. Fractional integer input such as 100.9 must not truncate
+     * silently to 100 loops.
      */
     function coerce(spec, raw) {
       if (raw === null || typeof raw === 'boolean' || typeof raw === 'number') return raw;
@@ -826,14 +692,13 @@ export default {
     // -- the value lists, the cost and the checks --------------------------
 
     /**
-     * `temperature · 9 values · settle from the last run at each` — R3·3's
-     * own two tables. The settle under each temperature is the one the cost
-     * model found in the journal for *that setpoint*, and an em dash where it
-     * found none, which is the artboard's own rendering of the first one.
+     * The value tables use journal-derived settling for each setpoint. Missing
+     * measurements remain an em dash rather than a guessed duration
+     * (`docs/service-contract.md` §7).
      */
     function renderValues(v) {
-      // Only the loops whose values *are* values: a `repeat` runs 1, 2, 3,
-      // and a table of the numbers one to nine is not information.
+      // Only loops with physical setpoint lists need tables. A repeat count does not
+      // require listing consecutive iteration numbers.
       const loops = v.rows.filter((r) => r.kind === 'loop' && r.spec && r.spec.list
         && r.values && r.values.length);
       keyed(valuesEl, JSON.stringify(loops.map((r) => [r.loop, r.values, r.iterations.map((it) => it.settle_s)])), () => {
@@ -858,13 +723,9 @@ export default {
     }
 
     /**
-     * The three numbers of R3·3, with the one word that keeps them honest.
-     *
-     * `lower_bound` is set the moment any temperature has no measured settle
-     * behind it, which on a fresh device is all of them — so the total reads
-     * *at least*, `waiting for T` reads the em dash rather than the holds it
-     * does know about, and there is no finish time. A clock time under a
-     * number that is a floor is a promise the run cannot keep.
+     * The cost summary labels lower-bound total duration as at least. Unknown
+     * settling leaves temperature-wait duration absent and removes finish time; known
+     * holds cannot stand in for the missing waits (`docs/service-contract.md` §7).
      */
     function renderCost(v) {
       keyed(costEl, JSON.stringify([v.cost, v.counters]), () => {
@@ -905,7 +766,10 @@ export default {
         h('span.big', { text: seconds === null || seconds === undefined ? fmt.ABSENT : (prefix ? prefix + ' ' : '') + fmt.duration(seconds) }));
     }
 
-    /** `22 checks · 12 ok · 3 warn · show` — §11's answered question. */
+    /**
+     * The check summary collapses successful entries to a count (`docs/ui-rules.md`
+     * §11).
+     */
     function renderChecks(v) {
       const c = v.checks;
       keyed(checksEl, JSON.stringify([c, showAllChecks, v.stale, inflight]), () => {
@@ -933,8 +797,8 @@ export default {
     }
 
     const tagClass = (level) => (level === 'ok' ? 'ok' : level === 'warn' ? 'cost' : level === 'info' ? 'nb' : 'bad');
-    // `info` keeps its letter: the pack has no glyph for *worth knowing*, and
-    // a borrowed one would say something the check does not.
+    // Informational checks retain their letter because borrowing a warning or success
+    // glyph would imply a different severity.
     const levelMark = (level) => (level === 'info'
       ? h('span.ico', 'i')
       : icon(level === 'crit' ? 'crit' : level === 'ok' ? 'ok' : 'warn', { cls: 'ico' }));
@@ -945,9 +809,8 @@ export default {
       const c = v.cost;
       const blocked = !v.answer || !v.answer.valid || v.busy || v.stale || inflight || !typed;
       const moved = loaded ? drift(loaded, store.getState().modules.byName, { tree: typed, rows: v.rows }) : [];
-      // The stem the service will write, not the name as typed: `cool down`
-      // is the file `cool_down`, and comparing the raw name meant the "this
-      // will write over it" arming never fired for a name with a space in it.
+      // Overwrite confirmation compares the service filename stem. A name such as
+      // cool down becomes cool_down, so raw text cannot identify its saved file.
       const stem = fileStem(name || (typed && typed.name) || '');
       const overwrites = recipes.some((r) => r.name === stem);
       const armed = Boolean(stem) && saveArmed === stem;
@@ -959,10 +822,8 @@ export default {
           h('input.v', {
             value: name, placeholder: 'pipeline',
             title: 'the folder stem: <out>/<name>_YYYYMMDD_HHMMSS',
-            // Kept as it is typed: the bar is rebuilt whenever its key moves
-            // (a validate answering, the arming lapsing), and a rebuild draws
-            // this field from `name` — which would otherwise be the last
-            // committed one, over whatever has been typed since.
+            // `name` follows every input event so validation or arming redraws cannot
+            // replace uncommitted typing with the last committed value.
             oninput: (e) => { name = e.target.value.trim(); },
             onchange: (e) => { name = e.target.value.trim(); revalidate(); render(); },
           }),
@@ -972,11 +833,10 @@ export default {
               onchange: (e) => {
                 const found = recipes.find((r) => r.name === e.target.value);
                 if (found && found.tree) {
-                  // Opening a recipe replaces the whole tree, and the one it
-                  // replaces may be half an hour of composing that was never
-                  // saved. Undo takes the snapshot back whole — the name and
-                  // the recipe it was opened from with it — which is why the
-                  // picker still acts on one click rather than asking first.
+                  // Opening a recipe replaces the tree in one click. Undo restores
+                  // the whole prior snapshot, including name and source recipe, so
+                  // unsaved composition remains recoverable without another
+                  // confirmation.
                   const was = snapshot();
                   name = found.name;
                   loaded = found;
@@ -987,10 +847,8 @@ export default {
             ...recipes.map((r) => h('option', { value: r.name }, r.name)))
             : null),
         h('div.btnrow',
-          // The way back, beside the ways forward. Named rather than counted:
-          // `undo · remove the temperature loop` is answerable without
-          // remembering, which after four clicks and a look away is the whole
-          // point of it.
+          // Undo sits beside forward actions and names the operation rather than
+          // merely counting history steps.
           h('button.btng', {
             disabled: !history.canUndo || null,
             title: history.canUndo
@@ -1031,13 +889,10 @@ export default {
     }
 
     /**
-     * One submission on the wire at a time. `busy` comes from the store, which
-     * only learns of a run when its `RunQueued` arrives — so two clicks inside
-     * that window both pass the check and the service, which queues every
-     * accepted POST, starts two pipelines. On a rig that is a night of the
-     * sample's life. A plain variable checked synchronously, as `views/bench.js`
-     * guards its Run: disabling the button re-renders, and a re-render between
-     * the mousedown and the mouseup eats the click.
+     * A synchronous flag permits one submission before `RunQueued` updates store
+     * `busy`. Otherwise two clicks can queue two pipelines and expose the sample
+     * twice. Disabling via redraw could consume the intended click, so the guard
+     * leaves DOM intact.
      */
     async function start() {
       if (submitting || !typed) return;
@@ -1046,8 +901,8 @@ export default {
         const out = await api.startPipeline(typed, name || undefined);
         notify(`queued ${out.run_id} → ${out.folder}`, 'ok');
       } catch (error) {
-        // 422 carries the checks, and a refused Start is exactly when the
-        // operator needs all of them rather than the first sentence.
+        // A refused Start needs the complete 422 check list, not only its first
+        // reason.
         notify(error.text || String(error), error.level || 'warn', error.checks || null);
         if (error.checks) { answer = { ...(answer || {}), valid: false, checks: error.checks }; answered = typed; }
       } finally {
@@ -1057,12 +912,10 @@ export default {
     }
 
     /**
-     * Where the bench has moved since the recipe was saved. One line per
-     * parameter — `bace.vpre  saved 1.020 · bench 0.800` — and two buttons:
-     * put the bench back to the recipe's values (the ordinary `PUT`, one per
-     * module, so the cards and every node form move with it), or keep the
-     * bench and dismiss. A recipe saved before the bench was recorded says
-     * so instead, once.
+     * The drift note lists saved-versus-bench differences and offers per-module
+     * restoration or dismissal. Start uses the current bench, so these values must
+     * remain visible. Records without a saved bench block explicitly identify that
+     * missing comparison data.
      */
     function recipeNote(v) {
       if (!loaded) return null;
@@ -1094,8 +947,8 @@ export default {
       const bodies = restore(moved);
       try {
         for (const [module, params] of Object.entries(bodies)) {
-          // The response is the module entry as the bench now has it; the
-          // store's copy is what every card and node form draws from.
+          // The response supplies the authoritative module entry used by cards and
+          // node forms.
           store.applyModule(await api.setParams(module, params));
         }
         notify(`bench back to ${loaded.name}: ${moved.map((m) => `${m.module}.${m.name}`).join(', ')}`, 'ok');
@@ -1107,21 +960,17 @@ export default {
     }
 
     /**
-     * Armed is a confirmation, not a mode — the same six seconds Park uses.
-     *
-     * Armed **for one name**, not a flag: a name changed between the two
-     * clicks would otherwise carry the arming to a different file and
-     * overwrite that one with no confirmation at all. The rule
-     * `monitor.scopedTo` applies to an armed Abort, for the same reason.
+     * Save arming expires after six seconds and belongs to one filename. Changing the
+     * name must not transfer confirmation to another file, matching run-scoped Abort
+     * ownership.
      */
     function armSave(name) {
       saveArmed = name;
       clearTimeout(saveArmedTimer);
       saveArmedTimer = name ? setTimeout(() => {
         saveArmed = null;
-        // "…or type another name", the strip has just said; if the operator
-        // is doing that, a render now rebuilds the field under the caret.
-        // Its own `change` renders when they leave it.
+        // Arming expiry avoids rebuilding a name under the caret. Its commit renders
+        // after focus leaves.
         if (!actionsBarEl.contains(document.activeElement)) render();
       }, 6000) : null;
     }
@@ -1132,17 +981,15 @@ export default {
         notify('a saved recipe needs a name — type one in the name field first.', 'warn');
         return;
       }
-      // A name that is already a file: say what it will replace, and take the
-      // second click for it. `recipes` is `GET /pipelines/saved`, re-read after
-      // every save, so this is the service's list rather than a guess.
+      // An existing filename gets a named overwrite warning and second click. The
+      // saved-recipe list refreshes after saving so confirmation uses service state.
       if (saveArmed !== stem && recipes.some((r) => r.name === stem)) {
         armSave(stem);
         const was = recipes.find((r) => r.name === stem);
         notify(`${stem} already exists${was && was.saved_at ? ` — saved ${fmt.clock(was.saved_at)}` : ''}. `
           + 'Click again to write over it, or type another name.', 'warn');
-        // `notify` draws the strip and nothing else; the button has to say
-        // what the second click will do, or the arming is invisible where the
-        // finger already is.
+        // The strip notification alone does not update the button. Its label must
+        // also reveal what the confirmation click performs.
         render();
         return;
       }
@@ -1151,8 +998,8 @@ export default {
         const out = await api.savePipeline(typed, stem);
         notify(`saved ${out.name} → ${out.path}`, 'ok');
         await loadRecipes();
-        // Saved just now, so the file and the bench agree; the note has
-        // nothing to say until the bench moves under it.
+        // A successful save captures the current bench, so comparison stays empty
+        // while values agree.
         loaded = recipes.find((r) => r.name === out.name) || null;
       } catch (error) {
         notify(error.text || String(error), 'warn');
@@ -1177,13 +1024,10 @@ export default {
       keyed(chartEl, JSON.stringify([v.blocks, v.cost]),
         () => chart((w) => scheduleModel({ blocks: v.blocks, cost: v.cost, width: w })));
 
-      // Keyed on the *answer*, not on the shape of it. Revalidating the same
-      // tree — a Dry run, or a bench read-back — leaves the node paths and
-      // the count exactly where they were while `needs_operator`, the settle
-      // times, the estimates and the shots all move: the 331 coming online
-      // turns every `waits for the operator` off, and a key built from paths
-      // would have kept them on screen beside a chart that had already
-      // dropped them. `derived()` stamps each answer it folds.
+      // The schedule key identifies the answer, not only its paths. Revalidation can
+      // preserve tree shape while changing controller availability, settling,
+      // estimates and shots. `derived()` stamps answers so those changes update every
+      // fold.
       keyed(stepsEl, JSON.stringify([v.id, [...expanded].sort(), showFlat]), () => {
         if (!v.nodes.length) return h('p.absent', 'nothing scheduled yet.');
         return [
@@ -1220,8 +1064,8 @@ export default {
       });
 
       const folder = v.shown && v.shown.folder_pattern;
-      // The operator sees the folder's name under the out directory; the full
-      // path is one hover away (#38).
+      // The folder stem appears beneath the output directory; hover exposes its full
+      // path.
       keyed(folderEl, JSON.stringify([folder, v.counters.modules]), () => (folder
         ? [`writes ${fmt.plural(v.counters.modules || 0, 'folder')} under `,
           h('span.path', { title: folder, text: folder.replace(/\/+$/, '').split('/').pop() + '/' }),
@@ -1230,7 +1074,7 @@ export default {
         : ''));
     }
 
-    /** One line of the nested schedule, at whichever of the three scales it is. */
+    /** The renderer draws one nested schedule row at its appropriate progress scale. */
     function schedNode(node) {
       if (node.kind === 'module') {
         return h('div.sr.mod', { style: { marginLeft: `${node.depth * 16}px` } },
@@ -1274,15 +1118,10 @@ export default {
     }
 
     /**
-     * Every step, in order — the service's own list, not the module leaves of
-     * it.
-     *
-     * Behind a switch because the canonical tree is 198 of them and
-     * `step 3 of 198` is the number `ui-rules` §5 exists to refuse; but the
-     * flat list is what "in order" literally means, and the ninety leaves are
-     * not it. The hundred and eight it leaves out are the loop boundaries —
-     * which is where every settle and every LED level change happens, and so
-     * exactly what an operator opens this view to look at.
+     * The optional flat schedule includes every service step in order, including loop
+     * boundaries where settling and LED changes occur. The main view instead uses
+     * three progress scales (`docs/ui-rules.md` §5). A 198-step tree has ninety
+     * module leaves; showing only those would omit 108 relevant boundaries.
      */
     function flatSteps(v) {
       const steps = (v.shown && v.shown.schedule) || [];
@@ -1295,9 +1134,9 @@ export default {
     }
 
     /**
-     * The three bindings of the contract, said only where the tree has them.
-     * Read off the resolved params rather than assumed from the shape: an
-     * `led_v` is inherited because the service says `source: "inherited"`.
+     * Bindings appear only where resolved parameters declare them. Inheritance comes
+     * from `source: "inherited"`, never an assumption based on tree shape
+     * (`docs/ui-rules.md` §6).
      */
     function bindings(v) {
       const leaves = v.leaves;
@@ -1321,10 +1160,9 @@ export default {
     // -- the loop --------------------------------------------------------
 
     /**
-     * Renders held back while a click is in flight — the M2 finding, and it
-     * bites harder here: an answer arriving between the mousedown and the
-     * mouseup would replace the row the operator is clicking ✕ on, and the
-     * click would land on nothing.
+     * Rendering waits through click dispatch. A validation response between mouse
+     * press and release could replace the clicked row and consume actions such as
+     * deletion.
      */
     let pressing = false;
     let missed = false;
@@ -1362,10 +1200,8 @@ export default {
     }
 
     /**
-     * Reopen what this session last validated. `GET /pipelines/last` is the
-     * route's whole purpose ("so the UI can reopen it") and it is the
-     * difference between a reload during a four-hour sweep costing nothing
-     * and costing the tree.
+     * The view reopens the session's last validated tree so reloading during a long
+     * sweep preserves composition (`docs/service-contract.md` §7).
      */
     async function boot() {
       await loadRecipes();
@@ -1386,17 +1222,10 @@ export default {
     }
 
     /**
-     * The bench snapshot moves several of the checks — an instrument that went
-     * away, the chain, whether the 331 answers — so a read-back re-asks, the
-     * way `views/bench.js` re-validates its cards on `read_at`.
-     *
-     * And **nothing else on the stream reaches this tab**. The store notifies
-     * once per animation frame for the length of a run, and this screen
-     * describes the *next* one: it reads whether the worker is held, the
-     * catalogue, and the read-back, and no shot, phase or progress frame moves
-     * any of the three. So a scan running under an open pipeline tab costs it
-     * exactly nothing — which is the same argument that put the timing diagram
-     * below the run in M4, applied to a whole view.
+     * Read-back can change instrument, chain and controller checks, so `read_at`
+     * triggers validation. Other dependencies are worker availability and catalogue
+     * state. Shot, phase and progress frames describe the current run, not this
+     * editor's next run, and must not rebuild the view.
      */
     let validatedAt = null;
     let storeKey = null;

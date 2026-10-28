@@ -12,6 +12,7 @@ with the working tree:
 |---|---|
 | `.py` | The syntax tree with every docstring and every bare string statement removed; comments are not in the tree |
 | `.toml` | The parsed tables, each value with its type |
+| `.js`, `.mjs` | The token sequence with comments removed: every identifier, number, string, template and regular expression |
 
 A checked file that was added, deleted or renamed fails: a rewrite changes
 files, it does not create or remove them. Any other changed file is listed
@@ -57,7 +58,126 @@ def _git(*args: str) -> str:
                           encoding="utf-8", check=True).stdout
 
 
-CHECKED = (".py", ".toml")
+CHECKED = (".py", ".toml", ".js", ".mjs")
+
+_JS_PUNCT = sorted(("{ } ( ) [ ] ; , < > + - * % & | ^ ! ~ ? : = . @ / "
+                    "... => == != === !== <= >= && || ?? ?. ++ -- << >> >>> "
+                    "+= -= *= /= %= &= |= ^= &&= ||= ??= **= <<= >>= >>>= **").split(),
+                   key=len, reverse=True)
+_JS_REGEX_AFTER = {"(", ",", "=", ":", "[", "!", "&", "|", "?", "{", "}", ";", "+", "-",
+                   "*", "%", "<", ">", "~", "^", "=>", "==", "!=", "===", "!==", "<=",
+                   ">=", "&&", "||", "??", "+=", "-=", "*=", "/=", "return", "typeof",
+                   "case", "in", "of", "delete", "void", "throw", "new", "else", "do",
+                   "yield", "await", "ctl)", None}
+"""Tokens after which a `/` opens a regular expression rather than dividing.
+`ctl)` stands for the `)` that closes the condition of `if`, `while`, `for` or
+`with`, after which a statement, and so a regular expression, may begin."""
+
+_JS_CONTROL = {"if", "while", "for", "with"}
+
+LINE_BREAK = "\u23ce"
+"""Stands between two tokens that a line terminator separates, in the source
+or inside a block comment: automatic semicolon insertion depends on it, so a
+comment rewrite may not add or remove one (`return /* a\n */ 42`)."""
+
+
+def js_tokens(source: str) -> list[str]:
+    """The tokens of a JavaScript module with its comments left out.
+
+    Enough of a lexer for comparing two versions: strings, templates (with
+    their `${}` expressions kept as text), regular expressions, numbers,
+    identifiers and punctuators. A `/` opens a regular expression after an
+    operator, an opening bracket, a keyword or the `)` of a control
+    statement's condition, and divides otherwise. A line break between two
+    tokens is kept as `LINE_BREAK`, however many there are.
+    """
+    out: list[str] = []
+    i, n = 0, len(source)
+    prev = last = None
+    parens: list[bool] = []
+    broken = False
+    while i < n:
+        c = source[i]
+        if c.isspace():
+            broken = broken or c in "\n\r\u2028\u2029"
+            i += 1
+            continue
+        if source.startswith("//", i):
+            j = source.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        if source.startswith("/*", i):
+            j = source.find("*/", i + 2)
+            end = n if j < 0 else j + 2
+            broken = broken or any(t in source[i:end] for t in "\n\r\u2028\u2029")
+            i = end
+            continue
+        if c in "'\"":
+            j = i + 1
+            while j < n and source[j] != c:
+                j += 2 if source[j] == "\\" else 1
+            tok = source[i:j + 1]
+            i = j + 1
+        elif c == "`":
+            j, depth = i + 1, 0
+            while j < n:
+                ch = source[j]
+                if ch == "\\":
+                    j += 2
+                    continue
+                if depth == 0 and ch == "`":
+                    break
+                if source.startswith("${", j):
+                    depth += 1
+                    j += 2
+                    continue
+                if depth and ch == "{":
+                    depth += 1
+                elif depth and ch == "}":
+                    depth -= 1
+                j += 1
+            tok = source[i:j + 1]
+            i = j + 1
+        elif c == "/" and prev in _JS_REGEX_AFTER:
+            j, in_class = i + 1, False
+            while j < n:
+                ch = source[j]
+                if ch == "\\":
+                    j += 2
+                    continue
+                if ch == "[":
+                    in_class = True
+                elif ch == "]":
+                    in_class = False
+                elif ch == "/" and not in_class:
+                    break
+                j += 1
+            j += 1
+            while j < n and (source[j].isalnum()):
+                j += 1
+            tok = source[i:j]
+            i = j
+        elif c.isalnum() or c in "_$#":
+            j = i + 1
+            while j < n and (source[j].isalnum() or source[j] in "_$."
+                             and not (source[j] == "." and not source[i].isdigit())):
+                j += 1
+            tok = source[i:j]
+            i = j
+        else:
+            tok = next((p for p in _JS_PUNCT if source.startswith(p, i)), c)
+            i += len(tok)
+        if broken and out:
+            out.append(LINE_BREAK)
+        broken = False
+        out.append(tok)
+        prev = tok if not (tok[0].isalnum() or tok[0] in "_$#'\"`") or tok in _JS_REGEX_AFTER else "x"
+        if tok == "(":
+            parens.append(last in _JS_CONTROL)
+        elif tok == ")" and parens and parens.pop():
+            prev = "ctl)"
+        last = tok
+    return out
 
 
 def changed(base: str, paths: list[str]) -> list[tuple[str, str]]:
@@ -101,6 +221,9 @@ def compare(path: str, base: str) -> str | None:
         except tomllib.TOMLDecodeError as exc:
             return f"does not parse: {exc}"
         return None if same else "the tables differ, not only the comments"
+    if path.endswith((".js", ".mjs")):
+        return None if js_tokens(before) == js_tokens(after) else \
+            "the code differs, not only its comments"
     raise ValueError("not checked")
 
 

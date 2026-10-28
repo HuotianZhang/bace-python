@@ -1,45 +1,13 @@
-// The offline bench. `docs/ui-plan.md` decision 4: the UI is testable without
-// the bench, from fixtures fed into the same store the WebSocket feeds — which
-// is the only reason that is true. Nothing here is a test double; the frames
-// are the service's own, recorded off a rig day or off `--sim`.
-//
-// The three shapes are not interchangeable, and the plan says which is which:
-//
-//   * **the journals** (`acceptance/20260902_service-vs-labview/journals/`)
-//     replay every run semantic — the lifecycles, the chain verdicts, two real
-//     `RunFailed` — and cannot draw a single curve: the journal payload policy
-//     stores "enough to render the session log and the history queries, never
-//     the traces";
-//   * **a recorded stream** (`fixtures/stream_*.jsonl`) is the wire as a
-//     client sees it: traces decimated with `stride` and `n_full`, and the
-//     `StepPhase` frames that exist nowhere else;
-//   * **`fixtures/hello_*.json`** is the bench snapshot, which no journal
-//     contains, and **`fixtures/jv_*.json`** the J-V curves at full precision,
-//     which the journal reduces to metrics;
-//   * **`fixtures/modules_sim.json`** is `GET /modules` — every parameter of
-//     every module with its provenance, its `doc` and its `doc_full`. It is
-//     what M2's cards are generated from, so with it the bench tab is
-//     workable offline; recorded off a service with a *clean* journal, or the
-//     last-used layer of whoever recorded it rides along as if it were the
-//     catalogue's own;
-//   * **`fixtures/bench_running_*.json`** is `GET /bench` taken *while a run
-//     held the worker*, which is the only place the `inferred` overlay exists:
-//     at rest every instrument on the rail is a read-back;
-//   * **`fixtures/validate_*.json`** is `POST /pipelines/validate` — the
-//     checks, the schedule in order, the counters and the cost of a tree
-//     nobody ran. It is what M5's schedule and its time bar are drawn from,
-//     and the one endpoint in the set that can be recorded on a live bench at
-//     any time, because it touches nothing;
-//   * **`fixtures/runs_*.json`** and **`fixtures/run_*_*.json`** are
-//     `GET /runs?session=all` and two `GET /runs/{id}` records — the identity
-//     on every row, the temperature triple and what was measured on every
-//     module node — which is everything M6's results tab reads. Recorded off
-//     `--sim` by `--only results`, which answers its own pauses.
-//
-// The journals also do *not* exercise the reconnect path — their `seq` runs
-// 0…N with no gap, because that is what a journal is. Gaps and
-// `decimated.replay` belong to the socket; test them against a live
-// `--sim --fast` scan, which the service README says will drop a client.
+// Replay feeds service fixtures through the WebSocket store. Journals preserve run
+// semantics but omit arrays (`docs/service-contract.md` §3). Recorded streams retain
+// decimation and live phases. Hello supplies snapshots; J–V endpoints supply full
+// curves; module fixtures supply provenance and explanations. Catalogue recording
+// needs a clean journal to avoid last-used contamination. Running snapshots expose
+// inferred state. Validation supplies checks, schedule, counters and cost without
+// touching instruments. Run-index and record fixtures supply results and temperature
+// provenance; simulated results recording answers pauses. Journal sequences have no
+// ring gaps, so gap recovery and omitted replay traces require live socket tests
+// against a fast simulated scan.
 
 export const FIXTURES = [
   { key: 'journal-153357', kind: 'journal', label: 'rig 15:33:57 — jv_dark, jv_bace, bace',
@@ -94,7 +62,7 @@ export const FIXTURES = [
     url: 'fixtures/run_bace_sim.json' },
 ];
 
-/** Parse a JSONL body into frames, skipping blank lines. */
+/** The parser reads JSONL frames and skips blank lines. */
 export function parseJsonl(text) {
   return text.split('\n').map((line) => line.trim()).filter(Boolean).map((line) => JSON.parse(line));
 }
@@ -107,9 +75,8 @@ export async function loadFixture(entry, { fetch: fetchImpl = globalThis.fetch, 
 }
 
 /**
- * Feed frames into a store as if they had arrived. `Hello` goes through
- * `applyHello` exactly as the stream does it, so the bench a recording carries
- * lands the same way it would live.
+ * The replay uses the live store path, including `applyHello` for bench snapshots, so
+ * fixtures and socket data initialize identical state.
  */
 export function replayInto(store, frames) {
   const list = Array.isArray(frames) ? frames : [frames];
@@ -124,8 +91,8 @@ export function replayInto(store, frames) {
 }
 
 /**
- * The same, paced, for watching a run redraw. `speed` multiplies the recorded
- * intervals; `0` is instant. Returns a handle with `stop()`.
+ * The paced replay multiplies recorded intervals by `speed`; zero feeds immediately.
+ * Its returned handle supports `stop()`.
  */
 export function replayPaced(store, frames, { speed = 1, onDone = () => {} } = {}) {
   let index = 0;

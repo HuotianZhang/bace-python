@@ -1,18 +1,8 @@
-// The live power trace — the meter's readings against the clock, the one
-// chart in the console whose x axis is *now* rather than a record.
-//
-// It is the R3·2 power sparkline grown into what the 1918-C's own console
-// shows: a strip chart of the last minute, five minutes, or the whole trace,
-// the number beside it, and the statistics over the window. Every reading is
-// a `PowerReading` frame — the monitor's, at the interval the switch chose —
-// and the store keeps them in order by the frame's `ts` (`powerLog`). The
-// history the service holds (`GET /monitors/power/history`) carries the same
-// `ts`, so the two merge without a duplicate.
-//
-// Watts at the meter, never an irradiance (`ui-rules` §2), and a reading the
-// meter flagged as saturated or overrange is a dot in the alert colour on the
-// line rather than a value left out: a clipped log is the classic way to ruin
-// a long measurement, and the chart is where it is seen first.
+// The power chart shows readings against the clock over a selected window.
+// `PowerReading` and `GET /monitors/power/history` share `ts`, allowing
+// duplicate-free merging (`docs/service-contract.md` §8). Values are watts at the
+// meter, not irradiance (`docs/ui-rules.md` §2). Saturated and overrange readings
+// remain as alert-colour dots so clipping cannot disappear from a long measurement.
 
 import * as scale from '../scale.js';
 import * as fmt from '../format.js';
@@ -38,7 +28,10 @@ export function lowerBound(points, ts) {
   return lo;
 }
 
-/** The readings inside the window ending now — the whole log when `seconds` is null. */
+/**
+ * The helper selects readings in a window ending at the current time; `seconds: null`
+ * selects the complete log.
+ */
 export function windowPoints(points, { seconds, now }) {
   if (!points || !points.length) return [];
   if (seconds === null || seconds === undefined) return points;
@@ -46,9 +39,9 @@ export function windowPoints(points, { seconds, now }) {
 }
 
 /**
- * Mean, extremes and the sample standard deviation over the window, and how
- * many of the readings the meter itself did not trust. `std` is null under
- * two points: a σ of one reading is not a number.
+ * The statistics describe the selected window and count readings the meter marks
+ * untrustworthy. `std` is `null` for fewer than two readings because sample deviation
+ * requires two.
  */
 export function powerStats(points) {
   const n = points.length;
@@ -91,11 +84,9 @@ export function wattsUnit(points) {
 }
 
 /**
- * The chart model: one panel, the readings in the window against seconds
- * (minutes, hours) before now. `fromZero` pins the y axis to zero — the
- * lamp being off is then visibly off — and otherwise the axis is a window
- * on the data, so a 1 % drift on a settled LED is a slope rather than a
- * flat line.
+ * The model plots the selected window against elapsed time before the current
+ * reading. `fromZero` makes an unlit lamp visibly zero; a fitted y window instead
+ * exposes small drift, such as 1 %, in a settled LED.
  */
 export function powerModel(points, {
   seconds = null, now, width = 1400, height = null, fromZero = false, columns = null,
@@ -192,7 +183,10 @@ function ago(v) {
   return String(Number(abs.toFixed(abs >= 10 ? 0 : abs >= 1 ? 1 : 2)));
 }
 
-/** `mean 92.1 µW · min 91.4 · max 92.9 · σ 0.31 µW · 300 readings` */
+/**
+ * The caption reports mean, minimum, maximum, sample deviation and reading count for
+ * the selected window.
+ */
 export function statsLine(stats) {
   if (!stats || !stats.n) return '';
   const [, prefix] = fmt.prefixed(Math.abs(stats.mean) || 1);

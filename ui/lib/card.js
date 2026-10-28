@@ -1,24 +1,8 @@
-// The generated module card, and the one field component every parameter goes
-// through — `docs/ui-plan.md` M2, decision 1. There is one field component and
-// one card component, and all six bench cards come from them; nothing about
-// `bace`'s fifty parameters is typed out by hand.
-//
-// The payoff is `ui-rules` §6: with one component owning
-// `{value, source, detail, editable}`, there is no second place that could
-// re-derive it. Inherited-reads-as-inherited, derived-is-not-editable and
-// `PUT null` resets are one implementation, not six.
-//
-// **Every field says what it is.** `doc` is the line under the name;
-// `doc_full` is the whole explanation, hidden until the pointer is on the
-// field (and reachable from the keyboard, since a tooltip nobody can focus is
-// a tooltip half the operators cannot read). `ui-rules` §1: the name is the
-// label, not the explanation — `smu_nplc`, `trigger_sweep` and `duty_percent`
-// mean nothing on their own, and `inverted_output` means something other than
-// it looks.
-//
-// The card never keeps its own copy of a value. An edit `PUT`s and re-renders
-// from the entry the service answers with, so the estimate, the point count
-// and the provenance all move together and none of them is this file's guess.
+// Module cards share one parameter field component. The service supplies `value`,
+// `source`, `detail`, `editable` and estimates; rendering these together preserves
+// provenance and editability (`docs/ui-rules.md` §6). `doc` explains each field and
+// `doc_full` remains accessible by pointer and keyboard (§1). Edits render the
+// service's answer so values, counts and estimates stay consistent.
 
 import { h, fill } from './dom.js';
 import * as fmt from './format.js';
@@ -26,9 +10,8 @@ import { cardModel, foldCount } from './fields.js';
 import { icon } from './icons.js';
 
 /**
- * One card. `ctx` carries `{api, store, onError}`; `open` is the per-card
- * disclosure state, kept by the caller so a re-render does not close a fold
- * the operator just opened.
+ * The card renders one module. `ctx` supplies `api`, `store` and `onError`; the
+ * caller keeps `open` so redraws preserve disclosure state.
  */
 export function moduleCard(entry, ctx, open) {
   const model = cardModel(entry, { bench: ctx.bench });
@@ -36,9 +19,8 @@ export function moduleCard(entry, ctx, open) {
   const wide = Boolean(ctx.hasResult && ctx.hasResult(model.name));
   const card = h('div.card.mod' + (wide ? '.wide' : ''), { dataset: { module: model.name } });
 
-  // Blockers gate Start. A card with no Start (`light`: bench actions only)
-  // has nothing for them to gate, and a verdict drawn under buttons it does
-  // not concern reads as a warning about the buttons.
+  // Blockers gate Start. The `light` card has only bench actions, so showing run
+  // blockers under those actions would imply they apply to them.
   const blocked = model.run.length ? startBlockers(ctx.checksFor(model.name), model) : [];
   const form = [
     h('div.pr', model.above.map((row) => renderRow(row, model, ctx))),
@@ -48,12 +30,8 @@ export function moduleCard(entry, ctx, open) {
     fold(model, ctx, open),
     blocked.length ? blockedNote(blocked) : null,
   ];
-  // The result panel is a **slot**, not content: `views/bench.js` fills it and
-  // keys it on the data behind it, so a shot arriving does not rebuild the
-  // card around it. That is the M2 rule with a chart in front of it — a
-  // rebuilt element is a different element, and the operator's caret goes with
-  // the old one (`docs/ui-plan.md` decision 5). Nothing here knows what a
-  // chart is.
+  // `ui/views/bench.js` fills and keys the result slot independently. A shot must not
+  // rebuild the surrounding form and discard the operator's caret.
   fill(card, header(model, ctx, busy, blocked),
     wide ? h('div.cb.split', h('div.col', form), h('div.res')) : h('div.cb', form));
   return card;
@@ -63,9 +41,8 @@ export function moduleCard(entry, ctx, open) {
 function header(model, ctx, busy, blocked) {
   const buttons = [];
   for (const action of model.actions) {
-    // `led-off` is the one action on this card that makes the bench safe, and
-    // it looked exactly like `Pulse`, which drives the lamp. §3's loudness is
-    // for meaning: this one is not another verb in the row.
+    // `led-off` makes the bench safe, so its visual priority must distinguish it from
+    // Pulse, which drives the lamp (`docs/ui-rules.md` §3).
     const danger = action.action === 'led-off';
     buttons.push(h('button' + (danger ? '.btnd' : '.btns'), {
       disabled: busy || null,
@@ -76,8 +53,9 @@ function header(model, ctx, busy, blocked) {
   }
   for (const [i, run] of model.run.entries()) {
     const last = i === model.run.length - 1;
-    // Temperature settles in 14 min – 2 h (§5) and "must not look like a step
-    // that runs". A red primary, the same button `Scan` uses, is exactly that.
+    // Temperature settling takes 14 min to 2 h on this bench (`docs/ui-rules.md` §5).
+    // It needs a different treatment from the primary Scan action so settling does
+    // not appear to be an ordinary measurement step.
     const slow = SLOW_RUN.has(model.name);
     const plain = slow || PLAIN_RUN.has(model.name);
     buttons.push(h(last && !plain ? 'button.btnp' : slow ? 'button.btnw' : 'button.btns', {
@@ -96,23 +74,25 @@ function header(model, ctx, busy, blocked) {
     buttons);
 }
 
-/** A run whose iteration is minutes to hours, not seconds (`ui-rules` §5). */
+/**
+ * The predicate identifies runs whose iterations take minutes to hours
+ * (`docs/ui-rules.md` §5).
+ */
 const SLOW_RUN = new Set(['temperature']);
 
-/** A run that reads and touches nothing: it does not want the primary. */
+/** A read-only run does not need the primary action treatment. */
 const PLAIN_RUN = new Set(['power']);
 
 /**
- * What the card costs. A card with actions and no run does not cost a run at
- * all — and the service's `nothing to set` read as a contradiction over six
- * editable fields the buttons beside it send.
+ * The estimate describes run cost. Action-only cards omit it because a no-op run
+ * estimate would contradict the editable values sent by their actions.
  */
 function subtitle(model) {
   if (!model.run.length && model.actions.length) return 'acts now · no run, no files';
   return model.estimate;
 }
 
-/** Every parameter drawn above the fold, whatever row shape carried it. */
+/** The helper lists parameters above the fold, including composite rows. */
 function aboveSpecs(model) {
   const out = [];
   for (const row of model.above) {
@@ -125,9 +105,8 @@ function aboveSpecs(model) {
 }
 
 /**
- * The quiet provenance, once. Twenty rows saying `run.toml` is twenty
- * repetitions of "normal"; the count is the whole of what it was telling you,
- * and the rows that are a statement still carry their own tag.
+ * Common provenance appears once per card. Individual tags remain for values whose
+ * source needs attention, avoiding repeated default-layer labels.
  */
 function provSummary(model) {
   const specs = aboveSpecs(model);
@@ -138,8 +117,8 @@ function provSummary(model) {
     counted.set(spec.source, (counted.get(spec.source) || 0) + 1);
   }
   if (!counted.size) return null;
-  // Each quiet source with its count; the rows that are a statement (typed,
-  // a loop's, measured) keep their own tag and are not counted as "the rest".
+  // Counts summarize common sources; edited, inherited and measured values keep
+  // individual tags.
   const order = ['run.toml', 'last-used', 'default'];
   const text = order.filter((k) => counted.has(k))
     .map((k) => (k === 'default' ? fmt.plural(counted.get(k), 'default') : `${counted.get(k)} from ${k}`))
@@ -156,12 +135,9 @@ function lastTag(last) {
 
 // -- the rows -------------------------------------------------------------
 /**
- * One row of a card, whichever composite it is. Exported because the pipeline
- * tab's node form is the same form: a module node is the bench's ParamSet
- * with the node's overrides on top (`docs/service-contract.md` §7 — "as on
- * the bench · only what differs is typed here"), so it goes through
- * `cardModel` and this, and the two screens cannot drift about which fields
- * matter or what a provenance looks like.
+ * The row renders a shared card composite. Pipeline node forms use the bench
+ * parameters with node overrides (`docs/service-contract.md` §7). Sharing `cardModel`
+ * and this renderer keeps field selection and provenance consistent.
  */
 export function renderRow(row, model, ctx) {
   switch (row.kind) {
@@ -174,9 +150,8 @@ export function renderRow(row, model, ctx) {
 }
 
 /**
- * One parameter. The whole of decision 1 is here: the provenance comes off the
- * wire and is rendered, the editability is the wire's, and `doc`/`doc_full`
- * are the engine's docstring rather than anything this file invents.
+ * The field renders one parameter from the service entry. Provenance, editability and
+ * `doc`/`doc_full` come from the service rather than local inference.
  */
 export function field(spec, ctx, model, { segmented = false, accent = false, label: text = null } = {}) {
   const editable = spec.editable !== false;
@@ -189,32 +164,28 @@ export function field(spec, ctx, model, { segmented = false, accent = false, lab
   if (spec.inert) cls.push('inert');
 
   const commit = (value) => ctx.edit(model.name, { [spec.name]: value });
-  // `input` answers the non-editable and inert cases itself — it has to, for
-  // the composite rows that reach it directly — so there is one path to the
-  // control, and a boolean is a checkbox on all of them.
+  // `input` handles read-only and inert values because composite rows call it
+  // directly. All paths therefore use the same boolean control.
   return h('div.pw', h('div.' + cls.join('.'), help(spec),
     label(spec, ctx, model, text),
     input(spec, commit, segmented),
     spec.inert
-      // `blank` is the pack's glyph for *there is no value here*, beside the
-      // words rather than instead of them (`ui-rules` §2).
+      // The blank glyph accompanies words explaining an absent value
+      // (`docs/ui-rules.md` §2).
       ? h('span.src', h('span.tag.off', { title: spec.inert }, icon('blank'), h('span', { text: 'not read' })))
       : provenance(spec, ctx, model, editable)), docLine(spec, ctx, model));
 }
 
-/** The value as text, for a field the operator may not type into. */
+/** The renderer displays read-only values as text. */
 function display(spec) {
   if (spec.value === null || spec.value === undefined) return fmt.ABSENT;
   return typed(spec);
 }
 
 /**
- * The value as the operator should read it, which is not always as JSON sent
- * it. `ui-rules` §2: significant figures carry meaning, because they are what
- * the measurement resolves — so a level reads `1.000` where the rail beside it
- * reads `1.000 V`, and `0.4` and `1` do not sit in one column as `0.4` and
- * `1`. Volts to 3, V_oc to 4 (§2), everything else as it came: only the
- * quantities whose resolution is known are given a width.
+ * The displayed value uses measurement precision (`docs/ui-rules.md` §2): voltages
+ * have three decimals and V_oc has four. Other quantities retain their supplied
+ * precision. A field omits the unit already shown beside it.
  */
 function typed(spec) {
   const v = spec.value;
@@ -225,12 +196,9 @@ function typed(spec) {
 }
 
 /**
- * The choosers are `<button>`s, not clickable spans.
- *
- * A span with an `onclick` cannot be tabbed to, has no role, and is invisible
- * to a screen reader — and these are the polarity, the shutter and the LED
- * mode, which is not a set of controls to leave mouse-only. `aria-pressed`
- * carries the selection, which is what the dark chip says visually.
+ * Choosers use buttons for keyboard focus and screen-reader roles. Clickable spans
+ * would make polarity, shutter and LED mode mouse-only. `aria-pressed` conveys the
+ * visual selection.
  */
 function option(label, on, commit) {
   return h('button.opt', {
@@ -242,18 +210,10 @@ function option(label, on, commit) {
 }
 
 /**
- * A boolean is a checkbox.
- *
- * It was a `true | false` pair in the setting family's look, which is
- * programmer vocabulary wearing a control's clothes (#42): every operator
- * alive already knows a tick means on, and nobody outside this repository
- * reads `false` as "the LED does not invert". The row's label is the name of
- * the thing, so the box carries no text of its own — `aria-label` gives a
- * screen reader the same name the row shows.
- *
- * A boolean that is `null` is neither: the service has not said, and a box
- * drawn empty would claim `false`. `indeterminate` is a property and not an
- * attribute, so it is set after the element exists.
+ * A boolean uses a checkbox (`docs/ui-rules.md` §14). The row supplies its visible
+ * name and `aria-label` supplies the same name to screen readers. `null` means the
+ * service has no value, so an empty box must not imply `false`. The `indeterminate`
+ * property is set after element creation because it is not an HTML attribute.
  */
 function checkbox(spec, commit, { disabled = false, title = null } = {}) {
   const el = h('input.cbx', {
@@ -269,26 +229,18 @@ function checkbox(spec, commit, { disabled = false, title = null } = {}) {
 }
 
 function input(spec, commit, segmented, { blank = false } = {}) {
-  // **Not editable is not an input, wherever the value is drawn.** Every row
-  // reaches this — `field`, and the composites that build their own controls:
-  // the range, the V_oc row's `led_v`, the polarity pair. The pipeline tab's
-  // node form is where that matters: `led_v` inside an illumination loop
-  // resolves `inherited`, which `params.LOCKED` makes non-editable on the wire
-  // whatever the spec says, and `ParamSet.set_edited` refuses. An input there
-  // offered an override that could only ever end in `tree.owned-param`
-  // refusing the tree. `ui-rules` §6: an inherited value reads as inherited,
-  // showing the value it will get.
-  // A boolean stays a checkbox when it may not be typed into — a disabled box
-  // still reads as on or off, where `false` in a value column reads as a word
-  // somebody wrote.
+  // Read-only values must not offer inputs, including in composite rows. An
+  // illumination loop owns `led_v`; a node override is non-editable and fails
+  // validation. Inherited values show their resolved value (`docs/ui-rules.md` §6). A
+  // read-only boolean remains a disabled checkbox so its on/off meaning stays
+  // visible.
   if (spec.editable === false) {
     return spec.type === 'bool'
       ? checkbox(spec, null, { disabled: true })
       : h('span.v', { text: display(spec) });
   }
-  // Not read in this configuration (`fields.inertReason`): shown, not typed
-  // into. The value stays so it is there when the setting that reads it is
-  // turned back on; the reason is on the row's tag and on hover here.
+  // An inert field retains its value for configurations that read it. The row and
+  // hover text explain why it cannot be edited in this configuration.
   if (spec.inert) {
     return spec.type === 'bool'
       ? checkbox(spec, null, { disabled: true, title: spec.inert })
@@ -310,9 +262,8 @@ function input(spec, commit, segmented, { blank = false } = {}) {
     value: spec.value === null || spec.value === undefined ? '' : typed(spec),
     onchange: (e) => {
       const raw = e.target.value.trim();
-      // An emptied nullable field is `PUT null`, which is the reset: the
-      // service drops the edited layer for that one parameter and the value
-      // falls back to whatever the layer below says. Not the same as 0.
+      // An empty nullable field sends `PUT null`, removing this parameter's edited
+      // layer. It restores the lower layer rather than setting zero.
       commit(raw === '' ? null : raw);
     },
   });
@@ -320,40 +271,26 @@ function input(spec, commit, segmented, { blank = false } = {}) {
 }
 
 /**
- * Where the value came from, and — when it came from an edit — the way back.
- * `ui-rules` §6: this is rendered, never re-derived, and the reset is a `PUT`
- * of `null` rather than a locally remembered previous value.
+ * The provenance tag shows the service's source and an available reset. Reset sends
+ * `PUT null` rather than restoring a locally remembered value (`docs/ui-rules.md`
+ * §6).
  */
 /**
- * The sources that are not a statement. `run.toml` is where most values come
- * from, so a boxed tag on every row was twenty repetitions of "normal" — and
- * the answer of making it nearly the paper's own colour left an illegible tag
- * still holding a column. It is counted once per card instead
- * (`provSummary`), and only the three that *say* something keep a tag.
+ * `provSummary` counts common sources once per card. Individual tags are reserved for
+ * sources that need attention, avoiding repetitive labels in every row.
  */
 const QUIET_SOURCES = new Set(['default', 'run.toml', 'last-used']);
 
 function provenance(spec, ctx, model, editable) {
-  // A node's own override carries no tag: the value in ink and the ↺ beside
-  // it are the statement, and `edited` next to them said it a third time.
+  // A node override uses its value and reset control as its indication; an edited tag
+  // would repeat that information.
   const label = QUIET_SOURCES.has(spec.source) || spec.node ? '' : spec.source;
-  // Who can take the value back. On a bench card that is whoever edited it,
-  // and `source === 'edited'` says so. On a pipeline node form it is not:
-  // the node's overrides and the bench card's edits **both** resolve as
-  // `edited` (`ParamSet.update_layer(Source.EDITED, node.params, "pipeline
-  // node")` merges into the same layer), so a reset offered on every edited
-  // row would, for a value the bench typed and this node did not, be a
-  // button that removes a key the node never had and changes nothing. The
-  // node form sets `spec.node` — is this override typed *here* — and that is
-  // the authority, because the tree is the client's own and needs no string
-  // parsed out of `detail` to know what is in it.
-  //
-  // **And the reset is not gated on `editable`.** Removing a key the node
-  // types is not typing into it: a module that types `led_v` inside an
-  // illumination loop resolves `inherited` — non-editable — *and* is refused
-  // by `tree.owned-param`, so gating the two together left the operator with
-  // an override that blocks Start and no way to drop it but deleting the
-  // node. The value stays read-only; the way out stays open.
+  // Reset ownership differs between bench cards and node forms. Both bench edits and
+  // node overrides resolve as `edited`, so that source alone cannot identify a
+  // node-owned key. `spec.node` identifies keys in the client's tree without parsing
+  // `detail`. Reset remains available even when the value is non-editable: an illegal
+  // `led_v` override inside an illumination loop blocks Start, and removing it must
+  // not require deleting the node. Read-only values still cannot be edited.
   const resettable = spec.node === undefined ? (spec.source === 'edited' && editable) : spec.node;
   return h('span.src',
     label ? h('span.tag.src-' + spec.source, { title: spec.detail || '', text: label }) : null,
@@ -369,13 +306,9 @@ function provenance(spec, ctx, model, editable) {
 }
 
 /**
- * The one sentence, and the whole of it — reachable, which it was not.
- *
- * `title` alone was the bug: it lives on a `div` with no `tabindex`, so the
- * explanation of `smu_nplc` was mouse-only, and `ui-rules` §1 asks for a field
- * that *can be expanded*, not one that can be hovered. So the name is a
- * `<button>` — tab to it, press it, and `doc` (then `doc_full`) opens under
- * the row. The `title` stays for the pointer.
+ * The field name opens its complete explanation. A `title` on an unfocusable element
+ * is mouse-only, so a button exposes `doc` and `doc_full` to keyboard users
+ * (`docs/ui-rules.md` §1). The hover title remains available.
  */
 function help(spec) {
   const full = spec.doc_full && spec.doc_full !== spec.doc ? spec.doc_full : spec.doc;
@@ -383,7 +316,7 @@ function help(spec) {
   return { class: 'has-help', title: full, 'data-doc': spec.doc };
 }
 
-/** The name, as a label or as the button that opens the explanation. */
+/** The name is a label or an explanation-opening button. */
 function label(spec, ctx, model, text) {
   const name = text || spec.name;
   if (!spec.doc) {
@@ -399,7 +332,7 @@ function label(spec, ctx, model, text) {
   }, name, spec.unit ? h('i', { text: spec.unit }) : null);
 }
 
-/** The explanation itself, under the row it belongs to. */
+/** The renderer places the explanation beneath its field. */
 function docLine(spec, ctx, model) {
   const key = `${model.name}:${spec.name}`;
   if (!spec.doc || !ctx.docOpen || !ctx.docOpen(key)) return null;
@@ -408,19 +341,16 @@ function docLine(spec, ctx, model) {
 }
 
 /**
- * Three parameters and a derived count in one row. The count comes from the
- * service's `estimate_text`, which a `PUT` returns afresh — the span is
- * rounded and never truncated, and re-implementing that here would eventually
- * round differently in the one case that mattered.
+ * The range row combines three parameters and a service-derived count.
+ * `estimate_text` follows each edit; local span arithmetic could round differently
+ * from the service.
  */
 function rangeRow(row, ctx, model) {
   const commit = (name) => (value) => ctx.edit(model.name, { [name]: value });
   const specs = [row.start, row.stop, row.step];
-  // `start == stop` is a *repeat*, not a sweep — "Q at V_oc twenty times" — and
-  // `ui-rules` §4 says the switch must be visible rather than silent: the chart
-  // beside this row changes from Q(axis) to Q per loop on exactly this test.
-  // Only on the swept axis (`row.accent`): a jv_bace's LED levels from 1.000
-  // to 1.000 is one level, not a repeat, and `n_loops` says nothing about it.
+  // On the swept axis, `start == stop` denotes a repeat and switches the chart from
+  // Q(axis) to Q per loop (`docs/ui-rules.md` §4). This indication requires
+  // `row.accent`: equal LED limits in `jv_bace` mean one level, not repeated shots.
   const repeat = Boolean(row.accent) && row.start.value !== null && Number(row.start.value) === Number(row.stop.value);
   return h('div.pw',
     h('div.pf.range' + (row.accent ? '.acc' : ''), { class: 'has-help', title: rangeHelp(row) },
@@ -438,11 +368,9 @@ function rangeRow(row, ctx, model) {
 }
 
 /**
- * One row, three parameters, three provenances. The row shows the highest one
- * of the three — a range whose `step_v` was edited must not read `default`
- * because its `start_v` still is — and names which of them it belongs to, so
- * "edited" is never ambiguous about *what*. Reset drops every edit in the row
- * in one `PUT`, because the operator edited a range, not a field.
+ * A composite range shows the highest parameter source and identifies the parameter.
+ * An edited `step_v` must remain visible even if `start_v` is default. Reset clears
+ * every edit in one `PUT` because the row represents one range.
  */
 function rangeProvenance(specs, ctx, model) {
   const rank = ['default', 'run.toml', 'last-used', 'edited', 'inherited', 'derived'];
@@ -467,10 +395,8 @@ function rangeHelp(row) {
 }
 
 /**
- * The V_oc row. `led_v` is *in* it, not elsewhere on the card, because the
- * coupling invariant is that the DC level V_oc was measured at and the pulse
- * high level are one number — `ui-rules` §6 wants the screen to make nobody
- * want to type a different one.
+ * The V_oc row includes `led_v` because the DC level used to measure V_oc must equal
+ * the transient pulse high level (`docs/ui-rules.md` §6).
  */
 function vocRow(row, ctx, model) {
   const voc = row.voc;
@@ -486,28 +412,23 @@ function vocRow(row, ctx, model) {
       h('span.v',
         bound
           ? h('span', { text: fmt.volts(voc.value) })
-          // Missing shows the field, not a sentence where the field should be:
-          // the typed V_oc is the documented last resort and the *only* route
-          // on a bench with no SourceMeter, so it has to look like something
-          // you can type in. The reason goes on its own line below, where it
-          // cannot push `@ led_v` onto a second row.
+          // A typed V_oc is the fallback and the only route without a source-meter.
+          // An absent value must therefore retain an input. Its explanation occupies
+          // a separate line so `led_v` stays with V_oc.
           : input(voc, commit, false, { blank: missing }),
         h('i.at', '@'),
         input(row.led, (v) => ctx.edit(model.name, { led_v: v }), false),
         h('i', 'V LED'),
-        // Where the V_oc came from -- "jv_bace (this session, 11:49)" -- is a
-        // sentence, and on the value's own line it ran under the tag. Its own
-        // line, after the level it was measured at.
+        // V_oc provenance occupies a separate line after its LED level to avoid
+        // colliding with the source tag.
         bound ? h('i.det', { text: voc.detail || 'derived' }) : null),
       provenance(voc, ctx, model, !bound)),
     missing && row.need ? h('div.need1', icon('warn', { cls: 'ico' }), h('span', { text: row.need.text })) : null);
 }
 
 /**
- * The polarity control: one four-way choice, with the boolean it falls back to
- * revealed only where it is read. `auto` *is* `inverted_output`; at NORM, INV
- * or leave that boolean is never consulted, and showing it as an independent
- * field would offer a knob that does nothing.
+ * The polarity control has four choices. Only `auto` consults `inverted_output`;
+ * showing that fallback for NORM, INV or leave would offer an ineffective control.
  */
 function polarityRow(row, ctx, model) {
   const mode = row.mode;
@@ -522,10 +443,9 @@ function polarityRow(row, ctx, model) {
     h('span.v',
       h('span.seg', { role: 'group', 'aria-label': mode.name },
         ...mode.choices.map((choice) => option(choice, mode.value === choice, () => commit(choice)))),
-      // `inverted_output` is a boolean on the wire and *not* a checkbox on the
-      // screen: what it selects is a polarity, and the two positions have
-      // names the operator already reads on the instrument. A tick beside
-      // `inverted_output` would be a box whose meaning is the word next to it.
+      // Although `inverted_output` is boolean on the wire, NORM and INV match the
+      // instrument's named positions. Those labels convey polarity more clearly than
+      // a checkbox (`docs/ui-rules.md` §14).
       auto
         ? h('span.seg', { role: 'group', 'aria-label': row.fallback.name },
           ...[true, false].map((v) => option(v ? 'INV' : 'NORM', row.fallback.value === v,
@@ -536,9 +456,8 @@ function polarityRow(row, ctx, model) {
 }
 
 /**
- * The bench read-back. Not a parameter and not from `/modules`: what the
- * instruments say the light is doing, which on the `jv` card is what decides
- * whether the curve will be labelled dark, lit or unknown.
+ * The light read-back reports instrument state independently of `/modules`. The `jv`
+ * card uses it to label illumination as dark, light or unknown.
  */
 function readback(row) {
   if (row.kind === 'shutter') {
@@ -572,19 +491,17 @@ function needsList(model) {
 }
 
 /**
- * The fold, as the service's own groups with computed counts. Not one button:
- * the `bace` card folds thirty-four, and thirty-four behind a single
- * disclosure is the comfortable screen `ui-rules` §1 warns about. Every count
- * is the length of what is in it — the artboard's typed "17" was stale the
- * day the SMU fields landed.
+ * The fold uses service groups and computed counts. A single disclosure for all
+ * `bace` parameters would hide too much (`docs/ui-rules.md` §1); counts must reflect
+ * the actual fields.
  */
 export function fold(model, ctx, open) {
   const total = foldCount(model);
   if (!total) return null;
   return h('div.fold',
     h('div.foldbar',
-      // On a node form the fold *is* the statement: everything in it is the
-      // module as it stands on the bench, and only what is above it differs.
+      // On a node form, the fold contains unchanged bench values; the fields above it
+      // show differences.
       h('span.cs', { text: `${total} more · ${model.form === 'node' ? 'same as bench' : 'run.toml'}` }),
       model.fold.map((group) => h('button.btng', {
         class: open.has(group.group) ? 'on' : '',
@@ -596,19 +513,15 @@ export function fold(model, ctx, open) {
 }
 
 /**
- * Start is disabled by `invalid` **and** by `crit`, because
- * `pipeline.validate` is `valid = not any(level in ("invalid", "crit"))` and a
- * button that only blocked on `crit` would answer 422. They are not the same
- * failure and do not look the same: `crit` keeps the loudest treatment
- * `ui-rules` §3 reserves for hardware safety; `invalid` reads as "this tree is
- * not runnable yet", which is what it is.
+ * Start is disabled for both `invalid` and `crit` checks, matching service validation
+ * (`docs/service-contract.md` §7). Hardware-critical checks retain the strongest
+ * visual treatment; invalid parameters indicate an unrunnable tree
+ * (`docs/ui-rules.md` §3).
  */
 function startBlockers(checks, model) {
-  // `pipeline.validate` is `valid = not any(level in ("invalid", "crit"))`,
-  // and both `session.submit` and the Start re-check refuse on that same
-  // pair — so a button that blocked on only one of them would offer a click
-  // that answers 422. Every check of this module's own one-node tree counts;
-  // there is no other tree in it to filter out.
+  // Both `invalid` and `crit` checks block submission and the Start re-check
+  // (`docs/service-contract.md` §7). Every check belongs to this module's one-node
+  // tree, so none can be filtered out.
   return (checks || []).filter((v) => v.level === 'crit' || v.level === 'invalid');
 }
 
