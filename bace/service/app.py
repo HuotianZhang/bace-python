@@ -1,40 +1,29 @@
-"""The routes: `create_app(session) -> FastAPI`, HTTP and one WebSocket over a `Session`.
+"""The application exposes session operations through HTTP and WebSocket routes.
 
-This is the only module in `bace.service` besides `__main__` that imports
-FastAPI, and it decides nothing. Every route is a thin translation between
-the wire and one `Session` method: the body becomes the call's arguments,
-the session's answer is the response, and the session's exceptions become
-status codes -- `SubmitRefused` is a 422 that carries every check, `Busy`
-and the other `Conflict`s are 409s, an unknown run, module or action is a
-404, a parameter the catalogue refuses is a 422 that names the parameter.
-The mapping lives in one table (`_HANDLERS`) so a new session error cannot
-arrive at a client as a 500 with a traceback for a body.
+Only this module and `__main__` import FastAPI in `bace.service`. Routes
+translate request bodies into `Session` calls and return their results.
+`_HANDLERS` maps `SubmitRefused` to 422 with all checks, `Busy` and other
+`Conflict` exceptions to 409, unknown runs, modules and actions to 404, and
+refused parameters to 422 with the parameter name
+(`docs/service-contract.md`, sections 4 and 6).
 
-**Threads.** Everything the session does on the event path assumes it runs
-on the asyncio loop's thread once a loop is attached: `submit` journals and
-fans out synchronously, and an `asyncio.Queue` may only be fed from its own
-loop's thread. So every route here is `async def` -- a plain `def` route
-would be run by Starlette on a threadpool thread, and the first frame put
-on a subscriber's queue from there would wake nobody. The two calls that
-block on the worker (`bench_read`, `bench_action`) are the exception, and
-they are sent to the threadpool explicitly; what they do off the loop is
-submit a job and wait for it, and the worker's callbacks come back to the
-loop with `call_soon_threadsafe` as they do for a run.
+Routes use `async def` because session event handling belongs to the attached
+asyncio loop's thread. A synchronous route runs in Starlette's thread pool;
+feeding a subscriber's `asyncio.Queue` there can fail to wake the consumer.
+Blocking `Session.bench_read` and `Session.bench_action` calls use the thread
+pool explicitly. They submit worker jobs and wait; worker callbacks return
+through `call_soon_threadsafe`.
 
-**The WebSocket** sends the `Hello` frame, replays the ring from `since`
-when asked, then streams what the session fans out. The subscription is
-taken *before* the replay is computed and every frame carries `seq`, so a
-frame that arrives during the replay is sent once, in order, and a client
-that reconnects with the last `seq` it saw misses nothing the ring still
-holds. A client the session drops for falling behind receives the `Notice`
-and is closed.
+WebSocket subscriptions precede replay. The socket sends `Hello`, replays
+frames after `since` when requested, then streams session events. Sequence
+numbers deduplicate frames queued during replay and preserve order. A
+reconnecting client receives every frame still in the ring. A subscriber
+that falls behind receives `Notice` before closure.
 
-**Lifespan.** Startup attaches the loop, starts the worker and runs one
-read-back so `/bench` has a state to show before anyone clicks (contract
-section 9); shutdown drains the worker on the threadpool -- the loop must
-keep running while the last `parked` frames come back -- and then closes
-the session, which parks the bench and closes the journal.
-"""
+Startup attaches the loop, starts the worker and reads the bench. Shutdown
+waits for the worker in the thread pool, keeping the loop available for
+`parked` frames, then closes the session and journal
+(`docs/service-contract.md`, section 9)."""
 from __future__ import annotations
 
 import asyncio
@@ -66,14 +55,18 @@ from .session import (Busy, Conflict, DataUnavailable, NodeRequired, NotPaused, 
 from .worker import StopMode
 
 SHUTDOWN_TIMEOUT_S = 5.0
-"""How long shutdown waits for the worker to abort the current job and end.
-A job inside a VISA call cannot be interrupted; after this the bench is
-parked and the journal closed regardless, and the worker thread is a daemon."""
+"""The shutdown timeout bounds the initial worker abort wait in seconds.
+
+A blocking VISA call cannot be interrupted. Session closure then waits for
+the worker before releasing bench resources. If it cannot finish, resources
+remain open (`docs/service-contract.md`, section 9)."""
 
 SHUTDOWN_DRAIN_S = 0.05
-"""A pause between the worker ending and the journal closing, so the frames
-the worker posted to the loop in its last moments (`aborted`, `parked`) are
-written before the file is closed rather than landing in `session.errors`."""
+"""The shutdown drain lets final worker frames reach the journal.
+
+This pause in seconds follows worker completion. It lets `aborted` and
+`parked` callbacks run before journal closure instead of becoming
+`session.errors`."""
 
 _RECIPE_STEM = re.compile(r"[^A-Za-z0-9_.-]+")
 
@@ -82,7 +75,9 @@ log = logging.getLogger("bace.service")
 
 # -- request bodies -------------------------------------------------------------
 class RunRequest(BaseModel):
-    """`POST /runs`: one module with overrides on its resolved parameters."""
+    """The run request selects one module with parameter overrides.
+
+    The contract is `docs/service-contract.md`, section 6."""
 
     model_config = ConfigDict(extra="forbid")
     module: str
@@ -91,22 +86,28 @@ class RunRequest(BaseModel):
 
 
 class StopRequest(BaseModel):
-    """`POST /runs/{id}/stop`: the two honest verbs and nothing else."""
+    """The stop request selects `after_shot` or `abort`.
+
+    The modes are defined in `docs/service-contract.md`, section 2."""
 
     model_config = ConfigDict(extra="forbid")
     mode: Literal["after_shot", "abort"] = StopMode.AFTER_SHOT
 
 
 class ShutdownRequest(BaseModel):
-    """`POST /service/shutdown`: `force` ends a run that holds the bench."""
+    """The shutdown request uses `force` to allow ending an active run.
+
+    The contract is `docs/service-contract.md`, section 9."""
 
     model_config = ConfigDict(extra="forbid")
     force: bool = False
 
 
 class ResumeRequest(BaseModel):
-    """`POST /runs/{id}/resume`: what the operator did. `temperature_k`
-    becomes the subtree's temperature; both are journaled as the answer."""
+    """The resume request records the operator's answer to a pause.
+
+    `temperature_k` becomes the subtree temperature in K. It and the note are
+    journaled (`docs/service-contract.md`, section 6)."""
 
     model_config = ConfigDict(extra="forbid")
     note: str = ""
@@ -114,7 +115,9 @@ class ResumeRequest(BaseModel):
 
 
 class TreeRequest(BaseModel):
-    """`POST /pipelines`, `/pipelines/validate`, `/pipelines/save`."""
+    """The tree request supplies a pipeline for execution, validation or saving.
+
+    The contract is `docs/service-contract.md`, section 7."""
 
     model_config = ConfigDict(extra="forbid")
     tree: dict[str, Any]
@@ -122,7 +125,9 @@ class TreeRequest(BaseModel):
 
 
 class BenchSaveRequest(BaseModel):
-    """`POST /bench/save`: the file the whole bench is written to."""
+    """The bench-save request names the file for the whole bench.
+
+    The contract is `docs/service-contract.md`, section 4."""
 
     model_config = ConfigDict(extra="forbid")
     name: str = ""
@@ -148,9 +153,10 @@ def _error(status: int, message: str, **extra: Any) -> JSONResponse:
 
 
 def _param_of(message: str, module: str | None = None) -> str | None:
-    """The parameter a `ModuleError`/`ParamError` message names: the first
-    token before a colon, after the module's own prefix. Both classes start
-    their messages that way so the console can attach them to a field."""
+    """The error parser extracts the parameter named by a catalogue refusal.
+
+    `ModuleError` and `ParamError` put it before the first colon, after any module
+    prefix, so the console can attach the error to a field."""
     rest = message
     if module and rest.startswith(module + ": "):
         rest = rest[len(module) + 2:]
@@ -209,8 +215,8 @@ async def _timeout(request: Request, exc: TimeoutError) -> JSONResponse:
 
 
 async def _runtime_error(request: Request, exc: RuntimeError) -> JSONResponse:
-    # A handled exception is not logged by Starlette, and a 500 whose only
-    # trace is one line in a browser is a bug nobody can find later.
+    # Starlette does not log handled exceptions. Keep the traceback so a
+    # 500 response remains diagnosable beyond the browser's error line.
     log.exception("%s %s failed", request.method, request.url.path)
     return _error(500, f"{type(exc).__name__}: {exc}")
 
@@ -243,16 +249,19 @@ _HANDLERS: tuple[tuple[type[Exception], Any], ...] = (
     (RuntimeError, _runtime_error),
     (RequestValidationError, _validation_error),
 )
-"""Session exception -> handler. Starlette walks the exception's MRO, so the
-most specific class registered wins: `Busy` before `Conflict` before
-`RuntimeError`, `ModuleError` before `ValueError`."""
+"""The handler table maps session exceptions to HTTP responses.
+
+Starlette walks the exception's method resolution order. The most specific
+registered class wins: `Busy` before `Conflict` before `RuntimeError`, and
+`ModuleError` before `ValueError`."""
 
 
 # -- frames ------------------------------------------------------------------------
 def _dumps(frame: Any) -> str:
-    """One frame as JSON text. Frames come from the wire policy with NaN
-    already turned into null; if one ever did not, `jsonable` does it here
-    rather than a bare `NaN` token closing the client's parser."""
+    """The frame encoder returns valid JSON without NaN tokens.
+
+    The wire policy normally replaces NaN with null. `jsonable` provides a
+    fallback so a nonfinite value cannot break the client's parser."""
     try:
         return json.dumps(frame, allow_nan=False, separators=(",", ":"))
     except ValueError:
@@ -260,24 +269,22 @@ def _dumps(frame: Any) -> str:
 
 
 def _hello(session: Session) -> dict:
-    """The first WebSocket frame, in envelope shape so a client parses it
-    like any other: `data` is `{session, seq, bench}`.
+    """The first WebSocket frame carries `{session, seq, bench}` in `data`.
 
-    The envelope `seq` is null, not the last seq: the replay that follows
-    carries frames with lower seqs, and a Hello stamped with the newest seq
-    would make a client that dedupes on `seq > last seen` drop the whole
-    replay. The last seq the client has is `data.seq`, where the contract
-    puts it."""
+    The envelope's `seq` is null. Using the last sequence number there would
+    make clients discard lower-numbered replay frames during deduplication.
+    `data.seq` carries that number instead (`docs/service-contract.md`, section 6)."""
     data = session.hello()
     return {"seq": None, "ts": time.time(), "run_id": None, "node_path": "",
             "type": "Hello", "data": data, "decimated": {}}
 
 
 def _bench_values(session: Session, names: list[str]) -> dict[str, dict[str, dict]]:
-    """`{module: {param: {value, source}}}` for `names`, as the bench has them
-    now -- the layer a node's own overrides sit on, and the only statement of
-    what a module will run with that does not depend on the session outliving
-    the operator's afternoon."""
+    """The bench snapshot records resolved values and layers for `names`.
+
+    Its shape is `{module: {param: {value, source}}}`. These values underlie
+    node overrides. Saving them records a recipe's parameters independently
+    of the session lifetime."""
     out: dict[str, dict[str, dict]] = {}
     for module in names:
         resolved = session.catalogue.param_set(module).resolve()
@@ -287,9 +294,10 @@ def _bench_values(session: Session, names: list[str]) -> dict[str, dict[str, dic
 
 
 def _bench_snapshot(session: Session, tree_obj: dict) -> dict[str, dict[str, dict]]:
-    """The bench a recipe is saved against: every module the tree names. A
-    tree that does not parse records nothing: the save still succeeds, as it
-    did before, and the file says so by having no `bench`."""
+    """The recipe snapshot includes every module named in a valid tree.
+
+    An invalid tree yields an empty snapshot. Saving still succeeds; an empty
+    `bench` block records the lack of resolved bench values."""
     try:
         root = pipeline.parse_tree(tree_obj)
     except Exception:
@@ -303,14 +311,11 @@ def _bench_snapshot(session: Session, tree_obj: dict) -> dict[str, dict[str, dic
 
 
 def _saved_records(folder: str, keys: tuple[str, ...]) -> list[dict]:
-    """Every `*.json` under `folder`, newest first, with `keys` lifted out of
-    each record beside its `name` and `path`.
+    """The saved-record index lists JSON files with selected fields, latest first.
 
-    A file that will not parse is listed with its `error` rather than
-    dropped: the operator saved it, so a picker that silently omits it says
-    the save never happened. Same rule for both save folders, which is why
-    this is one function.
-    """
+    `keys` selects fields beside each record's `name` and `path`. Unparseable
+    files remain listed with `error`; silently omitting one would hide a saved
+    file. Both save folders use this rule (`docs/service-contract.md`, section 4)."""
     out: list[dict] = []
     if not os.path.isdir(folder):
         return out
@@ -333,8 +338,10 @@ def _saved_records(folder: str, keys: tuple[str, ...]) -> list[dict]:
 
 
 def _write_record(folder: str, stem: str, record: dict) -> str:
-    """`<folder>/<stem>.json`, created and overwritten without asking -- the
-    console arms the second click, which is where a confirmation belongs."""
+    """The record writer creates or overwrites `<folder>/<stem>.json`.
+
+    The console arms a second click for overwrite; the route writes without
+    another confirmation (`docs/service-contract.md`, section 4)."""
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, f"{stem}.json")
     with open(path, "w", encoding="utf-8") as fh:
@@ -350,16 +357,14 @@ def _stem(name: str) -> str:
 def create_app(session: Session, *, ui_dir: str | None = None,
                read_back_at_start: bool = True,
                request_exit: Callable[[], None] | None = None) -> FastAPI:
-    """Every route of contract sections 4-8 over `session`.
+    """The app factory exposes HTTP and WebSocket routes over `session`.
 
-    `ui_dir` mounts a static front end at `/ui` and makes `/` redirect to
-    it; without it `/` is a JSON index of the routes. `read_back_at_start`
-    runs one read-back job in the startup hook so the bench card is not
-    blank until someone clicks; a test that wants the untouched stream can
-    turn it off. `request_exit` ends the server that runs the app; without it
-    `POST /service/shutdown` is refused, since nothing here can stop the
-    process.
-    """
+    `ui_dir` mounts the console at `/ui` and redirects `/` there. Without it,
+    `/` returns a JSON route index. `read_back_at_start` runs a startup read-back
+    so the bench card has state before an operator acts. Tests can disable it
+    to inspect an untouched event stream. `request_exit` ends the hosting server.
+    Without it, `/service/shutdown` is refused because the app cannot stop its
+    host process (`docs/service-contract.md`, section 9)."""
     if ui_dir is not None and not os.path.isdir(ui_dir):
         raise ValueError(f"--ui: {ui_dir!r} is not a directory")
 
@@ -386,7 +391,7 @@ def create_app(session: Session, *, ui_dir: str | None = None,
     # -- index -------------------------------------------------------------
     @app.get("/")
     async def index():
-        """The routes, or a redirect to the mounted UI."""
+        """The index returns route descriptions or redirects to the mounted console."""
         if ui_dir is not None:
             return RedirectResponse("/ui/")
         return {"service": "bace", "session": session.session_info(),
@@ -394,17 +399,18 @@ def create_app(session: Session, *, ui_dir: str | None = None,
 
     @app.get("/session")
     async def session_info():
-        """Who this process is: id, mode, sample, paths, fingerprint."""
+        """The session response identifies the process, sample, paths and fingerprint.
+
+        The contract is `docs/service-contract.md`, section 3a."""
         return session.session_info()
 
     @app.put("/session/sample")
     async def set_sample(values: dict[str, Any] = Body(...)):
-        """Name the device: the `[sample]` block, merged; a null puts a key back to run.toml.
+        """The sample edit merges `[sample]` and resets null keys to `run.toml`.
 
-        Touches no instrument and takes no worker job, so it is allowed while
-        a run is going -- and binds the runs queued *after* it only, which is
-        what `run_active` in the answer is there to let the console say.
-        """
+        It touches no instrument and takes no worker job, so it is allowed during
+        a run. Only runs queued afterward use the edited identity. `run_active`
+        lets the console explain that scope (`docs/service-contract.md`, section 3a)."""
         try:
             return session.set_sample(values)
         except ValueError as exc:
@@ -412,13 +418,12 @@ def create_app(session: Session, *, ui_dir: str | None = None,
 
     @app.post("/service/shutdown", status_code=202)
     async def shutdown(body: ShutdownRequest | None = Body(default=None)):
-        """End the service: abort any run, park the bench, close the journal, exit.
+        """The shutdown route ends the service, parks the bench and closes the journal.
 
-        A run holding or waiting for the bench is refused unless `force` is
-        set, so a client that did not see the run cannot end it. The exit
-        follows the answer: the server stops accepting, and the lifespan's
-        shutdown parks the bench as Ctrl-C does.
-        """
+        A run holding or waiting for the bench causes refusal unless `force` is
+        set, protecting a run the client may not see. Exit follows the response.
+        The server stops accepting requests and the lifespan parks the bench as on
+        Ctrl-C (`docs/service-contract.md`, section 9)."""
         if request_exit is None:
             return _error(409, "this service was not started by `python -m bace.service`; "
                                "stop it where it was started")
@@ -432,12 +437,18 @@ def create_app(session: Session, *, ui_dir: str | None = None,
     # -- /bench --------------------------------------------------------------
     @app.get("/bench")
     async def bench():
-        """The cached read-back, the run in progress and the queue; touches no instrument."""
+        """The bench route returns cached read-back, active run and queue without I/O.
+
+        The contract is `docs/service-contract.md`, section 4."""
         return session.bench_snapshot()
 
     @app.post("/bench/read", status_code=202)
     async def bench_read(wait: bool = Query(True)):
-        """A read-back job; 409 while a run is active (its Start re-reads the chain)."""
+        """The read-back route submits a job and returns 409 during an active run.
+
+        Start reads the chain itself.
+
+        The contract is `docs/service-contract.md`, section 4."""
         if not wait:
             return session.bench_read(wait=False)
         return await run_in_threadpool(session.bench_read)
@@ -445,39 +456,32 @@ def create_app(session: Session, *, ui_dir: str | None = None,
     @app.post("/bench/actions/{name}", status_code=202)
     async def bench_action(name: str, args: dict[str, Any] | None = Body(default=None),
                            wait: bool = Query(True)):
-        """One explicit bench action, journaled by hand and followed by a read-back."""
+        """The action route journals one explicit bench change and reads back the
+        result.
+
+        The contract is `docs/service-contract.md`, section 4."""
         if name not in ACTIONS:
             return _error(404, f"no such bench action: {name}", actions=list(ACTIONS))
         if not wait:
             return session.bench_action(name, args, wait=False)
         out = await run_in_threadpool(session.bench_action, name, args)
-        # A park still queued behind a run inside a long VISA call answers
-        # `pending: true` rather than a 504 that cancelled it.
+        # A park queued behind a blocking VISA call stays queued and reports
+        # `pending: true`. Cancelling it with a 504 would leave the bench unsafe.
         return {**out, "bench": session.bench_snapshot()}
 
     @app.post("/bench/save")
     async def save_bench(body: BenchSaveRequest):
-        """Write the whole bench to `<out>/bench/<name>.json`.
+        """The bench-save route writes all settings to `<out>/bench/<name>.json`.
 
-        The edited layer is a *session*: it lives in the catalogue and goes
-        when the process does, so an afternoon of tuning six cards was until
-        now recoverable only from the operator's memory or from a recipe
-        saved on the pipeline tab -- which records the bench for the modules
-        one tree happens to name, as a by-product of saving a structure.
-        This saves the bench for its own sake, every module of it.
+        The edited layer lives only in the session. Saving the whole catalogue
+        preserves settings beyond the modules named in one recipe. The record maps
+        `{module: {param: {value, source}}}`, preserving resolved values and layers.
 
-        The record is the recipe's `bench` block widened to the whole
-        catalogue: `{module: {param: {"value", "source"}}}`, resolved, so the
-        file says both what a value is and which layer it came from. There is
-        deliberately no route that *loads* one back. Putting a saved value onto
-        the bench is `PUT /modules/{m}/params`, the same edit a card's field
-        makes, one module at a time -- so a value the spec now refuses is
-        refused with the sentence it would have got from the field, and the
-        rest of the file still lands. A load route would have to invent an
-        all-or-nothing rule for the whole catalogue at once, and one that
-        fails leaves the operator with the bench they were replacing and no
-        idea which value stopped it.
-        """
+        Restoring uses `PUT /modules/{m}/params` one module at a time. A refused value
+        gets the same field error as an edit, while other modules can accept their
+        values. There is no load route with a catalogue-wide all-or-nothing rule:
+        such a refusal would hide which value prevents the whole-bench restore
+        (`docs/service-contract.md`, section 4)."""
         stem = _stem(body.name)
         if not stem:
             return _error(422, "name: saved bench settings need a name", param="name")
@@ -488,22 +492,19 @@ def create_app(session: Session, *, ui_dir: str | None = None,
 
     @app.get("/bench/saved")
     async def saved_bench():
-        """Every saved bench under `<out>/bench`, newest first, values included.
+        """The saved-bench index returns values from `<out>/bench`, latest first.
 
-        Keyed `benches` as `/pipelines/saved` is keyed `recipes`: each tab's
-        saved things, under the name that tab calls them."""
+        Its key is `benches`, matching the tab's noun, as `recipes` does for
+        `/pipelines/saved` (`docs/service-contract.md`, section 4)."""
         return {"benches": _saved_records(os.path.join(session.out, "bench"), ("bench",))}
 
     @app.delete("/bench/saved/{name}")
     async def delete_bench(name: str):
-        """Delete one saved bench. 404 when there is no such file.
+        """The delete route removes one saved bench and returns 404 if it is absent.
 
-        A saved bench is the only thing the console can remove from disk, so
-        it is the only DELETE that reaches a file: a recipe has no delete
-        (nothing in the pipeline tab offers one), and a run's folder is the
-        record of an experiment. The console arms the second click, as it
-        does for the overwrite beside it.
-        """
+        Only saved benches can be removed from disk through the console. Recipes
+        have no delete route; run folders are experiment records. The console arms
+        a second click, as for overwrite (`docs/service-contract.md`, section 4)."""
         stem = _stem(name)
         path = os.path.join(session.out, "bench", f"{stem}.json")
         if not stem or not os.path.isfile(path):
@@ -514,12 +515,16 @@ def create_app(session: Session, *, ui_dir: str | None = None,
     # -- /modules --------------------------------------------------------------
     @app.get("/modules")
     async def modules():
-        """The catalogue with provenance, estimates, needs and each module's last run."""
+        """The catalogue response includes layers, estimates, needs and last runs.
+
+        The contract is `docs/service-contract.md`, section 5."""
         return session.modules_wire()
 
     @app.get("/modules/{name}")
     async def module(name: str):
-        """One module entry."""
+        """The module route returns one catalogue entry.
+
+        The contract is `docs/service-contract.md`, section 5."""
         try:
             return session.module_wire(name)
         except KeyError:
@@ -527,7 +532,11 @@ def create_app(session: Session, *, ui_dir: str | None = None,
 
     @app.put("/modules/{name}/params")
     async def edit_params(name: str, values: dict[str, Any] = Body(...)):
-        """Set the edited layer (coerced, all or nothing); a null value resets that parameter."""
+        """The parameter edit coerces values into the edited layer atomically.
+
+        Null resets a parameter to the layer below.
+
+        The contract is `docs/service-contract.md`, section 5."""
         try:
             session.catalogue.edit(name, values)
         except KeyError:
@@ -536,7 +545,9 @@ def create_app(session: Session, *, ui_dir: str | None = None,
 
     @app.post("/modules/{name}/params/reset")
     async def reset_params(name: str):
-        """Drop the whole edited layer so the lower layers show again."""
+        """The parameter reset removes the edited layer to expose lower layers.
+
+        The contract is `docs/service-contract.md`, section 5."""
         try:
             session.catalogue.reset(name)
         except KeyError:
@@ -546,7 +557,9 @@ def create_app(session: Session, *, ui_dir: str | None = None,
     # -- /runs ---------------------------------------------------------------------
     @app.post("/runs", status_code=202)
     async def start_run(body: RunRequest):
-        """Queue a manual run: one module node, validated like any pipeline."""
+        """The run route validates and queues one module as a pipeline node.
+
+        The contract is `docs/service-contract.md`, section 6."""
         tree = tree_for_module(body.module, body.params, body.name)
         run_id, v = session.submit(tree, name=body.name, kind="manual")
         rec = session.run_record(run_id)
@@ -556,17 +569,25 @@ def create_app(session: Session, *, ui_dir: str | None = None,
 
     @app.get("/runs")
     async def runs(which: str = Query("this", alias="session")):
-        """The run index from the journal: this session, `all`, or a session id."""
+        """The run index reads the journal for this session, `all`, or a session ID.
+
+        The contract is `docs/service-contract.md`, section 6."""
         return session.runs_index(which)
 
     @app.get("/runs/{run_id}")
     async def run(run_id: str):
-        """The full record: tree, schedule, params as executed, node outcomes, folders."""
+        """The run record includes its tree, executed parameters, outcomes and folders.
+
+        The contract is `docs/service-contract.md`, section 6."""
         return session.run_record(run_id)
 
     @app.get("/runs/{run_id}/data")
     async def run_data(run_id: str, node: str | None = Query(None)):
-        """Full-precision arrays of one node; 400 for a pipeline run without `node`."""
+        """The data route returns full-precision arrays for one node.
+
+        A pipeline request without `node` returns 400.
+
+        The contract is `docs/service-contract.md`, section 6."""
         def render() -> str:
             return json.dumps(jsonable(session.run_data(run_id, node)), allow_nan=False)
         return Response(content=await run_in_threadpool(render),
@@ -574,20 +595,28 @@ def create_app(session: Session, *, ui_dir: str | None = None,
 
     @app.post("/runs/{run_id}/stop", status_code=202)
     async def stop_run(run_id: str, body: StopRequest | None = Body(default=None)):
-        """`after_shot` keeps the shot in flight, `abort` discards it; a queued run is cancelled."""
+        """The stop route keeps the shot with `after_shot` or discards it with `abort`.
+
+        A queued run is cancelled.
+
+        The contract is `docs/service-contract.md`, section 2."""
         mode = body.mode if body is not None else StopMode.AFTER_SHOT
         return session.stop(run_id, mode)
 
     @app.post("/runs/{run_id}/resume", status_code=202)
     async def resume_run(run_id: str, body: ResumeRequest | None = Body(default=None)):
-        """Answer a `NeedsOperator`; 409 when the run is not paused."""
+        """The resume route answers `NeedsOperator` and returns 409 unless paused.
+
+        The contract is `docs/service-contract.md`, section 6."""
         detail = body.model_dump(exclude_unset=True) if body is not None else {}
         return session.resume(run_id, detail)
 
     # -- /events ---------------------------------------------------------------------
     @app.get("/events")
     async def events_since(since: int = Query(0)):
-        """Frames with seq above `since` from the ring, for a client without a socket."""
+        """The event route returns ring frames with `seq` above `since`.
+
+        It supports clients without a socket (`docs/service-contract.md`, section 6)."""
         return {"seq": session.last_seq, "events": session.events_since(since)}
 
     @app.websocket("/events")
@@ -607,26 +636,18 @@ def create_app(session: Session, *, ui_dir: str | None = None,
                 nonlocal last
                 while True:
                     frame = await queue.get()
-                    # Yield to the loop, once for every frame taken off the
-                    # queue and before anything is decided about it.
+                    # Yield before processing each queued frame, including duplicates.
+                    # `Queue.get` can return without suspending for a nonempty queue;
+                    # `send_text` can return when the transport accepts the bytes.
+                    # A backlog then encodes roughly 20 kB frames without yielding and
+                    # starves other requests. Measured on this bench with a 21 x 60
+                    # fast scan and one subscriber, `GET /bench` latency is 6 ms without
+                    # this backlog and a median 3.0 s with it. The console's bench state
+                    # can become stale despite continuous polling.
                     #
-                    # Neither `await` above suspends when there is no reason
-                    # to: `Queue.get` takes its fast path while the queue is
-                    # non-empty, and `send_text` returns as soon as the
-                    # transport buffer accepts the bytes. So a pump with a
-                    # backlog -- which is every `--sim --fast` scan, and any
-                    # burst on the rig -- runs `_dumps` on twenty-kilobyte
-                    # frames in a tight loop and never gives the loop back.
-                    # Measured against a 21 x 60 fast scan with one
-                    # subscriber, `GET /bench` went from 6 ms to a median of
-                    # 3.0 s, which is the console's rail going minutes stale
-                    # while it asks as fast as it is allowed to.
-                    #
-                    # Here rather than after the send, so the duplicate
-                    # `continue` below yields too: a reconnecting subscriber
-                    # is sent frames while its `Hello` is going out, and every
-                    # one of those is at or below the `since=` replay's `last`
-                    # -- a burst that would spin without ever suspending.
+                    # Yield before duplicate rejection: frames can queue while `Hello`
+                    # is sent. Replay covers those sequence numbers, but a burst of
+                    # duplicates must also give the event loop time.
                     await asyncio.sleep(0)
                     if frame is None:                       # dropped by the session
                         with contextlib.suppress(Exception):
@@ -634,8 +655,8 @@ def create_app(session: Session, *, ui_dir: str | None = None,
                         return
                     seq = frame.get("seq")
                     if seq is None:
-                        # A frame for this client only, not from the ring
-                        # (the drop Notice): no seq to dedupe on, sent once.
+                        # A client-only drop `Notice` has no `seq` and is sent once.
+                        # It does not participate in ring-frame deduplication.
                         pass
                     elif seq <= last:
                         continue
@@ -664,7 +685,9 @@ def create_app(session: Session, *, ui_dir: str | None = None,
     # -- /pipelines ---------------------------------------------------------------------
     @app.post("/pipelines/validate")
     async def validate_pipeline(body: TreeRequest):
-        """The Dry run: every check, the schedule in order, the cost. Touches nothing."""
+        """The validation route returns checks, schedule and cost for Dry run.
+
+        It touches no instrument (`docs/service-contract.md`, section 7)."""
         v = session.validate_tree(body.tree, name=body.name)
         w = v.as_wire()
         schedule = w["schedule"] or {}
@@ -674,7 +697,9 @@ def create_app(session: Session, *, ui_dir: str | None = None,
 
     @app.post("/pipelines", status_code=202)
     async def start_pipeline(body: TreeRequest):
-        """Start: a fresh read-back when idle, validate, refuse with the checks or queue."""
+        """The pipeline start reads the idle bench, validates, then refuses or queues.
+
+        A refusal includes the checks (`docs/service-contract.md`, section 7)."""
         if session.run_active() is None:
             try:
                 await run_in_threadpool(session.bench_read)
@@ -688,25 +713,27 @@ def create_app(session: Session, *, ui_dir: str | None = None,
 
     @app.get("/pipelines/last")
     async def last_pipeline():
-        """The last tree validated in this session, so the UI can reopen it."""
+        """The last-pipeline route returns the session's last validated tree for
+        reopening.
+
+        The route is defined in `docs/service-contract.md`, section 7."""
         if session.last_validated is None:
             return _error(404, "nothing has been validated in this session yet")
         return session.last_validated
 
     @app.post("/pipelines/save")
     async def save_pipeline(body: TreeRequest):
-        """Write the tree to `<out>/recipes/<name>.json`."""
+        """The recipe-save route writes the tree to `<out>/recipes/<name>.json`.
+
+        The route is defined in `docs/service-contract.md`, section 7."""
         stem = _stem(body.name or str(body.tree.get("name") or ""))
         if not stem:
             return _error(422, "name: a saved recipe needs a name", param="name")
-        # The tree carries only what its nodes override; everything else a
-        # node runs with is the module's bench value *at start time*. A file
-        # that held the tree alone was an instance without its main
-        # component -- the same recipe would run differently after a bench
-        # edit, with no diff in the file. So the save also records the bench
-        # values of every module in the tree, value and source, as the
-        # complete statement of what this recipe meant when it was saved.
-        # The UI compares them with the bench when the recipe is reopened.
+        # A tree stores only node overrides. Other values come from the
+        # bench at run start, so a bench edit can change the same recipe's
+        # behavior without changing its tree. Save resolved values and
+        # layers for every module it names. The console compares this
+        # snapshot with the bench when reopening the recipe.
         record = {"name": stem, "saved_at": time.time(), "tree": body.tree,
                   "bench": _bench_snapshot(session, body.tree)}
         path = _write_record(os.path.join(session.out, "recipes"), stem, record)
@@ -714,34 +741,43 @@ def create_app(session: Session, *, ui_dir: str | None = None,
 
     @app.get("/pipelines/saved")
     async def saved_pipelines():
-        """Every recipe under `<out>/recipes`, newest first, trees included.
+        """The recipe index returns trees from `<out>/recipes`, latest first.
 
-        `bench` is null on a recipe saved before the bench was recorded with
-        it; `lib/recipe.js: recorded` is what the console says about that."""
+        A file without recorded bench values returns null for `bench`."""
         return {"recipes": _saved_records(os.path.join(session.out, "recipes"),
                                           ("tree", "bench"))}
 
     # -- /monitors -----------------------------------------------------------------------
     @app.post("/monitors/power", status_code=202)
     async def start_monitor(body: MonitorRequest | None = Body(default=None)):
-        """Start the power monitor (HTTP observer; runs beside a scan). One at most."""
+        """The power-monitor route starts at most one observer beside a run.
+
+        The contract is `docs/service-contract.md`, section 8."""
         return session.start_power_monitor(body.interval_s if body is not None else 1.0)
 
     @app.delete("/monitors/power")
     async def stop_monitor():
-        """Stop the power monitor; 404 when none is running."""
+        """The power-monitor stop returns 404 when none is running.
+
+        The contract is `docs/service-contract.md`, section 8."""
         if not session.stop_power_monitor():
             return _error(404, "no power monitor is running")
         return {"stopped": True, "monitors": session.monitors()}
 
     @app.get("/monitors/power/history")
     async def power_history(since: float | None = Query(None), limit: int | None = Query(None)):
-        """Every power-monitor reading the session holds, oldest first: `[ts, watts, trustworthy]` rows."""
+        """The power-history route returns held readings, earliest first.
+
+        Rows contain `[ts, watts, trustworthy]`.
+
+        The contract is `docs/service-contract.md`, section 8."""
         return session.power_history(since=since, limit=limit)
 
     @app.get("/monitors/power/history.csv")
     async def power_history_csv():
-        """The same readings as a CSV download, for a spreadsheet."""
+        """The power CSV route downloads the held readings for a spreadsheet.
+
+        The contract is `docs/service-contract.md`, section 8."""
         stamp = time.strftime("%Y%m%d_%H%M%S")
         return Response(session.power_history_csv(), media_type="text/csv",
                         headers={"Content-Disposition":
@@ -749,28 +785,35 @@ def create_app(session: Session, *, ui_dir: str | None = None,
 
     @app.delete("/monitors/power/history")
     async def clear_power_history():
-        """Forget the readings held in memory; the journal keeps them."""
+        """The power-history clear removes readings from memory and keeps the journal.
+
+        The contract is `docs/service-contract.md`, section 8."""
         return {"cleared": session.clear_power_history()}
 
     @app.post("/monitors/temperature", status_code=202)
     async def start_temperature_monitor(body: MonitorRequest | None = Body(default=None)):
-        """Start the temperature monitor (the 331, beside a run). One at most, and
-        the session has already started it on a bench that has a 331 -- so this is
-        the interval change and the restart, not the switch-on."""
+        """The temperature-monitor route starts or restarts one 331 observer.
+
+        At most one runs. The session starts it on a bench with a 331, so the route
+        also supports interval changes (`docs/service-contract.md`, section 8)."""
         if body is None:
             return session.start_temperature_monitor()
         return session.start_temperature_monitor(body.interval_s)
 
     @app.delete("/monitors/temperature")
     async def stop_temperature_monitor():
-        """Stop the temperature monitor; 404 when none is running."""
+        """The temperature-monitor stop returns 404 when none is running.
+
+        The contract is `docs/service-contract.md`, section 8."""
         if not session.stop_temperature_monitor():
             return _error(404, "no temperature monitor is running")
         return {"stopped": True, "monitors": session.monitors()}
 
     @app.get("/monitors")
     async def monitors():
-        """The observers running beside the bench."""
+        """The monitor index lists observers running beside the bench.
+
+        The contract is `docs/service-contract.md`, section 8."""
         return {"monitors": session.monitors()}
 
     # -- /assistant --------------------------------------------------------------------
@@ -778,13 +821,19 @@ def create_app(session: Session, *, ui_dir: str | None = None,
 
     @app.get("/assistant")
     async def assistant_status():
-        """Whether the assistant can run here, the model, and the documents it reads."""
+        """The assistant status reports availability, model and readable documents.
+
+        The contract is `docs/service-contract.md`, section 8a."""
         return assistant.status()
 
     @app.post("/assistant/chat")
     async def assistant_chat(body: ChatRequest,
                              key: str | None = Header(default=None, alias="X-API-Key")):
-        """One question, answered as NDJSON frames; the key is the asker's own and is not kept."""
+        """The chat route streams one answer as NDJSON frames.
+
+        The request supplies its own key, which is not kept.
+
+        The contract is `docs/service-contract.md`, section 8a."""
         try:
             provider = providers.make(body.provider, key=key or "", model=body.model,
                                       base_url=body.base_url)
@@ -809,7 +858,9 @@ def create_app(session: Session, *, ui_dir: str | None = None,
 
     @app.delete("/assistant/conversations/{conversation_id}")
     async def assistant_forget(conversation_id: str):
-        """Drop one conversation's history; 404 when there is none."""
+        """The conversation delete forgets one history and returns 404 if it is absent.
+
+        The contract is `docs/service-contract.md`, section 8a."""
         if not conversations.forget(conversation_id):
             return _error(404, f"no conversation {conversation_id}")
         return {"forgotten": conversation_id}
@@ -820,8 +871,10 @@ def create_app(session: Session, *, ui_dir: str | None = None,
 
 
 def _route_index(app: FastAPI) -> list[dict]:
-    """`GET /` without a UI: every route with the first line of its docstring,
-    read off the app so the index cannot list a route that is not there."""
+    """The route index lists endpoints and their docstring opening lines.
+
+    It serves `GET /` without a UI. Reading the app's routes prevents entries
+    for endpoints the app does not expose."""
     out = []
     for r in app.routes:
         if isinstance(r, APIRoute):

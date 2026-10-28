@@ -1,34 +1,29 @@
-"""The console's assistant: a conversation with a model that can read the bench.
+"""The console assistant answers questions using read-only session tools.
 
-It explains -- the physics, the chain, what a parameter does and why it has
-the value it has -- and it reads what the service already shows: the session,
-the read-back, the catalogue with each value's layer, the runs, the journal's
-frames, a Dry run of a tree. In this version it changes nothing. Every tool is
-a read, and the Dry run is `Session.validate_tree(remember=False)`, so it does
-not even replace the tree the pipeline tab reopens.
+It explains physics, the instrument chain, parameters and their layers. It
+reads session state, read-back, catalogue, runs and journal events. Dry run
+uses `Session.validate_tree(remember=False)` so it does not replace the tree
+reopened by the pipeline tab. Tools change no bench state
+(`docs/service-contract.md`, section 8a).
 
-**The model is the asker's choice, and so is the key.** Claude through the
-Anthropic API, or any OpenAI-compatible endpoint (`providers.py`). The key
-arrives on each request in `X-API-Key`, is used for that request's calls and
-is never stored, journaled or logged here. The console keeps it in the browser
-only if asked to.
+The request selects Claude through Anthropic or an OpenAI-compatible endpoint
+through `providers`. `X-API-Key` supplies the request's key. The service does
+not store, journal or log it; the console keeps it in the browser only when
+requested.
 
-**History lives here.** A conversation's messages are kept in memory under an
-id the first answer carries, because an assistant turn has to be sent back
-exactly as it came -- thinking blocks, tool calls and all -- and the browser
-has no reason to hold those. A history is one vendor's and one model's: a
-question asked with another starts a new conversation. A request either completes a turn or leaves the
-history as it found it, so a failed or abandoned request can simply be asked
-again.
+Conversation messages remain in memory under the ID in the first answer.
+Assistant turns, including thinking blocks and tool calls, must be returned
+exactly as received. Each conversation belongs to one provider signature;
+a different provider, address or model starts a separate conversation. Only a
+complete turn extends the stored messages. Failed or abandoned requests leave
+them unchanged and can be retried.
 
-**The wire** is one JSON object per line (`application/x-ndjson`), in order:
-`conversation`, then any number of `text` and `tool`/`tool_result`, then
-`done` or `error`.
+The wire uses one JSON object per line (`application/x-ndjson`):
+`conversation`, then `text` and `tool`/`tool_result` frames, then `done` or
+`error`.
 
-`anthropic` and `openai` are in the `service` extra, but nothing else imports
-them: without them the service runs as before and `GET /assistant` says what
-is missing.
-"""
+The `service` extra supplies `anthropic` and `openai`. Missing SDKs leave the
+service available; `GET /assistant` reports the missing dependency."""
 from __future__ import annotations
 
 import asyncio
@@ -43,17 +38,21 @@ from . import providers
 from .modules import jsonable
 
 MAX_TOOL_ROUNDS = 16
-"""A turn that has called tools this many times is stopped and says so; a read
-loop that long is a model going round in circles, not a question answered."""
+"""The tool-round limit stops repeated reads that do not reach an answer.
+
+A turn reaching the limit stops with an explanation."""
 
 MAX_CONVERSATIONS = 32
 TOOL_TEXT_LIMIT = 40000
-"""Characters of one tool result. A run record or the catalogue is a few
-thousand; the cut is for the one that is not, and it says it was cut."""
+"""The tool-result limit bounds the number of characters sent to the model.
+
+Run records and catalogue entries usually fit. Larger results are cut and
+marked as truncated."""
 LIST_LIMIT = 64
-"""A list longer than this inside a tool result is replaced by its length:
-traces and loops are for charts, and a model reading 10000 samples learns
-nothing a summary would not tell it."""
+"""The list limit replaces long tool-result lists with their lengths.
+
+Trace samples belong in charts. Their lengths provide a useful summary
+without sending thousands of samples to the model."""
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -131,7 +130,9 @@ comparing values. Give units.
 
 
 def status() -> dict:
-    """`GET /assistant`: which vendors can answer here, and the documents read."""
+    """The assistant status reports provider availability and readable documents.
+
+    The response is defined in `docs/service-contract.md`, section 8a."""
     vendors = providers.status()
     return {"available": any(v["available"] for v in vendors.values()), "providers": vendors,
             "model": providers.CLAUDE_MODEL, "docs": {k: v[1] for k, v in DOCS.items()}}
@@ -183,11 +184,10 @@ _TYPES = {"string": str, "integer": int, "object": dict}
 
 
 def check_input(tool: Mapping[str, Any], args: Any) -> str | None:
-    """Why `args` does not fit the tool's schema, or None.
+    """The tool-input check returns a schema error or `None`.
 
-    The tools stream their input eagerly, so nothing upstream has validated
-    it: a truncated or malformed input reaches here as whatever the SDK's
-    tolerant parser made of it."""
+    The SDK streams input before validation. Truncated or malformed input can
+    therefore reach this check as the tolerant parser's partial result."""
     schema = tool["input_schema"]
     if not isinstance(args, dict):
         return "input is not an object"
@@ -207,7 +207,7 @@ def check_input(tool: Mapping[str, Any], args: Any) -> str | None:
 
 
 def compact(obj: Any) -> Any:
-    """`obj` with every list longer than `LIST_LIMIT` replaced by its length."""
+    """The compact result replaces lists longer than `LIST_LIMIT` with their lengths."""
     if isinstance(obj, dict):
         return {k: compact(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
@@ -242,7 +242,7 @@ def read_doc(name: str, offset: int = 0, *, session=None) -> str:
 
 
 def run_tool(session, name: str, args: Mapping[str, Any]) -> str:
-    """One tool call against `session`, on the event loop's thread."""
+    """The tool dispatcher reads `session` on the event loop's thread."""
     if name == "get_session":
         return _render(session.session_info())
     if name == "get_bench":
@@ -252,8 +252,8 @@ def run_tool(session, name: str, args: Mapping[str, Any]) -> str:
     if name == "get_module":
         return _render(session.module_wire(args["name"]))
     if name == "list_runs":
-        # Paged before `compact` sees it: a journal of more than LIST_LIMIT
-        # runs would otherwise come back as its length and nothing else.
+        # Page before `compact` handles the result. Otherwise more than
+        # `LIST_LIMIT` runs would reduce to a length with no run records.
         runs = session.runs_index(args.get("scope", "this"))
         limit = max(1, min(int(args.get("limit", 20)), LIST_LIMIT))
         offset = max(0, int(args.get("offset", 0)))
@@ -276,20 +276,23 @@ def run_tool(session, name: str, args: Mapping[str, Any]) -> str:
 
 # -- conversations -------------------------------------------------------------------
 class Busy(RuntimeError):
-    """A turn is already being answered in this conversation."""
+    """The busy error identifies a conversation with a turn in progress."""
 
 
 class Conversations:
-    """Message histories by id, the newest `MAX_CONVERSATIONS` of them, each
-    under the provider signature it was written in."""
+    """Conversation messages are stored by ID for up to `MAX_CONVERSATIONS` entries.
+
+    Each entry retains its provider signature. The most recent entries are kept."""
 
     def __init__(self) -> None:
         self._items: OrderedDict[str, tuple[tuple, list]] = OrderedDict()
         self._busy: set[str] = set()
 
     def open(self, conversation_id: str | None, signature: tuple = ()) -> tuple[str, list]:
-        """The history under `conversation_id`, or a new one when there is
-        none or it was written by another vendor or model."""
+        """The conversation lookup returns a compatible history or an empty history.
+
+        Missing IDs and mismatched provider signatures require a separate
+        conversation."""
         held = self._items.get(conversation_id) if conversation_id else None
         if held is not None and held[0] == signature:
             self._items.move_to_end(conversation_id)
@@ -316,11 +319,11 @@ class Conversations:
 
 async def chat(session, conversations: Conversations, provider, *, text: str,
                conversation_id: str | None = None) -> AsyncIterator[dict]:
-    """Answer one question with `provider` (`providers.make`), yielding the
-    wire's frames.
+    """The chat generator answers one question and yields NDJSON frames.
 
-    The history is extended only when the turn completes. `Busy` is raised
-    before the first frame, so a route can turn it into a 409."""
+    `provider` comes from `providers.make`. Messages are kept only after the turn
+    completes. `Busy` is raised before the first frame so the route can return
+    409 (`docs/service-contract.md`, section 8a)."""
     cid, messages = conversations.open(conversation_id, provider.signature)
     conversations.claim(cid)
     start = len(messages)
@@ -341,8 +344,8 @@ async def chat(session, conversations: Conversations, provider, *, text: str,
             for k in usage:
                 usage[k] += answer.usage.get(k, 0)
             if answer.stop == "max_tokens":
-                # Before the text-only exit: a cut-off answer is not kept as if
-                # it were whole, and a cut-off tool input is not run.
+                # Reject truncation before the text-only exit: incomplete answers
+                # must not enter history, and incomplete tool input must not run.
                 yield {"type": "error", "message": "the answer ran out of room mid-way; ask a narrower question"}
                 return
             turn.append(answer.message)
