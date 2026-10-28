@@ -1,18 +1,15 @@
-"""Put a different integration window on a stored run.
+"""Stored traces support recomputing Q with another integration window.
 
-Finding the *integration* zero -- where the transient starts, and so where
-`t0_int_s` should sit -- is a question for data that has already been taken,
-not for the acquisition: the traces are in the HDF5 at full precision, so the
-window can be moved offline and Q recomputed. (Finding the *light* zero is the
-other kind, and that one needs a delay scan with the window pinned to the
-pulse -- `recipes/run-delay.toml`.)
+Full-precision HDF5 traces let the integration start move offline. The light-off
+delay zero requires a delay scan with the integration window tied to field
+arrival; `recipes/run-delay.toml` supplies that scan.
 
-The arithmetic is `experiment.transient.resolve_window`'s, applied to the
-file's own numbers: `t0_int_s` is measured from the field's arrival, which is
-`axis/delay_ns` plus the rig's `trigger_offset_s` after the trigger, and the
-record's origin is each step's `traces/trace_t0` (`:WAV:XOR?`). Files written
-before schema 3 have no `trace_t0`; the record's geometry (`:TIM:POS` four
-divisions in) stands in for it, half a sample out, and the result says so.
+The timing follows `experiment.transient.resolve_window`: `t0_int_s` is
+relative to field arrival, at `axis/delay_ns` plus `trigger_offset_s` after
+the trigger. Each point's `traces/trace_t0` gives the record origin from
+`:WAV:XOR?`. Without that dataset, the calculation uses record geometry
+with `:TIM:POS` at four divisions. This estimate differs by half a sample,
+and the result identifies the timing source.
 """
 from __future__ import annotations
 
@@ -25,27 +22,39 @@ from .process import charge
 
 @dataclass(frozen=True)
 class Reintegrated:
-    """One window, applied to every step of a run."""
+    """One integration window applied to every point of a stored run."""
 
     t0_int_s: float
     t_int_width_s: float
     trigger_offset_s: float
     window_s: np.ndarray
-    """(n_steps, 2): the window in record time."""
+    """Integration limits in record time, in s, with shape `(n_steps, 2)`."""
     q_mean: np.ndarray
-    """(n_steps,): from the loop-averaged photocurrent -- exactly the mean of
-    the per-loop charges, because both are linear."""
+    """Mean Q in C from the loop-averaged light-minus-dark trace.
+
+    Shape is `(n_steps,)`. Linearity makes this the mean of the per-loop Q.
+    """
     q_loops: np.ndarray | None
-    """(n_loops, n_steps) from `traces/shots`, when the run stored them."""
+    """Per-shot Q in C with shape `(n_loops, n_steps)`.
+
+    Available when the run contains `traces/shots`.
+    """
     q_std: np.ndarray | None
-    """(n_steps,) sample std over the loops, when the run stored them."""
+    """Sample standard deviation of Q in C over loops, with shape `(n_steps,)`.
+
+    Available when the run contains per-shot traces.
+    """
     clipped: np.ndarray
-    """(n_steps,) True where the window runs past the record."""
+    """A boolean per point, shape `(n_steps,)`, marking a window past record end."""
     trace_t0_source: str
 
 
 def trace_t0_of(run: dict) -> tuple[np.ndarray, str]:
-    """Each step's `:WAV:XOR?`, or the timebase geometry standing in for it."""
+    """Returns record origins in s per point, with their source description.
+
+    Finite `trace_t0` values supply `:WAV:XOR?` read-back. Otherwise timebase
+    geometry supplies an estimate.
+    """
     n_steps = np.asarray(run["photocurrent"]).shape[0]
     t0 = run.get("trace_t0")
     if t0 is not None and np.isfinite(np.asarray(t0, dtype=float)).all():
@@ -53,16 +62,20 @@ def trace_t0_of(run: dict) -> tuple[np.ndarray, str]:
     time = np.asarray(run["time_s"], dtype=float)
     dt = float(time[1] - time[0]) if time.size > 1 else 0.0
     per_div = float(run["run_config"].get("timebase_ns_per_div", 200.0)) * 1e-9
-    # `:TIM:POS` is four divisions and is the screen centre: the record begins
-    # half a record before it, which is one division before the trigger.
+    # `:TIM:POS` places screen centre four divisions after the trigger.
+    # Half a record precedes the centre, so one division precedes the trigger.
     guess = per_div * 4.0 - (time.size * dt) / 2.0
     return np.full(n_steps, guess), "timebase geometry (this file predates /traces/trace_t0)"
 
 
 def reintegrate(run: dict, t0_int_s: float, t_int_width_s: float,
                 trigger_offset_s: float | None = None) -> Reintegrated:
-    """`run` is `storage.hdf5.read_run`'s dict. `trigger_offset_s` defaults to
-    the rig the run was taken on."""
+    """Recomputes signed Q in C for each point of a stored run.
+
+    `run` is the dictionary from `storage.hdf5.read_run`. `t0_int_s` is relative
+    to field arrival and `t_int_width_s` must be positive; both are in s.
+    `trigger_offset_s` defaults to the stored rig configuration, in s.
+    """
     if not t_int_width_s > 0:
         raise ValueError(f"t_int_width_s must be positive, not {t_int_width_s!r}")
     if trigger_offset_s is None:
@@ -81,7 +94,7 @@ def reintegrate(run: dict, t0_int_s: float, t_int_width_s: float,
     q_loops = q_std = None
     shots = run.get("shots")
     if shots is not None:
-        shots = np.asarray(shots, dtype=float)          # (loops, steps, samples)
+        shots = np.asarray(shots, dtype=float)          # `(loop, point, sample)`
         q_loops = np.full(shots.shape[:2], np.nan)
         for l in range(shots.shape[0]):
             for i in range(shots.shape[1]):
@@ -97,11 +110,13 @@ def reintegrate(run: dict, t0_int_s: float, t_int_width_s: float,
 
 def sweep(run: dict, t0_values_s, t_int_width_s: float,
           trigger_offset_s: float | None = None) -> tuple[np.ndarray, np.ndarray]:
-    """Q(t0_int) for every step: `(t0 values, (n_t0, n_steps) charges)`.
+    """Returns Q in C for each integration start and point.
 
-    The integration zero is where this stops changing as `t0` moves earlier --
-    once the window starts before the transient, moving it further only adds
-    baseline."""
+    The result is `(t0_values, charges)` with shapes `(n_t0,)` and
+    `(n_t0, n_steps)`. All timing arguments are in s. Q becomes stable when
+    the integration window starts before the transient: moving it earlier
+    then adds only baseline, provided the window still contains the tail.
+    """
     t0s = np.asarray(list(t0_values_s), dtype=float)
     q = np.array([reintegrate(run, float(t0), t_int_width_s, trigger_offset_s).q_mean
                   for t0 in t0s])

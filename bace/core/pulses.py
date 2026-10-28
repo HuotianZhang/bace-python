@@ -1,19 +1,13 @@
-"""Mapping from physical bias values to Agilent 81150A pulse levels.
+"""Bias conditions map to Agilent 81150A pulse levels.
 
-Ported from the pulse-level MathScript node of TDCF-BACE_20160223.vi.
+`delay_ns` reaches `:PULS:DEL1` without an added offset, matching the
+LabVIEW scan sequence. Adding an offset shifts the displacement spike
+and changes which part of the transient the integration window includes.
 
-`delay_ns` reaches `:PULS:DEL1` as it is. The original had two nodes that
-disagreed on an offset `T` to add first (47 ns in the single-step path, 0 ns in
-the looping path); this port carried 47 ns until 2026-09-02, when the LabVIEW
-engine and the port were run back to back on the same device with the same
-`Delay(ns) = 90` and the dark trace's displacement spike -- the voltage step
-arriving, no light in it -- landed 48 ns apart. The looping path is the one a
-scan takes, and its offset is 0, so no offset is added here at all.
-
-The 47 ns is real, but it is not a command offset: it is the latency between
-the 81150A's Sync (which the scope triggers on) and the field reaching the
-device, and it belongs to the *integration window*, not to the generator. That
-is `RigConfig.trigger_offset_s`, used by `experiment.transient.resolve_window`.
+The measured Sync-to-field latency is 47.1 ns, fitted over a delay scan
+(manual 2.2, `docs/manual/2.2-transient.md`). It belongs to the integration
+window through `RigConfig.trigger_offset_s` and
+`experiment.transient.resolve_window`, rather than the generator command.
 """
 from __future__ import annotations
 
@@ -22,8 +16,11 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class PulseLevels:
-    """Levels handed to the 81150A for one acquisition step, in volts at the
-    generator output (i.e. already divided by the amplifier gain)."""
+    """Generator levels and timing for one shot.
+
+    Levels are in V at the 81150A output, divided by the bias amplifier gain.
+    `delay_s` and `width_s` are in s.
+    """
 
     high_light: float
     low_light: float
@@ -36,30 +33,31 @@ class PulseLevels:
 def pulse_levels(vpre: float, vcoll: float, pulse_amp: float,
                  delay_ns: float, width_ns: float, *,
                  invert: bool = False) -> PulseLevels:
-    """Levels for one step.
+    """Returns generator levels and timing for one shot.
 
-    Light trace: the device sits at `vpre` under illumination, then steps to
-    `vcoll`. Dark trace: the same voltage *step* with the same amplitude, but
-    referenced to zero so no carriers are injected — this is what gets
-    subtracted to remove the displacement/RC response.
+    The light trace steps from V_pre to V_coll. The translated dark reference
+    starts at 0 V and uses the same voltage change to remove the displacement
+    current and RC response without forward injection.
 
-    `invert` corresponds to the original's `NewSample` flag: it swaps and
-    negates both levels for devices of the opposite polarity.
+    `vpre` and `vcoll` are device voltages in V; `delay_ns` and `width_ns`
+    are in ns. `pulse_amp` is the dimensionless bias amplifier gain.
+    `invert` swaps and negates both levels for opposite device polarity,
+    matching the LabVIEW `NewSample` flag.
 
-    `delay_s` is what `:PULS:DEL1` is given, from the arm. The field reaches
-    the device `RigConfig.trigger_offset_s` later than that; the integration
-    window accounts for it, the generator never sees it.
+    `delay_s` supplies `:PULS:DEL1` relative to the arm. The field reaches the
+    device `RigConfig.trigger_offset_s` later; the integration window accounts
+    for that latency separately.
     """
     if pulse_amp == 0:
         raise ValueError("pulse_amp must be non-zero")
 
     delay_s = delay_ns * 1e-9
     if delay_s < 0:
-        # A generator cannot fire before it is armed. Left unchecked this reaches
-        # the instrument as a negative `:PULS:DEL1`, which is rejected into the
-        # error queue -- and `run_transient_scan` does not read that queue, so
-        # the affected steps would silently keep the previous delay and draw a
-        # flat stretch in Q(delay) that looks like physics.
+        # A generator cannot fire before its arm. A negative `:PULS:DEL1`
+        # enters the instrument error queue, which
+        # `experiment.transient.run_transient_scan` does not read. Without this
+        # check, affected points retain the preceding delay and create a flat
+        # region in Q against delay that can be mistaken for device behaviour.
         raise ValueError(
             f"delay_ns = {delay_ns:g} asks the generator to fire "
             f"{-delay_s * 1e9:g} ns before its own trigger. The axis cannot go "

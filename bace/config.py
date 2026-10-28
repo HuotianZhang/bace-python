@@ -1,16 +1,13 @@
-"""Loading `rig.toml` and `run.toml`.
+"""Configuration loading separates bench settings from run recipes.
 
-Two files because they fail differently. A stale `rig.toml` silently rescales
-every charge — the sense resistor and the amplifier gain are multiplicative and
-leave no trace in the data. A stale `run.toml` merely repeats a measurement you
-did not mean to repeat, which you notice immediately. So the bench and the
-recipe are edited, versioned and reviewed separately, and only the recipe is
-expected to change from run to run.
+`rig.toml` holds R_s and bias amplifier gain, whose errors silently rescale Q.
+`run.toml` holds measurement choices that can change between runs. Separate
+files let bench calibration and recipes be edited, versioned and reviewed
+independently.
 
-Unknown keys are an error, not a shrug. A typo in `sense_resistor_ohm` that
-falls back to the default would produce data wrong by a factor of five with no
-symptom, and the whole point of a config file is that someone can read what the
-run actually used.
+Unknown keys raise an error. A typo in `sense_resistor_ohm` must not select a
+default and silently rescale Q, potentially by a factor of five. The file must
+describe the settings the run actually uses.
 """
 from __future__ import annotations
 
@@ -66,9 +63,8 @@ def load_rig(path: str | Path = "rig.toml") -> RigConfig:
 
     _check(smu, {"address", "max_current_compliance_a",
                  "max_voltage_compliance_v"}, "sourcemeter")
-    # Both of these gained keys when the two instruments moved in-process, and
-    # both have a `console` that now means "do NOT open the device here". A
-    # typo in either is a rig that silently has no meter or no cryostat.
+    # `console` selects external instrument ownership. Unknown keys must
+    # fail: a typo can silently leave the bench without a meter or cryostat.
     _check(pm, {"wavelength_nm", "on_beam_splitter", "dll_path", "console",
                 "averaging", "digital_filter"},
            "power_meter")
@@ -78,8 +74,8 @@ def load_rig(path: str | Path = "rig.toml") -> RigConfig:
     try:
         cfg = RigConfig(
             sense_resistor_ohm=e.get("sense_resistor_ohm", 5.192),
-            # float(): TOML reads `-1` as an integer, and the sign is a multiplier
-            # on a float array, not a count.
+            # `float` makes TOML's integer `-1` a current sign multiplier,
+            # rather than a count.
             current_sign=float(e.get("current_sign", -1.0)),
             pulse_amp=e.get("pulse_amp", 4.0),
             probe_attenuation=e.get("probe_attenuation", 1.0),
@@ -113,7 +109,7 @@ def load_rig(path: str | Path = "rig.toml") -> RigConfig:
             max_current_compliance_a=smu.get("max_current_compliance_a", 0.05),
             max_voltage_compliance_v=smu.get("max_voltage_compliance_v", 5.0),
         )
-    except ValueError as exc:                 # RigConfig's own validation
+    except ValueError as exc:                 # `RigConfig` validation
         raise ConfigError(str(exc)) from exc
     if cfg.shutter_module_nr == cfg.relay_module_nr:
         raise ConfigError(
@@ -122,9 +118,8 @@ def load_rig(path: str | Path = "rig.toml") -> RigConfig:
             "connected to whichever source the relay happens to be set to."
         )
     if cfg.relay_module_nr == 0:
-        # `drivers.routing.BiasRouter` refuses module 0 as well; refused here
-        # it is a config error with the file named, not a traceback from the
-        # service's assembly.
+        # `drivers.routing.BiasRouter` also rejects module 0. Checking here
+        # reports a configuration error before service assembly reaches hardware.
         raise ConfigError(
             "[dio] relay_module_nr = 0: module 0 is the shutter (measured on the "
             "rig 2026-09-01), not the relay. The relay is module 1."
@@ -134,10 +129,10 @@ def load_rig(path: str | Path = "rig.toml") -> RigConfig:
 
 def load_run(path: str | Path = "run.toml"
              ) -> tuple[ScanSpec, RunConfig, LedDrive, SourceMeterConfig, RunMetadata, dict]:
-    """Returns (scan spec, run config, LED drive, SMU config, metadata, extras).
+    """Returns scan, run, LED, source-meter and metadata objects, plus extras.
 
-    `extras` carries the few values that belong to no dataclass — `v_sat` for
-    the SourceMeter, and `store_shots` for the recorder.
+    `extras` contains `v_sat` in V for the source meter and `store_shots` for
+    the recorder; neither belongs to the returned configuration dataclasses.
     """
     d = _load(path)
     ax, pin = d.get("axis", {}), d.get("pinned", {})
@@ -169,7 +164,7 @@ def load_run(path: str | Path = "run.toml"
     _check(acq, known | {"n_loops", "store_shots"}, "acquisition")
     try:
         run = RunConfig(**{k: v for k, v in acq.items() if k in known})
-    except ValueError as exc:                 # RunConfig's own validation
+    except ValueError as exc:                 # `RunConfig` validation
         raise ConfigError(f"[acquisition] {exc}") from exc
 
     drive = LedDrive(level=ill.get("level_v", 1.0),
@@ -178,9 +173,8 @@ def load_run(path: str | Path = "run.toml"
                      duty_percent=run.duty_percent,
                      threshold_v=1.0)
 
-    # Typed, and nothing on this path can make it anything else: `tools/scan.py`
-    # opens no temperature controller. The service is where a number can be
-    # settled or read, and it says so there.
+    # `tools/scan.py` opens no temperature controller, so this value is typed.
+    # Controller read-back and settling belong to the service path.
     typed_k = sam.get("temperature_k")
     meta = RunMetadata(sample=sam.get("sample", ""), material=sam.get("material", ""),
                        pixel=sam.get("pixel", ""),
@@ -202,12 +196,11 @@ def load_run(path: str | Path = "run.toml"
 
 
 def check_smu_limits(smu: SourceMeterConfig, rig: RigConfig) -> None:
-    """Refuse a run whose compliance exceeds the bench ceiling.
+    """Rejects compliance limits above the bench ceilings.
 
-    The working compliance is adjustable because it depends on the pixel. The
-    ceiling is not, because no measurement recipe should be able to authorise
-    a current that damages a device — and a typo in a run file is a much more
-    likely route to 1 A than a deliberate decision.
+    Working compliance depends on the device and is adjustable in the recipe.
+    The bench ceilings stay outside the recipe so a typo cannot authorise
+    damaging current or voltage, such as 1 A in place of the intended limit.
     """
     if smu.current_compliance_a > rig.max_current_compliance_a:
         raise ConfigError(

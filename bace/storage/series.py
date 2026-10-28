@@ -1,27 +1,22 @@
-r"""Output for an intensity series.
+r"""An LED-level series stores summaries and a full run folder per LED level.
 
-Three files at the top of a series folder, plus one full run folder per
-illumination point (written by the ordinary `RunRecorder`, so every point is a
-complete BACE dataset in its own right and can be re-analysed alone).
+`RunRecorder` writes each nested run independently, so it can be reanalysed
+without the series summary. The series folder contains these summaries:
 
-* `<yymmdd>_<HHMMSS>_LED_Voc_Jsc_BACE Parameters.dat` — the original's summary.
-  Filename and column names are recovered from the block diagram: a two-digit
-  year, the timestamp as a *prefix*, and a space in the name. Reproduced as
-  found. Written **only when the axis has exactly three points**, because the
-  format has `Vpre1/2/3` columns baked in and cannot express anything else —
-  which is precisely the assumption the axis abstraction removes.
-* `series_<stamp>.dat` — the general form: one row per (LED level, axis point).
-  Always written, whatever the axis length.
-* `series_<stamp>.h5` — everything, at full precision.
+* `<yymmdd>_<HHMMSS>_LED_Voc_Jsc_BACE Parameters.dat` uses the LabVIEW
+  filename and column layout. The two-digit year, prefix timestamp and space
+  in the name are compatibility constraints. Its `Vpre1/2/3` columns require
+  exactly three axis points.
+* `series_<stamp>.dat` has one row per LED level and axis point, for any axis
+  length.
+* `series_<stamp>.h5` stores the summary at full precision.
 
-**Not byte-verified.** No series summary file has been read, so unlike the BACE
-per-run writer this one is a reconstruction from the recovered strings. One
-sample would pin it.
+The three-point LabVIEW summary is not byte-verified against an export.
+A sample is required to check its filename and column conventions exactly.
 
-Columns that need a calibration nobody recorded are written as NaN rather than
-guessed: J_sc and J_sat in mA/cm² need the pixel area, and the intensity column
-needs the factor converting meter watts to irradiance at the sample. A number
-that looks calibrated and is not is worse than a gap.
+Missing calibration produces NaN rather than an apparently calibrated value.
+Current density in mA/cm² requires device area; irradiance requires the factor
+from measured W to mW/cm² at the device.
 """
 from __future__ import annotations
 
@@ -55,13 +50,12 @@ NAN = float("nan")
 
 
 def _density(current: float | None, area_cm2: float) -> float:
-    """A -> mA/cm², through the one conversion the J–V curves use
-    (`experiment.jv.current_density`) — this column and those arrays are the
-    same quantity and must not be able to drift apart.
+    """Converts current in A to mA/cm² using the shared J–V conversion.
 
-    NaN when the area is unknown, never a silent 1 cm². The absence is spelled
-    differently here only because the file has a column to fill: the curves
-    answer None and leave the density out.
+    `experiment.jv.current_density` keeps curve and summary units identical.
+    `area_cm2` is the device area in cm². An unknown area or missing current
+    returns NaN; assuming 1 cm² would falsely imply calibration. Curve output
+    uses `None` to omit density, whereas this table requires a numeric cell.
     """
     if current is None:
         return NAN
@@ -143,7 +137,7 @@ def write_hdf5(path: str, points, *, metadata: dict, config: dict) -> str:
             d = g.create_dataset(name, data=arr)
             d.attrs["unit"] = unit
 
-        # Axis lengths are equal within a series, so this is rectangular.
+        # Equal axis lengths within a series permit rectangular summary arrays.
         q = f.create_group("charge")
         for name, arr in (
             ("axis", np.array([p.axis_values for p in points], dtype=float)),
@@ -157,11 +151,10 @@ def write_hdf5(path: str, points, *, metadata: dict, config: dict) -> str:
 
 @dataclass
 class SeriesRecorder:
-    """Writes the series summary, and a full run folder per illumination point.
+    """Writes series summaries and a full run folder for each LED level.
 
-    Each point's folder is an ordinary BACE dataset — same five `.dat` files,
-    same HDF5 — so any single intensity can be re-analysed on its own without
-    knowing it was part of a series.
+    Each nested folder contains the five BACE `.dat` files and HDF5 data,
+    so a single LED level can be reanalysed independently.
     """
 
     root: str
@@ -198,9 +191,8 @@ class SeriesRecorder:
             self._voc = ev.dc.voc
         elif isinstance(ev, S.IlluminationSet) and ev.mode == "pulse":
             self._close_current()
-            # Each point carries the time *it* ran, not the series start: a
-            # series that repeats a level would otherwise collide, and a file
-            # stamped hours before it was written is a small lie in the record.
+            # Each nested run needs its own start time. Reusing the series start
+            # can make repeated LED levels collide and misstate acquisition times.
             meta = replace(self.metadata, led_drive_v=ev.level_v, voc_v=self._voc,
                            started=datetime.now())
             self._current = RunRecorder(self.folder, meta,
@@ -244,7 +236,7 @@ class SeriesRecorder:
 
 
 def record(events, recorder: SeriesRecorder):
-    """Pass events through while recording them, flushing on any exit."""
+    """Yields each event unchanged while recording, and flush on every exit."""
     try:
         for ev in events:
             recorder.handle(ev)

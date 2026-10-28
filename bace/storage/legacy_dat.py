@@ -1,41 +1,31 @@
-r"""The engine's `.dat` files, written byte-for-byte.
+r"""The `.dat` export matches LabVIEW run files byte for byte.
 
-Huotian's analysis reads these directly, so the port writes them exactly as
-LabVIEW did rather than approximately. "Exactly" here is not a figure of
-speech: `tests/test_storage.py` reads the 2026-08-07 archive, writes it back
-out through this module, and compares the bytes.
+Existing analysis depends on the exact format. `tests/test_storage.py`
+checks byte-exact round trips, including these constraints:
 
-The conventions, recovered from that archive:
-
-* **CRLF** line endings throughout, including after the final row.
-* Tab separated, ASCII.
-* Values as `%.5E` with LabVIEW's **unpadded exponent** (`bace.storage.numbers`).
-* Two file shapes:
-
-  *table* — one header line, then one line per row. Used by `1_averagesQ`::
+* CRLF line endings, including the final row; tab separators; ASCII.
+* Six significant figures with an unpadded exponent, from
+  `bace.storage.numbers.lv_float`.
+* Tables contain a header followed by data rows, as in `1_averagesQ`::
 
       % Vpre/V \tVcoll/V \tDelay / ns\tQ/C\tstdDevQ/C
       9.05000E-1\t-1.00000E+0\t8.80000E+1\t3.65257E-10\t4.01451E-12
 
-  *matrix* — a header line whose cells are the column coordinates, then a
-  **blank line**, then one line per row prefixed by its own coordinate::
+* Matrices contain column coordinates, a blank separator line, and rows
+  prefixed by their coordinates::
 
       % Vpre/V  //  time/s\t0.00000E+0\t5.00000E-10\t...
       <blank>
       9.05000E-1\t-3.31157E-5\t...
 
-  The blank line is not decoration; scripts that skip exactly one header line
-  would read it as a row. Reproduced.
+  The blank line is part of the format. Readers must account for it rather
+  than skip only one header line and treat the separator as a data row.
+* Header spaces are significant. `'% Vpre/V '` has a trailing space,
+  `'% Vpre/V  //  time/s'` has two spaces around the slashes, and
+  `'% Loop // Vpre / V '` has one. Parsers match this text exactly.
+* `1_allLoopsQ` uses scientific data and plain `%f` V_pre column labels.
 
-* Header text is copied verbatim, trailing spaces included: `'% Vpre/V '` has a
-  space before its tab, `'% Vpre/V  //  time/s'` has two spaces around the
-  slashes, and `'% Loop // Vpre / V '` has one. These are not typos to fix —
-  they are what the parsers on the other side match against.
-* `1_allLoopsQ` mixes formats: scientific for data, plain `%f` for the V_pre
-  column labels.
-
-Filenames are `<stem><YYYYMMDD>_<HHMMSS>.dat`, all sharing one timestamp per
-run.
+Filenames use `<stem><YYYYMMDD>_<HHMMSS>.dat`, with one timestamp per run.
 """
 from __future__ import annotations
 
@@ -50,7 +40,7 @@ from .numbers import lv_fixed, lv_float
 EOL = "\r\n"
 SEP = "\t"
 
-# Header strings, verbatim from the archive. Trailing spaces are significant.
+# LabVIEW header matching requires these trailing spaces.
 H_AVERAGES_Q = ("% Vpre/V ", "Vcoll/V ", "Delay / ns", "Q/C", "stdDevQ/C")
 H_ALL_LOOPS_Q = "% Loop // Vpre / V "
 H_TRACE_MATRIX = "% Vpre/V  //  time/s"
@@ -83,7 +73,10 @@ def render_table(header: Sequence[str], rows: Sequence[Sequence[float]]) -> str:
 def render_matrix(corner: str, columns: Sequence[float], row_labels: Sequence[float],
                   data: np.ndarray, *, column_format: str = "sci",
                   row_format: str = "sci") -> str:
-    """The header/blank-line/rows shape. `data` is (n_rows, n_columns)."""
+    """Renders a matrix with a header, blank separator line and data rows.
+
+    `data` has shape `(n_rows, n_columns)` and must match both label arrays.
+    """
     data = np.asarray(data, dtype=float)
     if data.shape != (len(row_labels), len(columns)):
         raise ValueError(
@@ -101,7 +94,7 @@ def render_matrix(corner: str, columns: Sequence[float], row_labels: Sequence[fl
 
 def _write(folder: str, stem: str, stamp: str, text: str) -> str:
     path = os.path.join(folder, f"{stem}{stamp}.dat")
-    # newline="" so Python does not translate the CRLF we wrote deliberately
+    # `newline=""` preserves the explicit CRLF bytes required by LabVIEW files.
     with open(path, "w", newline="", encoding="ascii") as fh:
         fh.write(text)
     return path
@@ -109,11 +102,10 @@ def _write(folder: str, stem: str, stamp: str, text: str) -> str:
 
 @dataclass
 class LegacyWriter:
-    """Writes the engine's file set into one folder.
+    """Writes the LabVIEW-compatible run file set into one folder.
 
-    Only the files a run actually produces are written — the 2026-08-07 archive
-    has five, because the intensity files and `3_allLoopsPhotoCurrent` were not
-    produced by that run.
+    Only requested files are written. A run without intensity or per-shot
+    trace export can therefore contain only the five summary and trace files.
     """
 
     folder: str
@@ -126,7 +118,10 @@ class LegacyWriter:
                       render_table(H_AVERAGES_Q, rows))
 
     def all_loops_q(self, vpre, q_all) -> str:
-        """`q_all` is (n_loops, n_steps); loop numbers are written 1-based."""
+        """Writes per-shot Q in C with 1-based loop labels.
+
+        `q_all` has shape `(n_loops, n_steps)`; `vpre` supplies column labels in V.
+        """
         q_all = np.asarray(q_all, dtype=float)
         loops = np.arange(1, q_all.shape[0] + 1, dtype=float)
         return _write(self.folder, STEMS["all_loops_q"], self.stamp,
@@ -134,7 +129,11 @@ class LegacyWriter:
                                     column_format="fixed"))
 
     def trace_matrix(self, which: str, time_s, vpre, data) -> str:
-        """`which` is one of averages_photocurrent / averages_light / averages_dark."""
+        """Writes loop-averaged traces with time and V_pre coordinates.
+
+        `which` selects `averages_photocurrent`, `averages_light` or
+        `averages_dark`. `time_s` is in s, `vpre` in V and `data` in A.
+        """
         return _write(self.folder, STEMS[which], self.stamp,
                       render_matrix(H_TRACE_MATRIX, time_s, vpre, data))
 
@@ -144,7 +143,7 @@ class LegacyWriter:
                       render_table(H_INTENSITY, rows))
 
 
-# -- reading (for round-tripping and for old runs) -----------------------
+# -- reading and byte-exact round trips ---------------------------------
 def read_table(path: str) -> tuple[list[str], np.ndarray]:
     raw = open(path, "rb").read().decode("ascii")
     lines = raw.split(EOL)
@@ -154,7 +153,7 @@ def read_table(path: str) -> tuple[list[str], np.ndarray]:
 
 
 def read_matrix(path: str) -> tuple[str, np.ndarray, np.ndarray, np.ndarray]:
-    """Returns (corner, columns, row_labels, data)."""
+    """Returns `(corner, columns, row_labels, data)` from a `.dat` matrix."""
     raw = open(path, "rb").read().decode("ascii")
     lines = raw.split(EOL)
     head = lines[0].split(SEP)

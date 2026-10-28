@@ -1,63 +1,41 @@
-"""Where a parameter's value came from.
+"""Parameter layers resolve values and report their sources to the console.
 
-The console shows every parameter as `{value, source, editable}`, and the
-service's `/modules` endpoint is what fills that in. This module is the generic
-machinery underneath: a `ParamSet` holds one layer per `Source`, resolves them
-by a fixed precedence, and reports the winner *with its provenance*. The
-per-module catalogue -- which dataclass fields make up the `bace` module, what
-they are called on the wire -- is service-layer work built on top of this and
-lives elsewhere.
+`ParamSet` holds one layer per non-default `Source`. The service's `/modules`
+endpoint reports each parameter's value, source and editability. Module
+catalogues bind these generic specs to dataclass fields and wire names.
 
-**Why provenance at all.** A run is described by ten to forty numbers, and the
-same number can arrive by four different roads: the dataclass default, the
-recipe file, the value the last run used, or something the operator typed a
-minute ago. When those disagree the console has to say which one is in force,
-because `n_averages = 20` with no source cannot tell the operator whether they
-are about to repeat yesterday's run or the recipe's. The pipeline adds a fifth
-road: a loop that injects `led_v` into every child, or a J-V run that produces
-the V_oc the next `bace` run centres on. Those must show as what they are. The
-failure this prevents is concrete: the operator types V_oc = 0.90, the
-illumination loop then runs a J-V that measures 0.86, the transient centres on
-0.86, and the console still says "0.90, edited". Every charge in that run is
-then read against the wrong axis by anyone who trusts the screen.
+The source matters when defaults, a recipe, a previous run and operator edits
+disagree. Pipeline bindings and measured values also need explicit sources:
+if an edited V_oc is 0.90 V and a J–V measurement supplies 0.86 V, displaying
+0.90 V as edited would make the console show the wrong axis for Q.
 
-**Precedence**, lowest to highest:
+Precedence, from lowest to highest:
 
     default < run.toml < last-used < edited < inherited < derived
 
-- `default` is the dataclass field default. Always present, never a layer.
-- `run.toml` is the recipe file -- the thing that is versioned and reviewed.
-- `last-used` is what the previous run of this module actually ran with, so a
-  session picks up where it left off. It sits *above* run.toml because a
-  recipe edited between two runs of one session would otherwise silently undo
-  values the operator had just settled on, and *below* edited because a fresh
-  edit is the most recent statement of intent.
-- `edited` is what the operator typed in this session.
-- `inherited` comes from the pipeline context (a loop's `led_v`). It beats
-  edited because the loop is the thing being run: an edited value that a loop
-  overrides surfaces as inherited, never silently as edited.
-- `derived` comes from a measurement (V_oc from a J-V curve). It beats
-  inherited because a measurement taken inside the loop is more recent than the
-  loop's own binding. A parameter that is both inherited and derived is a
-  pipeline-authoring mistake this module does not police; it reports derived.
+* `default` belongs to the spec and is always present, outside the layers.
+* `run.toml` supplies the versioned recipe.
+* `last-used` supplies the preceding run's values. It overrides a recipe edit
+  between runs, so the session retains the operator's chosen settings.
+* `edited` overrides those values with the operator's explicit session edits.
+* `inherited` supplies pipeline bindings such as a loop's `led_v`. It overrides
+  edits because the loop controls the run; the source must show that override.
+* `derived` supplies measurements such as V_oc from J–V. It overrides a binding
+  because the measurement is taken inside the loop. A parameter with both
+  sources indicates a pipeline-authoring error; this module reports derived
+  without rejecting the pipeline.
 
-Inherited and derived values are not editable on the wire, and `set_edited`
-refuses them too. A value the pipeline will overwrite is not the operator's to
-type, and a form that accepted it would be lying about what the next run does.
-Refusing at the API as well as on the wire matters because a PUT that
-succeeded against a locked value would store an edit the screen never showed
--- and the first manual run after the loop let go would use it.
+Inherited and derived values are locked in both the wire representation and
+`ParamSet.set_edited`. Accepting an edit to a locked value stores an invisible
+setting that could take effect on a manual run after the binding clears.
 
-**Values are coerced on the way into a layer**, never on the way out, so a bad
-value is refused at the API boundary with the parameter's name attached and
-nothing is half-applied. The reason is JSON: a form sends `"20"` for a count,
-`"false"` for a flag and `"1.02, 1.06"` for a list, and `bool("false")` is
-`True`.
+Coercion happens before values enter a layer. Whole batches are checked before
+storage, so errors include the parameter name and leave no partial update.
+Forms can send counts as strings, flags as `"false"` and lists as comma-separated
+text; Python's `bool("false")` would otherwise give `True`.
 
-Nothing here imports from `core/`, `drivers/`, `experiment/` or `storage/`.
-Binding these specs to the real dataclasses is the layer above, which is why
-`specs_from_dataclass` takes any dataclass and asks nothing of it beyond
-`dataclasses.fields`.
+This module has no dependency on measurement, driver or storage modules.
+`specs_from_dataclass` uses `dataclasses.fields` to bind arbitrary dataclasses.
 """
 from __future__ import annotations
 
@@ -78,14 +56,16 @@ from typing import Any, Iterable, Literal, Mapping, Union, get_args, get_origin,
 
 
 class ParamError(ValueError):
-    """A value that cannot enter a layer, a name no spec knows, or a spec that
-    contradicts itself. Every message starts with the parameter's name so the
-    console can attach it to the right field -- or, when no single parameter
-    is at fault (a batch that is not a mapping), with the layer's source."""
+    """An invalid parameter value, unknown name or inconsistent specification.
+
+    Messages start with the parameter name so the console can identify the
+    field. A batch error without a single parameter, such as a non-mapping
+    input, starts with the layer source.
+    """
 
 
 class Source(str, Enum):
-    """Which road a value arrived by. See the module docstring for precedence."""
+    """The source of a parameter value, ordered by the module precedence rules."""
 
     DEFAULT = "default"
     RUN_TOML = "run.toml"
@@ -97,40 +77,42 @@ class Source(str, Enum):
 
 PRECEDENCE: tuple[Source, ...] = (Source.DEFAULT, Source.RUN_TOML, Source.LAST_USED,
                                   Source.EDITED, Source.INHERITED, Source.DERIVED)
-"""Lowest to highest. `ParamSet.resolve` walks it from the top and stops at the
-first layer that holds the name."""
+"""Sources ordered from lowest to highest precedence.
+
+`ParamSet.resolve` searches from the highest layer for each name.
+"""
 
 LOCKED: frozenset[Source] = frozenset({Source.INHERITED, Source.DERIVED})
-"""Sources that make a value non-editable on the wire, whatever the spec says."""
+"""Sources that make a value non-editable regardless of the specification."""
 
 TYPES: tuple[str, ...] = ("float", "int", "bool", "str", "enum", "list[float]", "list[str]")
-"""The wire types. What JSON carries and what `ParamSpec.coerce` converts to --
-not Python annotations: `tuple[float, ...]` on a dataclass is `list[float]` here."""
+"""Wire types accepted by `ParamSpec.coerce` and represented in JSON.
+
+These differ from Python annotations: `tuple[float, ...]` maps to
+`list[float]` on the wire.
+"""
 
 
 # -- one parameter --------------------------------------------------------
 @dataclass(frozen=True)
 class ParamSpec:
-    """One parameter as the console sees it: type, default, and how to show it.
+    """A parameter's wire type, default, display metadata and validation rules.
 
-    `nullable` lets `None` (JSON `null`, or an empty field) through `coerce`.
-    It is inferred from a `float | None` annotation and from a `None` default.
-    Without it a nullable float such as `SeriesConfig.dc_settle_s`, where None
-    means "use the driver's own settle times", could never be set back to None
-    once it had held a number.
+    `nullable` permits `None`, JSON `null` or an empty field in `coerce`.
+    `specs_from_dataclass` infers it from a nullable annotation or `None`
+    default. This lets a value such as `SeriesConfig.dc_settle_s` return to
+    `None`, meaning the driver's settle times, after holding a number.
 
-    `editable` is the spec's own say: False for a value the console shows but
-    must never take from a form (a bench ceiling, for instance). The wire also
-    marks inherited and derived values non-editable, but that is per value and
-    decided by `ParamSet`, not here.
+    `editable` controls whether the console can submit the parameter. A bench
+    ceiling can be visible but read-only. `ParamSet` also locks inherited and
+    derived values according to their source.
 
-    `minimum`/`maximum` are inclusive and apply to `float`, `int` and every
-    element of a `list[float]`; on any other type they are refused.
+    `minimum` and `maximum` are inclusive. They apply to `float`, `int` and
+    each `list[float]` element; other types reject bounds.
 
-    The default is put through `coerce` when the spec is built and stored in
-    its coerced form (a list becomes a tuple, an enum takes the spelling of
-    its choice), so a spec cannot advertise a default its own form would
-    refuse.
+    The default is coerced during construction, so the spec cannot advertise
+    a default its own form rejects. Lists become tuples and enum values use
+    the canonical choice spelling.
     """
 
     name: str
@@ -138,19 +120,20 @@ class ParamSpec:
     default: Any = None
     unit: str = ""
     doc: str = ""
-    """One sentence: **which instrument, and what this does to it.** It is what
-    the console prints under the field, and for most of these fifty parameters
-    it is the only thing standing between the operator and a name that means
-    nothing on its own (`smu_nplc`, `trigger_sweep`, `duty_percent`) or, worse,
-    something else than it looks (`inverted_output` is the 81150A's output
-    polarity; `invert_polarity` is arithmetic on the computed levels)."""
+    """One sentence naming the instrument and the parameter's effect.
+
+    The console displays it below the field. Names such as `smu_nplc`,
+    `trigger_sweep` and `duty_percent` need this context. The description must
+    distinguish instrument polarity (`inverted_output`) from arithmetic on
+    levels (`invert_polarity`).
+    """
 
     doc_full: str = ""
-    """The whole explanation, for the field's expandable help: what it does,
-    what it costs, and what a wrong value produces. Empty means `doc` is the
-    whole of it. Kept apart rather than folded into `doc` because the card
-    shows one line per field and `ui-rules` §1 wants the density -- the rest
-    is a click away, not gone."""
+    """Expandable help describing effects, costs and wrong-value consequences.
+
+    An empty value makes `doc` the complete help. Keeping the full text apart
+    lets the console show one line per field with the rest available on demand.
+    """
 
     choices: tuple = ()
     group: str = ""
@@ -178,14 +161,11 @@ class ParamSpec:
                 and self.type not in _BOUNDED):
             raise ParamError(f"{self.name}: a minimum or maximum is given but the type "
                              f"is {self.type!r} -- it would never be checked")
-        # The default is the one value that reaches `values()` without ever
-        # entering a layer, so it is the one road into the dataclass that
-        # `coerce` does not guard. Guard it here: a catalogue that lists
-        # choices=("trigger", "pulse") for a field whose default is "record"
-        # would otherwise put a value in the dropdown that the dropdown cannot
-        # select, and `reset` would restore a value the form refuses. Storing
-        # the coerced default also canonicalises it in one place: a list
-        # becomes a tuple and an enum takes the spelling of its choice.
+        # Defaults reach `ParamSet.values` without entering a layer, so layer
+        # validation cannot protect them. An enum default outside `choices`
+        # would leave the dropdown unable to select its own value and make
+        # `ParamSet.reset` restore a rejected value. Coercing the default here
+        # also canonicalises lists as tuples and enum choice spelling.
         if self.default is None and not self.nullable:
             raise ParamError(f"{self.name}: the default is None but the parameter is "
                              "not nullable; pass nullable=True if None is a value, "
@@ -200,18 +180,16 @@ class ParamSpec:
 
     # -- coercion ---------------------------------------------------------
     def coerce(self, value: Any) -> Any:
-        """Convert `value` to this parameter's wire type, or raise `ParamError`.
+        """Converts `value` to the parameter's wire type or raises `ParamError`.
 
-        Accepts what JSON and HTML forms actually send: numbers as strings,
-        booleans as `"true"`/`"false"`, lists as a comma-separated string.
-        Rejects what would otherwise pass by accident: `bool("false")`, a bool
-        where a count is wanted, `"20.5"` for an int, NaN for a float, an enum
-        value that is not one of the choices.
+        Numbers can arrive as strings, flags as `"true"` or `"false"`, and lists
+        as comma-separated text. Coercion rejects booleans as counts, fractional
+        integers such as `"20.5"`, non-finite floats and unlisted enum choices.
+        It also avoids treating `bool("false")` as a valid true flag.
 
-        Numpy scalars are accepted as the Python number they wrap. A last-used
-        layer seeded from a run file's `/config` group, or a derived V_oc from
-        measurement code, arrives as `np.float64`/`np.int64`/`np.bool_`, and
-        refusing those by name with "is not a number" would be wrong twice.
+        NumPy scalars convert to their Python equivalents. HDF5 configuration and
+        derived V_oc can supply `np.float64`, `np.int64` and `np.bool_`; rejecting
+        these would exclude valid stored or measured values.
         """
         value = _python_scalar(value)
         if value is None or (isinstance(value, str) and value.strip() == ""
@@ -240,9 +218,8 @@ class ParamSpec:
         else:
             raise ParamError(f"{self.name}: {v!r} is not a number")
         if not math.isfinite(out):
-            # JSON cannot carry NaN or inf, so one arriving here was typed on
-            # purpose or produced by a broken caller. Either way a run whose
-            # settle time is NaN sleeps for no time and looks fine.
+            # JSON cannot carry NaN or infinity. Rejecting non-finite input also
+            # prevents a NaN settle time from skipping the wait without an error.
             raise ParamError(f"{self.name}: {v!r} is not a finite number")
         return out
 
@@ -261,7 +238,7 @@ class ParamSpec:
                 return int(s)
             except ValueError:
                 pass
-            f = float(s)                       # "20.0" from a numeric form field
+            f = float(s)                       # `"20.0"` from a numeric form field
             if not math.isfinite(f) or not f.is_integer():
                 raise ParamError(f"{self.name}: {v!r} is not a whole number")
             return int(f)
@@ -274,10 +251,9 @@ class ParamSpec:
         if isinstance(v, bool):
             return v
         if isinstance(v, numbers.Integral) and v in (0, 1):
-            # 0 and 1 are how TOML-less sources (a form checkbox, an HDF5
-            # attribute) spell a flag. Floats are not: 1.0 as a flag is a
-            # wiring mistake in the caller, and the string "1.0" is refused
-            # below, so accepting the number would make the two disagree.
+            # Forms and HDF5 attributes can encode flags as integer 0 or 1.
+            # Floats indicate a caller type error. Accepting `1.0` while rejecting
+            # `"1.0"` would make numeric and textual inputs disagree.
             return bool(v)
         if isinstance(v, str):
             s = v.strip().lower()
@@ -289,8 +265,8 @@ class ParamSpec:
 
     def _as_str(self, v: Any) -> str:
         if not isinstance(v, str):
-            # Not `str(v)`: a number that lands in a text field is a wiring
-            # mistake in the caller, and turning 1 into "1" would hide it.
+            # A number in a text field indicates a caller type error.
+            # `str(v)` would hide it by converting 1 to `"1"`.
             raise ParamError(f"{self.name}: {v!r} is not text")
         return v
 
@@ -298,9 +274,8 @@ class ParamSpec:
         if v in self.choices:
             return v
         if isinstance(v, str):
-            # `RunConfig.output_polarity` accepts "norm" and "NORM" alike, so
-            # the console should too -- but it hands back the canonical
-            # spelling, so one option never appears twice in a dropdown.
+            # Case-insensitive matching agrees with `RunConfig.output_polarity`.
+            # Returning the canonical spelling prevents duplicate dropdown options.
             hits = [c for c in self.choices if isinstance(c, str) and c.lower() == v.lower()]
             if len(hits) == 1:
                 return hits[0]
@@ -314,14 +289,17 @@ class ParamSpec:
         return tuple(self._as_str(x) for x in self._items(v))
 
     def _items(self, v: Any) -> list:
-        """A comma-separated string or any non-string iterable. Tuples, not
-        lists, leave here so a frozen dataclass built from `values()` stays
-        hashable and nothing downstream can grow the list in place."""
+        """Parses comma-separated text or a non-string iterable into a list.
+
+        The list coercers convert its result to tuples. This keeps a frozen
+        dataclass built from `ParamSet.values` hashable and prevents in-place
+        growth of its parameter sequences.
+        """
         if isinstance(v, str):
             return [p.strip() for p in v.split(",") if p.strip()]
         if isinstance(v, (bytes, Mapping)) or not isinstance(v, collections.abc.Iterable):
             raise ParamError(f"{self.name}: {v!r} is not a list")
-        return [_python_scalar(x) for x in v]     # an ndarray yields numpy scalars
+        return [_python_scalar(x) for x in v]     # `ndarray` yields NumPy scalars
 
     def _check_bounds(self, out: Any) -> None:
         if self.type not in _BOUNDED or out is None:
@@ -336,8 +314,11 @@ class ParamSpec:
 
 
 _BOUNDED: tuple[str, ...] = ("float", "int", "list[float]")
-"""The types `minimum`/`maximum` apply to. A bound on any other type is
-refused by `ParamSpec`, for the same reason choices on a non-enum are."""
+"""Wire types that accept `minimum` and `maximum`.
+
+`ParamSpec` rejects bounds on other types so constraints cannot be silently
+ignored, as with choices on a non-enum type.
+"""
 
 
 def _unit(u: str) -> str:
@@ -345,13 +326,12 @@ def _unit(u: str) -> str:
 
 
 def _python_scalar(v: Any) -> Any:
-    """A 0-d numpy scalar as the Python scalar it wraps; anything else as is.
+    """Converts a zero-dimensional NumPy value to its Python scalar.
 
-    Duck-typed on the module name so this file stays free of numpy: `np.bool_`
-    and `np.str_` register with neither `numbers.Integral` nor `numbers.Real`,
-    so the `numbers` checks alone would still refuse a flag read back from an
-    HDF5 attribute. `.item()` is what every numpy scalar offers for exactly
-    this.
+    Other inputs pass through unchanged. Module-name detection avoids a NumPy
+    dependency. `np.bool_` and `np.str_` satisfy neither `numbers.Integral`
+    nor `numbers.Real`, so numeric checks alone reject valid HDF5 read-back.
+    NumPy scalars provide `item` for this conversion.
     """
     if type(v).__module__ == "numpy" and getattr(v, "ndim", None) == 0:
         return v.item()
@@ -361,12 +341,10 @@ def _python_scalar(v: Any) -> Any:
 # -- one resolved value ---------------------------------------------------
 @dataclass(frozen=True)
 class ParamValue:
-    """A value together with where it came from.
+    """A resolved parameter value with its source and display detail.
 
-    `detail` is the human-readable part of the provenance: which table of the
-    recipe (`"run.toml [acquisition]"`), which run (`"run 20260902_210300-003"`),
-    which pipeline node (`"illumination loop"`). Free text, shown next to the
-    source tag; never parsed.
+    `detail` identifies a recipe table, run or pipeline node. It appears beside
+    the source tag as free text and is never parsed.
     """
 
     value: Any
@@ -379,8 +357,11 @@ class ParamValue:
 
 
 def _jsonable(v: Any) -> Any:
-    """Tuples become lists and enums their values; everything else is already
-    what `json.dumps` wants, because `coerce` let nothing else in."""
+    """Converts tuples to JSON lists and enums to their values.
+
+    Other values already satisfy JSON because `ParamSpec.coerce` restricts
+    what enters a layer.
+    """
     if isinstance(v, Enum):
         return v.value
     if isinstance(v, (tuple, list)):
@@ -390,17 +371,15 @@ def _jsonable(v: Any) -> Any:
 
 # -- the set --------------------------------------------------------------
 class ParamSet:
-    """An ordered set of specs and one value layer per non-default `Source`.
+    """An ordered specification set with one layer per non-default `Source`.
 
-    Plain in-memory state, owned by whoever owns the module (the service keeps
-    one per module). Not thread-safe; the service's single worker is the only
-    writer.
+    The service owns one instance per module. This in-memory state is not
+    thread-safe; the single service worker is its only writer.
 
-    Every value entering a layer goes through `ParamSpec.coerce`, and a batch
-    is coerced in full before any of it is stored, so a bad value in a form
-    submission leaves the set exactly as it was. The default layer is not
-    settable: the default *is* the spec's, and two places to hold it would be
-    two places for it to disagree.
+    Every incoming value passes `ParamSpec.coerce`. A batch is coerced before
+    any storage, so one invalid value leaves the whole set unchanged.
+    Defaults belong only to specs; a separate mutable default layer would
+    permit contradictory values.
     """
 
     def __init__(self, specs: Iterable[ParamSpec]):
@@ -439,13 +418,16 @@ class ParamSet:
 
     # -- layers -----------------------------------------------------------
     def set_layer(self, source: Source, values: Mapping[str, Any], detail: str = "") -> None:
-        """Replace one layer wholesale. `detail` is shared by every value in it;
-        call `update_layer` per table when values come from several places."""
+        """Replaces a layer after validating the entire batch.
+
+        `detail` applies to every value. Separate calls to `update_layer` let
+        different recipe tables retain their own source descriptions.
+        """
         coerced = self._coerce_all(source, values)
         self._layers[source] = {n: (v, detail) for n, v in coerced.items()}
 
     def update_layer(self, source: Source, values: Mapping[str, Any], detail: str = "") -> None:
-        """Merge into one layer, keeping what is already there."""
+        """Merges validated values into one layer, retaining its other values."""
         coerced = self._coerce_all(source, values)
         self._layers[source].update({n: (v, detail) for n, v in coerced.items()})
 
@@ -454,21 +436,22 @@ class ParamSet:
         self._layers[source] = {}
 
     def layer(self, source: Source) -> dict[str, tuple[Any, str]]:
-        """A copy of one layer as `{name: (value, detail)}`, for the journal
-        and for tests. Mutating the copy changes nothing."""
+        """Returns a layer copy as `{name: (value, detail)}` for the journal or tests.
+
+        Changing the returned mapping does not change the layer.
+        """
         self._check_source(source)
         return dict(self._layers[source])
 
     def set_edited(self, name: str, value: Any, detail: str = "") -> None:
-        """What `PUT /modules/{m}/params` does for one field."""
+        """Validates and store one field from `PUT /modules/{m}/params`."""
         self.update_layer(Source.EDITED, {name: value}, detail)
 
     def reset(self, name: str) -> None:
-        """Drop the operator's edit so the next lower layer shows again.
+        """Removes an operator edit so the next lower layer supplies the value.
 
-        Only the edited layer: `last-used` and `run.toml` are facts about what
-        ran and what the file says, not the operator's to discard from a form,
-        and a loop's inherited value is not affected by anything typed.
+        `last-used` and `run.toml` retain the run and recipe settings; a form reset
+        does not discard them. Inherited loop bindings also remain unaffected.
         """
         self.spec(name)
         self._layers[Source.EDITED].pop(name, None)
@@ -483,8 +466,8 @@ class ParamSet:
     def _coerce_all(self, source: Source, values: Mapping[str, Any]) -> dict[str, Any]:
         self._check_source(source)
         if not isinstance(values, Mapping):
-            # A JSON body that is a list or a bare string must come back as
-            # the same 422 a bad value does, not as a 500 from `.items()`.
+            # A list or bare string is invalid API input and needs HTTP 422,
+            # rather than HTTP 500 from calling `items` on the wrong type.
             raise ParamError(f"{source.value}: expected a mapping of name -> value, "
                              f"got {type(values).__name__}")
         out: dict[str, Any] = {}
@@ -498,12 +481,13 @@ class ParamSet:
         return out
 
     def _check_not_locked(self, name: str) -> None:
-        """Refuse an edit against a value that is inherited or derived right
-        now. The wire says `editable: false` for it; an API that then took the
-        edit anyway would hold a value the screen never confirmed and use it
-        the moment the loop released the name. An edit made *before* the loop
-        bound the name is untouched: it stays underneath and shows again when
-        the layer is cleared."""
+        """Rejects edits to values controlled by inherited or derived layers.
+
+        The wire marks these values `editable: false`. Accepting an edit would
+        store an invisible value that takes effect when the binding clears.
+        Edits made before the binding remain underneath and return when the layer
+        clears.
+        """
         for source in reversed(PRECEDENCE):
             if source in LOCKED and name in self._layers[source]:
                 _, detail = self._layers[source][name]
@@ -515,11 +499,11 @@ class ParamSet:
         return self._resolve_one(self.spec(name))
 
     def resolve(self) -> dict[str, ParamValue]:
-        """Every parameter with its winning value and source, in spec order."""
+        """Returns each winning value and source in specification order."""
         return {n: self._resolve_one(s) for n, s in self._specs.items()}
 
     def values(self) -> dict[str, Any]:
-        """Plain `{name: value}`, for `SomeConfig(**subset)`."""
+        """Returns `{name: value}` for constructing configuration dataclasses."""
         return {n: pv.value for n, pv in self.resolve().items()}
 
     def _resolve_one(self, spec: ParamSpec) -> ParamValue:
@@ -534,16 +518,12 @@ class ParamSet:
 
     # -- the wire ---------------------------------------------------------
     def as_wire(self) -> list[dict[str, Any]]:
-        """What `GET /modules` sends for one module, one dict per parameter in
-        spec order. Everything in it survives `json.dumps` as is.
+        """Returns JSON-ready parameter records for `GET /modules`, in spec order.
 
-        `editable` here is the per-value answer: the spec's flag *and* the
-        source not being inherited or derived. `nullable`, `minimum` and
-        `maximum` are included beyond the eleven keys the service contract
-        lists, so a form can validate before it submits and knows whether
-        "empty" is allowed. They are additive -- a client written to the
-        eleven ignores them -- and the contract should list them when the
-        service round writes the catalogue.
+        `editable` requires both an editable spec and an unlocked source.
+        `nullable`, `minimum` and `maximum` let the form validate empty fields
+        and bounds before submitting. Clients that consume only the base contract
+        keys can ignore these additional fields.
         """
         out = []
         for spec, pv in zip(self._specs.values(), self.resolve().values()):
@@ -575,39 +555,30 @@ def specs_from_dataclass(cls: type, *, group: str = "", exclude: Iterable[str] =
                          editable: Mapping[str, bool] | None = None,
                          types: Mapping[str, str] | None = None,
                          defaults: Mapping[str, Any] | None = None) -> list[ParamSpec]:
-    """One `ParamSpec` per constructor field of `cls`, in field order.
+    """Builds one `ParamSpec` per constructor field of `cls`, in field order.
 
-    The wire type comes from the annotation (`float`, `int`, `bool`, `str`,
-    `float | None`, `tuple[float, ...]`, `Literal[...]`), resolved through
-    `typing.get_type_hints` because this repo writes
-    `from __future__ import annotations` and every annotation is a string. If
-    the hints cannot be resolved the string is parsed directly; if that fails
-    too the default value's type is used; and if *that* fails the field is
-    refused with a message, because a guessed type is a form that accepts the
-    wrong thing. A fixed-length `tuple[float, float]` is one of the refusals:
-    it is a pair, and `list[float]` would let a form submit three.
+    `typing.get_type_hints` resolves annotations, including nullable types,
+    variadic tuples and `Literal` choices. If resolution fails, string parsing
+    is tried, then the default's type. An unknown type is rejected rather than
+    guessed, because the wire type controls which values the form accepts.
+    Recognised unsupported types do not fall back: `tuple[float, float]` is a
+    pair, and `list[float]` would incorrectly accept three values.
 
-    A field with no default is refused as well, unless `defaults` supplies
-    one. The console cannot show a value that does not exist, and inventing
-    `None` for it would present `Axis.start` as optional and hand the
-    dataclass `None` at run start. Fields with `init=False` are skipped: they
-    are never constructor input, and `values()` is meant to be splatted into
-    the constructor.
+    A required field needs an entry in `defaults` or is rejected. Inventing
+    `None` would make a required value such as `Axis.start` appear optional.
+    Fields with `init=False` are excluded because `ParamSet.values` supplies
+    constructor arguments.
 
-    Every override is keyed by the **dataclass field name**, before `rename`:
-    `rename` maps field name to wire name; `units`, `choices`, `editable`,
-    `types` and `defaults` decorate; `exclude` drops. A key that names no
-    field is an error, for the same reason an unknown TOML key is:
-    `units={"n_average": "..."}` would otherwise silently leave `n_averages`
-    without a unit.
+    Override keys use dataclass field names before `rename` maps them to wire
+    names. `units`, `choices`, `editable`, `types` and `defaults` supply field
+    metadata; `exclude` omits fields. Unknown keys raise an error: a misspelt
+    unit key must not silently leave a parameter without its unit.
 
-    Units are never inferred from the name. The `_s`/`_ns`/`_v` suffix
-    convention is nearly consistent here, and "nearly" is the problem:
-    `intensity_factor_mw_cm2_per_w` ends in `_w` and is not in watts.
-
-    `choices` turns a `str` field into an enum -- `RunConfig` validates
-    `dark_reference` in `__post_init__` rather than in its annotation, so
-    the catalogue says the choices here. Docs come from `field_docs`.
+    Units are explicit. A suffix cannot reliably imply them:
+    `intensity_factor_mw_cm2_per_w` ends in `_w` but is not in W.
+    `choices` can turn a string field into an enum when validation lives in
+    the dataclass rather than its annotation, as for `RunConfig.dark_reference`.
+    `field_docs` supplies the documentation.
     """
     if not dataclasses.is_dataclass(cls):
         raise ParamError(f"{cls!r} is not a dataclass")
@@ -675,15 +646,16 @@ def specs_from_dataclass(cls: type, *, group: str = "", exclude: Iterable[str] =
 
 
 class _Unknown(Exception):
-    """Internal: the annotation or value did not map to a wire type, so the
-    next fallback may try."""
+    """An unrecognised annotation or value that permits the next type fallback."""
 
 
 class _Refused(_Unknown):
-    """Internal: the annotation *was* understood and is deliberately not a
-    wire type -- a fixed pair, a tuple of ints. No fallback may try: the
-    default `(0.0, 1.0)` looks exactly like a float list, and guessing from
-    it would undo the refusal. The message is the reason, for the caller."""
+    """A recognised annotation that cannot be represented by a wire type.
+
+    Fixed pairs and integer tuples must not fall back to the default's type.
+    For example, `(0.0, 1.0)` could otherwise turn a fixed pair into a list.
+    The exception message gives the caller the reason.
+    """
 
 
 _SIMPLE = {float: "float", int: "int", bool: "bool", str: "str"}
@@ -691,9 +663,11 @@ _SEQUENCES = (tuple, list, collections.abc.Sequence)
 
 
 def _default_of(f: dataclasses.Field) -> Any:
-    """The field's default, or `dataclasses.MISSING` when it has none. Not
-    `None`: None is a value a nullable field can hold, and conflating the two
-    is how a required field would come to look optional on the wire."""
+    """Returns a field default, or `dataclasses.MISSING` if none exists.
+
+    `None` is a valid nullable value. Using it for a missing default would
+    make a required field appear optional on the wire.
+    """
     if f.default is not dataclasses.MISSING:
         return f.default
     if f.default_factory is not dataclasses.MISSING:   # type: ignore[misc]
@@ -702,7 +676,7 @@ def _default_of(f: dataclasses.Field) -> Any:
 
 
 def _kind_of(ann: Any) -> tuple[str, tuple, bool]:
-    """(wire type, enum choices, nullable) from a resolved annotation."""
+    """Returns `(wire_type, enum_choices, nullable)` from a resolved annotation."""
     if isinstance(ann, str):
         return _kind_of_string(ann)
     origin = get_origin(ann)
@@ -717,10 +691,9 @@ def _kind_of(ann: Any) -> tuple[str, tuple, bool]:
         return "enum", tuple(get_args(ann)), False
     if origin in _SEQUENCES:
         args = get_args(ann)
-        # `tuple[float, ...]` is a list; `tuple[float, float]` is a pair and
-        # `tuple[float]` a singleton, and neither may become an unbounded
-        # list that lets a form submit three values for two. `list[float]`
-        # and `Sequence[float]` carry exactly one argument by construction.
+        # Fixed tuples require a fixed count. Mapping a pair or singleton
+        # to an unbounded list would let the form submit too many values.
+        # `list[float]` and `Sequence[float]` have one element-type argument.
         if origin is tuple:
             if len(args) != 2 or args[1] is not Ellipsis:
                 raise _Refused(f"{ann!r} is a fixed-length tuple, not a list")
@@ -737,8 +710,8 @@ def _list_kind(elem: Any, ann: Any) -> str:
         return "list[float]"
     if elem is str:
         return "list[str]"
-    # `tuple[int, ...]` is deliberately not `list[float]`: the values would
-    # come back as floats and the dataclass would hold 1.0 where it expects 1.
+    # Mapping `tuple[int, ...]` to `list[float]` would return 1.0 where
+    # the dataclass requires an integer 1.
     raise _Refused(f"{ann!r} is a sequence of {elem!r}, and only float and str "
                    "elements have a wire type")
 
@@ -746,12 +719,15 @@ def _list_kind(elem: Any, ann: Any) -> str:
 _TUPLE_STRING = re.compile(r"^tuple\[\s*(\w+)\s*,\s*\.\.\.\s*\]$")
 _LIST_STRING = re.compile(r"^(?:list|Sequence|typing\.Sequence|collections\.abc\.Sequence)"
                           r"\[\s*(\w+)\s*\]$")
-"""The same rule as `_kind_of`, on the unresolved string: a tuple must be
-variadic (`tuple[float, ...]`) to be a list; a fixed pair is refused."""
+"""Unresolved sequence annotations follow the `_kind_of` length rules.
+
+Only a variadic tuple such as `tuple[float, ...]` maps to a list; a fixed
+pair is rejected.
+"""
 
 
 def _kind_of_string(s: str) -> tuple[str, tuple, bool]:
-    """The fallback when `get_type_hints` cannot resolve the module's names."""
+    """Parses a wire type when `get_type_hints` cannot resolve module names."""
     parts = [p.strip() for p in s.strip().split("|")]
     nullable = "None" in parts
     parts = [p for p in parts if p != "None"]
@@ -780,8 +756,11 @@ _SEQUENCE_HEAD = re.compile(r"^(?:tuple|list|Sequence|typing\.Sequence|collectio
 
 
 def _kind_of_value(v: Any) -> tuple[str, tuple, bool]:
-    """Last resort: the default's own type. `bool` before `int`, because a
-    bool is an int in Python and a flag is not a count."""
+    """Infers a wire type from the default as the final fallback.
+
+    Booleans are checked before integers: Python treats `bool` as an `int`,
+    but a flag must not become a count.
+    """
     if isinstance(v, bool):
         return "bool", (), False
     if isinstance(v, int):
@@ -800,27 +779,28 @@ def _kind_of_value(v: Any) -> tuple[str, tuple, bool]:
 
 # -- docs from the source -------------------------------------------------
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9`*\"'(])")
-"""A digit starts a sentence too ("Zero by default. 200 is the panel value.");
-a lowercase letter does not, because after an abbreviation the sentence simply
-continues ("approx. two divisions") and a period inside a number is never
-followed by whitespace, so the digit case cannot misfire on `0.2`."""
+"""Sentence starts can be capitals, digits or opening markup characters.
+
+A lowercase word after an abbreviation continues the sentence. A decimal
+point in `0.2` has no following whitespace, so it cannot split a sentence.
+"""
 _NOT_AN_END = ("e.g.", "i.e.", "vs.", "cf.")
 
 
 def field_docs(cls: type, *, full: bool = False) -> dict[str, str]:
-    """`{field_name: doc}` for fields documented the way this repo documents
-    them: a bare string literal on the line after the field.
+    """Returns field documentation from bare strings after annotated fields.
+
+    For example:
 
         n_averages: int = 200
         \"\"\"Hardware averages per trace. Noise falls as 1/sqrt(n).\"\"\"
 
-    Python attaches no meaning to that string, so it is read back from the
-    source with `inspect.getsource` and `ast`. By default the first sentence
-    of the first paragraph is returned -- what fits a tooltip; `full=True`
-    returns the whole string, cleaned. Classes with no such docs give `{}`,
-    and so does anything whose source cannot be read (a builtin, a class made
-    in a REPL). Never raises: a missing tooltip is not a reason to refuse to
-    list a module.
+    Python does not attach these strings to fields, so `inspect.getsource`
+    and `ast` read them from source. The default result contains the first
+    sentence of the first paragraph for tooltips. `full=True` returns the
+    cleaned full text. Missing documentation or unreadable source, including
+    builtins and interactive classes, gives `{}`. The function never raises;
+    a missing tooltip must not prevent listing a module.
     """
     try:
         tree = ast.parse(textwrap.dedent(inspect.getsource(cls)))
@@ -842,13 +822,12 @@ def field_docs(cls: type, *, full: bool = False) -> dict[str, str]:
 
 
 def first_sentence(text: str) -> str:
-    """The first sentence of the first paragraph, whitespace collapsed.
+    """Returns the first paragraph's first sentence with whitespace collapsed.
 
-    A heuristic, and it says so: a sentence ends at `.`, `!` or `?` followed
-    by whitespace and something that starts a sentence (a capital, a digit, a
-    backtick, a quote, a bracket). `e.g.` and friends do not count, and
-    neither does a period inside `1/sqrt(n)` or `0.2`, because no whitespace
-    follows them.
+    The heuristic recognises `.`, `!` or `?` followed by whitespace and a
+    capital, digit, backtick, quote or bracket. Abbreviations in `_NOT_AN_END`
+    do not end sentences. A period inside `1/sqrt(n)` or `0.2` has no following
+    whitespace and does not split the text.
     """
     paragraph = re.split(r"\n\s*\n", text.strip(), maxsplit=1)[0]
     flat = " ".join(paragraph.split())
@@ -861,14 +840,12 @@ def first_sentence(text: str) -> str:
 
 # -- TOML ------------------------------------------------------------------
 def toml_layer(table: Mapping[str, Any], mapping: Mapping[str, str]) -> dict[str, Any]:
-    """Pick values out of a parsed TOML dict by dotted path.
+    """Selects values from a parsed TOML mapping by dotted path.
 
-    `mapping` is `{"acquisition.n_averages": "n_averages", ...}` -- path in
-    the file to name on the wire. Paths that do not resolve are skipped, so a
-    recipe that leaves a key out simply lets the lower layer show; nothing is
-    invented. This is a picker, not a validator: the file has already been
-    through `config.load_run`, which refuses unknown keys, by the time the
-    service attributes values to it.
+    `mapping` maps file paths such as `acquisition.n_averages` to wire names
+    such as `n_averages`. Missing paths are skipped so lower layers apply.
+    This function does not validate: `config.load_run` rejects unknown keys
+    before the service attributes parameter values to the recipe.
     """
     out: dict[str, Any] = {}
     for path, name in mapping.items():
@@ -883,13 +860,12 @@ def toml_layer(table: Mapping[str, Any], mapping: Mapping[str, str]) -> dict[str
 
 
 def run_toml_layer(path: str | Path) -> dict[str, Any]:
-    """The raw nested dict of a recipe file, for `toml_layer` to pick from.
+    """Reads a recipe's nested table mapping for `toml_layer`.
 
-    Returns the tables as written rather than the dataclasses `config.load_run`
-    builds from them, because provenance needs the *table*: the console says
-    "run.toml [acquisition]", and by the time a value is a `RunConfig` field it
-    no longer knows which table it came from. The mapping is the caller's --
-    it is the catalogue that knows `acquisition.n_averages` is `n_averages`.
+    The raw tables preserve source details such as `run.toml [acquisition]`.
+    Dataclasses from `config.load_run` retain values without table names.
+    The caller supplies the file-to-wire mapping because the catalogue defines
+    which recipe path supplies each parameter.
     """
     p = Path(path)
     if not p.exists():

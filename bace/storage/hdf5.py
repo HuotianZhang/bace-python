@@ -1,54 +1,52 @@
-"""The primary store: one HDF5 file per run, carrying its own recipe.
+"""The primary HDF5 store keeps full-precision data and configuration per run.
 
-The `.dat` export is what existing analysis reads, but it is lossy — six
-significant figures, and no record of which instrument was set to what. This
-file is the one that has to be sufficient to reconstruct the run years later, so
-it holds the arrays at full precision plus every configuration value that
-produced them.
+The `.dat` export has six significant figures and lacks instrument settings.
+HDF5 retains arrays, requested settings and read-back so the run can be
+reconstructed from its file.
 
-Layout::
+Layout (`n_steps` counts points)::
 
-    /                       attrs: schema, created, software version
+    /                       attrs: schema, software, loops_planned,
+                            loops_completed, complete
     /metadata               attrs: sample, material, pixel, temperature_k,
-                            temperature_how/-_source (where that kelvin came
-                            from: typed, setpoint, settled, operator -- absent
-                            in files written before they existed), ...
-    /config/rig             attrs: sense resistor, pulse amp, channels, ...
-    /config/run             attrs: averages, timebase, t0_int, settle times, ...
-    /config/resolved        attrs: what the instruments reported at setup --
-                            :OUTP:POL in force, and anything else the recipe
-                            asked to be left alone. Absent in schema 1 files.
-    /axis                   attrs: name, unit, start, stop, step, centre_on_voc, voc
-      values      (n_steps,)          the swept quantity
-      vpre        (n_steps,)          full setpoint at every step, including
-      vcoll       (n_steps,)          the two that were pinned -- so a file is
-      delay_ns    (n_steps,)          readable without knowing which was swept
+                            temperature_how, temperature_source, ...
+    /config/rig             attrs: R_s, bias amplifier gain, channels, ...
+    /config/run             attrs: N_avg, timebase, window, settle times, ...
+    /config/resolved        attrs: instrument read-back, including settings
+                            the recipe leaves unchanged; absent in schema 1
+    /axis                   attrs: name, unit, start, stop, step, centre_on_voc,
+                            voc
+      values      (n_steps,)          axis values in the axis unit
+      vpre        (n_steps,)          V_pre in V at every point
+      vcoll       (n_steps,)          V_coll in V at every point
+      delay_ns    (n_steps,)          delay in ns at every point
     /charge
-      q           (n_loops, n_steps)  per shot; NaN where a loop never ran
-      mean        (n_steps,)          nan-aware
-      std         (n_steps,)          nan-aware, sample (ddof=1)
+      q           (n_loops, n_steps)  Q in C per shot; NaN if unmeasured
+      mean        (n_steps,)          mean Q in C, ignoring NaN
+      std         (n_steps,)          sample standard deviation in C, ddof=1
     /traces
-      time        (n_samples,)        record time, from the first sample
-      trace_t0    (n_steps,)          :WAV:XOR? -- where the record begins
-                                      relative to the trigger (negative:
-                                      the trigger is inside the record)
-      window      (n_steps, 2)        the integration window Q was taken
-                                      over, record time; pinned to the pulse
-                                      so it moves along a delay axis
-      light       (n_steps, n_samples)   loop-averaged, amps
-      dark        (n_steps, n_samples)
-      photocurrent(n_steps, n_samples)
-      shots       (n_loops, n_steps, n_samples)   only if store_shots=True
+      time        (n_samples,)        s from the first sample of the record
+      trace_t0    (n_steps,)          :WAV:XOR? in s relative to the trigger;
+                                     negative when the trigger is in the record
+      window      (n_steps, 2)        integration limits in record time, s;
+                                     tied to field arrival along a delay axis
+      light       (n_steps, n_samples)   light traces averaged over loops, A
+      dark        (n_steps, n_samples)   dark traces averaged over loops, A
+      photocurrent(n_steps, n_samples)   baseline-corrected light minus dark, A
+      shots       (n_loops, n_steps, n_samples)   A; only if store_shots=True
     /intensity
-      mean, std   (n_steps,)          W, when a power meter was present
+      mean, std   (n_steps,)          W; available with power measurements
 
-**Partial runs are first class.** The 2026-08-07 archive is one: 100 loops
-planned, 20 completed, the rest NaN. `loops_completed` is an attribute, and
-every consumer should read it rather than assuming the array is full.
+Setpoints include constant conditions so readers need not infer them from
+the axis name. Temperature method and source can be absent and must not be
+inferred from the temperature value alone.
 
-`shots` is off by default. At 51 axis points x 100 loops x 4000 samples it is
-163 MB per run, which is the honest version of the original's `Big File?` — a
-choice about disk, made explicitly, rather than a switch nobody remembered.
+Partial runs retain NaN for unmeasured shots. `loops_completed` counts full
+loops; consumers must read it rather than assume full arrays. The LabVIEW
+compatibility case in `tests/test_storage.py` contains 20 of 100 loops.
+
+`shots` is off by default: 51 points × 100 loops × 4000 samples require about
+163 MB before compression. Storing each shot is an explicit disk-space choice.
 """
 from __future__ import annotations
 
@@ -57,8 +55,12 @@ from typing import Any
 import numpy as np
 
 SCHEMA = "bace-run/3"
-"""3 adds `/traces/trace_t0` and `/traces/window`; 2 added `/config/resolved`. Readers of 1 are unaffected: nothing moved, and
-`read_run` returns `{}` for the group when it is absent."""
+"""The run schema identifier defines optional timing and read-back fields.
+
+Schema 3 contains `/traces/trace_t0` and `/traces/window`. Schema 2 contains
+`/config/resolved`. Dataset paths are shared with schema 1; `read_run`
+returns an empty dictionary when the resolved group is absent.
+"""
 COMPRESSION = dict(compression="gzip", compression_opts=4, shuffle=True)
 
 
@@ -113,9 +115,8 @@ def write_run(path: str, *, metadata: dict, rig_config: dict, run_config: dict,
         cfg = f.create_group("config")
         _set_attrs(cfg.create_group("rig"), rig_config)
         _set_attrs(cfg.create_group("run"), run_config)
-        # Readings, not settings. A run told to leave a polarity alone records
-        # nothing about it in `run`; without this group the file cannot say
-        # which convention produced its own numbers.
+        # A recipe that leaves polarity unchanged cannot establish its value.
+        # Separate read-back records which convention produces the stored data.
         _set_attrs(cfg.create_group("resolved"), resolved or {})
 
         ax = f.create_group("axis")
@@ -157,9 +158,9 @@ def write_run(path: str, *, metadata: dict, rig_config: dict, run_config: dict,
                                   **COMPRESSION)
             d.attrs["unit"] = "A"
             d.attrs["note"] = "(loop, step, sample) photocurrent, un-averaged"
-        # The trigger channel out of the same records (2026-09-05): what the
-        # edge the scope fired on looked like, loop-averaged like the
-        # currents. Volts, not amps -- it is a sync line, not the resistor.
+        # The trigger channel shares the current record and loop averaging.
+        # Its edge diagnoses timing. Units are V because it measures Sync,
+        # rather than the voltage across R_s converted to A.
         for name, arr in (("sync_light", sync_light), ("sync_dark", sync_dark)):
             if arr is None:
                 continue
@@ -167,9 +168,9 @@ def write_run(path: str, *, metadata: dict, rig_config: dict, run_config: dict,
             d.attrs["unit"] = "V"
             d.attrs["note"] = "the trigger channel, same record as the current trace"
         if diagnostics:
-            # Per-shot, (loop, step): is this shot the measurement it claims
-            # to be? Average counts from `:WAV:COUN?`, the light-to-dark
-            # spike lag and the spike and sync edges (`core.diagnostics`).
+            # Per-shot diagnostics preserve timing and N_avg checks that averaging
+            # traces can hide: `:WAV:COUN?` counts, spike lag and spike and sync
+            # edge widths from `core.diagnostics`.
             dg = f.create_group("diagnostics")
             for name, arr in diagnostics.items():
                 d = dg.create_dataset(name, data=np.asarray(arr, dtype=float))
@@ -190,7 +191,7 @@ def write_run(path: str, *, metadata: dict, rig_config: dict, run_config: dict,
 
 
 def read_run(path: str) -> dict:
-    """Everything back as a plain dict — no lazy handles to leak."""
+    """Returns the run as an in-memory dictionary with no open HDF5 handles."""
     h5py = _require_h5py()
     out: dict = {}
     with h5py.File(path, "r") as f:
@@ -198,7 +199,7 @@ def read_run(path: str) -> dict:
         out["metadata"] = dict(f["metadata"].attrs)
         out["rig_config"] = dict(f["config/rig"].attrs)
         out["run_config"] = dict(f["config/run"].attrs)
-        # Missing in files written before the group existed.
+        # Schema 1 permits an absent resolved group.
         rs = f.get("config/resolved")
         out["resolved"] = dict(rs.attrs) if rs is not None else {}
         out["axis"] = dict(f["axis"].attrs)

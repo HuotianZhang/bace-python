@@ -1,17 +1,11 @@
-"""One listener on the event stream that writes both file sets.
+"""An event listener writes both `.dat` and HDF5 run files.
 
-It is a consumer, not a stage: `record()` passes every event straight through,
-so the UI, the log and the recorder all see the same stream and adding a fourth
-listener touches nothing here.
+`record` yields events unchanged, so the console, journal and recorder can
+consume the same stream independently.
 
-    for ev in record(run_transient_scan(rig, spec, cfg), recorder):
-        ui.handle(ev)
-
-**It flushes what it has, whenever it stops.** A run that is aborted, or that
-dies on an instrument, still leaves a folder containing every completed loop —
-with NaN in the rows that never ran, exactly as the original did. That is not a
-nicety: the 2026-08-07 archive this port is validated against is itself a
-partial run, 20 loops of a planned 100.
+Every exit flushes acquired shots, including stops and instrument failures.
+Unmeasured shots remain NaN. This is required for LabVIEW compatibility:
+`tests/test_storage.py` checks a partial run with 20 of 100 loops complete.
 """
 from __future__ import annotations
 
@@ -34,20 +28,19 @@ def _ua(amps: float | None) -> float | None:
 
 @dataclass
 class RunRecorder:
-    """Accumulates a run and writes it out.
+    """Accumulates a run and write its data and metadata.
 
-    `root` is the directory runs are created under; the run gets its own folder
-    named from the metadata.
+    `root` contains run folders named from `metadata`.
     """
 
     root: str
     metadata: RunMetadata
     resolved: dict[str, str] = field(default_factory=dict)
-    """Instrument readbacks, kept apart from the config so a reader can tell a
-    *reading* from a *setting*. `InstrumentState` events add to it during the
-    run; a caller that verified something before the run started -- the 33220A
-    polarity, the 81150A arming -- can seed it here, because the run itself
-    never reads those."""
+    """Instrument read-back kept separate from requested configuration.
+
+    `InstrumentState` events update it during the run. Callers can seed checks
+    such as 33220A polarity or 81150A arming that acquisition does not read.
+    """
 
     store_shots: bool = False
     write_legacy: bool = True
@@ -56,8 +49,11 @@ class RunRecorder:
     folder: str = field(init=False, default="")
     written: list[str] = field(init=False, default_factory=list)
     hdf5_error: str | None = field(init=False, default=None)
-    """Set when the HDF5 file could not be written. The `.dat` files are always
-    written first, so a run survives a missing h5py."""
+    """The HDF5 write error, or `None` if no error occurs.
+
+    Enabled `.dat` exports are written first, so a missing `h5py` does not
+    discard their data.
+    """
 
     # accumulated state
     _n_steps: int = field(init=False, default=0)
@@ -73,19 +69,25 @@ class RunRecorder:
     _sync_light: RunningAverage | None = None
     _sync_dark: RunningAverage | None = None
     _diag: dict | None = None
-    """Per-shot diagnostics, (loop, step): the average counts the digitiser
-    reported, the light-to-dark spike lag, the spike edges and the sync
-    edges (`core.diagnostics`, 2026-09-05). NaN where a shot could not say."""
+    """Per-shot diagnostics with shape `(n_loops, n_steps)` per field.
+
+    Fields include digitiser acquisition counts, spike and sync lag, edge
+    widths and levels from `core.diagnostics`. NaN marks unavailable values.
+    """
     _photo: np.ndarray | None = None
     _shots: np.ndarray | None = None
     _window: np.ndarray | None = None
-    """(n_steps, 2): the integration window each step's charge was taken over,
-    in record time. Pinned to the pulse, so along a delay axis every row
-    differs -- the file has to say which slice of which record became Q."""
+    """Integration limits per point in s of record time, shape `(n_steps, 2)`.
+
+    The window follows field arrival along a delay axis. Each row identifies
+    the part of that point's record integrated into Q.
+    """
     _trace_t0: np.ndarray | None = None
-    """(n_steps,): each step's `:WAV:XOR?`, where the record begins relative
-    to the trigger. With it and `axis/delay_ns` an offline reader can put a
-    different window on the stored traces (`tools/reintegrate.py`)."""
+    """Record origins in s relative to the trigger, with shape `(n_steps,)`.
+
+    Each value is `:WAV:XOR?`. Together with `axis/delay_ns`, it lets
+    `tools/reintegrate.py` place another window on the stored traces.
+    """
     _intensity: np.ndarray | None = None
     _dt: float = field(init=False, default=float("nan"))
     _finished: bool = field(init=False, default=False)
@@ -142,12 +144,14 @@ class RunRecorder:
         if self._shots is not None:
             self._shots[loop - 1, i] = ev.photo
 
-        # keep the setpoints so the file is readable without knowing the axis
+        # Full setpoints let readers interpret the file without inferring the axis.
         self._setpoints[i] = ev.setpoint
 
     def _sync(self, ev: E.StepDone) -> None:
-        """The trigger channel's traces, loop-averaged like `light`/`dark`,
-        when the digitiser handed them over."""
+        """Average available trigger-channel traces over loops, in V.
+
+        The averaging follows the light and dark traces.
+        """
         for name, tr in (("_sync_light", ev.sync_light), ("_sync_dark", ev.sync_dark)):
             if tr is None:
                 continue
@@ -174,9 +178,9 @@ class RunRecorder:
         values = {
             "averages_light": ev.light.count, "averages_dark": ev.dark.count,
             "spike_lag_ns": spike_lag_ns(ev.light.y, ev.dark.y, dt),
-            # The verdict turns on this one when a lag has sharp edges, and the
-            # stored traces are averaged over loops while this is per shot, so
-            # it cannot be recomputed from the file afterwards (2026-09-08).
+            # Sync lag determines the verdict when spike edges remain sharp.
+            # It is per shot and cannot be recovered from loop-averaged stored
+            # sync traces, so the file must retain it separately.
             "sync_lag_ns": None if (ev.sync_light is None or ev.sync_dark is None)
             else sync_lag_ns(ev.sync_light.y, ev.sync_dark.y, float(ev.sync_light.dt),
                              float(ev.sync_light.t0)),
@@ -186,9 +190,8 @@ class RunRecorder:
                 ev.sync_light.y, float(ev.sync_light.dt), float(ev.sync_light.t0)),
             "sync_edge_dark_ns": None if ev.sync_dark is None else sync_edge_ns(
                 ev.sync_dark.y, float(ev.sync_dark.dt), float(ev.sync_dark.t0)),
-            # Raw levels, before any baseline: the scope's zero at this range
-            # and, after the window, what the baseline left behind -- the
-            # amplifier's drift between the two traces, shot by shot (2026-10-26).
+            # Raw pre-trigger levels reveal the digitiser zero at this range.
+            # The late offset reveals drift between traces left by the baseline.
             "pre_trigger_light_ua": _ua(pre_trigger_mean(ev.light.y, dt, float(ev.light.t0))),
             "pre_trigger_dark_ua": _ua(pre_trigger_mean(ev.dark.y, dt, float(ev.dark.t0))),
             "late_offset_ua": _ua(late_offset(ev.light.y, ev.dark.y, dt, float(ev.light.t0),
@@ -201,7 +204,7 @@ class RunRecorder:
 
     # -- output -----------------------------------------------------------
     def finish(self) -> list[str]:
-        """Write everything accumulated so far. Safe to call twice."""
+        """Writes accumulated data once and return the paths on repeated calls."""
         if self._finished or self._light is None or self._axis is None:
             self._finished = True
             return self.written
@@ -232,9 +235,9 @@ class RunRecorder:
                 self._write_hdf5(vpre, vcoll, delay, q_mean, q_std,
                                  time_s, i_mean, i_std)
             except Exception as exc:
-                # An hour of measurement must not be lost because an optional
-                # dependency is missing or a disk hiccuped. The legacy files are
-                # already on disk by this point; record the failure and move on.
+                # An optional HDF5 dependency or write failure must not discard the
+                # enabled `.dat` exports. Those writes precede HDF5; retaining the
+                # error lets callers report the incomplete output.
                 self.hdf5_error = f"{type(exc).__name__}: {exc}"
         return self.written
 
@@ -269,10 +272,10 @@ class RunRecorder:
 
 
 def _nan_stats(a: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Column mean and sample std, ignoring loops that never ran.
+    """Returns column means and sample standard deviations, ignoring NaN.
 
-    `ddof=1` to match MathScript's `std`, and a column with one sample gets
-    std 0 rather than NaN — the same convention `core.process` uses.
+    `ddof=1` matches LabVIEW MathScript `std`. A single sample gives zero
+    standard deviation, matching `core.process.ChargeAccumulator.summary`.
     """
     a = np.asarray(a, dtype=float)
     mean = np.full(a.shape[1], np.nan)
@@ -287,7 +290,7 @@ def _nan_stats(a: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 def record(events: Iterable[E.Event], recorder: RunRecorder) -> Iterator[E.Event]:
-    """Pass events through while recording them, flushing on any exit."""
+    """Yields each event unchanged while recording, and flush on every exit."""
     try:
         for ev in events:
             recorder.handle(ev)

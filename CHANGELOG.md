@@ -4,6 +4,10 @@ Dated, newest first. Details and evidence are in `docs/`.
 
 ## 2026-10-28
 
+- The docstrings and comments of `bace/core/`, `bace/storage/`, `params.py`
+  and `config.py` follow `docs/style.md`: units, contracts and reasons, the
+  LabVIEW compatibility kept as a constraint, no history.
+
 - The comments in `rig.toml`, `run.toml` and `recipes/` follow `docs/style.md`:
   what each setting does and why it has its value, with the document that
   shows it, and no history. `tools/check_text_only.py` confirms a rewrite
