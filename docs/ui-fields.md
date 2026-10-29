@@ -3,7 +3,8 @@
 `ui/lib/fields.js` defines visible rows and folded groups. `cardModel` turns
 a catalogue entry into that layout. `ui/lib/card.js` renders it. This document
 states the placement and its reasons. Paths beginning with `ui/`, `bace/` or
-`docs/` are relative to the repository root.
+`docs/` are relative to the repository root. The `field` columns below give
+code names; the card shows each field's label (`ui-rules.md` §1).
 
 ## Placement
 
@@ -278,6 +279,7 @@ their module's main controls.
    not silent: when it is on, the card header carries a chip, because a
    parameter whose cost is measured in gigabytes should not be invisible.
 7. The fold is groups, per the section above.
-8. No field is a bare name. `doc` states its instrument or calculation and
-   effect; `doc_full` expands the explanation where available. The service
-   supplies both from dataclass docstrings and explicit specs.
+8. No field is a bare name. It shows its `label`; `doc` states its
+   instrument or calculation and effect, in the tooltip and the help line;
+   `doc_full` expands the explanation where available. The service supplies
+   all three from dataclass docstrings and explicit specs.

@@ -24,11 +24,24 @@ Long run names must stay distinguishable and selectable:
 s4_PTQ10IT4F_pxa_290K_1020mVLED_906mVVOC_offsetcorr_20260807_111521
 ```
 
-Field labels use code names such as `vpre`, `n_averages` and
-`centre_on_voc`. Each field displays `doc`: a sentence identifying its
-instrument or calculation and effect. `doc_full` supplies expanded help
-when available. Dataclass docstrings and explicit service parameter specs
-are the sources. A bare name such as `smu_nplc` or `v_sat` is insufficient.
+A field shows its label: a sentence-case noun phrase such as "Hardware
+averages" or "Centre on V_oc", from the parameter spec's `label`. The code
+name (`n_averages`, `centre_on_voc`) is the identifier: the first line of the
+tooltip and of the help line, and the spelling in exports, provenance, drift
+lists and check codes. `doc`, a sentence identifying the instrument or
+calculation and its effect, is the tooltip's second line and the help line's
+body; it is not drawn under the field. `doc_full` extends the help line.
+Dataclass docstrings and explicit service parameter specs are the sources.
+
+The screen carries label, value, unit and state. `style.md` ("The console")
+gives the text rules; the visual ones are:
+
+| Rule | |
+|---|---|
+| Type scale | 13 px values and labels, 11 px secondary text, 10.5 px mono identifiers, 9 px engraved zone titles |
+| Identifiers | Code names, node paths, run ids, check codes and file stems share one style: mono, grey, 10.5 px |
+| Field row | Label, value, state. Nothing sits between rows except a warning about the row above |
+| Side panels | The assistant and the plans share one side panel. It narrows the view on a wide screen and overlays it below 1280 px |
 
 ## 2 · Numbers
 
@@ -191,7 +204,7 @@ Warnings state evidence, consequence and remedy in short sentences.
 
 | Subject | Rule |
 |---|---|
-| OK preflight checks | Collapse to a count with a disclosure, e.g. `16 checks · 15 ok · 1 warn · show`. |
+| OK preflight checks | Collapse to a count with a disclosure, e.g. `16 checks, 1 warning  [Show]`. |
 | Shot phases | Collapse to the current phase, e.g. `5 · acquire light`. |
 | Module settings | Keep the service's last-used layer. |
 | Running card | Keep the editor beside its result monitor. |
