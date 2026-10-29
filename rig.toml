@@ -13,9 +13,10 @@ pulse_amp = 4.0                 # Gain of the bias amplifier on the sample holde
                                 # 4 V/V; the 81150A levels are divided by it
                                 # (manual 1.2).
 probe_attenuation = 1.0
-trigger_offset_s = 47.1e-9      # Field latency: 47.1 ns after trigger + :PULS:DEL1. A
-                                # 49-point delay fit gives a 1.5 ns residual (manual
-                                # 2.2; docs/notes.md). It positions the integration
+trigger_offset_s = 35.1e-9      # Field latency: the voltage step's 50 % point is 35.1 ns
+                                # after trigger + :PULS:DEL1, measured with a 56 pF
+                                # capacitor in the device's place (manual 2.2;
+                                # docs/notes.md). It positions the integration
                                 # window relative to field arrival. :PULS:DEL1 receives
                                 # delay_ns unchanged, as required for the LabVIEW timing
                                 # match. Adding the latency to the command separates the

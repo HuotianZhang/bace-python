@@ -4,8 +4,8 @@
 LabVIEW scan sequence. Adding an offset shifts the displacement spike
 and changes which part of the transient the integration window includes.
 
-The measured Sync-to-field latency is 47.1 ns, fitted over a delay scan
-(manual 2.2, `docs/manual/2.2-transient.md`). It belongs to the integration
+The measured Sync-to-field latency is 35.1 ns, measured with a capacitor in
+the device's place (manual 2.2, `docs/manual/2.2-transient.md`). It belongs to the integration
 window through `RigConfig.trigger_offset_s` and
 `experiment.transient.resolve_window`, rather than the generator command.
 """

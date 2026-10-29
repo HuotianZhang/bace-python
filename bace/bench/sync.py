@@ -1,10 +1,10 @@
 """Check the bias step's phase within the LED cycle.
 
 The 81150A must arm when the LED drive falls. BACE holds V_pre under light,
-normally at V_oc, then steps to V_coll after the light goes out. Arming on the
+normally at V_oc, then steps to V_coll as the light goes out. Arming on the
 rising edge instead extracts during generation, yet can still produce a
-plausible transient and Q. Field arrival is delay + 47.1 ns after the 81150A
-Sync, fitted over a delay scan (manual 2.2); at 88 ns delay it is about 135 ns.
+plausible transient and Q. Field arrival is delay + 35.1 ns after the 81150A
+Sync, measured with a capacitor (manual 2.2); at 88 ns delay it is about 123 ns.
 
 Signal paths:
 
@@ -459,7 +459,7 @@ def stage_sync(report, rm, rig_config, run_config, *,
             for q in (":ARM:SOUR1?", ":ARM:SENS1?", ":OUTP1:POL?",
                       # Read delay and width to separate programmed delay from
                       # latency in the Sync-to-output interval. One record cannot
-                      # distinguish them without `:PULS:DEL1?`. The 47.1 ns
+                      # distinguish them without `:PULS:DEL1?`. The 35.1 ns
                       # `trigger_offset_s` locates field arrival at the device,
                       # rather than the generator output (manual 2.2).
                       ":PULS:DEL1?", ":FUNC1:PULS:WIDT?", ":FREQ1?",
