@@ -44,10 +44,10 @@ export function titleModel(state, { announce = null } = {}) {
   const live = monitorModel(state);
   if (live) {
     if (live.prompt) {
-      return { level: 'paused', text: `⏸ needs you · ${asking(live.prompt)} — ${BASE}` };
+      return { level: 'paused', text: `⏸ Needs you: ${asking(live.prompt)} — ${BASE}` };
     }
     if (live.state === 'stopping') {
-      return { level: 'stopping', text: `⏹ stopping · ${live.label} — ${BASE}` };
+      return { level: 'stopping', text: `⏹ Stopping: ${live.label} — ${BASE}` };
     }
     // The outermost loop is the one whose iteration is measured in hours; on a
     // manual run there is none and the label stands alone.
@@ -61,8 +61,9 @@ export function titleModel(state, { announce = null } = {}) {
     // The title includes kept/requested counts to distinguish truncated runs from
     // complete sweeps (`docs/ui-rules.md` §9).
     const counts = how.word === 'done' || ended.kept === null || ended.kept === undefined
-      ? '' : ` · ${fmt.keptOf(ended.kept, ended.requested)}`;
-    return { level: 'ended', text: `${how.mark} ${how.word} · ${label}${counts} — ${BASE}` };
+      ? '' : `, ${fmt.keptOf(ended.kept, ended.requested)}`;
+    const word = how.word.charAt(0).toUpperCase() + how.word.slice(1);
+    return { level: 'ended', text: `${how.mark} ${word}: ${label}${counts} — ${BASE}` };
   }
   return { level: 'idle', text: BASE };
 }

@@ -175,8 +175,8 @@ export function pausePrompt(record, state) {
     reading: reading ? { kelvin: reading.kelvin, source: reading.source, in_band: reading.in_band, ts: reading.ts } : null,
     // Blank resume uses the last pause reading. Without one, the setpoint stays
     // unconfirmed (`docs/service-contract.md` §7).
-    fallback: reading ? `resume with nothing typed takes the last reading, ${fmt.kelvin(reading.kelvin)}`
-      : 'resume with nothing typed leaves the temperature unconfirmed — the folder names carry the setpoint',
+    fallback: reading ? `Blank resume takes the last reading, ${fmt.kelvin(reading.kelvin)}`
+      : 'Blank resume: temperature unconfirmed; folders carry the setpoint.',
   };
 }
 
@@ -349,7 +349,7 @@ function liveRow(model) {
   }
   if (model.shots) kids.push(h('span.mon-count.shots', { text: model.shots.text }));
   if (model.waiting) {
-    kids.push(h('span.mon-wait', { text: `waiting for the operator · ${model.waiting}` }));
+    kids.push(h('span.mon-wait', { text: `Waiting for you: ${model.waiting}` }));
   } else if (model.phase) {
     kids.push(phaseEl(model.phase));
   }
@@ -362,11 +362,11 @@ function liveRow(model) {
   if (model.eta) {
     kids.push(h('span.mon-eta', {
       title: model.eta.from === 'executor'
-        ? 'the executor\'s ETA, re-derived from what this run has measured'
+        ? 'From the loop times this run has measured.'
         : model.eta.from === 'predicted'
-          ? 'the cost model\'s prediction, made when the run was submitted — nothing has been measured to re-derive it from yet'
-          : 'the module\'s own estimate',
-      text: `${model.eta.from === 'predicted' ? 'ETA ~' : 'ETA '}${fmt.duration(model.eta.seconds)} · finish ${fmt.clock(model.eta.finish_at)}`,
+          ? 'Predicted at submission; nothing measured yet.'
+          : 'Module estimate.',
+      text: `${model.eta.from === 'predicted' ? 'ETA ~' : 'ETA '}${fmt.duration(model.eta.seconds)}, finish ${fmt.clock(model.eta.finish_at)}`,
     }));
   }
   return kids;
@@ -380,19 +380,19 @@ function actionButtons(model, { onStop, onAbort, abortArmed, status }) {
   if (status) kids.push(h('span', { class: 'mon-status ' + (status.level || ''), text: status.text }));
   const stop = model.stop;
   if (stop.canCancel) {
-    kids.push(h('button.btns', { onclick: () => onStop && onStop(model.run_id, 'after_shot'), title: 'cancel this run before it starts' }, 'Cancel'));
+    kids.push(h('button.btns', { onclick: () => onStop && onStop(model.run_id, 'after_shot'), title: 'Cancels this run before it starts.' }, 'Cancel'));
   } else {
     kids.push(h('button.btns', {
       disabled: !stop.canStop || null,
-      title: stop.canStop ? 'after_shot: the shot in flight completes and is kept, then the run parks' : stop.why || '',
+      title: stop.canStop ? 'The shot in flight completes and is kept, then the run parks.' : stop.why || '',
       onclick: () => onStop && onStop(model.run_id, 'after_shot'),
-    }, 'Stop after this shot'));
+    }, 'Stop after shot'));
     kids.push(h('button', {
       class: abortArmed ? 'btns armed' : 'btns',
       disabled: !stop.canAbort || null,
-      title: stop.canAbort ? 'abort: the shot being acquired is discarded, nothing after it starts' : stop.why || '',
+      title: stop.canAbort ? 'The shot being acquired is discarded; nothing after it starts.' : stop.why || '',
       onclick: () => onAbort && onAbort(model.run_id),
-    }, abortArmed ? 'abort now?' : 'Abort'));
+    }, abortArmed ? 'Abort now?' : 'Abort'));
   }
   return kids;
 }
@@ -406,14 +406,14 @@ function queueStatus(queued, status) {
 function queueRow(queued, status, onStop) {
   if (!queued.length) return [];
   return [
-    h('span.mon-qk', { text: `queue ${queued.length}` }),
+    h('span.mon-qk', { text: `Queue ${queued.length}` }),
     queued.map((q) => {
       const answer = scopedTo(q.run_id, status);
       return h('span.mon-q',
         h('span', { title: q.run_id, text: `${q.position} · ${q.label}` }),
         answer ? h('span', { class: 'mon-status ' + (answer.level || ''), text: answer.text }) : null,
         h('button.btns', {
-          title: 'cancel this run before it starts',
+          title: 'Cancels this run before it starts.',
           onclick: () => onStop && onStop(q.run_id, 'after_shot'),
         }, 'Cancel'));
     }),
@@ -425,7 +425,7 @@ function queueRow(queued, status, onStop) {
  * reference.
  */
 function phaseEl(phase) {
-  return h('span.mon-phase', { title: 'where inside the shot the run is, from StepPhase' },
+  return h('span.mon-phase', { title: 'Where in the shot the run is.' },
     h('span.mon-seg-row', phase.segments.map((name, i) => h('span', {
       class: 'mon-seg' + (i + 1 < phase.k ? ' done' : i + 1 === phase.k ? ' on' : ''),
       title: `${i + 1} · ${name}`,
@@ -435,7 +435,7 @@ function phaseEl(phase) {
 
 function promptForm(model, p, onResume) {
   const temperature = h('input.v', { type: 'text', inputmode: 'decimal', placeholder: p.setpoint_k !== null ? fmt.kelvin(p.setpoint_k, { unit: false }) : '', 'aria-label': 'temperature_k' });
-  const note = h('input.v.note', { type: 'text', placeholder: 'note — what you did', 'aria-label': 'note' });
+  const note = h('input.v.note', { type: 'text', placeholder: 'Note', title: 'What you did; it goes into the journal.', 'aria-label': 'note' });
   const submit = () => {
     const raw = temperature.value.trim();
     const typed = raw === '' ? null : Number(raw);
@@ -445,12 +445,12 @@ function promptForm(model, p, onResume) {
   temperature.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
   note.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
   return [
-    h('span.mon-ask', { text: `needs the operator · ${p.node_path}` }),
+    h('span.mon-ask', { text: `Needs you: ${p.node_path}` }),
     h('span.mon-lines', p.lines.map((line) => h('span', { text: line }))),
     h('span.mon-reading'),
-    h('label.mon-field', h('span', 'temperature_k'), temperature, h('i', 'K')),
+    h('label.mon-field', h('span', { title: 'temperature_k' }, 'Temperature'), temperature, h('i', 'K')),
     h('label.mon-field', note),
-    h('button.btnp', { onclick: submit, title: 'answers the pause that is open and no other' }, 'Resume'),
+    h('button.btnp', { onclick: submit, title: 'Answers the open pause.' }, 'Resume'),
   ];
 }
 
@@ -464,7 +464,7 @@ function readingLine(p) {
   return [
     r ? h('span', {
       class: r.in_band === true ? 'ok' : r.in_band === false ? 'warn' : '',
-      text: `reads ${fmt.kelvin(r.kelvin)} · ${r.source}${r.in_band === true ? ' · in band' : r.in_band === false ? ' · out of band' : ''}`,
+      text: `Reads ${fmt.kelvin(r.kelvin)}, ${r.source}${r.in_band === true ? ', in band' : r.in_band === false ? ', out of band' : ''}`,
     }) : null,
     h('span.mon-fallback', { text: p.fallback }),
   ];

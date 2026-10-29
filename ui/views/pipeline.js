@@ -31,7 +31,7 @@ const VALIDATE_MS = 250;
 
 export default {
   route: 'pipeline',
-  title: 'pipeline',
+  title: 'Pipeline',
 
   mount(container, { store, api, notify }) {
     // -- the state this view owns ------------------------------------------

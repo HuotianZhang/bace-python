@@ -37,7 +37,7 @@ export function sweptAxis(state) {
 
 export default {
   route: 'rig',
-  title: 'rig',
+  title: 'Rig',
 
   mount(container, { store }) {
     const chain = h('div.card.mod.rig-chain');

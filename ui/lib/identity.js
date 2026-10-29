@@ -14,16 +14,16 @@ import { h, keyed } from './dom.js';
  * affecting persistent paths.
  */
 export const IDENTITY_FIELDS = [
-  { name: 'sample', in_name: true, placeholder: 's4',
-    doc: 'the device. First field of every folder name this session writes.' },
-  { name: 'material', in_name: true, placeholder: 'PTQ10IT4F',
-    doc: 'what it is made of, as the archive writes it — the second field of the name.' },
-  { name: 'pixel', in_name: true, placeholder: 'pxa',
-    doc: 'which pixel is under the mask — the third field of the name.' },
-  { name: 'operator', in_name: false, placeholder: '',
-    doc: 'who is at the bench. Metadata only: it is in the HDF5 and the journal, not in any folder name.' },
-  { name: 'comment', in_name: 'slug', placeholder: '',
-    doc: 'one sentence about this session. A slug of it goes into the folder name; the file keeps it verbatim.' },
+  { name: 'sample', label: 'Sample', in_name: true, placeholder: 's4',
+    doc: 'The device. First field of every folder name this session writes.' },
+  { name: 'material', label: 'Material', in_name: true, placeholder: 'PTQ10IT4F',
+    doc: 'What the device is made of, as the archive writes it. Second field of the name.' },
+  { name: 'pixel', label: 'Pixel', in_name: true, placeholder: 'pxa',
+    doc: 'The pixel under the mask. Third field of the name.' },
+  { name: 'operator', label: 'Operator', in_name: false, placeholder: '',
+    doc: 'Who is at the bench. In the HDF5 and the journal, not in the folder name.' },
+  { name: 'comment', label: 'Comment', in_name: 'slug', placeholder: '',
+    doc: 'One sentence about this session. Its slug goes into the folder name; the file keeps it verbatim.' },
 ];
 
 /**
@@ -54,9 +54,8 @@ export function nameHazard(value, inName) {
     // A value reduced to empty disappears from the name. An empty suggestion would
     // hide that consequence.
     text: filed
-      ? (text.length > filed.length && !reason
-        ? `too long for a name — filed as` : `filed as`)
-      : 'reduces to nothing, so it is left out of the name',
+      ? (text.length > filed.length && !reason ? 'Too long: filed as' : 'Filed as')
+      : 'Left out of the name: nothing filing-safe remains.',
     why: reason ? reason[1] : null,
   };
 }
@@ -100,13 +99,13 @@ export function identityModel(state) {
   return {
     rows,
     named,
-    chip: named || 'no sample named',
+    chip: named || 'No sample named',
     /** The predicate identifies a session without a named device. */
     unnamed: !named,
     stem,
     // Without identity fields, filenames begin with temperature and carry no device
     // name.
-    preview: stem ? `${stem}_…` : '290K_… — no device in the name',
+    preview: stem ? `${stem}_…` : '290K_…',
     /**
      * The helper lists fields whose filename spelling differs from their typed value.
      */
@@ -131,23 +130,24 @@ export function renderIdentity(el, state, { open, onSet, onClose, status = null 
   }
   keyed(el, JSON.stringify([model, status]), () => [
     h('div.id-head',
-      h('span.cn', 'what is mounted'),
-      h('span.cs', 'the session’s [sample] block. '
-        + 'It names the runs queued after it; anything already queued keeps the name it has.'),
+      h('span.cn', {
+        title: 'The session\'s [sample] block. It names the runs queued after it; '
+          + 'runs already queued keep their names.',
+      }, 'Sample'),
       h('span', { style: { flex: '1' } }),
       status ? h('span', { class: 'id-status ' + (status.level || ''), text: status.text }) : null,
-      h('button.btng', { onclick: () => onClose && onClose() }, 'close')),
+      h('button.btng', { onclick: () => onClose && onClose() }, 'Close')),
     h('div.id-rows', model.rows.map((row) => identityRow(row, onSet))),
     h('div.id-foot',
       // The preview is a stem: temperature, LED level, V_oc, baseline flag and
-      // comment slug follow. Its ellipsis must not imply a complete filename.
-      h('span.l', 'next folder starts'),
-      h('span', { class: 'id-stem' + (model.stem ? '' : ' absent'), text: model.preview }),
-      h('span', { style: { flex: '1' } }),
-      // The panel explains why it omits `temperature_k`, avoiding a stale temperature
-      // claim.
-      h('span.cs', 'temperature_k is not typed here: a bench with a 331 reads the '
-        + 'controller as each node starts, and a typed 290 filed a 220 K run as 290 K once already')),
+      // comment slug follow. Its ellipsis must not imply a complete filename. The
+      // temperature is not typed here; manual 1.3 says where it comes from.
+      h('span.l', 'Folder stem'),
+      h('span', {
+        class: 'id-stem' + (model.stem ? '' : ' absent'),
+        title: model.stem ? '' : 'No device in the name: name the sample.',
+        text: model.preview,
+      })),
   ]);
   return model;
 }
@@ -163,33 +163,32 @@ function identityRow(row, onSet) {
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); });
   const hazard = row.hazard;
   return h('div.id-row' + (hazard ? '.warn' : ''),
-    h('span.l', { text: row.name },
-      row.in_name === true ? h('i', 'in the name') : row.in_name === 'slug' ? h('i', 'slugged into the name') : null),
+    h('span.l', { text: row.label, title: row.doc },
+      row.in_name ? h('i', { title: row.in_name === 'slug' ? 'A slug of it is in the folder name.' : 'In the folder name.' }, 'folder') : null),
     input,
     h('span.src',
       row.typed
         ? h('button.link.undo', {
-          title: row.file
-            ? `back to run.toml — ${row.file}`
-            : 'back to run.toml, which left this empty',
+          title: row.file ? `Back to run.toml: ${row.file}` : 'Back to run.toml (empty)',
           'aria-label': 'reset',
           onclick: () => onSet && onSet(row.name, null),
         }, '↺')
         : null),
-    h('div.doc', h('span', { text: row.doc }),
-      hazard
-        ? h('span.id-warn',
-          h('span', { text: `${hazard.text}` }),
-          hazard.filed ? h('b', { text: hazard.filed }) : null,
-          hazard.why ? h('i', { text: `— ${hazard.why}` }) : null,
-          // Adopting reduced spelling makes metadata match the folder. It is
-          // optional, but truncation after character 24 can merge otherwise distinct
-          // batches.
-          hazard.filed
-            ? h('button.link', {
-              title: `type ${hazard.filed} instead, so the record and the folder agree`,
-              onclick: () => onSet && onSet(row.name, hazard.filed),
-            }, 'use it')
-            : null)
-        : null));
+    // Only a filing hazard takes a line under the field; the explanation is the
+    // label's and the input's title.
+    hazard
+      ? h('div.doc', h('span.id-warn',
+        h('span', { text: hazard.text }),
+        hazard.filed ? h('b', { text: hazard.filed }) : null,
+        hazard.why ? h('i', { text: `: ${hazard.why}.` }) : null,
+        // Adopting reduced spelling makes metadata match the folder. It is
+        // optional, but truncation after character 24 can merge otherwise distinct
+        // batches.
+        hazard.filed
+          ? h('button.link', {
+            title: `Type ${hazard.filed} instead, so the record and the folder agree.`,
+            onclick: () => onSet && onSet(row.name, hazard.filed),
+          }, 'Use it')
+          : null))
+      : null);
 }
