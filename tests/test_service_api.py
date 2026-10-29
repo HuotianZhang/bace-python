@@ -1257,6 +1257,9 @@ def test_the_ui_mount_redirects_the_root_and_serves_the_files(tmp_path):
         assert r.status_code in (307, 308) and r.headers["location"] == "/ui/"
         r = client.get("/ui/")
         assert r.status_code == 200 and "<h1>bace</h1>" in r.text
+        # Revalidated on every load, so an update reaches an open browser.
+        assert r.headers["cache-control"] == "no-cache"
+        assert client.get("/ui/", headers={"If-None-Match": r.headers["etag"]}).status_code == 304
         assert client.get("/bench").status_code == 200
     with pytest.raises(ValueError, match="not a directory"):
         create_app(make_session(tmp_path, sid="20260902_220002"), ui_dir=str(tmp_path / "nope"))

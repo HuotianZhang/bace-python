@@ -336,7 +336,7 @@ export function foldCount(model) {
  * and cost together, avoiding a second rounding implementation.
  */
 export function points(estimateText) {
-  const m = /×\s*(\d+)\s*pts/.exec(String(estimateText || ''));
+  const m = /×\s*(\d+)\s*pts?\b/.exec(String(estimateText || ''));
   return m ? Number(m[1]) : null;
 }
 

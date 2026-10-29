@@ -417,6 +417,9 @@ function cellEl(cell) {
   // The diagram identifies a connected circuit. Unlit can mean neutral or absent
   // read-back, so those states retain words.
   if (cell.key === 'relay' && cell.links && (cell.links[0] || cell.links[1])) classes.push('drawn');
+  // A reading cell puts its label above its value, so a narrow cell keeps the
+  // instrument's name whole.
+  if (cell.key !== 'relay') classes.push('stacked');
   // A one-line rail opens details on hover and focus. `tabindex` provides keyboard
   // access; `title` also exposes text when the panel extends off-screen.
   return h('div', {

@@ -172,6 +172,19 @@ def _error(status: int, message: str, **extra: Any) -> JSONResponse:
     return JSONResponse({"error": message, **extra}, status_code=status)
 
 
+class _ConsoleFiles(StaticFiles):
+    """The console's static files, revalidated on every load.
+
+    Without `no-cache` a browser may keep `style.css` and `app.js` from before an
+    update and run them against the new service. The ETag keeps an unchanged
+    file to a 304."""
+
+    async def get_response(self, path: str, scope) -> Response:
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 def _param_of(message: str, module: str | None = None) -> str | None:
     """The error parser extracts the parameter named by a catalogue refusal.
 
@@ -968,7 +981,7 @@ def create_app(session: Session, *, ui_dir: str | None = None,
         return {"forgotten": conversation_id}
 
     if ui_dir is not None:
-        app.mount("/ui", StaticFiles(directory=ui_dir, html=True), name="ui")
+        app.mount("/ui", _ConsoleFiles(directory=ui_dir, html=True), name="ui")
     return app
 
 

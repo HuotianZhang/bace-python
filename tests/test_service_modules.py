@@ -258,7 +258,7 @@ def test_estimates_follow_the_cost_model():
     cat = catalogue(history=FakeHistory(shot=1.2))
     p = {**cat.param_set("bace").values(), "n_loops": 20}
     assert cat.estimate_s("bace", p) == pytest.approx(20 * 1 * 1.2)
-    assert cat.estimate_text("bace", p) == "one shot ≈ 1.2 s · 20 loops × 1 pts ≈ 24 s"
+    assert cat.estimate_text("bace", p) == "one shot ≈ 1.2 s · 20 loops × 1 pt ≈ 24 s"
     p.update({"axis_start": -0.02, "axis_stop": 0.02, "axis_step": 0.01})
     assert cat.estimate_s("bace", p) == pytest.approx(20 * 5 * 1.2)
     assert cat.estimate_s("bace", {"n_loops": 10}) == pytest.approx(12.0)   # partial: filled in
