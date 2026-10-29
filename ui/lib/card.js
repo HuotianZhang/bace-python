@@ -316,11 +316,18 @@ function help(spec) {
   return { class: 'has-help', title: full, 'data-doc': spec.doc };
 }
 
+/** The unit after a name, unless the name already ends in it (`settle_s`, `pixel_area_cm2`). */
+function unitTag(spec, name) {
+  if (!spec.unit) return null;
+  const suffix = '_' + spec.unit.toLowerCase().replace('²', '2').replace('µ', 'u');
+  return String(name).toLowerCase().endsWith(suffix) ? null : h('i', { text: spec.unit });
+}
+
 /** The name is a label or an explanation-opening button. */
 function label(spec, ctx, model, text) {
   const name = text || spec.name;
   if (!spec.doc) {
-    return h('span.l', { text: name }, spec.unit ? h('i', { text: spec.unit }) : null);
+    return h('span.l', { text: name }, unitTag(spec, name));
   }
   const key = `${model.name}:${spec.name}`;
   const open = ctx.docOpen ? ctx.docOpen(key) : false;
@@ -329,7 +336,7 @@ function label(spec, ctx, model, text) {
     'aria-expanded': open ? 'true' : 'false',
     title: spec.doc_full && spec.doc_full !== spec.doc ? spec.doc_full : spec.doc,
     onclick: () => ctx.toggleDoc && ctx.toggleDoc(key),
-  }, name, spec.unit ? h('i', { text: spec.unit }) : null);
+  }, name, unitTag(spec, name));
 }
 
 /** The renderer places the explanation beneath its field. */
@@ -362,7 +369,7 @@ function rangeRow(row, ctx, model) {
         h('i', 'step'),
         input(row.step, commit(row.step.name), false),
         repeat ? h('span.tag.rep', 'repeat')
-          : row.points !== null ? h('i.pts', { text: `${row.points} pts` }) : null),
+          : row.points !== null ? h('i.pts', { text: fmt.plural(row.points, 'pt') }) : null),
       rangeProvenance(specs, ctx, model)),
     repeat ? h('div.note1', { text: 'start = stop: one point, measured n_loops times — Q per loop, not Q(axis)' }) : null);
 }

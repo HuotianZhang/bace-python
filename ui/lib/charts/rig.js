@@ -58,7 +58,7 @@ export function chainMarkup() {
   s += box(44, 382, 220, 58, ['Deditec DIO', 'shutter = module 0 · relay = module 1', 'ID 9'], { s: G, d: '3 3' });
   // bench
   s += box(344, 30, 90, 58, ['LED amp', 'fixed gain', '≈ 83 ns']);
-  s += box(464, 30, 70, 58, ['LED', '530 nm', '']);
+  s += box(464, 30, 70, 58, ['LED', '520 nm', 'laser']);
   s += box(564, 30, 120, 58, ['shutter → fibre', 'DIO 0 · open / shut', '85 m fibre · 419 ns']);
   s += box(714, 30, 70, 58, ['splitter', 'meter +', 'device']);
   s += box(814, 30, 130, 58, ['1918-C', 'optical power', 'W · :8918']);

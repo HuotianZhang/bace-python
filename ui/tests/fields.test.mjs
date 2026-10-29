@@ -255,8 +255,9 @@ test('a node form shows only what differs from the bench', () => {
 });
 
 test('the point count is read out of the service estimate, never recomputed', () => {
-  assert.equal(points('1 curves × 141 pts ≈ 16 s'), 141);
+  assert.equal(points('1 curve × 141 pts ≈ 16 s'), 141);
   assert.equal(points('one shot ≈ 0.8 s (default) · 20 loops × 17 pts ≈ 4.5 min'), 17);
+  assert.equal(points('one shot ≈ 0.8 s (default) · 20 loops × 1 pt ≈ 16 s'), 1);
   assert.equal(points('one reading'), null);
   const model = cardModel(entry('jv'));
   assert.equal(model.above.find((r) => r.kind === 'range').points, points(byName.jv.estimate_text));

@@ -1078,8 +1078,8 @@ class Catalogue:
             n_loops = int(p["n_loops"])
             total = n_loops * n_steps * t_shot
             tag = "" if source == "journal" else " (default)"
-            return total, (f"one shot ≈ {t_shot:.1f} s{tag} · {n_loops} loops × "
-                           f"{n_steps} pts ≈ {_duration(total)}")
+            return total, (f"one shot ≈ {t_shot:.1f} s{tag} · {_count(n_loops, 'loop')} × "
+                           f"{_count(n_steps, 'pt')} ≈ {_duration(total)}")
         if name in ("jv", "jv_bace"):
             try:
                 n_points = int(_jv_points(p).size)
@@ -1095,7 +1095,7 @@ class Catalogue:
                 n_curves, led_settle = (2 if p["both_directions"] else 1), 0.0
             total = n_curves * (n_points * float(p["settle_s"])
                                 + n_points * JV_POINT_OVERHEAD_S + led_settle)
-            return total, f"{n_curves} curves × {n_points} pts ≈ {_duration(total)}"
+            return total, f"{_count(n_curves, 'curve')} × {_count(n_points, 'pt')} ≈ {_duration(total)}"
         if name == "power":
             total = 0.1 * max(1, int(p["samples"]))
             return total, "one reading" if p["samples"] <= 1 else f"{p['samples']} samples"
@@ -1834,6 +1834,11 @@ def _duration(seconds: float) -> str:
     if seconds < 3600:
         return f"{seconds / 60:.1f} min"
     return f"{seconds / 3600:.1f} h"
+
+
+def _count(n: int, one: str) -> str:
+    """`1 curve`, `2 curves`: a count with its noun in the matching number."""
+    return f"{n} {one}" if n == 1 else f"{n} {one}s"
 
 
 class _null:

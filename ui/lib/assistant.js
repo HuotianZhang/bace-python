@@ -345,14 +345,16 @@ export function createAssistantPanel({ api, onChange = () => {} }) {
       h('span.as-title', 'assistant'),
       h('span.as-model', { text: modelLabel() }),
       h('span.spacer'),
-      !editing() ? h('button.as-link', { text: 'settings', title: 'model, address and key', onclick: openForm }) : null,
+      !editing() ? h('button.as-link.as-settings', { text: 'settings', title: 'model, address and key', onclick: openForm }) : null,
       state.items.length ? h('button.as-link', { text: 'new', title: 'start a new conversation', onclick: reset }) : null,
       h('button.as-link', { text: '✕', title: 'close', onclick: () => toggle(false) }));
 
     const ps = providerStatus();
     if (editing() && !draft) draft = freshDraft();
+    // With the form closed, an unavailable provider still says why the input is off.
     keyed(noteEl, JSON.stringify([editing(), formVersion, ps, Boolean(state.status)]),
-      () => (editing() ? form() : []));
+      () => (editing() ? form()
+        : ps && !ps.available ? h('p.as-warn', { text: `Not available on this service: ${ps.reason}` }) : []));
 
     const near = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
     fill(logEl, state.items.length
