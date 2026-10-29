@@ -72,6 +72,7 @@ DOCS: dict[str, tuple[str, str]] = {
     "manual-1.3": ("docs/manual/1.3-first-measurement.md", "manual: starting the service and a first measurement"),
     "manual-1.4": ("docs/manual/1.4-results.md", "manual: reading a result and its checks"),
     "manual-1.5": ("docs/manual/1.5-troubleshooting.md", "manual: symptoms, causes and remedies"),
+    "manual-1.6": ("docs/manual/1.6-agent-runs.md", "manual: plans, their approval, and runs by an agent"),
     "manual-2.1": ("docs/manual/2.1-extraction.md", "manual: what the extracted charge is, and the dark reference"),
     "manual-2.2": ("docs/manual/2.2-transient.md", "manual: the transient, the timing and the integration window"),
     "manual-2.3": ("docs/manual/2.3-signal.md", "manual: the measurement chain and the uncertainty budget"),

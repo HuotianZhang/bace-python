@@ -47,7 +47,7 @@ from starlette.routing import Mount
 
 from ..params import ParamError
 from .modules import SAMPLE_KEYS, ModuleError, jsonable
-from . import assistant, pipeline, providers
+from . import assistant, mcp, pipeline, providers
 from .plans import PlanConflict, PlanError
 from .pipeline import TreeError
 from .rigs import ACTIONS, BenchActionRefused
@@ -885,6 +885,38 @@ def create_app(session: Session, *, ui_dir: str | None = None,
     async def close_plan(plan_id: str, body: DecisionRequest | None = Body(default=None)):
         """Closes an approved plan: nothing more is accepted under it."""
         return await _decide(plan_id, "close", body)
+
+    # -- /mcp ---------------------------------------------------------------------------
+    @app.post("/mcp")
+    async def mcp_endpoint(request: Request):
+        """The Model Context Protocol for an external agent: one JSON-RPC message in,
+        one JSON response out (`service.mcp`, docs/service-contract.md section 8c)."""
+        origin = request.headers.get("origin")
+        if origin and not re.match(r"^https?://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$", origin):
+            # A page on another site must not drive the bench through the
+            # browser of whoever is at the console.
+            return _error(403, f"origin {origin} may not use /mcp")
+        try:
+            message = json.loads(await request.body())
+        except ValueError:
+            return JSONResponse({"jsonrpc": "2.0", "id": None,
+                                 "error": {"code": -32700, "message": "not JSON"}})
+
+        async def read_bench():
+            try:
+                await run_in_threadpool(session.bench_read)
+            except Busy:
+                pass
+
+        answer = await mcp.handle(session, message, read_bench=read_bench)
+        if answer is None:
+            return Response(status_code=202)
+        return JSONResponse(answer)
+
+    @app.get("/mcp")
+    async def mcp_stream():
+        """No server-sent stream is offered; every answer comes with its request."""
+        return Response(status_code=405, headers={"Allow": "POST"})
 
     # -- /assistant --------------------------------------------------------------------
     conversations = assistant.Conversations()

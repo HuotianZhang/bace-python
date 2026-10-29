@@ -48,6 +48,7 @@ bace/service/
                   endpoints. Imports `anthropic` and `openai` lazily.
   plans.py        experiment plans: the envelope, approval by fingerprint, and
                   the check of a submission under a plan (§8b).
+  mcp.py          the Model Context Protocol for an external agent (§8c).
   app.py          create_app(session) -> FastAPI. Routes, WS, static mount.
 ```
 
@@ -1211,6 +1212,34 @@ section 7, the interlocks and park apply. `RunQueued.plan` and the run record's
 
 Plans are held in the session's memory: a restart forgets them, so no
 approval outlives the process it was given to.
+
+## 8c. `/mcp`; the Model Context Protocol
+
+`POST /mcp` serves an external agent (Claude Code, Codex, any MCP client)
+over the protocol's Streamable HTTP transport: one JSON-RPC 2.0 message per
+request, one JSON response, with no server-sent stream (`GET /mcp` is 405).
+Protocol revisions 2025-06-18, 2025-03-26 and 2024-11-05 are answered; another
+requested revision is offered the newest. A notification (no `id`) is 202 with
+no body. A request with an `Origin` other than a loopback host is 403, so a web
+page cannot drive the bench through the browser at the console.
+
+| Method | Answer |
+|---|---|
+| `initialize` | Protocol version, `capabilities.tools`, `serverInfo` and `instructions` that tell the agent to read the manual, propose a plan and wait for a person's approval |
+| `ping` | `{}` |
+| `tools/list` | The tools below, with JSON Schema inputs |
+| `tools/call` | `{"content": [{"type": "text", "text": …}], "isError": …}`; arguments checked against the schema first |
+| anything else | `-32601` |
+
+| Tool | Effect |
+|---|---|
+| `get_session`, `get_bench`, `list_modules`, `get_module`, `list_runs`, `get_run`, `get_events`, `get_monitors`, `dry_run`, `read_doc` | The assistant's read-only tools (§8a) |
+| `list_plans`, `propose_plan`, `close_plan` | §8b; `propose_plan` journals `PlanProposed` |
+| `start_run`, `start_pipeline` | `POST /runs` and `POST /pipelines` with `plan` required; a refusal is `isError` with every invalid and crit check |
+| `stop_run` | `POST /runs/{id}/stop` for a run started under a plan; a run a person started is refused |
+
+No tool approves a plan. Approval is `POST /plans/{id}/approve` from the
+console (§8b).
 
 ## 9. CLI (`__main__.py`)
 
