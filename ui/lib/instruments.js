@@ -76,8 +76,8 @@ export function panelModel(bench, light) {
 /**
  * The panel uses `ctx` actions and edits. Park stays in the pinned strip with one
  * visible abort-and-cancel confirmation. Side-by-side switches label themselves
- * without a repeated heading. On this bench, the row measures 1226 px within 1250 px
- * at a 1280 px viewport, leaving 24 px; a fourth instrument needs a layout change.
+ * without a repeated heading. The row measures about 1226 px; a narrower view wraps
+ * whole instruments to a second row (`ui/style.css`, `.inst`).
  * Four-pixel padding retains instrument-switch borders and fill (`docs/ui-rules.md`
  * §14).
  */
