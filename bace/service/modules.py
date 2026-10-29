@@ -35,7 +35,7 @@ import os
 import time
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from typing import Any, Callable, Iterator, Mapping
+from typing import Any, Callable, Iterable, Iterator, Mapping
 
 import numpy as np
 
@@ -410,6 +410,68 @@ def _regroup(specs: list[ParamSpec], groups: Mapping[str, str], cls: type) -> li
     return out
 
 
+LABELS: dict[str, str] = {
+    # J-V sweep and source meter
+    "start_v": "Sweep start", "stop_v": "Sweep stop", "step_v": "Sweep step",
+    "settle_s": "Dwell per point", "both_directions": "Both directions",
+    "pixel_area_cm2": "Pixel area",
+    "smu_current_compliance_a": "Current compliance",
+    "smu_voltage_compliance_v": "Voltage compliance",
+    "smu_settle_jsc_ms": "J_sc settle", "smu_settle_voc_ms": "V_oc settle",
+    "smu_settle_jsat_ms": "J_sat settle", "smu_nplc": "NPLC",
+    "smu_averaging": "Readings averaged", "smu_terminals": "Terminals",
+    "smu_four_wire": "Four-wire sensing",
+    # illumination
+    "led_v": "LED level", "led_start_v": "LED start", "led_stop_v": "LED stop",
+    "led_step_v": "LED step", "led_low_v": "LED low level", "led_settle_s": "LED settle",
+    "led_settle_max_s": "LED settle limit", "led_settle_tolerance": "LED settle tolerance",
+    "dark": "Dark curve", "led_mode": "LED mode", "shutter": "Shutter",
+    # bace axis and pinned values
+    "axis_name": "Scan parameter", "axis_start": "Scan start", "axis_stop": "Scan stop",
+    "axis_step": "Scan step", "centre_on_voc": "Centre on V_oc", "vpre": "V_pre",
+    "vcoll": "V_coll", "delay_ns": "Delay", "vpre_on_voc": "V_pre from V_oc",
+    "n_loops": "Loops", "voc": "V_oc", "measure_dc": "DC metrics",
+    "v_sat": "J_sat bias",
+    # bace acquisition
+    "n_averages": "Hardware averages", "timebase_ns_per_div": "Timebase",
+    "record_length": "Record length", "t0_int_s": "Integration start",
+    "t_int_width_s": "Integration width", "output_polarity": "Output polarity",
+    "pulse_width_ns": "Pulse width", "pulse_frequency_hz": "Pulse frequency",
+    "duty_percent": "Duty cycle", "offset_correct": "Baseline correction",
+    "offset_region": "Baseline region", "alternate_order": "Alternate order",
+    "invert_polarity": "Invert levels", "inverted_output": "Inverted output",
+    "dark_settle_s": "Dark settle", "dark_reference": "Dark reference",
+    "light_shutter": "Light-trace shutter", "shutter_settle_s": "Shutter settle",
+    "read_intensity": "Power per shot", "acquisition_timeout_s": "Acquisition timeout",
+    "external_trigger": "External trigger", "trigger_slope_positive": "Rising-edge trigger",
+    "trigger_sweep": "Trigger sweep", "calibrate_trigger": "Calibrate trigger",
+    "store_shots": "Store every shot",
+    # power, temperature, wait, note
+    "wavelength_nm": "Wavelength", "samples": "Samples", "setpoint_k": "Setpoint",
+    "tolerance_k": "Tolerance", "hold_s": "Hold", "timeout_s": "Timeout",
+    "seconds": "Duration", "text": "Text",
+}
+"""The console's label for each parameter name (`ParamSpec.label`)."""
+
+MODULE_LABELS: dict[tuple[str, str], str] = {
+    ("bace", "settle_s"): "Light settle",
+    ("light", "settle_s"): "Settle after",
+}
+"""Labels for a name whose meaning differs by module; `LABELS` holds the rest."""
+
+
+def _labelled(module: str, specs: Iterable[ParamSpec]) -> tuple[ParamSpec, ...]:
+    out = []
+    for s in specs:
+        label = MODULE_LABELS.get((module, s.name)) or LABELS.get(s.name)
+        if not label:
+            raise ModuleError(
+                f"catalogue: {module}.{s.name} has no label; add it to LABELS so the "
+                "card does not show the bare code name")
+        out.append(replace(s, label=label))
+    return tuple(out)
+
+
 def _with_docs(specs: list[ParamSpec], docs: Mapping[str, str]) -> list[ParamSpec]:
     return [replace(s, doc=docs.get(s.name, s.doc)) for s in specs]
 
@@ -740,15 +802,15 @@ class Catalogue:
                 "to defaults -- a typo here is a J-V range nobody chose.")
 
         self._params: dict[str, tuple[ParamSpec, ...]] = {
-            "jv": tuple(_jv_specs()),
-            "light": tuple(_light_specs()),
-            "jv_bace": tuple(_jv_bace_specs()),
-            "bace": tuple(_bace_specs(rig_config)),
-            "power": tuple(_power_specs(rig_config)),
-            "temperature": tuple(_temperature_specs()),
+            "jv": _labelled("jv", _jv_specs()),
+            "light": _labelled("light", _light_specs()),
+            "jv_bace": _labelled("jv_bace", _jv_bace_specs()),
+            "bace": _labelled("bace", _bace_specs(rig_config)),
+            "power": _labelled("power", _power_specs(rig_config)),
+            "temperature": _labelled("temperature", _temperature_specs()),
             "park": (),
-            "wait": tuple(_wait_specs()),
-            "note": tuple(_note_specs()),
+            "wait": _labelled("wait", _wait_specs()),
+            "note": _labelled("note", _note_specs()),
         }
         self._specs: dict[str, ModuleSpec] = {
             # No `led_params`: this module is the one that does not touch the
@@ -949,12 +1011,16 @@ class Catalogue:
             # Only this separate copy receives the binding.
             ps.set_layer(Source.DERIVED, {"voc": session_voc.value},
                          f"{session_voc.how} {session_voc.node_path} (this session)")
+        keys = recipe_keys(name)
+        params = [{**row, "recipe": keys.get(row["name"], [])} for row in ps.as_wire()]
+        seconds, text, parts = self._estimate(name, p)
         return {"name": name, "title": spec.title, "status": spec.status,
                 "kind": spec.kind, "relay": spec.relay,
-                "estimate_s": self.estimate_s(name, p),
-                "estimate_text": self.estimate_text(name, p),
+                "estimate_s": seconds,
+                "estimate_text": text,
+                "estimate": {"seconds": seconds, **parts},
                 "needs": self.needs(name, p, bench=bench, session_voc=session_voc),
-                "last": None, "params": ps.as_wire()}
+                "last": None, "params": params}
 
     def needs(self, name: str, params: Mapping[str, Any], *, bench: dict | None = None,
               session_voc: VocSource | None = None) -> list[dict]:
@@ -1064,28 +1130,31 @@ class Catalogue:
     def estimate_text(self, name: str, params: Mapping[str, Any]) -> str:
         return self._estimate(name, params)[1]
 
-    def _estimate(self, name: str, params: Mapping[str, Any]) -> tuple[float, str]:
+    def _estimate(self, name: str, params: Mapping[str, Any]) -> tuple[float, str, dict]:
+        """Seconds, the card's sentence and its parts: `shot_s`, `shot_source`,
+        `loops`, `points` and `curves` where the module has them."""
         try:
             p = self._complete(name, params)
         except ModuleError as exc:
-            return 0.0, f"cannot estimate: {exc}"
+            return 0.0, f"cannot estimate: {exc}", {}
         if name == "bace":
             t_shot, source = self.shot_time()
             try:
                 n_steps = _axis_of(p).n_points
             except (AxisError, ModuleError) as exc:
-                return 0.0, f"cannot estimate: {exc}"
+                return 0.0, f"cannot estimate: {exc}", {}
             n_loops = int(p["n_loops"])
             total = n_loops * n_steps * t_shot
             tag = "" if source == "journal" else " (default)"
             return total, (f"one shot ≈ {t_shot:.1f} s{tag} · {_count(n_loops, 'loop')} × "
-                           f"{_count(n_steps, 'pt')} ≈ {_duration(total)}")
+                           f"{_count(n_steps, 'pt')} ≈ {_duration(total)}"), {
+                "shot_s": t_shot, "shot_source": source, "loops": n_loops, "points": n_steps}
         if name in ("jv", "jv_bace"):
             try:
                 n_points = int(_jv_points(p).size)
                 levels = self._jv_levels(p, None) if name == "jv_bace" else ()
             except (ModuleError, ValueError) as exc:
-                return 0.0, f"cannot estimate: {exc}"
+                return 0.0, f"cannot estimate: {exc}", {}
             # `jv` takes one curve per direction without changing illumination.
             # There is no dark-plus-levels plan or LED settle to count.
             dark = bool(p["dark"]) if name == "jv_bace" else True
@@ -1095,15 +1164,16 @@ class Catalogue:
                 n_curves, led_settle = (2 if p["both_directions"] else 1), 0.0
             total = n_curves * (n_points * float(p["settle_s"])
                                 + n_points * JV_POINT_OVERHEAD_S + led_settle)
-            return total, f"{_count(n_curves, 'curve')} × {_count(n_points, 'pt')} ≈ {_duration(total)}"
+            return total, (f"{_count(n_curves, 'curve')} × {_count(n_points, 'pt')} ≈ "
+                           f"{_duration(total)}"), {"curves": n_curves, "points": n_points}
         if name == "power":
             total = 0.1 * max(1, int(p["samples"]))
-            return total, "one reading" if p["samples"] <= 1 else f"{p['samples']} samples"
+            return total, "one reading" if p["samples"] <= 1 else f"{p['samples']} samples", {}
         if name == "temperature":
             hold = float(p["hold_s"])
-            return hold, f"settle — (331 or operator) + hold {_duration(hold)}"
+            return hold, f"settle — (331 or operator) + hold {_duration(hold)}", {}
         if name == "wait":
-            return float(p["seconds"]), _duration(float(p["seconds"]))
+            return float(p["seconds"]), _duration(float(p["seconds"])), {}
         if name == "light":
             asks = []
             if p["shutter"] != "leave":
@@ -1114,10 +1184,10 @@ class Catalogue:
                 asks.append(f"LED {p['led_mode'].upper()} {float(p['led_v']):g} V")
             settle = float(p["settle_s"])
             return settle + 0.2, (" · ".join(asks) or "nothing to set") + (
-                f" + {_duration(settle)}" if settle > 0 else "")
+                f" + {_duration(settle)}" if settle > 0 else ""), {}
         if name == "park":
-            return 1.0, "outputs off, shutter shut"
-        return 0.0, "journal entry"
+            return 1.0, "outputs off, shutter shut", {}
+        return 0.0, "journal entry", {}
 
     def _jv_levels(self, p: Mapping[str, Any], ctx: RunContext | None) -> tuple[float, ...]:
         """The `jv_bace` light levels use one `led_v` or the configured range.

@@ -82,9 +82,9 @@ test('the jv card reads the light off the bench, and unknown is not dark', () =>
 test('the axis rows are labelled for the operator, and the wire names stay', () => {
   const model = cardModel(entry('bace', { axis_name: 'vpre' }));
   const seg = model.above.find((row) => row.kind === 'segmented' && row.spec.name === 'axis_name');
-  assert.equal(seg.label, 'scan parameter');
+  assert.equal(seg.label, 'Scan parameter');
   const range = model.above.find((row) => row.kind === 'range');
-  assert.equal(range.label, 'scan range');
+  assert.equal(range.label, 'Scan range');
   assert.deepEqual([range.start.name, range.stop.name, range.step.name], ['axis_start', 'axis_stop', 'axis_step']);
   // Any other field carries no label override: its name is its label.
   const plain = model.above.find((row) => row.kind === 'field' && row.spec.name === 'n_loops');
@@ -261,6 +261,12 @@ test('the point count is read out of the service estimate, never recomputed', ()
   assert.equal(points('one reading'), null);
   const model = cardModel(entry('jv'));
   assert.equal(model.above.find((r) => r.kind === 'range').points, points(byName.jv.estimate_text));
+  // The structured estimate wins when the service sends one ...
+  const parts = cardModel({ ...entry('jv'), estimate: { seconds: 1, curves: 1, points: 7 } });
+  assert.equal(parts.above.find((r) => r.kind === 'range').points, 7);
+  // ... and a node form, which clears both, shows no count rather than the bench's.
+  const node = cardModel({ ...entry('jv'), estimate_text: '', estimate: null });
+  assert.equal(node.above.find((r) => r.kind === 'range').points, null);
 });
 
 test('every field the cards draw carries an explanation', () => {

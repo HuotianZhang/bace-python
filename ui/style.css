@@ -572,6 +572,10 @@ a.btng.goto { text-decoration: none; display: inline-flex; align-items: center; 
   font-size: 11.5px; color: var(--ink); max-width: 62ch; text-wrap: pretty;
 }
 .doc .dfull { color: var(--grey); }
+/* The identifier line: the code name and its run.toml key (`docs/ui-rules.md` §1). */
+.doc .dcode { font-family: var(--font-num); font-size: 10.5px; color: var(--grey); white-space: pre; }
+.ch .cs .cost { color: var(--ink); }
+.btng .tag { margin-left: 5px; }
 
 /* Reasons and consequences occupy separate lines below the field. Keeping them
    outside the value column leaves the LED level beside its value. */
@@ -728,7 +732,7 @@ button.link:hover { color: var(--accent-dark); }
 /* Needs and blockers stay beside the controls that resolve them. */
 .warn1 { display: flex; align-items: baseline; gap: 6px; color: var(--warn); font-size: 12px; }
 .warn1.crit, .warn1.invalid { color: var(--alert); }
-.warn1 .code { font-family: var(--font-num); font-size: 11px; color: var(--grey); }
+.warn1 .code { font-family: var(--font-num); font-size: 10.5px; color: var(--grey); }
 .blocked { border-top: 1px solid var(--rule); padding-top: 6px; }
 
 .fold { border-top: 1px solid var(--rule); padding-top: 6px; }
