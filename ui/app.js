@@ -124,30 +124,30 @@ function renderChips(state) {
     h('button', {
       class: 'chip ident' + (ident.unnamed || ident.hazards.length ? ' bad' : '') + (identOpen ? ' on' : ''),
       title: ident.unnamed
-        ? 'nothing names the device: every folder this session writes opens on the temperature. Click to name it.'
-        : `${ident.preview} — click to change what is mounted`,
+        ? 'No sample named. Folders open on the temperature; click to name it.'
+        : `${ident.preview}\nClick to edit the sample.`,
       'aria-expanded': identOpen ? 'true' : 'false',
       onclick: () => toggleIdent(),
     }, ident.chip),
     h('span.chip', { text: `${session.mode || fmt.ABSENT}${session.fast ? ' · fast' : ''}` }),
     currentRun(state) ? h('span.chip.m', { text: runLabel(state) }) : null,
-    state.queue.length ? h('span.chip', { text: `queue ${state.queue.length}` }) : null,
+    state.queue.length ? h('span.chip', { text: `Queue ${state.queue.length}` }) : null,
     h('span', { class: 'chip state ' + (state.benchState || 'idle'), text: state.benchState || 'idle' }),
     h('button', {
-      class: 'chip ask' + (askOpen ? ' on' : ''), text: 'ask',
-      title: 'the assistant: the physics, the bench and the console, explained',
+      class: 'chip ask' + (askOpen ? ' on' : ''), text: 'Ask',
+      title: 'Assistant. Reads the bench and the manual; changes nothing.',
       'aria-expanded': askOpen ? 'true' : 'false', onclick: () => assistant.toggle(),
     }),
     h('button', {
       class: 'chip plans' + (plansPending ? ' bad' : '') + (plansOpen ? ' on' : ''),
-      text: plansPending ? `plans ${plansPending}` : 'plans',
-      title: 'experiment plans an agent may run once a person approves them',
+      text: plansPending ? `Plans ${plansPending}` : 'Plans',
+      title: 'Plans proposed by an agent. Each runs only after approval here.',
       'aria-expanded': plansOpen ? 'true' : 'false', onclick: () => plansPanel.toggle(),
     }),
     h('button', {
       class: 'chip quit' + (quitArmed ? ' armed' : ''),
-      text: quitArmed ? 'shut down?' : 'shut down',
-      title: 'end the service: a run in progress is aborted, the bench parked and the journal closed',
+      text: quitArmed ? 'Shut down?' : 'Shut down',
+      title: 'Aborts the run, parks the bench, closes the journal.',
       onclick: () => shutDown(),
     }),
   ]);
@@ -178,20 +178,18 @@ async function shutDown() {
     return;
   }
   stream.close();
-  const heading = h('h1', 'The service is shutting down …');
-  const body = h('p', 'It aborts any run, parks the bench and closes the journal, then exits.');
+  const heading = h('h1', 'Shutting down');
+  const body = h('p', 'Aborting any run, parking the bench, closing the journal.');
   document.getElementById('app').replaceChildren(h('div.ended', h('p.wordmark', 'bace'), heading, body));
   // HTTP 202 acknowledges the exit request, not park. An instrument call that does
   // not return can prevent park. The page waits for process exit and reports the
-  // limit of what it can observe.
+  // limit of what it can observe; runs\logs\ records which happened.
   const gone = await serviceGone(SHUTDOWN_WAIT_MS);
-  heading.textContent = gone ? 'The service has stopped.' : 'The service has not exited yet.';
+  heading.textContent = gone ? 'Service stopped' : 'Service has not stopped';
   body.textContent = gone
-    ? 'It parks the bench as it exits. If a run was inside an instrument call that did not return, '
-      + 'the bench was left as it was and the log in runs\\logs\\ says so: check the outputs on the '
-      + 'instruments then. This window can be closed; BACE.pyw starts the service again.'
-    : 'It is still waiting for a run to leave an instrument call. Check the instruments; the log in '
-      + 'runs\\logs\\ says what it is waiting for.';
+    ? 'Bench parked unless a run held an instrument; runs\\logs\\ says which. '
+      + 'Close this window; BACE.pyw starts the service again.'
+    : 'A run is still inside an instrument call. Check the instruments; see runs\\logs\\.';
 }
 
 /**
@@ -261,9 +259,9 @@ async function setSample(name, value) {
     identStatus = out.changed && out.changed.length
       ? { level: 'ok',
           text: out.run_active
-            ? `${out.changed.join(', ')} · ${out.run_active} keeps the name it was queued under`
-            : `${out.changed.join(', ')} · every run queued from now carries it` }
-      : { level: '', text: 'unchanged' };
+            ? `Saved. ${out.run_active} keeps its name.`
+            : 'Saved. Applies to runs queued from now.' }
+      : { level: '', text: 'Unchanged' };
   } catch (error) {
     identStatus = { level: 'bad', text: error.text || error.message };
   }
@@ -345,7 +343,7 @@ async function fix(name, item) {
 function describe(out) {
   const before = (out && out.result && out.result.before) || null;
   if (!before) return 'done';
-  return Object.entries(before).map(([key, was]) => `${key} was ${was}`).join(' · ') + ' · done';
+  return 'done; ' + Object.entries(before).map(([key, was]) => `${key} was ${was}`).join(', ');
 }
 
 /**
@@ -357,7 +355,7 @@ async function park() {
   const busy = (store.getState().benchState || 'idle') !== 'idle';
   if (busy && !parkArmed) return armPark(true);
   armPark(false);
-  stripStatus = { level: '', text: 'park …' };
+  stripStatus = { level: '', text: 'Parking …' };
   drawStrip(store.getState());
   try {
     const out = await api.action('park');
@@ -365,8 +363,8 @@ async function park() {
     stripStatus = out && out.pending
       // A blocking VISA call can exceed the wait. Park remains queued for the worker,
       // so the operator needs to see that it is pending.
-      ? { level: '', text: 'park queued behind a run still in a VISA call' }
-      : { level: 'ok', text: 'parked' };
+      ? { level: '', text: 'Park queued; a run holds an instrument.' }
+      : { level: 'ok', text: 'Parked' };
   } catch (error) {
     stripStatus = { level: 'bad', text: error.text || error.message };
   }
@@ -502,10 +500,10 @@ async function togglePower(on) {
   try {
     if (on) {
       await api.startMonitor('power', powerUi.interval_s);
-      powerSay('ok', `monitoring every ${powerUi.interval_s} s`);
+      powerSay('ok', `Every ${powerUi.interval_s} s`);
     } else {
       try { await api.stopMonitor('power'); } catch (error) { if (error.status !== 404) throw error; }
-      powerSay('', 'monitor off · the trace is kept');
+      powerSay('', 'Off. Trace kept.');
     }
   } catch (error) {
     powerSay('bad', error.text || error.message);
@@ -524,7 +522,7 @@ async function setPowerInterval(seconds) {
   try {
     try { await api.stopMonitor('power'); } catch (error) { if (error.status !== 404) throw error; }
     await api.startMonitor('power', seconds);
-    powerSay('ok', `monitoring every ${seconds} s`);
+    powerSay('ok', `Every ${seconds} s`);
   } catch (error) {
     powerSay('bad', error.text || error.message);
   } finally {
@@ -537,7 +535,7 @@ async function clearPowerHistory() {
   try {
     const out = await api.clearPowerHistory();
     store.clearPowerLog();
-    powerSay('', `cleared ${fmt.plural(out.cleared, 'reading')} · the journal keeps them`);
+    powerSay('', `${fmt.plural(out.cleared, 'reading')} cleared. The journal keeps them.`);
   } catch (error) {
     powerSay('bad', error.text || error.message);
   }
@@ -673,17 +671,22 @@ function renderBar(state) {
   const c = { ...(state.connection || {}), ...stream.state };
   const stats = c.stats || {};
   barEl.className = 'stream-bar ' + (c.state || 'idle');
-  keyed(barEl, JSON.stringify([c.state, c.session, c.lastSeq, c.seq, stats]), () => [
-    h('span.dot'),
-    h('span', { text: c.state || 'idle' }),
-    h('span', { text: `session ${c.session || fmt.ABSENT}` }),
-    h('span', { text: `seq ${c.lastSeq ?? c.seq ?? fmt.ABSENT}` }),
-    h('span', { text: fmt.plural(stats.frames || 0, 'frame') }),
-    stats.duplicates ? h('span', { text: `${stats.duplicates} deduped` }) : null,
-    stats.gaps ? h('span', { text: fmt.plural(stats.gaps, 'gap') }) : null,
-    stats.drops ? h('span', { text: `${fmt.plural(stats.drops, 'drop')} · ${fmt.plural(stats.reconnects, 'reconnect')}` }) : null,
-    stats.tracesGone ? h('span', { text: `${fmt.plural(stats.tracesGone, 'trace')} replayed without their arrays` }) : null,
-  ]);
+  // The connection state is the reading; session, sequence and frame counts are the
+  // bar's title. Gaps, drops and replays stay visible because they need attention.
+  const STATE = { live: 'Connected', connecting: 'Connecting', offline: 'Offline, retrying',
+                  behind: 'Catching up', closed: 'Disconnected', idle: 'Idle' };
+  keyed(barEl, JSON.stringify([c.state, c.session, c.lastSeq, c.seq, stats]), () => {
+    barEl.title = `session ${c.session || fmt.ABSENT}\nseq ${c.lastSeq ?? c.seq ?? fmt.ABSENT}\n`
+      + `${fmt.plural(stats.frames || 0, 'frame')}`
+      + (stats.duplicates ? `\n${stats.duplicates} deduped` : '');
+    return [
+      h('span.dot'),
+      h('span', { text: STATE[c.state] || c.state || 'Idle' }),
+      stats.gaps ? h('span', { text: fmt.plural(stats.gaps, 'gap') }) : null,
+      stats.drops ? h('span', { text: `${fmt.plural(stats.drops, 'drop')}, ${fmt.plural(stats.reconnects, 'reconnect')}` }) : null,
+      stats.tracesGone ? h('span', { text: `${fmt.plural(stats.tracesGone, 'trace')} replayed without arrays` }) : null,
+    ];
+  });
 }
 
 /**

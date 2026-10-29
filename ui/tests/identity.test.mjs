@@ -18,9 +18,9 @@ const session = (sample, file) => ({ session: { sample, sample_file: file === un
 test('an unnamed session says what its folders will be called instead', () => {
   const model = identityModel(session({ sample: '', material: '', pixel: '' }));
   assert.equal(model.unnamed, true);
-  assert.equal(model.chip, 'no sample named');
+  assert.equal(model.chip, 'No sample named');
   assert.equal(model.stem, '');
-  assert.match(model.preview, /no device in the name/,
+  assert.equal(model.preview, '290K_…',
     'the consequence, not the absence — an unnamed run opens on the temperature');
 });
 
@@ -65,12 +65,12 @@ test('a value the folder name will spell differently says so, and why', () => {
   // explain: two batches differing after character 24 are one folder name.
   const long = nameHazard('PTQ10IT4F-batch-2026-08-A', 'PTQ10IT4F-batch-2026-08');
   assert.equal(long.why, null);
-  assert.match(long.text, /too long/);
+  assert.match(long.text, /too long/i);
 
   // Reduced to nothing: the field leaves the name entirely.
   const gone = nameHazard('///', '');
   assert.equal(gone.filed, '');
-  assert.match(gone.text, /left out of the name/);
+  assert.match(gone.text, /left out of the name/i);
 });
 
 test('the folder preview is what the folder will say, not what was typed', () => {

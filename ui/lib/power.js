@@ -199,12 +199,12 @@ function switchRow(model, { onToggle }) {
   });
   const title = model.available === false
     ? model.reason
-    : model.running ? 'stop reading the meter — the trace stays'
-      : `the service reads the meter every ${model.interval_s} s, whether or not this page is open`;
+    : model.running ? 'Stops reading. The trace stays.'
+      : `Reads the meter every ${model.interval_s} s, with or without this page open.`;
   return [
-    h('label.pw-switch', { title }, box, h('span', 'power monitor')),
+    h('label.pw-switch', { title }, box, h('span', 'Power monitor')),
     model.wanted && !model.running && model.available !== false
-      ? h('span.pw-note', { text: 'starting' }) : null,
+      ? h('span.pw-note', { text: 'Starting' }) : null,
   ];
 }
 
@@ -223,10 +223,10 @@ function foldButton(shape, { onChart }) {
     'aria-expanded': open ? 'true' : 'false',
     'aria-controls': 'pw-chart',
     title: open
-      ? 'hide the trace — the monitor keeps reading and every reading is kept'
-      : 'show the trace — the readings held, over the window',
+      ? 'Hides the trace. Reading continues and every reading is kept.'
+      : 'Shows the readings held, over the window.',
     onclick: () => onChart && onChart(!open),
-  }, h('span.pw-caret', { text: open ? '▾' : '▸' }), h('span', { text: 'trace' }));
+  }, h('span.pw-caret', { text: open ? '▾' : '▸' }), h('span', { text: 'Trace' }));
 }
 
 function readingEl(model, live) {
@@ -237,7 +237,7 @@ function readingEl(model, live) {
     ] : [h('span.pw-sub', { text: model.reason || 'off' })];
   }
   const value = h('span', { class: 'pw-value' + (model.level ? ' ' + model.level : ''), text: model.value.text,
-    title: 'watts at the meter, on the beam splitter — never an irradiance' });
+    title: 'Watts at the meter, on the beam splitter; not an irradiance.' });
   return live ? [value, h('span.pw-sub', { text: model.sub })] : [value];
 }
 
@@ -260,22 +260,22 @@ function menu(model, rows, { onInterval, onWindow, onZero, onClear, onExportCsv,
     h('span', { text: label }));
   const action = (label, title, disabled, onPick) => h('button.btns', { title, disabled: disabled || null, onclick: onPick }, label);
   const details = h('details.pw-menu',
-    h('summary', { title: rows.window ? 'interval, window, export …' : 'interval, export …',
+    h('summary', { title: rows.window ? 'Interval, window, export' : 'Interval, export',
       'aria-label': 'power monitor options' }, '⋯'),
     h('div.pw-menu-body',
-      rows.interval ? pick('every', INTERVALS.map((s) => [s, `${s} s`]), model.interval_s, (s) => onInterval && onInterval(s),
-        'how often the service reads the meter — it stops and restarts the monitor') : null,
-      rows.window ? pick('window', [['auto', 'auto'], ...WINDOWS.map((w) => [w.key, w.label])], model.window.auto ? 'auto' : model.window.key,
+      rows.interval ? pick('Interval', INTERVALS.map((s) => [s, `${s} s`]), model.interval_s, (s) => onInterval && onInterval(s),
+        'How often the meter is read. Changing it restarts the monitor.') : null,
+      rows.window ? pick('Window', [['auto', 'auto'], ...WINDOWS.map((w) => [w.key, w.label])], model.window.auto ? 'auto' : model.window.key,
         (k) => onWindow && onWindow(k),
-        'how much of the trace is drawn; the statistics under it are over the same span') : null,
+        'How much of the trace is drawn; the statistics cover the same span.') : null,
       rows.toggles ? h('div.pw-opt.togs',
-        toggle('y from 0', model.fromZero, (v) => onZero && onZero(v), 'pin the y axis to zero, so an LED that is off reads as off')) : null,
+        toggle('y from 0', model.fromZero, (v) => onZero && onZero(v), 'Pins the y axis to zero, so an LED that is off reads as off.')) : null,
       h('div.pw-opt.acts',
-        rows.exportCsv ? action('Export CSV', 'every reading the service holds, not only what this page saw',
+        rows.exportCsv ? action('Export CSV', 'Every reading the service holds, not only those this page saw.',
           !model.count, () => onExportCsv && onExportCsv()) : null,
-        rows.exportSvg ? action('Export SVG', 'the trace on screen, as an SVG file',
+        rows.exportSvg ? action('Export SVG', 'The trace on screen, as an SVG file.',
           !model.points.length || !model.chart, () => onExportSvg && onExportSvg()) : null,
-        rows.clear ? action('Clear', 'forget the readings held; the journal keeps them',
+        rows.clear ? action('Clear', 'Forgets the readings held; the journal keeps them.',
           !model.count, () => onClear && onClear()) : null)));
   details.addEventListener('mouseleave', () => { details.open = false; });
   return details;

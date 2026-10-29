@@ -46,7 +46,7 @@ test('a pause reaches the taskbar, with what it is asking for', () => {
   const store = foldUntil(TREE, (f) => f.type === 'NeedsOperator');
   const model = titleModel(store.getState());
   assert.equal(model.level, 'paused');
-  assert.equal(model.text, `⏸ needs you · set 250.0 K — ${BASE}`);
+  assert.equal(model.text, `⏸ Needs you: set 250.0 K — ${BASE}`);
 });
 
 test('a running sweep carries the outermost loop and no faster counter', () => {
@@ -81,7 +81,7 @@ test('an ending is announced only while nobody has seen it', () => {
   // because a truncated run is normal and that is how it is said (§9).
   const model = titleModel(state, { announce: runId });
   assert.equal(model.level, 'ended');
-  assert.equal(model.text, `⏹ stopped · bace · 39/60 — ${BASE}`);
+  assert.equal(model.text, `⏹ Stopped: bace, 39/60 — ${BASE}`);
 });
 
 test('a run that finished cleanly needs no counts', () => {
@@ -89,7 +89,7 @@ test('a run that finished cleanly needs no counts', () => {
   const state = store.getState();
   const runId = state.order[state.order.length - 1];
   const model = titleModel(state, { announce: runId });
-  assert.equal(model.text, `✓ done · bace — ${BASE}`);
+  assert.equal(model.text, `✓ Done: bace — ${BASE}`);
 });
 
 test('a live run outranks an ending that was never seen', () => {

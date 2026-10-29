@@ -19,7 +19,7 @@ let chartBy = 'led';
 
 export default {
   route: 'results',
-  title: 'results',
+  title: 'Results',
 
   mount(container, { store, api, notify }) {
     let rows = [];
