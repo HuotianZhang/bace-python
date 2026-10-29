@@ -12,8 +12,8 @@ window. This document defines the coordinate conversion for code and files.
 
 Here `delay_ns` is converted to seconds. `:PULS:DEL1` receives `delay_ns`
 unchanged. `trigger_offset_s` positions the window and never reaches the
-generator command. Its value is 47.1 ns, from a 49-point fit with a 1.5 ns
-residual (`notes.md`).
+generator command. Its value is 35.1 ns, measured with a capacitor in the
+device's place (`notes.md`).
 
 `trace.t0` is the record origin relative to the trigger (`:WAV:XOR?`).
 The nominal origin is −200 ns at 200 ns/div and −500 ns at 500 ns/div.
@@ -48,13 +48,13 @@ guidance. The table converts these values to the field-relative definition.
 | `trigger`     | after the trigger                    | old − delay_ns − trigger_offset_s                         |
 | `record`      | after the first sample               | old + trace.t0 − delay_ns − trigger_offset_s (trace.t0 = −timebase_ns_per_div, e.g. −200 ns at 200 ns/div) |
 
-All terms must use seconds. At delay 90 ns and latency 47.1 ns:
+All terms must use seconds. At delay 90 ns and latency 35.1 ns:
 
 | File value | Field-relative start | Width |
 |---|---|---|
-| LabVIEW `record` 320 ns at 200 ns/div | 320 − 200 − 90 − 47.1 = −17.1 ns | 2000 − 320 = 1680 ns, to record end (`recipes/run-labview.toml`, `recipes/run-labview-same.toml`) |
-| `trigger` 120.5 ns | 120.5 − 90 − 47.1 = −16.6 ns | Preserve the file's end or width. |
-| `pulse` 45 ns without an added command offset | 45 − 47.1 = −2.1 ns (−2 ns with 47 ns latency) | Preserve the file's end or width. |
+| LabVIEW `record` 320 ns at 200 ns/div | 320 − 200 − 90 − 35.1 = −5.1 ns | 2000 − 320 = 1680 ns, to record end (`recipes/run-labview.toml`, `recipes/run-labview-same.toml`) |
+| `trigger` 120.5 ns | 120.5 − 90 − 35.1 = −4.6 ns | Preserve the file's end or width. |
+| `pulse` 45 ns without an added command offset | 45 − 35.1 = 9.9 ns | Preserve the file's end or width. |
 
 For an older delay axis, inspect the file's command-offset convention.
 An axis that excludes a 47 ns command offset reads as `:PULS:DEL1 − 47 ns`;

@@ -50,11 +50,10 @@ record_length = 5000
 # The integration window matches the LabVIEW panel at this delay and timebase.
 # The panel starts 320 ns from the first sample and integrates to 2000 ns.
 # The trigger is 200 ns into the record. Delay is 90 ns and field latency
-# is 47.1 ns (manual 2.2). Relative to field arrival, the start is
-# 320 - 200 - 90 - 47.1 = -17.1 ns; the width is 2000 - 320 = 1680 ns.
-# The 17.1 ns lead is consistent with a 16.5 ns relation measured on this
-# bench. Equivalence requires delay 90 ns and timebase 200 ns/div.
-t0_int_s = -17.1e-9
+# is 35.1 ns (manual 2.2). Relative to field arrival, the start is
+# 320 - 200 - 90 - 35.1 = -5.1 ns; the width is 2000 - 320 = 1680 ns.
+# Equivalence requires delay 90 ns and timebase 200 ns/div.
+t0_int_s = -5.1e-9
 t_int_width_s = 1.68e-6
 
 offset_correct = true           # Subtracts a constant baseline; the LabVIEW panel

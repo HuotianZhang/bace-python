@@ -47,11 +47,11 @@ timebase_ns_per_div = 500.0
 record_length = 5000
 
 # The integration window follows field arrival at every delay point.
-# The fitted latency is 47.1 ns over 49 points, with a 1.5 ns residual
+# The latency is 35.1 ns, measured with a capacitor in the device's place
 # (manual 2.2; docs/notes.md). It belongs in rig.toml's trigger_offset_s,
 # which positions the window without changing :PULS:DEL1.
 # Window start in record time = t0_int_s + delay_ns + trigger_offset_s - t0.
-# At t0 = -500 ns this is t0_int_s + delay_ns + 547.1 ns.
+# At t0 = -500 ns this is t0_int_s + delay_ns + 535.1 ns.
 # The end is start + t_int_width_s. Starting 2 ns before the field includes
 # the spike and treats every point alike (manual 2.2).
 t0_int_s = -2e-9

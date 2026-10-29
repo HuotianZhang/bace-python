@@ -967,13 +967,13 @@ def test_run_toml_builds_a_usable_plan():
 
 
 def test_the_rig_carries_the_measured_sync_to_field_latency():
-    """47.1 ns (2026-09-03, 49-point fit). It positions the integration window
+    """35.1 ns (the voltage step on a 56 pF capacitor). It positions the integration window
     and is not added to `:PULS:DEL1`: `pulse_levels` no longer takes it."""
     import inspect
 
     from bace.core.pulses import pulse_levels
     rig = load_rig("rig.toml")
-    assert rig.trigger_offset_s == pytest.approx(47.1e-9)
+    assert rig.trigger_offset_s == pytest.approx(35.1e-9)
     assert "trigger_offset_s" not in inspect.signature(pulse_levels).parameters
 
 

@@ -400,8 +400,8 @@ def resolve_window(config: RunConfig, trace_t0: float, pulse_delay_s: float,
     `trace_t0` is the record origin relative to the trigger, from `:WAV:XOR?`;
     it is negative when the trigger lies inside the record. Subtracting it
     converts trigger-relative time to time from the first sample. For example,
-    `trace_t0 = -500 ns`, latency 47 ns and `t0_int_s = -2 ns` place the start at
-    delay plus 545 ns of record time; the end is `t_int_width_s` later.
+    `trace_t0 = -500 ns`, latency 35 ns and `t0_int_s = -2 ns` place the start at
+    delay plus 533 ns of record time; the end is `t_int_width_s` later.
 
     This conversion belongs with the bench timing. `bace.core.process.charge`
     integrates on `arange(n) * dt` and does not depend on cabling or record origin.

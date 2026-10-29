@@ -7,10 +7,10 @@ by 1e8 sets `:TIM:RANG` for ten divisions; four divisions set `:TIM:POS`.
 On this bench, `:TIM:POS` denotes the record centre. At 200 ns/div the
 record spans -200 to +1800 ns relative to the trigger; `:WAV:XOR?` reads
 -1.995e-7 s. Field arrival is delay plus `trigger_offset_s`. The latency
-is 47.1 ns, fitted over a delay scan (`docs/notes.md`). At delay 90 ns
-the field arrives about
-337 ns into this record. The LabVIEW reference at delay 88 ns starts integration at
-318 ns, about 16 ns before its field arrival. Record origin is needed
+is 35.1 ns, measured with a capacitor in the device's place (`docs/notes.md`).
+At delay 90 ns the field arrives about
+325 ns into this record. The LabVIEW reference at delay 88 ns starts integration at
+318 ns, about 5 ns before its field arrival. Record origin is needed
 to place the integration window relative to the field.
 
 The requested record length can differ from the delivered length. On this

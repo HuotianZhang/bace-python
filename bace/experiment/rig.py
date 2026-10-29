@@ -65,8 +65,10 @@ class RigConfig:
     """Latency from the 81150A Sync edge to field arrival at the device after `:PULS:DEL1`, in s, used to position the integration window.
 
     Field arrival is trigger plus `:PULS:DEL1` plus `trigger_offset_s`. This
-    bench measures 47.1 ns over a 49-point delay scan, with 1.5 ns fit residual
-    (`docs/notes.md`). `rig.toml` carries that value.
+    bench measures 35.1 ns, the 50 % point of the voltage step on a 56 pF
+    capacitor in the device's place, the same at every delay (`docs/notes.md`).
+    A device's displacement spike comes later by its own RC time. `rig.toml`
+    carries that value.
 
     The offset positions the integration window through
     `bace.experiment.transient.resolve_window`; `RunConfig.t0_int_s` is relative

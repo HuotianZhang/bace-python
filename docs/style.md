@@ -32,7 +32,7 @@ These rules apply to the manual, the other documents, code comments and docstrin
 |---|---|
 | A docstring opens with one sentence that says what the object is or does | |
 | A comment explains why, or a constraint the code cannot show; it does not narrate the code | |
-| An empirical constant names its source document, not its history | `# 47.1 ns; manual 2.2, "Timing"` |
+| An empirical constant names its source document, not its history | `# 35.1 ns; manual 2.2, "Timing"` |
 | A known limitation is stated as a limitation, with the condition under which it matters | |
 | No dates, names, ticket numbers or "fixed" in comments; that record is `git log` | |
 

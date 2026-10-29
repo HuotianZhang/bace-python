@@ -24,8 +24,9 @@ The DIO identity was measured on 2026-09-01 by walking all four line states
 with the Keithley reading the device (`docs/bench-checkout.md`). Re-run
 `python -m bace.bench --dio` after any rewiring.
 
-Sync-to-field latency: 47.1 ns, from a 49-point delay scan on 2026-09-03
-(1.5 ns residual). It positions the integration window and is never added to a
+Sync-to-field latency: 35.1 ns, the 50 % point of the voltage step on a 56 pF
+capacitor in the device's place, the same at every delay from 0 to 150 ns to
+0.02 ns (`analysis/2026-10-29/capacitor/`). It positions the integration window and is never added to a
 command (`docs/integration-window.md`).
 
 ## Defects only the hardware found
