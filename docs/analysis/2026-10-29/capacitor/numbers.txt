@@ -1,0 +1,21 @@
+run 1 293.92K_1000mVLED_-114mVVOC_offsetcorr_20261029_163151
+run 2 293.94K_1000mVLED_-102mVVOC_offsetcorr_20261029_163940
+
+run 1: single-trace charge against the swing dV = V_pre - V_coll (light and dark traces)
+  dV/V   Q_light/pC  Q_dark/pC  light-dark in the run's window/pC
+  0.886      -51.1      -51.0      -0.44
+  1.386      -80.1      -80.1       4.41
+  1.886     -110.0     -109.6       1.04
+  light: |slope| 58.91 pF, intercept +1.27 pC; ratio to 56 pF nominal 1.052
+  dark: |slope| 58.59 pF, intercept +0.97 pC; ratio to 56 pF nominal 1.046
+
+run 2: the step at each delay, in ns after the trigger (light trace)
+  delay  onset   half   peak   half-delay  window start  Q/pC
+      0    27.2   33.5   36.8    33.50        45.1    -109.6
+     30    57.6   63.5   67.2    33.52        75.1    -110.1
+     60    86.4   93.5   97.6    33.51       105.1    -109.5
+     90   116.8  123.5  126.4    33.51       135.1    -109.2
+    120   147.2  153.5  156.8    33.54       165.1    -109.6
+    150   177.6  183.5  187.2    33.47       195.1    -108.3
+  half-rise = 0.9999 x delay + 33.52 ns, residual rms 0.02 ns
+  window start - half-rise: 11.6 ns
