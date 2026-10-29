@@ -1374,14 +1374,16 @@ button.chip.plans { background: none; cursor: pointer; font: inherit; font-famil
 button.chip.plans:hover { border-color: #fff; color: #fff; }
 button.chip.plans.on { background: #fff; border-color: #fff; color: var(--ink); }
 /* The plan panel sits where the assistant does; a plan's approval covers
-   exactly what the card shows, so the envelope is a table, not a summary. */
-.plans {
+   exactly what the card shows, so the envelope is a table, not a summary.
+   `aside` because the bar's chip is `.plans` too: unscoped, the chip is
+   fixed over the assistant's header and takes its clicks. */
+aside.plans {
   position: fixed; top: var(--tabs-height); right: 0; bottom: 0; width: 460px; z-index: 31;
   display: flex; flex-direction: column;
   background: var(--paper); border-left: 1px solid var(--rule);
   box-shadow: -6px 0 18px rgba(0,0,0,.08);
 }
-.plans[hidden] { display: none; }
+aside.plans[hidden] { display: none; }
 .plans .as-head {
   display: flex; align-items: baseline; gap: 10px; padding: 8px 12px;
   border-bottom: 1px solid var(--rule); background: var(--fill);
