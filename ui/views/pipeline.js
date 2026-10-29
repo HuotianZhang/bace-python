@@ -84,7 +84,7 @@ export default {
 
     const body = h('div.pipe');
     fill(container,
-      h('h1', 'pipeline'),
+      h('h1', 'Pipeline'),
       body);
 
     const structureEl = h('div.card.pipe-col');
@@ -179,7 +179,7 @@ export default {
       if (!entry) return;
       ({ typed, name, selected, loaded } = entry.state);
       if (selected && !tree.nodeAt(typed, selected)) selected = null;
-      notify(`${direction === 'redo' ? 'redone' : 'undone'}${entry.label ? ' · ' + entry.label : ''}`, 'ok');
+      notify(`${direction === 'redo' ? 'Redone' : 'Undone'}${entry.label ? ': ' + entry.label : ''}`, 'ok');
       revalidate();
       render();
     }
@@ -267,12 +267,12 @@ export default {
       const s = typed ? tree.structureSummary(typed) : { loops: 0, modules: 0 };
       const runs = v.counters.modules;
       keyed(headEl, JSON.stringify([s, runs, v.moduleNames, Boolean(typed), selected, recipes.length, inflight]), () => [
-        h('span.cn', 'structure'),
+        h('span.cn', 'Tree'),
         h('span.cs', {
-          text: `${fmt.plural(s.loops, 'loop')} · ${fmt.plural(s.modules, 'module')}`
-            + (runs === undefined ? '' : ` · ${fmt.plural(runs, 'run')}`),
+          text: `${fmt.plural(s.loops, 'loop')}, ${fmt.plural(s.modules, 'module')}`
+            + (runs === undefined ? '' : `, ${fmt.plural(runs, 'run')}`),
         }),
-        inflight ? h('span.cs', { text: '· checking' }) : null,
+        inflight ? h('span.tag', { text: 'checking' }) : null,
         h('span', { style: { flex: '1' } }),
         addControls(v),
       ]);
@@ -299,17 +299,18 @@ export default {
     function addControls(v) {
       const into = addTarget();
       const at = into ? tree.nodeAt(typed, into) : null;
-      const where = !typed ? 'as the root' : at ? `into ${label(at)}` : 'at the root';
-      const picker = h('select.v', { title: 'the module this node runs' },
+      const where = !typed || !at ? 'root' : `into ${at.kind === 'loop' ? at.loop : at.module}`;
+      const picker = h('select.v', { title: 'The module this node runs.' },
         ...v.moduleNames.map((n) => h('option', { value: n }, n)));
+      const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
       return h('span.addbar',
         h('span.cs', { text: where }),
         ...tree.LOOP_ORDER.map((kind) => h('button.btng', {
-          title: `a ${kind} loop — ${tree.LOOPS[kind].owns || 'repeats its children'}`,
+          title: `${cap(kind)} loop. ${tree.LOOPS[kind].owns ? `Sets ${tree.LOOPS[kind].owns.split(' ')[0]} for everything inside.` : 'Repeats its children.'}`,
           onclick: () => addNode(tree.newLoop(kind), into, `add the ${kind} loop`),
-        }, `+ ${kind}`)),
+        }, `+ ${cap(kind)}`)),
         picker,
-        h('button.btng', { onclick: () => addNode(tree.newModule(picker.value), into, `add ${picker.value}`) }, '+ module'));
+        h('button.btng', { onclick: () => addNode(tree.newModule(picker.value), into, `add ${picker.value}`) }, '+ Module'));
     }
 
     function addNode(node, into, label = 'add a node') {
@@ -324,8 +325,7 @@ export default {
         return change({ ...node, children: [typed] }, { select: [], label });
       }
       if (typed.kind !== 'loop') {
-        notify('the root is a single module. Add a loop first — it takes this module inside it — '
-          + 'or remove it and start again.', 'warn');
+        notify('The root is one module. Add a loop first, or remove the module.', 'warn');
         return undefined;
       }
       const index = (typed.children || []).length;
@@ -337,8 +337,7 @@ export default {
         v.rows.map((r) => [r.runs, r.shots, r.needs_operator, r.relay_transition, r.estimate_s, r.measure_s])]);
       keyed(treeEl, key, () => {
         if (!typed) {
-          return h('p.absent', 'no nodes yet — add a loop or a module above, '
-            + 'or reopen one of the saved recipes below.');
+          return h('p.absent', 'Add a loop or a module, or open a recipe.');
         }
         return v.rows.map((row) => treeRow(row, v));
       });
@@ -352,24 +351,24 @@ export default {
       });
       const tags = [];
       if (row.kind === 'loop') {
-        if (row.owns) tags.push(h('span.inh', { text: `owns ${row.owns.split(' ')[0]}` }));
+        if (row.owns) tags.push(h('span.inh', { title: 'This loop sets it for every node inside.', text: row.owns.split(' ')[0] }));
         // `needs_operator` comes from bench capability, not tree shape. Only an
         // answering attached controller removes the pause. Long operator waits must
         // remain visibly distinct from acquisition.
-        if (row.needs_operator) tags.push(h('span.tag.nb', { title: 'the 331 is not answering, so the run pauses here for a manual set', text: 'pauses' }));
+        if (row.needs_operator) tags.push(h('span.tag.nb', { title: 'No 331 reading. The run pauses here for a manual set.', text: 'pauses' }));
         if (row.measure_s) tags.push(h('span.cs', { text: fmt.duration(row.measure_s) }));
       } else {
         const entry = v.catalogue[row.module];
-        if (!entry) tags.push(h('span.tag.bad', { title: 'this service has no module by that name', text: 'unknown module' }));
+        if (!entry) tags.push(h('span.tag.bad', { title: 'No module by that name on this service.', text: 'unknown module' }));
         else if (entry.status !== 'built') tags.push(h('span.tag.nb', { text: entry.status }));
         if (row.centre_on_voc) {
           tags.push(h('span.inh', {
-            title: row.voc ? `${row.voc.how} ${row.voc.node_path || ''} at ${fmt.volts(row.voc.led_v)}` : 'no source in scope',
+            title: row.voc ? `${row.voc.how} ${row.voc.node_path || ''} at ${fmt.volts(row.voc.led_v)}` : 'No V_oc source in scope.',
           }, icon(row.voc ? 'inherit' : 'warn'),
           h('span', { text: row.voc ? `V_oc ← ${row.voc.how}` : 'V_oc' })));
         }
         if (row.relay_transition) {
-          tags.push(h('span.cs', { title: 'the router moves at this boundary; the interlock refuses while a source is live', text: `relay → ${row.relay}` }));
+          tags.push(h('span.cs', { title: 'The relay moves here; refused while a source is live.', text: `relay → ${row.relay}` }));
         }
         if (row.runs > 1) tags.push(h('span.cs', { text: `× ${row.runs}` }));
         if (row.shots) tags.push(h('span.cs', { text: fmt.plural(row.shots, 'shot') }));
@@ -386,10 +385,10 @@ export default {
         h('span', { style: { flex: '1' } }),
         tags,
         h('span.rowact',
-          h('button.btng', { title: 'move up', onclick: () => moveNode(row.path, -1) }, '↑'),
-          h('button.btng', { title: 'move down', onclick: () => moveNode(row.path, 1) }, '↓'),
+          h('button.btng', { title: 'Move up', onclick: () => moveNode(row.path, -1) }, '↑'),
+          h('button.btng', { title: 'Move down', onclick: () => moveNode(row.path, 1) }, '↓'),
           h('button.btng', {
-            title: 'remove this node and everything under it — Undo, or Ctrl-Z, takes it back',
+            title: 'Removes this node and its children. Ctrl-Z undoes.',
             onclick: () => change(tree.removeAt(typed, row.path),
               { select: null, label: `remove ${row.kind === 'loop' ? 'the ' + row.loop + ' loop' : row.module}` }),
           }, '✕')));
@@ -431,26 +430,25 @@ export default {
         return h('div.nf',
           h('div.nfh',
             h('span.cn', { text: node.kind === 'loop' ? `${node.loop} loop` : node.module }),
-            h('span.cs', { text: node.kind === 'loop' ? 'the values it runs, and how it settles' : 'as on the bench' }),
             // The bench link opens the module card supplying every unoverridden node
             // value.
             node.kind === 'module'
               ? h('a.btng.goto', {
                 href: benchHash(node.module),
-                title: `${node.module} on the bench — what every node of it starts from`,
-              }, '→ bench')
+                title: `Opens the ${node.module} card. Values not overridden here come from it.`,
+              }, 'Bench')
               : null,
             h('span', { style: { flex: '1' } }),
             // Node reset appears only with overrides. Dropping them restores bench
             // inheritance and reduces the form to its remaining differences.
             node.kind === 'module' && Object.keys(node.params || {}).length
               ? h('button.btng.undo', {
-                title: 'drop every override this node types — back to the module as it stands on the bench',
+                title: 'Drops every override; the bench values apply.',
                 onclick: () => change(tree.clearParams(typed, selected),
                   { label: `drop ${node.module}’s overrides` }),
-              }, '↺ bench')
+              }, 'Reset')
               : null,
-            h('button.btng', { onclick: () => { selected = null; render(); } }, 'close')),
+            h('button.btng', { onclick: () => { selected = null; render(); } }, 'Close')),
           node.kind === 'loop' ? loopForm(node, row) : moduleForm(node, row, v, open));
       });
     }
@@ -467,16 +465,18 @@ export default {
      */
     function loopForm(node, row) {
       const spec = tree.LOOPS[node.loop];
-      if (!spec) return h('p.absent', { text: `${node.loop} is not a loop this service knows` });
+      if (!spec) return h('p.absent', { text: `No ${node.loop} loop on this service.` });
       const ctx = loopCtx();
       const rows = [];
       if (spec.count) {
-        rows.push(field(loopSpec(node, row, { name: 'count', type: 'int', unit: '',
-          doc: 'how many times the children run. Nothing changes between iterations — it is the outer averaging loop.' }), ctx, { name: '' }, {}));
+        rows.push(field(loopSpec(node, row, { name: 'count', label: 'Count', type: 'int', unit: '',
+          doc: 'How many times the children run. Nothing changes between iterations: it is the outer averaging loop.' }), ctx, { name: '' }, {}));
       } else {
         const form = tree.valueForm(node);
+        // The count beside a range is the service's: `range_values` rounds rather
+        // than truncates, so 1.010 → 1.030 step 0.005 is five levels, not four.
         rows.push(h('div.pf.range',
-          h('span.l', 'values'),
+          h('span.l', 'Values'),
           h('span.v.rng',
             h('span.seg', { role: 'group', 'aria-label': 'values as' },
               ...['list', 'range'].map((f) => h('button.opt', {
@@ -484,7 +484,7 @@ export default {
                 class: form === f ? 'on' : '',
                 'aria-pressed': form === f ? 'true' : 'false',
                 onclick: () => switchForm(f, row),
-              }, f))),
+              }, f === 'list' ? 'List' : 'Range'))),
             form === 'list' ? listInput(node, spec) : null,
             form === 'range' ? spec.range.map((n, i) => h('input.v', {
               value: node[n] === undefined ? '' : String(node[n]),
@@ -492,14 +492,9 @@ export default {
               onchange: (e) => commitField(n, e.target.value),
             })) : null,
             form === 'range' && row && row.values
-              ? h('i.pts', { text: fmt.plural(row.values.length, 'value') })
+              ? h('i.pts', { title: 'Counted by the service, rounding the span.', text: fmt.plural(row.values.length, 'value') })
               : null),
           h('span.src')));
-        if (form === 'range') {
-          rows.push(h('p.chart-note', 'the count is the service’s: `range_values` rounds it, '
-            + 'because truncating drops the last level whenever floating point puts the ratio just '
-            + 'under the integer — which for 1.010 → 1.030 step 0.005 wrote a four-level loop as five.'));
-        }
       }
       for (const f of spec.fields) rows.push(field(loopSpec(node, row, f), ctx, { name: '' }, {}));
       return h('div.pr', rows);
@@ -526,13 +521,13 @@ export default {
       const values = node[spec.list] || [];
       return h('input.v.vlist', {
         value: values.map((v) => Number(v)).join(', '),
-        title: `${spec.list} — the values, in the order they run`,
+        title: `${spec.list}: the values, in the order they run`,
         onchange: (e) => {
           const raw = e.target.value.trim();
           if (!raw) return commitField(spec.list, null);
           const parsed = raw.split(/[\s,]+/).filter(Boolean).map(Number);
           if (parsed.some((n) => !Number.isFinite(n))) {
-            notify(`${spec.list}: "${raw}" is not a list of numbers. Separate them with commas or spaces.`, 'warn');
+            notify(`${spec.list}: not a list of numbers. Separate them with commas.`, 'warn');
             return render();
           }
           return commitField(spec.list, parsed);
@@ -552,7 +547,7 @@ export default {
         ...f,
         value: typedHere ? node[f.name] : (fallback === undefined ? null : fallback),
         source: typedHere ? 'edited' : 'default',
-        detail: typedHere ? 'typed on this node' : 'the service’s default for this loop',
+        detail: typedHere ? 'typed on this node' : 'default',
         editable: true,
         node: typedHere,
         doc_full: f.doc,
@@ -592,7 +587,7 @@ export default {
     function moduleForm(node, row, v, open) {
       const catalogue = v.catalogue[node.module];
       if (!catalogue) {
-        return h('p.absent', { text: `this service has no module named ${node.module} — this structure cannot run here` });
+        return h('p.absent', { text: `No module ${node.module} on this service.` });
       }
       const overrides = node.params || {};
       /**
@@ -643,12 +638,14 @@ export default {
       if (first && first.led_v !== null && first.led_v !== undefined) where.push(`LED ${fmt.volts(first.led_v)}`);
       return h('div',
         !resolved
-          ? h('p.chart-note', 'the structure does not resolve yet, so this is the module as it stands on '
-            + 'the bench with this node’s own overrides on it — not what the loops above would bind. '
-            + 'The check list says what is wrong.')
+          ? h('p.chart-note', {
+            title: 'The tree does not resolve, so the loops above bind nothing yet.',
+          }, 'Unresolved: bench values with this node’s overrides. See Checks.')
           : row && row.runs > 1
-            ? h('p.chart-note', { text: `resolved for the first of ${row.runs} runs${where.length ? ' — ' + where.join(' · ') : ''}. `
-              + 'The loops above bind a different value into each of the others.' })
+            ? h('p.chart-note', {
+              title: 'The loops above bind other values into the remaining runs.',
+              text: `First of ${row.runs} runs${where.length ? ': ' + where.join(', ') : ''}`,
+            })
             : null,
         h('div.pr', model.above.map((r) => renderRow(r, model, ctx))),
         fold(model, ctx, open));
@@ -709,8 +706,9 @@ export default {
           const settles = row.loop === 'temperature' ? row.iterations.map((it) => it.settle_s) : null;
           return h('div.vlist-block',
             h('div.cs', {
-              text: `${row.loop} · ${fmt.plural(row.values.length, 'value')}`
-                + (settles ? ' · settle measured on this bench at each' : spec && spec.owns ? ` · ${spec.owns}` : ''),
+              title: settles ? 'Second row: the settle time this bench measured at each temperature.'
+                : spec && spec.owns ? spec.owns : '',
+              text: `${row.loop.charAt(0).toUpperCase() + row.loop.slice(1)}, ${fmt.plural(row.values.length, 'value')}`,
             }),
             h('div.lst', { style: { gridTemplateColumns: `repeat(${row.values.length}, auto)` } },
               row.values.map((value) => h('span.h', {
@@ -730,31 +728,33 @@ export default {
      */
     function renderCost(v) {
       keyed(costEl, JSON.stringify([v.cost, v.counters]), () => {
-        if (!v.cost) return h('p.absent', 'no cost yet — the structure has not been checked.');
+        if (!v.cost) return h('p.absent', 'Not checked');
         const c = v.cost;
         const counters = v.counters;
         return [
           h('div.nums',
-            num('total', c.total_s, c.prefix),
-            num('measuring', c.measuring_s, ''),
-            num('waiting for T', c.waiting_s, c.waiting_s === null ? '' : c.prefix)),
+            num('Total', c.total_s, c.prefix),
+            num('Measuring', c.measuring_s, ''),
+            num('Waiting for T', c.waiting_s, c.waiting_s === null ? '' : c.prefix)),
           h('div.cs', {
+            title: c.t_shot_s ? `Shot time from the ${c.t_shot_source === 'journal' ? 'journal' : c.t_shot_source}.` : '',
             text: [
               counters.temperatures ? fmt.plural(counters.temperatures, 'temperature') : null,
               counters.levels ? fmt.plural(counters.levels, 'level') : null,
               counters.modules ? fmt.plural(counters.modules, 'module run') : null,
               counters.shots ? fmt.plural(counters.shots, 'shot') : null,
-              c.t_shot_s ? `shot ${fmt.duration(c.t_shot_s)} (${c.t_shot_source})` : null,
+              c.t_shot_s ? `${fmt.duration(c.t_shot_s)} per shot` : null,
               c.finish_at ? `finish ${fmt.clock(c.finish_at)}` : null,
-            ].filter(Boolean).join(' · '),
+            ].filter(Boolean).join(', '),
           }),
           c.lower_bound
             ? h('p.chart-note', {
+              title: c.unmeasured.length
+                ? 'A settle takes 14 min to 2 h on this bench; the journal fills them in as they are measured.'
+                : 'The catalogue has no estimate for them.',
               text: c.unmeasured.length
-                ? `a floor, not an estimate: ${c.unmeasured.length} of ${c.per_temperature.length} `
-                  + 'temperatures have no settle measured on this bench, and a settle is 14 minutes to '
-                  + '2 hours. The journal fills them in as this bench measures them.'
-                : `a floor, not an estimate: ${fmt.plural(c.unestimated, 'module run')} cost nothing the catalogue can estimate.`,
+                ? `Lower bound: ${c.unmeasured.length} of ${c.per_temperature.length} settles unmeasured.`
+                : `Lower bound: ${fmt.plural(c.unestimated, 'module run')} not estimated.`,
             })
             : null,
         ];
@@ -775,24 +775,26 @@ export default {
       const c = v.checks;
       keyed(checksEl, JSON.stringify([c, showAllChecks, v.stale, inflight]), () => {
         if (!c.total) {
-          return h('p.absent', inflight ? 'checking …' : 'not checked yet — Dry run asks.');
+          return h('p.absent', inflight ? 'Checking …' : 'Not checked');
         }
         const shown = showAllChecks ? c.ordered : c.notable;
         return [
           h('div.cksum',
             h('span.m', { text: fmt.plural(c.total, 'check') }),
             ...tree.LEVELS.filter((l) => c.counts[l]).map((l) => h('span.tag.' + tagClass(l), { text: `${c.counts[l]} ${l}` })),
-            v.stale ? h('span.cs', { text: '· the structure has changed since' }) : null,
+            v.stale ? h('span.tag', { title: 'The tree has changed since the last check.', text: 'stale' }) : null,
             h('span', { style: { flex: '1' } }),
             h('button.btng', { onclick: () => { showAllChecks = !showAllChecks; render(); } },
-              showAllChecks ? 'collapse' : 'show')),
+              showAllChecks ? 'Hide' : 'Show')),
+          // The text leads; the node path and the check code follow as identifiers
+          // (`docs/ui-rules.md` §1), the code being what manual 4.2 is indexed by.
           shown.length
             ? h('div.cklist', shown.map((check) => h('div.warn1.' + check.level,
               levelMark(check.level),
-              h('span.code', { text: check.code }),
               h('span', { text: check.text }),
-              check.node_path ? h('span.cs', { text: check.node_path }) : null)))
-            : h('p.chart-note', 'nothing to report — every check is ok or info.'),
+              check.node_path ? h('span.cs', { text: check.node_path }) : null,
+              h('span.code', { text: check.code }))))
+            : h('p.chart-note', 'All checks ok'),
         ];
       });
     }
@@ -819,10 +821,10 @@ export default {
       keyed(noteEl, key, () => [recipeNote(v)]);
       keyed(actionsBarEl, key, () => [
         h('div.namerow',
-          h('span.l', 'name'),
+          h('span.l', 'Name'),
           h('input.v', {
             value: name, placeholder: 'pipeline',
-            title: 'the folder stem: <out>/<name>_YYYYMMDD_HHMMSS',
+            title: 'Folder stem: <name>_YYYYMMDD_HHMMSS',
             // `name` follows every input event so validation or arming redraws cannot
             // replace uncommitted typing with the last committed value.
             oninput: (e) => { name = e.target.value.trim(); },
@@ -830,7 +832,7 @@ export default {
           }),
           recipes.length
             ? h('select.v', {
-              title: 'reopen a saved recipe',
+              title: 'Opens a saved recipe.',
               onchange: (e) => {
                 const found = recipes.find((r) => r.name === e.target.value);
                 if (found && found.tree) {
@@ -844,7 +846,7 @@ export default {
                   change(found.tree, { select: null, label: `open ${found.name}`, before: was });
                 }
               },
-            }, h('option', { value: '' }, 'saved recipes …'),
+            }, h('option', { value: '' }, 'Recipes …'),
             ...recipes.map((r) => h('option', { value: r.name }, r.name)))
             : null),
         h('div.btnrow',
@@ -853,37 +855,37 @@ export default {
           h('button.btng', {
             disabled: !history.canUndo || null,
             title: history.canUndo
-              ? `Ctrl-Z — takes back: ${history.undoLabel || 'the last change'}`
-              : 'nothing to take back on this structure',
+              ? `Ctrl-Z: ${history.undoLabel || 'the last change'}`
+              : 'Nothing to undo.',
             onclick: () => step('undo'),
-          }, history.canUndo && history.undoLabel ? `↶ undo · ${history.undoLabel}` : '↶ undo'),
+          }, history.canUndo && history.undoLabel ? `↶ Undo ${history.undoLabel}` : '↶ Undo'),
           history.canRedo
             ? h('button.btng', {
-              title: `Ctrl-Shift-Z — puts back: ${history.redoLabel || 'the last undo'}`,
+              title: `Ctrl-Shift-Z: ${history.redoLabel || 'the last undo'}`,
               onclick: () => step('redo'),
-            }, '↷ redo')
+            }, '↷ Redo')
             : null,
           h('button.btnp', {
             disabled: blocked || null,
             title: blocked
-              ? (v.busy ? 'a run holds the worker; this would queue behind it'
-                : v.stale || inflight ? 'the structure has changed — checking it again'
-                  : !typed ? 'nothing to run'
-                    : 'the checks refuse this structure; the list above says why')
-              : 'checks the structure once more against the bench as it is now, then queues the run',
+              ? (v.busy ? 'A run holds the bench; this would queue behind it.'
+                : v.stale || inflight ? 'Checking again.'
+                  : !typed ? 'Nothing to run.'
+                    : 'Refused; see Checks.')
+              : 'Checks once more against the bench, then queues the run.',
             onclick: start,
-          }, c ? `Start · ${c.prefix ? c.prefix + ' ' : ''}${fmt.duration(c.total_s)}` : 'Start'),
+          }, c ? `Start  ${c.prefix ? c.prefix + ' ' : ''}${fmt.duration(c.total_s)}` : 'Start'),
           h('button', {
             class: armed ? 'btns armed' : 'btns',
             disabled: !typed || null,
             title: overwrites
-              ? `${stem} already exists — saving writes over it, and the file it replaces is not in the undo history`
-              : 'writes the structure to a file, with the bench values it was saved with',
+              ? `${stem} exists. Saving overwrites it; the old file is not in the undo history.`
+              : 'Writes the tree and the bench values to a file.',
             onclick: save,
-          }, armed ? `overwrite ${stem}?` : 'Save recipe'),
+          }, armed ? `Overwrite ${stem}?` : 'Save recipe'),
           h('button.btns', {
             disabled: !typed || null,
-            title: 'checks the structure without touching the bench',
+            title: 'Checks without touching the bench.',
             onclick: () => { showAllChecks = true; showFlat = false; revalidate({ now: true }); },
           }, 'Dry run')),
       ]);
@@ -900,7 +902,7 @@ export default {
       submitting = true;
       try {
         const out = await api.startPipeline(typed, name || undefined);
-        notify(`queued ${out.run_id} → ${out.folder}`, 'ok');
+        notify(`Queued ${out.run_id}: ${out.folder}`, 'ok');
       } catch (error) {
         // A refused Start needs the complete 422 check list, not only its first
         // reason.
@@ -923,20 +925,20 @@ export default {
       const byName = store.getState().modules.byName;
       if (!recorded(loaded)) {
         return h('div.recipe-note',
-          h('span', { text: `${loaded.name} was saved before the bench was recorded with it — what its nodes do not override is whatever the bench has now.` }),
-          h('button.btng', { onclick: () => { loaded = null; render(); } }, 'ok'));
+          h('span', { text: `${loaded.name} has no saved bench values; nodes take the bench as it is.` }),
+          h('button.btng', { onclick: () => { loaded = null; render(); } }, 'OK'));
       }
       const moved = drift(loaded, byName, { tree: typed, rows: (v && v.rows) || null });
       if (!moved.length) return null;
       return h('div.recipe-note',
         h('div.rn-head',
-          h('span', { text: `the bench has moved since ${loaded.name} was saved — its nodes will run with the bench, not the file:` }),
+          h('span', { text: `Bench differs from ${loaded.name}. Nodes run with the bench.` }),
           h('span', { style: { flex: '1' } }),
           h('button.btns', {
-            title: 'put the recipe’s values back onto the bench, one module at a time',
+            title: 'Puts the recipe’s values back on the bench, module by module.',
             onclick: () => restoreBench(moved),
-          }, '↺ bench to recipe'),
-          h('button.btng', { title: 'keep the bench as it is', onclick: () => { loaded = null; render(); } }, 'keep bench')),
+          }, 'Restore recipe values'),
+          h('button.btng', { title: 'Keeps the bench as it is.', onclick: () => { loaded = null; render(); } }, 'Keep bench')),
         h('div.rn-list', moved.map((it) => h('div.rn-row',
           h('span.l', { text: `${it.module}.${it.name}` }),
           h('span.v', { text: `saved ${showValue(it.saved, it.unit)}` }),
@@ -952,7 +954,7 @@ export default {
           // node forms.
           store.applyModule(await api.setParams(module, params));
         }
-        notify(`bench back to ${loaded.name}: ${moved.map((m) => `${m.module}.${m.name}`).join(', ')}`, 'ok');
+        notify(`Bench set to ${loaded.name}: ${moved.map((m) => `${m.module}.${m.name}`).join(', ')}`, 'ok');
       } catch (error) {
         notify(error.text || String(error), 'warn');
       }
@@ -979,7 +981,7 @@ export default {
     async function save() {
       const stem = fileStem(name || (typed && typed.name) || '');
       if (!stem) {
-        notify('a saved recipe needs a name — type one in the name field first.', 'warn');
+        notify('Type a name first.', 'warn');
         return;
       }
       // An existing filename gets a named overwrite warning and second click. The
@@ -987,8 +989,8 @@ export default {
       if (saveArmed !== stem && recipes.some((r) => r.name === stem)) {
         armSave(stem);
         const was = recipes.find((r) => r.name === stem);
-        notify(`${stem} already exists${was && was.saved_at ? ` — saved ${fmt.clock(was.saved_at)}` : ''}. `
-          + 'Click again to write over it, or type another name.', 'warn');
+        notify(`${stem} exists${was && was.saved_at ? ` (saved ${fmt.clock(was.saved_at)})` : ''}. `
+          + 'Click again to overwrite.', 'warn');
         // The strip notification alone does not update the button. Its label must
         // also reveal what the confirmation click performs.
         render();
@@ -997,7 +999,7 @@ export default {
       armSave(null);
       try {
         const out = await api.savePipeline(typed, stem);
-        notify(`saved ${out.name} → ${out.path}`, 'ok');
+        notify(`Saved ${out.name} to ${out.path}`, 'ok');
         await loadRecipes();
         // A successful save captures the current bench, so comparison stays empty
         // while values agree.
@@ -1012,13 +1014,11 @@ export default {
 
     function renderSchedule(v) {
       keyed(schedHeadEl, JSON.stringify([v.counters, v.cost && v.cost.t_shot_source, v.stale]), () => [
-        h('span.cn', 'what it will do, in order'),
-        h('span.cs', {
-          text: v.cost
-            ? `shot time from the ${v.cost.t_shot_source === 'journal' ? 'journal' : 'default'} · `
-              + 'settle from what this bench has measured'
-            : 'from the last check of the structure',
-        }),
+        h('span.cn', {
+          title: v.cost
+            ? `Shot time from the ${v.cost.t_shot_source === 'journal' ? 'journal' : 'default'}; settles as measured on this bench.`
+            : 'From the last check of the tree.',
+        }, 'Schedule'),
         v.stale ? h('span.tag.nb', { text: 'stale' }) : null,
       ]);
 
@@ -1030,16 +1030,16 @@ export default {
       // estimates and shots. `derived()` stamps answers so those changes update every
       // fold.
       keyed(stepsEl, JSON.stringify([v.id, [...expanded].sort(), showFlat]), () => {
-        if (!v.nodes.length) return h('p.absent', 'nothing scheduled yet.');
+        if (!v.nodes.length) return h('p.absent', 'Nothing scheduled');
         return [
           h('div.schedbar',
             h('span.cs', {
-              text: showFlat
-                ? `every step, in order — ${((v.shown && v.shown.schedule) || []).length}, loop boundaries included`
-                : 'three scales — expand a temperature for its levels, a level for its modules',
+              title: showFlat ? 'Every step in order, loop boundaries included.'
+                : 'Expand a temperature for its levels, a level for its modules.',
+              text: showFlat ? fmt.plural(((v.shown && v.shown.schedule) || []).length, 'step') : '',
             }),
             h('span', { style: { flex: '1' } }),
-            h('button.btng', { onclick: () => { showFlat = !showFlat; render(); } }, showFlat ? 'nested' : 'flat')),
+            h('button.btng', { onclick: () => { showFlat = !showFlat; render(); } }, showFlat ? 'Nested' : 'Flat')),
           showFlat ? flatSteps(v) : v.nodes.map((node) => schedNode(node)),
         ];
       });
@@ -1050,7 +1050,7 @@ export default {
       keyed(gridEl, JSON.stringify([grid && grid.temperatures, grid && grid.levels, grid && grid.count]), () => {
         if (!grid) return null;
         return [
-          h('div.cs', { text: `the cells it fills · ${fmt.plural(grid.count, 'module run')} over ${grid.temperatures.length} × ${grid.levels.length}` }),
+          h('div.cs', { text: `Grid ${grid.temperatures.length} × ${grid.levels.length}, ${fmt.plural(grid.count, 'module run')}` }),
           h('div.lst', { style: { gridTemplateColumns: `auto repeat(${grid.levels.length}, 1fr)` } },
             h('span.h', 'T / K'),
             grid.levels.map((led) => h('span.h', { text: Number(led).toFixed(3) })),
@@ -1067,11 +1067,11 @@ export default {
       const folder = v.shown && v.shown.folder_pattern;
       // The folder stem appears beneath the output directory; hover exposes its full
       // path.
+      // The stamp is taken at Start, which is why the stem shows its pattern;
+      // manual 3.3 says so.
       keyed(folderEl, JSON.stringify([folder, v.counters.modules]), () => (folder
-        ? [`writes ${fmt.plural(v.counters.modules || 0, 'folder')} under `,
-          h('span.path', { title: folder, text: folder.replace(/\/+$/, '').split('/').pop() + '/' }),
-          ' — the stamp is taken at Start, so a Dry run cannot name it. '
-          + 'A run that stops early says kept of requested.']
+        ? [h('span.l', 'Output'), ' ',
+          h('span.path', { title: folder, text: folder.replace(/[\\/]+$/, '').split(/[\\/]/).pop() + '/' })]
         : ''));
     }
 
@@ -1081,14 +1081,14 @@ export default {
         return h('div.sr.mod', { style: { marginLeft: `${node.depth * 16}px` } },
           h('span.nk.mod', icon('module')),
           h('span.n', { text: node.module }),
-          node.led_v !== null && node.led_v !== undefined ? h('span.d', { text: fmt.volts(node.led_v) + ' LED' }) : null,
+          node.led_v !== null && node.led_v !== undefined ? h('span.d', { text: 'LED ' + fmt.volts(node.led_v) }) : null,
           node.temperature && node.temperature.k !== null && node.temperature.k !== undefined
             ? h('span.d', {
               title: node.temperature.how === 'module'
-                ? `a temperature node set this and it binds the rest of the run (${node.temperature.node_path})`
-                : `the ${node.temperature.node_path} loop`,
-              text: fmt.kelvin(node.temperature.k) + (node.temperature.how === 'module' ? ' (bound)' : ''),
-            })
+                ? `Set by the temperature node ${node.temperature.node_path}; it holds for the rest of the run.`
+                : `The ${node.temperature.node_path} loop.`,
+              text: 'T ' + fmt.kelvin(node.temperature.k),
+            }, node.temperature.how === 'module' ? h('span.tag', { text: 'bound' }) : null)
             : null,
           h('span', { style: { flex: '1' } }),
           node.relay_transition ? h('span.cs', { text: `relay ${node.relay_from} → ${node.relay}` }) : null,
@@ -1106,7 +1106,7 @@ export default {
           h('span.n', { text: node.node_path.split('/').pop() }),
           h('span.d', { text: `${(node.index ?? 0) + 1} of ${node.count}` }),
           node.needs_operator
-            ? h('span.mon-wait', { title: 'the 331 is not answering — the run pauses here until someone sets the cryostat and resumes', text: 'waits for the operator' })
+            ? h('span.mon-wait', { title: 'No 331 reading. The run pauses here until the cryostat is set and the run resumed.', text: 'pause' })
             : null,
           node.loop === 'temperature'
             ? h('span.d', { text: `settle ${node.settle_s === null || node.settle_s === undefined ? fmt.ABSENT : fmt.duration(node.settle_s)}` })
@@ -1114,7 +1114,7 @@ export default {
           h('span', { style: { flex: '1' } }),
           h('span.cs', { text: fmt.plural(node.modules, 'run') }),
           node.shots ? h('span.cs', { text: fmt.plural(node.shots, 'shot') }) : null,
-          h('span.cs', { text: fmt.duration(node.measure_s) + (spec && node.loop === 'temperature' ? ' measuring' : '') })),
+          h('span.cs', { title: spec && node.loop === 'temperature' ? 'Measuring time, without the settle.' : null, text: fmt.duration(node.measure_s) })),
         open ? node.children.map((child) => schedNode(child)) : null);
     }
 
@@ -1143,17 +1143,17 @@ export default {
       const leaves = v.leaves;
       const out = [];
       if (leaves.some((l) => l.params.led_v && l.params.led_v.source === 'inherited')) {
-        out.push('led_v ← the illumination loop, which owns it');
+        out.push('led_v ← illumination loop');
       }
       const voc = leaves.filter((l) => l.voc && l.voc.how);
       if (voc.length) {
-        out.push(`V_oc ← ${voc[0].voc.how} at the same led_v · ${fmt.plural(voc.length, 'centred scan')}`);
+        out.push(`V_oc ← ${voc[0].voc.how}, ${fmt.plural(voc.length, 'centred scan')}`);
       }
       const transitions = leaves.filter((l) => l.relay_transition).length;
-      if (transitions) out.push(`relay moves at ${fmt.plural(transitions, 'jv ↔ bace boundary', 'jv ↔ bace boundaries')}`);
+      if (transitions) out.push(`relay moves ${fmt.plural(transitions, 'time')}`);
       const bound = leaves.filter((l) => l.temperature && l.temperature.how === 'module');
       if (bound.length) {
-        out.push(`a temperature node binds ${fmt.plural(bound.length, 'later node')} — the rest of the run, not the rest of one iteration`);
+        out.push(`T set by a node for ${fmt.plural(bound.length, 'later node')}`);
       }
       return out;
     }

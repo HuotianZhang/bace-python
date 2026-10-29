@@ -247,7 +247,7 @@ test('a form switch never invents values, and never loses the ones typed', () =>
   // sweep on a click meant to change how it is written.
   const fresh = canonical();
   assert.equal(canSwitchForm(nodeAt(fresh, [0]), null, 'list').ok, false, 'a range with no answer');
-  assert.match(canSwitchForm(nodeAt(fresh, [0]), null, 'list').why, /has not been checked yet/);
+  assert.match(canSwitchForm(nodeAt(fresh, [0]), null, 'list').why, /not checked yet/);
   assert.equal(setValueForm(fresh, [0], 'list', null), fresh, 'so the tree is left alone');
 
   // With the answer in hand it converts, and to the levels the service made.
@@ -484,5 +484,5 @@ test('a tree row marks a differing node with the form’s own glyph, and a plain
   const mark = overrideMark({ overrides: [['n_loops', 100], ['vcoll', -0.3]] });
   assert.equal(mark.text, '↺');
   assert.equal(mark.count, 2);
-  assert.equal(mark.title, 'differs from the bench: n_loops 100 · vcoll -0.3');
+  assert.equal(mark.title, 'Overrides: n_loops 100, vcoll -0.3');
 });
