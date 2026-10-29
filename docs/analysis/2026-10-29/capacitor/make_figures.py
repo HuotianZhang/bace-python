@@ -2,8 +2,12 @@
 
 Run 1 steps the capacitor by three swings at a fixed delay; run 2 steps it by one swing at six
 delays. Both have the shutter shut for both traces. The charge of one trace is integrated from 30 ns
-before the step's onset for 500 ns, against the trace's own pre-trigger baseline; the step's timing is
-read from the light trace's half-rise, relative to the trigger. Usage: make_figures.py RUN_1 RUN_2
+before the step's onset for 500 ns, against the trace's own pre-trigger baseline.
+
+The capacitor's current is C dV/dt, so its own half-rise and peak mark the current spike, not the
+voltage. The voltage step is the trace's cumulative charge over its final value, V(t) = Q(t)/C: its
+10, 50 and 90 % crossings time the step as the digitiser sees it, through the measurement chain's own
+response. Usage: make_figures.py RUN_1 RUN_2
 """
 import glob, os, sys
 import numpy as np
@@ -49,6 +53,21 @@ def step(d, i, y):
     return y, trig, d["t"][onset], half, d["t"][after[k]]
 
 
+def voltage_crossings(d, i, y, levels=(0.1, 0.5, 0.9)):
+    """Record times at which the cumulative charge reaches `levels` of its value 120-200 ns after
+    the step: the voltage step reconstructed as V = Q/C."""
+    trig = -d["t0"][i]
+    start = trig + d["delay"][i] * 1e-9
+    w = (d["t"] > start - 10e-9) & (d["t"] < start + 200e-9)
+    tt, c = d["t"][w], np.cumsum(y[w]) * d["dt"]
+    f = c / c[tt > start + 120e-9].mean()
+    out = []
+    for level in levels:
+        j = np.argmax(f >= level)
+        out.append(tt[j - 1] + (level - f[j - 1]) / (f[j] - f[j - 1]) * d["dt"])
+    return out
+
+
 def charge(d, y, onset):
     w = (d["t"] > onset + SPAN[0]) & (d["t"] <= onset + SPAN[1])
     return y[w].sum() * d["dt"]
@@ -78,20 +97,26 @@ for name, q in (("light", ql), ("dark", qd)):
 
 # -- run 2: the step's timing against the delay ------------------------------------------
 lines += ["", "run 2: the step at each delay, in ns after the trigger (light trace)",
-          "  delay  onset   half   peak   half-delay  window start  Q/pC"]
+          "  delay | current: onset  half   peak | voltage: V10   V50   V90  V50-delay | window start  Q/pC"]
 rows = []
 for i in range(len(r2["delay"])):
     y, trig, on, half, peak = step(r2, i, r2["L"][i])
+    v10, v50, v90 = voltage_crossings(r2, i, y)
     rows.append((r2["delay"][i], (on - trig) * 1e9, (half - trig) * 1e9, (peak - trig) * 1e9,
+                 (v10 - trig) * 1e9, (v50 - trig) * 1e9, (v90 - trig) * 1e9,
                  (r2["win"][i, 0] - trig) * 1e9, charge(r2, y, on)))
     r = rows[-1]
-    lines.append(f"  {r[0]:5.0f}  {r[1]:6.1f} {r[2]:6.1f} {r[3]:6.1f}   {r[2] - r[0]:6.2f}     "
-                 f"{r[4]:7.1f}    {r[5] * 1e12:6.1f}")
-delay, half = np.array([r[0] for r in rows]), np.array([r[2] for r in rows])
-k, b = np.polyfit(delay, half, 1)
-lines.append(f"  half-rise = {k:.4f} x delay + {b:.2f} ns, residual rms "
-             f"{np.std(half - (k * delay + b)):.2f} ns")
-lines.append(f"  window start - half-rise: {np.mean([r[4] - r[2] for r in rows]):.1f} ns")
+    lines.append(f"  {r[0]:5.0f} |   {r[1]:6.1f} {r[2]:6.1f} {r[3]:6.1f} |  {r[4]:6.1f} {r[5]:6.1f} "
+                 f"{r[6]:6.1f}  {r[5] - r[0]:6.2f}  | {r[7]:7.1f}  {r[8] * 1e12:6.1f}")
+delay = np.array([r[0] for r in rows])
+for name, col in (("current half-rise", 2), ("voltage 50 %", 5)):
+    v = np.array([r[col] for r in rows])
+    k, b = np.polyfit(delay, v, 1)
+    lines.append(f"  {name} = {k:.4f} x delay + {b:.2f} ns, residual rms "
+                 f"{np.std(v - (k * delay + b)):.2f} ns")
+lines.append(f"  voltage 10-90 % rise: {np.mean([r[6] - r[4] for r in rows]):.1f} ns")
+lines.append(f"  window start - voltage 50 %: {np.mean([r[7] - r[5] for r in rows]):.1f} ns; "
+             f"- voltage 90 %: {np.mean([r[7] - r[6] for r in rows]):.1f} ns")
 
 with open(os.path.join(OUT, "numbers.txt"), "w", encoding="utf-8") as fh:
     fh.write("\n".join(lines) + "\n")

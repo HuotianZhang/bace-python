@@ -32,26 +32,28 @@ Light − dark over the run's window is −0.4, +4.4 and +1.0 pC, at most 5 % of
 
 ## The step in time
 
-| `delay_ns` | Onset | Half-rise | Peak | Half-rise − delay | Window start |
-|---|---|---|---|---|---|
-| 0 | 27.2 | 33.5 | 36.8 | 33.50 | 45.1 |
-| 30 | 57.6 | 63.5 | 67.2 | 33.52 | 75.1 |
-| 60 | 86.4 | 93.5 | 97.6 | 33.51 | 105.1 |
-| 90 | 116.8 | 123.5 | 126.4 | 33.51 | 135.1 |
-| 120 | 147.2 | 153.5 | 156.8 | 33.54 | 165.1 |
-| 150 | 177.6 | 183.5 | 187.2 | 33.47 | 195.1 |
+The capacitor's current is C dV/dt: its half-rise and peak mark the current spike, not the voltage. The voltage step follows from the trace's cumulative charge over its final value, V(t) = Q(t)/C, as the digitiser sees it.
 
-Times in ns after the trigger. Half-rise = 0.9999 × `delay_ns` + 33.52 ns, residual 0.02 ns rms.
+| `delay_ns` | Current: onset | half-rise | peak | Voltage: 10 % | 50 % | 90 % | Voltage 50 % − delay | Window start |
+|---|---|---|---|---|---|---|---|---|
+| 0 | 27.2 | 33.5 | 36.8 | 32.0 | 35.0 | 37.1 | 35.04 | 45.1 |
+| 30 | 57.6 | 63.5 | 67.2 | 62.0 | 65.1 | 67.2 | 35.09 | 75.1 |
+| 60 | 86.4 | 93.5 | 97.6 | 91.9 | 95.1 | 97.2 | 35.10 | 105.1 |
+| 90 | 116.8 | 123.5 | 126.4 | 122.0 | 125.1 | 127.2 | 35.08 | 135.1 |
+| 120 | 147.2 | 153.5 | 156.8 | 152.0 | 155.1 | 157.2 | 35.06 | 165.1 |
+| 150 | 177.6 | 183.5 | 187.2 | 182.0 | 185.0 | 187.1 | 35.03 | 195.1 |
+
+Times in ns after the trigger. Voltage 50 % = 0.9998 × `delay_ns` + 35.08 ns, residual 0.02 ns rms; 10–90 % rise 5.2 ns.
 
 | Finding | Value |
 |---|---|
-| Latency from trigger + `:PULS:DEL1` to the step's half-rise | 33.5 ns, independent of the delay |
+| Latency from trigger + `:PULS:DEL1` to the voltage's 50 % | 35.1 ns, independent of the delay |
 | `trigger_offset_s` in `rig.toml` | 47.1 ns |
-| Window start (`t0_int_s` = −2 ns from the field arrival `rig.toml` implies) | 11.6 ns after the half-rise, on the overshoot after the step |
-| The step at `delay_ns` 90 | 123.5 ns after the trigger; the light goes out at the sample at +122 ns (manual 1.2), so the field arrives 1.5 ns after it, not 15 ns |
+| Window start (`t0_int_s` = −2 ns from the field arrival `rig.toml` implies) | 10.0 ns after the voltage's 50 %, 7.9 ns after its 90 % |
+| The step at `delay_ns` 90 | Voltage 50 % at 125.1 ns after the trigger; the light goes out at the sample at +122 ns (manual 1.2), so the field arrives about 3 ns after it, not 15 ns |
 | Ringing after the step | Period about 10 ns, decayed within about 60 ns |
 
-The 47.1 ns was fitted to the displacement spike of a device, whose RC time delays the spike; the capacitor's step shows the field itself. With 47.1 ns the integration window starts about 13 ns after the field arrives, so the first part of the extraction current is not integrated. Light − dark removes the displacement current, so what is lost is the extraction current in those 13 ns.
+The reconstructed voltage is the step as it reaches the digitiser, through the sample-holder amplifier's own response (rise time near 7 ns, manual 1.2); the voltage at the device leads it by up to that response, so the field may arrive a few ns earlier still. The 47.1 ns was fitted to the displacement spike of a device, whose RC time delays the spike. With 47.1 ns the integration window starts about 10 ns after the voltage step at the digitiser, so the first part of the extraction current is not integrated; light − dark removes the displacement current, so what is lost is extraction current from those ns.
 
 ## Figures
 
