@@ -22,9 +22,9 @@ export const LOOPS = {
     unit: 'K',
     decimals: 1,
     fields: [
-      { name: 'tolerance_k', unit: 'K', type: 'float', doc: 'how close to the setpoint counts as arrived — the reading must stay inside ± this for hold_s.' },
-      { name: 'hold_s', unit: 's', type: 'float', doc: 'the dwell after the band is entered, before anything is measured.' },
-      { name: 'timeout_s', unit: 's', type: 'float', doc: 'give up settling after this and ask the operator; the run never measures at a temperature it did not reach.' },
+      { name: 'tolerance_k', label: 'Tolerance', unit: 'K', type: 'float', doc: 'How close to the setpoint counts as arrived: the reading stays inside ± this for hold_s.' },
+      { name: 'hold_s', label: 'Hold', unit: 's', type: 'float', doc: 'The dwell after the band is entered, before anything is measured.' },
+      { name: 'timeout_s', label: 'Timeout', unit: 's', type: 'float', doc: 'Settling gives up after this and asks the operator; the run never measures at a temperature it did not reach.' },
     ],
     owns: 'temperature_k of everything under it',
   },
@@ -35,8 +35,8 @@ export const LOOPS = {
     unit: 'V',
     decimals: 3,
     fields: [
-      { name: 'led_low_v', unit: 'V', type: 'float', doc: 'the dark half of the LED cycle. It must sit below turn-on, or the dark half is not dark.' },
-      { name: 'led_settle_s', unit: 's', type: 'float', doc: 'the wait after a level is set, before the first measurement at it.' },
+      { name: 'led_low_v', label: 'LED low level', unit: 'V', type: 'float', doc: 'The dark half of the LED cycle. It must sit below turn-on, or the dark half is not dark.' },
+      { name: 'led_settle_s', label: 'LED settle', unit: 's', type: 'float', doc: 'The wait after a level is set, before the first measurement at it.' },
     ],
     owns: 'led_v of every module inside it',
   },
@@ -91,7 +91,7 @@ export function overrideMark(row) {
   if (!overrides.length) return null;
   return {
     text: '↺',
-    title: 'differs from the bench: ' + overrides.map(([k, v]) => `${k} ${v}`).join(' · '),
+    title: 'Overrides: ' + overrides.map(([k, v]) => `${k} ${v}`).join(', '),
     count: overrides.length,
   };
 }
@@ -248,22 +248,19 @@ export function setValueForm(tree, path, form, resolved) {
  */
 export function canSwitchForm(node, resolved, form = 'list') {
   const spec = node && LOOPS[node.loop];
-  if (!spec || !spec.list) return { ok: false, why: 'this loop has no value list' };
+  if (!spec || !spec.list) return { ok: false, why: 'This loop has no value list.' };
   const values = loopValues(node, resolved);
   if (!values || !values.length) {
-    return {
-      ok: false,
-      why: 'the range has not been checked yet, so there are no values to list. '
-        + 'The service is the only thing that expands a range — try again in a moment.',
-    };
+    // Only the service expands a range, so the list waits for its answer.
+    return { ok: false, why: 'Range not checked yet; no values to list. Try again in a moment.' };
   }
   if (form === 'range' && !evenlySpaced(values)) {
     const rule = Math.abs(values[1] - values[0]);
     const would = Math.round(Math.abs(values[values.length - 1] - values[0]) / rule) + 1;
     return {
       ok: false,
-      why: `these ${values.length} values are not evenly spaced, and a range can only say `
-        + `one spacing: ${fmtNum(values[0], spec.decimals)} → `
+      why: `These ${values.length} values are not evenly spaced: `
+        + `${fmtNum(values[0], spec.decimals)} → `
         + `${fmtNum(values[values.length - 1], spec.decimals)} step `
         + `${fmtNum(rule, spec.decimals)} would run ${would}. Keep the list.`,
     };
