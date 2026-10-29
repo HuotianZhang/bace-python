@@ -79,8 +79,9 @@ def parameters() -> str:
 
     cat = Catalogue(rig_config=RigConfig())
     out = ["# Parameters", "",
-           "Every parameter of every module: its default in the code, unit, limits and "
-           "meaning, and the `run.toml` key that sets it. A value from `run.toml`, the "
+           "Every parameter of every module: the label the console shows, its default in "
+           "the code, unit, limits and meaning, and the `run.toml` key that sets it. "
+           "A value from `run.toml`, the "
            "last run or an edit overrides the default (3.1). Rig-dependent defaults are "
            "those of a `rig.toml` with no entries.", "",
            GENERATED_NOTE.format(source="the parameter specs in `bace/service/modules.py`"),
@@ -94,12 +95,13 @@ def parameters() -> str:
             out += [f"`{name}` has no parameters.", ""]
             continue
         out += [f"Kind: {spec.kind}.", "",
-                "| Parameter | Default | Unit | Limits | run.toml | Meaning |",
-                "|---|---|---|---|---|---|"]
+                "| Label | Parameter | Default | Unit | Limits | run.toml | Meaning |",
+                "|---|---|---|---|---|---|---|"]
         for p in params:
             recipe = ", ".join(f"`{k}`" for k in keys.get(p.name, []))
             out.append("| " + " | ".join(_cell(c) for c in (
-                f"`{p.name}`", _value(p.default), p.unit, _limits(p), recipe, p.doc)) + " |")
+                p.label, f"`{p.name}`", _value(p.default), p.unit, _limits(p), recipe,
+                p.doc)) + " |")
         out.append("")
     return "\n".join(out)
 

@@ -373,7 +373,7 @@ def test_as_wire_is_json_serialisable_and_in_spec_order():
     lv = next(w for w in back if w["name"] == "led_levels_v")
     assert lv["value"] == [1.02, 1.06] and lv["default"] == []
     assert lv["source"] == "run.toml" and lv["detail"] == "run.toml [jv]"
-    expected_keys = {"name", "value", "source", "detail", "editable", "type", "unit",
+    expected_keys = {"name", "label", "value", "source", "detail", "editable", "type", "unit",
                      "default", "doc", "doc_full", "choices", "group", "nullable",
                      "minimum", "maximum"}
     assert all(set(w) == expected_keys for w in back)
