@@ -333,7 +333,7 @@ function shotStrip(panel, segments) {
   return {
     ...panel,
     label: `A · one shot = one Q · ${seconds(total)}`,
-    note: `${segments.filter((s) => !s.skipped).length} StepPhase segments`
+    note: `${segments.filter((s) => !s.skipped).length} segments`
       + (skipped.length ? ` · ${skipped.map((s) => s.label).join(', ')} skipped` : ''),
     y: { ticks: [] },
     bands: bars,
@@ -483,7 +483,7 @@ function recordRows(panel, cycle, record, swept) {
     label: `C · the record · ${fmt.sig((end - start) * 1e9, 4)} ns · ${record.points} points · dt ${fmt.sig(record.dt * 1e9, 3)} ns`,
     // `:TIM:POS` is four divisions, so the ten-division window sits one
     // division before the trigger and nine after it.
-    note: `timebase ${fmt.sig(((end - start) / 10) * 1e9, 3)} ns/div · one division before the trigger, nine after`,
+    note: `${fmt.sig(((end - start) / 10) * 1e9, 3)} ns/div; 1 division before the trigger, 9 after`,
     y: { ticks: [] },
     series, shades, rules,
     marks: [...marks, ...rowLabels(rect, rows, ['bias'])],

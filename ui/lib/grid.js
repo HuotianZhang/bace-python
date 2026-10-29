@@ -14,12 +14,12 @@ import { cellName, flagsFor, identityOf, isPartial, provenanceSummary, sigmaReco
 /** One session's group of runs, newest first, with its identities on the heading. */
 export function renderGroups(groups, { selected = null, onSelect } = {}) {
   if (!groups.groups.length) {
-    return h('p.absent', 'no run in the journal yet · a run parks and appears here, tagged manual or pipeline');
+    return h('p.absent', { title: 'A run appears here once it parks.' }, 'No runs yet');
   }
   return groups.groups.map((group) => h('div.hgroup',
     h('div.hgh',
       h('span.num', { text: `session ${group.session}` }),
-      h('span.cs', { text: group.identities.length ? group.identities.join(' / ') : 'no sample named' }),
+      h('span.cs', { text: group.identities.length ? group.identities.join(' / ') : 'No sample named' }),
       h('span.cs.right', { text: fmt.plural(group.runs.length, 'run') })),
     group.runs.map((run) => h('button.hrow', {
       class: (run.run_id === selected ? 'on ' : '') + `lv-${run.level}`,
@@ -48,7 +48,9 @@ export function renderRunHead(record, grid, summary) {
   const level = record.state === 'failed' || record.state === 'blocked' ? 'crit'
     : ['stopped', 'aborted', 'cancelled'].includes(record.state) ? 'warn' : record.state === 'done' ? 'ok' : 'live';
   const counts = grid.shape === 'grid'
-    ? `${fmt.plural(summary.present, 'bace cell')} · ${summary.complete} complete · ${summary.partial} partial · ${summary.missing} never run`
+    ? [fmt.plural(summary.present, 'bace cell'), `${summary.complete} complete`,
+      summary.partial ? `${summary.partial} partial` : null,
+      summary.missing ? `${summary.missing} not run` : null].filter(Boolean).join(', ')
     : fmt.plural(nodes.length, 'module node');
   return h('div.rhead',
     h('div.rh1',
@@ -56,13 +58,13 @@ export function renderRunHead(record, grid, summary) {
       h('span', { class: `tag st ${level}`, text: record.state || fmt.ABSENT }),
       h('span.num.cs', { text: record.run_id })),
     h('div.rh2',
-      h('span', { class: identity ? '' : 'absent', text: identity || 'no sample named' }),
-      sample.operator ? h('span.cs', { text: `operator ${sample.operator}` }) : null,
+      h('span', { class: identity ? '' : 'absent', text: identity || 'No sample named' }),
+      sample.operator ? h('span.cs', { text: `Operator ${sample.operator}` }) : null,
       h('span.num', { text: spanOf(record.started_at || record.queued_at, record.finished_at) }),
       h('span.num', { text: counts }),
       h('span.num.cs', { text: `${fmt.keptOf(record.kept, record.requested)} kept` })),
     sample.comment ? h('p.rcomment', { text: sample.comment }) : null,
-    record.error ? h('p.warn1.crit', { text: `failed · ${record.error}` }) : null);
+    record.error ? h('p.warn1.crit', { text: `Failed: ${record.error}` }) : null);
 }
 
 // -- the grid ---------------------------------------------------------------
@@ -75,9 +77,9 @@ export function renderGrid(grid, { selected = null, onSelect } = {}) {
   if (grid.shape !== 'grid') {
     // The empty state points to available results or actions rather than explaining
     // grid internals (`docs/ui-rules.md` §9).
-    return h('div.chart-absent', h('p.absent', 'no bace node in this run — its nodes are listed below'));
+    return h('div.chart-absent', h('p.absent', 'No bace node; see Nodes'));
   }
-  const head = h('tr', h('th.corner', h('span.cs', 'T / K ↓  ·  led_v →')),
+  const head = h('tr', h('th.corner', h('span.cs', 'T / K ↓   led_v →')),
     grid.cols.map((col) => h('th', { text: col.label })));
   const rows = grid.rows.map((row) => {
     const t = temperatureText({ temperature_k: row.t ?? row.asked, temperature_how: row.how, temperature_source: row.source });
@@ -99,14 +101,14 @@ export function renderGrid(grid, { selected = null, onSelect } = {}) {
     h('div.chart-legend',
       h('span.legend-item', h('span.mk.filled'), h('span', 'σ_Q measured')),
       h('span.legend-item', h('span.mk.hollow'), h('span', 'σ_Q not recorded')),
-      h('span.legend-item', h('span.mk.partial'), h('span', 'partial · kept of requested')),
-      h('span.legend-item', h('span.mk.missing'), h('span', 'never run')),
-      h('span.cs', 'Q / C · V_oc / V beneath')));
+      h('span.legend-item', { title: 'Kept of requested.' }, h('span.mk.partial'), h('span', 'partial')),
+      h('span.legend-item', h('span.mk.missing'), h('span', 'not run')),
+      h('span.cs', 'Q / C over V_oc / V')));
 }
 
 function renderCell(grid, cell, { selected, onSelect }) {
   if (!cell || cell.missing) {
-    return h('div.cell.missing', { title: `${cell ? cellName(grid, cell) : ''} · never run` }, h('span.cs', 'never run'));
+    return h('div.cell.missing', { title: `${cell ? cellName(grid, cell) + ': ' : ''}not run` }, h('span.cs', 'not run'));
   }
   const classes = ['cell'];
   if (cell.partial) classes.push('partial');
@@ -122,7 +124,7 @@ function renderCell(grid, cell, { selected, onSelect }) {
     h('span.cv.num', { text: `${cell.voc === null ? 'V_oc —' : fmt.volts(cell.voc, { unit: false })} · ${sigma}` }),
     cell.partial ? h('span.ck.num', { text: `${fmt.keptOf(cell.kept, cell.requested)} kept` }) : null,
     cell.points > 1 ? h('span.ck.cs', { text: `${cell.points} points · ${cell.at}` }) : null,
-    cell.repeated > 1 ? h('span.ck.cs', { text: `×${cell.repeated}, newest shown` }) : null);
+    cell.repeated > 1 ? h('span.ck.cs', { title: 'Run more than once; the newest is shown.', text: `×${cell.repeated} newest` }) : null);
 }
 
 // -- the summary strip ------------------------------------------------------
@@ -138,7 +140,7 @@ export function renderSummary(summary) {
 /** Every module node of the run in order — the J-Vs too, which have no cell. */
 export function renderNodes(record, { selected = null, onSelect } = {}) {
   const nodes = moduleNodes(record);
-  if (!nodes.length) return h('p.absent', 'no module node has ended in this run');
+  if (!nodes.length) return h('p.absent', 'No module node has ended');
   return h('div.nlist', nodes.map((node) => {
     const t = temperatureText(node);
     const v = vocText(node);
@@ -169,7 +171,7 @@ export function renderNodes(record, { selected = null, onSelect } = {}) {
  */
 export function renderNodePanel(record, node, grid, { onRerun, rerunState = null } = {}) {
   if (!node) {
-    return h('div.npanel', h('p.absent', 'select a cell, or a node in the list, to see its numbers and its flags'));
+    return h('div.npanel', h('p.absent', 'Select a cell or a node'));
   }
   const cell = grid.shape === 'grid' ? grid.cells.find((c) => !c.missing && c.path === node.node_path) : null;
   const q = GRID_MODULES.has(node.module) ? cellQ(node) : null;
@@ -183,17 +185,17 @@ export function renderNodePanel(record, node, grid, { onRerun, rerunState = null
 
   const numbers = [];
   if (q) {
-    numbers.push(['Q', q.q === null ? fmt.ABSENT : fmt.charge(q.q), q.q === null ? '' : `mean of ${node.kept ?? '?'} ${q.points > 1 ? '· ' + q.at : ''}`]);
+    numbers.push(['Q', q.q === null ? fmt.ABSENT : fmt.charge(q.q), q.q === null ? '' : `mean of ${fmt.plural(node.kept ?? 0, 'loop')}${q.points > 1 ? ', ' + q.at : ''}`]);
     numbers.push(['σ_Q', q.sigma === null ? 'not recorded' : fmt.scientific(q.sigma, 3) + ' C',
-      q.sigma === null ? (sigmaRecorded(node) ? 'not at this point' : 'a zero is not a σ') : `over ${fmt.plural(node.kept ?? '?', 'loop')}`]);
+      q.sigma === null ? (sigmaRecorded(node) ? 'not at this point' : 'single loop') : `over ${fmt.plural(node.kept ?? '?', 'loop')}`]);
   }
-  numbers.push(['acquired', `${fmt.keptOf(node.kept, node.requested)} ${unit}`, partial ? (node.outcome || 'ended early') : node.outcome || '']);
+  numbers.push(['Acquired', `${fmt.keptOf(node.kept, node.requested)} ${unit}`, partial ? (node.outcome || 'ended early') : node.outcome || '']);
   if (node.curves && node.curves.length) {
     for (const curve of node.curves) {
       const m = curve.metrics || {};
       numbers.push([curve.label || (curve.dark ? 'dark' : 'light'),
-        curve.dark === true ? 'dark' : `V_oc ${fmt.volts(m.voc)} · FF ${m.ff === null || m.ff === undefined ? fmt.ABSENT : fmt.sig(m.ff, 3)}`,
-        'derived — interpolated from the curve']);
+        curve.dark === true ? 'dark' : `V_oc ${fmt.volts(m.voc)}, FF ${m.ff === null || m.ff === undefined ? fmt.ABSENT : fmt.sig(m.ff, 3)}`,
+        'derived']);
     }
   }
 
@@ -208,29 +210,32 @@ export function renderNodePanel(record, node, grid, { onRerun, rerunState = null
       h('tr', h('th', 'led_v'), h('td', num(node.led_v === null || node.led_v === undefined ? fmt.ABSENT : fmt.volts(node.led_v, { decimals: 3 })))),
       h('tr', h('th', 'V_oc'), h('td', h('span', { class: v.level, text: v.text }))),
       node.offset_corrected !== null && node.offset_corrected !== undefined
-        ? h('tr', h('th', 'baseline'), h('td', { text: node.offset_corrected ? 'dark baseline subtracted (offset_correct)' : 'not subtracted' })) : null,
-      node.started_at ? h('tr', h('th', 'ran'), h('td', num(spanOf(node.started_at, node.finished_at)))) : null),
-    h('h3', 'flags on this node'),
-    h('p.cs', 'observations · they travel with the record, not with the folder'),
+        ? h('tr', h('th', 'Baseline'), h('td', { title: 'offset_correct', text: node.offset_corrected ? 'dark baseline subtracted' : 'not subtracted' })) : null,
+      node.started_at ? h('tr', h('th', 'Ran'), h('td', num(spanOf(node.started_at, node.finished_at)))) : null),
+    // Flags travel with the record, not the folder; the files are listed in
+    // manual 3.3.
+    h('h3', 'Flags'),
     h('div.flags', flags.length
-      ? flags.map((flag) => h('div', { class: `warn1 ${flag.level}` }, h('span.code', { text: flag.code }), h('span', { text: flag.text })))
-      : h('p.absent', 'nothing flagged')),
-    h('h3', 'where it is'),
-    h('p.path.num', { text: node.folder || 'no folder recorded — the node wrote nothing' }),
+      ? flags.map((flag) => h('div', { class: `warn1 ${flag.level}` }, h('span', { text: flag.text }), h('span.code', { text: flag.code })))
+      : h('p.absent', 'None')),
+    h('h3', 'Files'),
+    h('p.path.num', { text: node.folder || 'No folder: the node wrote nothing.' }),
     record.folder && node.folder && node.folder !== record.folder
-      ? h('p.cs', { text: `inside the pipeline's ${record.folder}` }) : null,
-    h('p.cs', node.module === 'bace'
-      ? 'the recorder writes the HDF5 with /metadata, the legacy .dat, and every trace it kept; the journal line for this node is in the session file'
-      : 'the recorder writes the HDF5 with /metadata and the curves; the journal line for this node is in the session file'),
-    h('h3', 'resolved from'),
+      ? h('p.cs', { text: `In ${record.folder}` }) : null,
+    h('h3', 'Provenance'),
     provenance
       ? h('p.num', { text: provenance.text })
       : h('p.absent', record.from === 'journal'
-        ? 'the layers were not kept: a run read back from the journal has its values, not their provenance'
-        : 'no parameters recorded for this node'),
+        ? 'Not kept: a run read back from the journal has its values, not their layers.'
+        : 'No parameters recorded'),
     onRerun ? h('div.btnrow',
-      h('button.btns', { onclick: () => onRerun(node, params), disabled: !params }, `Run ${node.module} again`),
-      h('span.cs', { text: rerunState ? rerunState.text : `one manual ${node.module} on the queue now, with this node's own overrides${params && params.led_v && params.led_v.source === 'inherited' ? ' and its led_v' : ''} — at the bench's V_oc and temperature as they are, because a manual run has no loop to bind them` }))
+      h('button.btns', {
+        onclick: () => onRerun(node, params), disabled: !params,
+        title: `Queues one manual ${node.module} with this node's overrides`
+          + `${params && params.led_v && params.led_v.source === 'inherited' ? ' and its led_v' : ''}, `
+          + 'at the bench\'s V_oc and temperature: a manual run has no loop to bind them.',
+      }, `Run ${node.module} again`),
+      rerunState ? h('span.cs', { text: rerunState.text }) : null)
       : null);
 }
 
