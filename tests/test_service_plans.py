@@ -76,6 +76,33 @@ def test_what_a_tree_sets_must_lie_inside_the_envelope():
     assert env.violations(parsed(temp)) == ["a temperature loop is not in the plan"]
 
 
+def test_a_scan_is_held_to_the_bound_of_the_parameter_it_sweeps():
+    """Loose bounds on axis_start and axis_stop must not let a scan of V_coll
+    reach -10 V when the plan holds V_coll to -4 V."""
+    loose = {**ENVELOPE, "modules": {"bace": {
+        **ENVELOPE["modules"]["bace"],
+        "axis_name": {"choices": ["vpre", "vcoll", "delay_ns"]},
+        "axis_start": {"min": -10, "max": 400}, "axis_stop": {"min": -10, "max": 400},
+        "axis_step": {"min": 0, "max": 50}, "centre_on_voc": {"choices": [True, False]}}}}
+    env = Envelope.from_wire(loose, catalogue=CAT)
+
+    def scan(name, start, stop, step, **more):
+        return bace(axis_name=name, axis_start=start, axis_stop=stop, axis_step=step, **more)
+
+    assert env.violations(parsed(scan("delay_ns", 30, 150, 20))) == []
+    assert env.violations(parsed(scan("vcoll", -0.5, -2.0, 0.5))) == []
+    found = env.violations(parsed(scan("vcoll", -0.5, -10.0, 0.5)))
+    assert found == ["bace.axis_stop = -10.0 sweeps vcoll, the plan allows between -4 and -0.5"]
+    # the plan does not let vpre be set, so it may not be swept either ...
+    [v] = env.violations(parsed(scan("vpre", 0.2, 0.6, 0.1)))
+    assert "sweeps vpre, and the plan does not let it be set" in v
+    # ... except as offsets around V_oc, which only the axis bounds hold
+    assert env.violations(parsed(scan("vpre", -0.05, 0.05, 0.05, centre_on_voc=True))) == []
+    # an end without its axis cannot be checked
+    [v] = env.violations(parsed(bace(axis_start=30, axis_stop=150, axis_step=20)))
+    assert "without axis_name" in v
+
+
 # -- the book ----------------------------------------------------------------------
 def test_a_plan_is_approved_by_its_fingerprint_and_then_spent():
     book = PlanBook("S")

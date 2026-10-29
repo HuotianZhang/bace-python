@@ -1202,7 +1202,11 @@ An agent runs experiments only inside a plan a person approved
 
 The envelope bounds what the submitted tree states. A parameter the tree does
 not set takes its value from its layers (run.toml, last used, the operator's
-edits), which the agent cannot change.
+edits), which the agent cannot change. A scan's ends are values of the swept
+parameter: a tree that sets `axis_start` or `axis_stop` must set `axis_name`,
+the envelope must bound that parameter, and both ends must lie within its
+bound. A `vpre` axis with `centre_on_voc` sweeps offsets from V_oc, held only by
+the bounds on `axis_start` and `axis_stop`.
 
 | Route | |
 |---|---|
