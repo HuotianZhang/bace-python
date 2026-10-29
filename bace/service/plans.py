@@ -27,6 +27,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from ..core.axis import Axis, AxisError
 from .pipeline import LOOPS, Loop, Module, Node, walk
 
 STATES: tuple[str, ...] = ("proposed", "approved", "rejected", "closed")
@@ -125,8 +126,30 @@ def _axis_violations(node: Module, allowed: Mapping[str, Mapping[str, Any]]) -> 
     bound = allowed.get(axis)
     if bound is None:
         return [f"{node.module} sweeps {axis}, and the plan does not let it be set"]
-    return [f"{node.module}.{k} = {node.params[k]!r} sweeps {axis}, the plan allows "
-            f"{_describe(bound)}" for k in ends if not _within(node.params[k], bound)]
+    if len(ends) < len(AXIS_ENDS):
+        missing = next(k for k in AXIS_ENDS if k not in node.params)
+        return [f"{node.module}.{ends[0]} is set without {missing}, so the scan's other "
+                "end comes from the layers"]
+    if "choices" not in bound:
+        # A range holds every point between two ends that lie inside it.
+        return [f"{node.module}.{k} = {node.params[k]!r} sweeps {axis}, the plan allows "
+                f"{_describe(bound)}" for k in ends if not _within(node.params[k], bound)]
+    # Discrete choices: every point the scan will apply must be one of them.
+    start, stop = node.params["axis_start"], node.params["axis_stop"]
+    if start != stop and "axis_step" not in node.params:
+        return [f"{node.module} sweeps {axis} without axis_step, so the plan cannot tell "
+                "its points"]
+    try:
+        points = Axis(axis, float(start), float(stop),
+                      float(node.params.get("axis_step", 0.0))).values()
+    except (AxisError, TypeError, ValueError) as exc:
+        return [f"{node.module}: the {axis} scan is not a scan ({exc})"]
+    numeric = [c for c in bound["choices"] if isinstance(c, (int, float))
+               and not isinstance(c, bool)]
+    off = [float(p) for p in points
+           if not any(math.isclose(p, c, rel_tol=1e-9, abs_tol=1e-12) for c in numeric)]
+    return [f"{node.module} sweeps {axis} through {off[0]:g}, the plan allows "
+            f"{_describe(bound)}"] if off else []
 
 
 def _describe(bound: Mapping[str, Any]) -> str:

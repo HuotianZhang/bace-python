@@ -101,9 +101,29 @@ def test_a_scan_is_held_to_the_bound_of_the_parameter_it_sweeps():
     # whether a vpre scan is centred cannot be left to the layers (run.toml centres it)
     [v] = env.violations(parsed(scan("vpre", -0.05, 0.05, 0.05)))
     assert "without setting centre_on_voc" in v
-    # an end without its axis cannot be checked
+    # an end without its axis cannot be checked, nor one end without the other
     [v] = env.violations(parsed(bace(axis_start=30, axis_stop=150, axis_step=20)))
     assert "without axis_name" in v
+    [v] = env.violations(parsed(bace(axis_name="vcoll", axis_start=-0.5, axis_step=0.5)))
+    assert "without axis_stop" in v
+
+
+def test_a_scan_over_discrete_choices_applies_only_those_values():
+    """With choices, the points between the ends matter: -4 to -0.5 in 0.5 V
+    steps also runs -3.5, -3.0 ..., which a plan of [-4, -0.5] does not allow."""
+    env = Envelope.from_wire({**ENVELOPE, "modules": {"bace": {
+        "vcoll": {"choices": [-4.0, -0.5]},
+        "axis_name": {"choices": ["vcoll"]},
+        "axis_start": {"min": -4, "max": 0}, "axis_stop": {"min": -4, "max": 0},
+        "axis_step": {"min": 0, "max": 4}}}}, catalogue=CAT)
+
+    def scan(start, stop, step):
+        return bace(axis_name="vcoll", axis_start=start, axis_stop=stop, axis_step=step)
+
+    assert env.violations(parsed(scan(-4.0, -0.5, 3.5))) == []
+    [v] = env.violations(parsed(scan(-4.0, -0.5, 0.5)))
+    assert "through -3.5" in v
+    assert env.violations(parsed(scan(-0.5, -0.5, 0.0))) == []
 
 
 # -- the book ----------------------------------------------------------------------
