@@ -7,12 +7,18 @@
    "kind": "measurement",
    "relay": "dc",
    "estimate_s": 7.1000000000000005,
-   "estimate_text": "1 curves \u00d7 71 pts \u2248 7.1 s",
+   "estimate_text": "1 curves × 71 pts ≈ 7.1 s",
+   "estimate": {
+    "seconds": 7.1000000000000005,
+    "curves": 1,
+    "points": 71
+   },
    "needs": [],
    "last": null,
    "params": [
     {
      "name": "start_v",
+     "label": "Sweep start",
      "value": -0.2,
      "source": "default",
      "detail": "",
@@ -26,10 +32,14 @@
      "group": "axis",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "jv.start_v"
+     ]
     },
     {
      "name": "stop_v",
+     "label": "Sweep stop",
      "value": 1.2,
      "source": "default",
      "detail": "",
@@ -43,10 +53,14 @@
      "group": "axis",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "jv.stop_v"
+     ]
     },
     {
      "name": "step_v",
+     "label": "Sweep step",
      "value": 0.02,
      "source": "default",
      "detail": "",
@@ -60,10 +74,14 @@
      "group": "axis",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "jv.step_v"
+     ]
     },
     {
      "name": "settle_s",
+     "label": "Dwell per point",
      "value": 0.05,
      "source": "default",
      "detail": "",
@@ -77,10 +95,14 @@
      "group": "acquisition",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "jv.settle_s"
+     ]
     },
     {
      "name": "both_directions",
+     "label": "Both directions",
      "value": false,
      "source": "default",
      "detail": "",
@@ -94,10 +116,14 @@
      "group": "acquisition",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "jv.both_directions"
+     ]
     },
     {
      "name": "pixel_area_cm2",
+     "label": "Pixel area",
      "value": 0.0,
      "source": "default",
      "detail": "",
@@ -106,15 +132,19 @@
      "unit": "cm2",
      "default": 0.0,
      "doc": "Illuminated area of the pixel, which is what the SourceMeter's amps are divided by to get a current density.",
-     "doc_full": "Illuminated area of the pixel, which is what the SourceMeter's amps are\ndivided by to get a current density. 0 means report current in amps and\nleave density out \u2014 better than defaulting to 1 cm\u00b2, which silently\nmislabels A as A/cm\u00b2.",
+     "doc_full": "Illuminated area of the pixel, which is what the SourceMeter's amps are\ndivided by to get a current density. 0 means report current in amps and\nleave density out — better than defaulting to 1 cm², which silently\nmislabels A as A/cm².",
      "choices": [],
      "group": "acquisition",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "jv.pixel_area_cm2"
+     ]
     },
     {
      "name": "smu_current_compliance_a",
+     "label": "Current compliance",
      "value": 0.01,
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -123,15 +153,19 @@
      "unit": "A",
      "default": 0.05,
      "doc": "The most current the 2400 will pass while it sources voltage (`:SENS:CURR:PROT:LEV`); it clamps there rather than going higher.",
-     "doc_full": "The most current the 2400 will pass while it sources voltage\n(`:SENS:CURR:PROT:LEV`); it clamps there rather than going higher. Sized\nfor the pixel, not the instrument \u2014 a 2400 will happily deliver 1 A into a\nsmall cell.",
+     "doc_full": "The most current the 2400 will pass while it sources voltage\n(`:SENS:CURR:PROT:LEV`); it clamps there rather than going higher. Sized\nfor the pixel, not the instrument — a 2400 will happily deliver 1 A into a\nsmall cell.",
      "choices": [],
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.current_compliance_a"
+     ]
     },
     {
      "name": "smu_voltage_compliance_v",
+     "label": "Voltage compliance",
      "value": 2.0,
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -140,15 +174,19 @@
      "unit": "V",
      "default": 2.0,
      "doc": "The most voltage the 2400 will put across the device while it sources current (`:SENS:VOLT:PROT:LEV`).",
-     "doc_full": "The most voltage the 2400 will put across the device while it sources\ncurrent (`:SENS:VOLT:PROT:LEV`). With 0 A sourced \u2014 the V_oc reading \u2014 this\nis what stops the output swinging to the rail if a contact opens.",
+     "doc_full": "The most voltage the 2400 will put across the device while it sources\ncurrent (`:SENS:VOLT:PROT:LEV`). With 0 A sourced — the V_oc reading — this\nis what stops the output swinging to the rail if a contact opens.",
      "choices": [],
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.voltage_compliance_v"
+     ]
     },
     {
      "name": "smu_settle_jsc_ms",
+     "label": "J_sc settle",
      "value": 1000.0,
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -162,10 +200,14 @@
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.settle_jsc_ms"
+     ]
     },
     {
      "name": "smu_settle_voc_ms",
+     "label": "V_oc settle",
      "value": 1000.0,
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -179,10 +221,14 @@
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.settle_voc_ms"
+     ]
     },
     {
      "name": "smu_settle_jsat_ms",
+     "label": "J_sat settle",
      "value": 1000.0,
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -196,10 +242,14 @@
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.settle_jsat_ms"
+     ]
     },
     {
      "name": "smu_nplc",
+     "label": "NPLC",
      "value": 1.0,
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -213,10 +263,14 @@
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.nplc"
+     ]
     },
     {
      "name": "smu_averaging",
+     "label": "Readings averaged",
      "value": 10,
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -230,10 +284,14 @@
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.averaging"
+     ]
     },
     {
      "name": "smu_terminals",
+     "label": "Terminals",
      "value": "FRON",
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -250,10 +308,14 @@
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.terminals"
+     ]
     },
     {
      "name": "smu_four_wire",
+     "label": "Four-wire sensing",
      "value": false,
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -267,7 +329,10 @@
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.four_wire"
+     ]
     }
    ]
   },
@@ -278,12 +343,18 @@
    "kind": "measurement",
    "relay": "dc",
    "estimate_s": 18.200000000000003,
-   "estimate_text": "2 curves \u00d7 71 pts \u2248 18 s",
+   "estimate_text": "2 curves × 71 pts ≈ 18 s",
+   "estimate": {
+    "seconds": 18.200000000000003,
+    "curves": 2,
+    "points": 71
+   },
    "needs": [],
    "last": null,
    "params": [
     {
      "name": "start_v",
+     "label": "Sweep start",
      "value": -0.2,
      "source": "default",
      "detail": "",
@@ -297,10 +368,14 @@
      "group": "axis",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "jv.start_v"
+     ]
     },
     {
      "name": "stop_v",
+     "label": "Sweep stop",
      "value": 1.2,
      "source": "default",
      "detail": "",
@@ -314,10 +389,14 @@
      "group": "axis",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "jv.stop_v"
+     ]
     },
     {
      "name": "step_v",
+     "label": "Sweep step",
      "value": 0.02,
      "source": "default",
      "detail": "",
@@ -331,10 +410,14 @@
      "group": "axis",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "jv.step_v"
+     ]
     },
     {
      "name": "led_v",
+     "label": "LED level",
      "value": null,
      "source": "default",
      "detail": "",
@@ -348,10 +431,12 @@
      "group": "led",
      "nullable": true,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": []
     },
     {
      "name": "led_start_v",
+     "label": "LED start",
      "value": 1.0,
      "source": "run.toml",
      "detail": "run.toml [illumination]",
@@ -365,10 +450,15 @@
      "group": "led",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "illumination.level_v",
+      "jv.led_start_v"
+     ]
     },
     {
      "name": "led_stop_v",
+     "label": "LED stop",
      "value": 1.0,
      "source": "run.toml",
      "detail": "run.toml [illumination]",
@@ -382,10 +472,15 @@
      "group": "led",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "illumination.level_v",
+      "jv.led_stop_v"
+     ]
     },
     {
      "name": "led_step_v",
+     "label": "LED step",
      "value": 0.02,
      "source": "default",
      "detail": "",
@@ -399,10 +494,14 @@
      "group": "led",
      "nullable": false,
      "minimum": 0.0,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "jv.led_step_v"
+     ]
     },
     {
      "name": "led_low_v",
+     "label": "LED low level",
      "value": 0.4,
      "source": "run.toml",
      "detail": "run.toml [illumination]",
@@ -416,10 +515,15 @@
      "group": "led",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "illumination.low_level_v",
+      "jv.led_low_v"
+     ]
     },
     {
      "name": "led_settle_s",
+     "label": "LED settle",
      "value": 2.0,
      "source": "default",
      "detail": "",
@@ -433,10 +537,14 @@
      "group": "led",
      "nullable": false,
      "minimum": 0.0,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "jv.led_settle_s"
+     ]
     },
     {
      "name": "dark",
+     "label": "Dark curve",
      "value": true,
      "source": "default",
      "detail": "",
@@ -450,10 +558,14 @@
      "group": "led",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "jv.dark"
+     ]
     },
     {
      "name": "settle_s",
+     "label": "Dwell per point",
      "value": 0.05,
      "source": "default",
      "detail": "",
@@ -467,10 +579,14 @@
      "group": "acquisition",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "jv.settle_s"
+     ]
     },
     {
      "name": "both_directions",
+     "label": "Both directions",
      "value": false,
      "source": "default",
      "detail": "",
@@ -484,10 +600,14 @@
      "group": "acquisition",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "jv.both_directions"
+     ]
     },
     {
      "name": "pixel_area_cm2",
+     "label": "Pixel area",
      "value": 0.0,
      "source": "default",
      "detail": "",
@@ -496,15 +616,19 @@
      "unit": "cm2",
      "default": 0.0,
      "doc": "Illuminated area of the pixel, which is what the SourceMeter's amps are divided by to get a current density.",
-     "doc_full": "Illuminated area of the pixel, which is what the SourceMeter's amps are\ndivided by to get a current density. 0 means report current in amps and\nleave density out \u2014 better than defaulting to 1 cm\u00b2, which silently\nmislabels A as A/cm\u00b2.",
+     "doc_full": "Illuminated area of the pixel, which is what the SourceMeter's amps are\ndivided by to get a current density. 0 means report current in amps and\nleave density out — better than defaulting to 1 cm², which silently\nmislabels A as A/cm².",
      "choices": [],
      "group": "acquisition",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "jv.pixel_area_cm2"
+     ]
     },
     {
      "name": "smu_current_compliance_a",
+     "label": "Current compliance",
      "value": 0.01,
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -513,15 +637,19 @@
      "unit": "A",
      "default": 0.05,
      "doc": "The most current the 2400 will pass while it sources voltage (`:SENS:CURR:PROT:LEV`); it clamps there rather than going higher.",
-     "doc_full": "The most current the 2400 will pass while it sources voltage\n(`:SENS:CURR:PROT:LEV`); it clamps there rather than going higher. Sized\nfor the pixel, not the instrument \u2014 a 2400 will happily deliver 1 A into a\nsmall cell.",
+     "doc_full": "The most current the 2400 will pass while it sources voltage\n(`:SENS:CURR:PROT:LEV`); it clamps there rather than going higher. Sized\nfor the pixel, not the instrument — a 2400 will happily deliver 1 A into a\nsmall cell.",
      "choices": [],
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.current_compliance_a"
+     ]
     },
     {
      "name": "smu_voltage_compliance_v",
+     "label": "Voltage compliance",
      "value": 2.0,
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -530,15 +658,19 @@
      "unit": "V",
      "default": 2.0,
      "doc": "The most voltage the 2400 will put across the device while it sources current (`:SENS:VOLT:PROT:LEV`).",
-     "doc_full": "The most voltage the 2400 will put across the device while it sources\ncurrent (`:SENS:VOLT:PROT:LEV`). With 0 A sourced \u2014 the V_oc reading \u2014 this\nis what stops the output swinging to the rail if a contact opens.",
+     "doc_full": "The most voltage the 2400 will put across the device while it sources\ncurrent (`:SENS:VOLT:PROT:LEV`). With 0 A sourced — the V_oc reading — this\nis what stops the output swinging to the rail if a contact opens.",
      "choices": [],
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.voltage_compliance_v"
+     ]
     },
     {
      "name": "smu_settle_jsc_ms",
+     "label": "J_sc settle",
      "value": 1000.0,
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -552,10 +684,14 @@
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.settle_jsc_ms"
+     ]
     },
     {
      "name": "smu_settle_voc_ms",
+     "label": "V_oc settle",
      "value": 1000.0,
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -569,10 +705,14 @@
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.settle_voc_ms"
+     ]
     },
     {
      "name": "smu_settle_jsat_ms",
+     "label": "J_sat settle",
      "value": 1000.0,
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -586,10 +726,14 @@
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.settle_jsat_ms"
+     ]
     },
     {
      "name": "smu_nplc",
+     "label": "NPLC",
      "value": 1.0,
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -603,10 +747,14 @@
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.nplc"
+     ]
     },
     {
      "name": "smu_averaging",
+     "label": "Readings averaged",
      "value": 10,
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -620,10 +768,14 @@
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.averaging"
+     ]
     },
     {
      "name": "smu_terminals",
+     "label": "Terminals",
      "value": "FRON",
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -640,10 +792,14 @@
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.terminals"
+     ]
     },
     {
      "name": "smu_four_wire",
+     "label": "Four-wire sensing",
      "value": false,
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -657,7 +813,10 @@
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.four_wire"
+     ]
     }
    ]
   },
@@ -668,17 +827,21 @@
    "kind": "measurement",
    "relay": "transient",
    "estimate_s": 80.0,
-   "estimate_text": "one shot \u2248 0.8 s (default) \u00b7 100 loops \u00d7 1 pts \u2248 1.3 min",
+   "estimate_text": "one shot ≈ 0.8 s (default) · 100 loops × 1 pts ≈ 1.3 min",
+   "estimate": {
+    "seconds": 80.0
+   },
    "needs": [
     {
      "code": "voc",
-     "text": "none \u00b7 run jv_bace first"
+     "text": "none · run jv_bace first"
     }
    ],
    "last": null,
    "params": [
     {
      "name": "axis_name",
+     "label": "Scan parameter",
      "value": "vpre",
      "source": "run.toml",
      "detail": "run.toml [axis]",
@@ -696,10 +859,14 @@
      "group": "axis",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "axis.name"
+     ]
     },
     {
      "name": "axis_start",
+     "label": "Scan start",
      "value": 0.0,
      "source": "run.toml",
      "detail": "run.toml [axis]",
@@ -713,10 +880,14 @@
      "group": "axis",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "axis.start"
+     ]
     },
     {
      "name": "axis_stop",
+     "label": "Scan stop",
      "value": 0.0,
      "source": "run.toml",
      "detail": "run.toml [axis]",
@@ -730,10 +901,14 @@
      "group": "axis",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "axis.stop"
+     ]
     },
     {
      "name": "axis_step",
+     "label": "Scan step",
      "value": 0.0,
      "source": "run.toml",
      "detail": "run.toml [axis]",
@@ -747,10 +922,14 @@
      "group": "axis",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "axis.step"
+     ]
     },
     {
      "name": "centre_on_voc",
+     "label": "Centre on V_oc",
      "value": true,
      "source": "run.toml",
      "detail": "run.toml [axis]",
@@ -764,10 +943,14 @@
      "group": "axis",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "axis.centre_on_voc"
+     ]
     },
     {
      "name": "vpre",
+     "label": "V_pre",
      "value": 0.0,
      "source": "default",
      "detail": "",
@@ -781,10 +964,14 @@
      "group": "pinned",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "pinned.vpre"
+     ]
     },
     {
      "name": "vcoll",
+     "label": "V_coll",
      "value": -1.0,
      "source": "run.toml",
      "detail": "run.toml [pinned]",
@@ -798,10 +985,14 @@
      "group": "pinned",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "pinned.vcoll"
+     ]
     },
     {
      "name": "delay_ns",
+     "label": "Delay",
      "value": 90.0,
      "source": "run.toml",
      "detail": "run.toml [pinned]",
@@ -815,10 +1006,14 @@
      "group": "pinned",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "pinned.delay_ns"
+     ]
     },
     {
      "name": "vpre_on_voc",
+     "label": "V_pre from V_oc",
      "value": false,
      "source": "default",
      "detail": "",
@@ -832,10 +1027,12 @@
      "group": "pinned",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": []
     },
     {
      "name": "n_loops",
+     "label": "Loops",
      "value": 100,
      "source": "run.toml",
      "detail": "run.toml [acquisition]",
@@ -849,10 +1046,14 @@
      "group": "acquisition",
      "nullable": false,
      "minimum": 1,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "acquisition.n_loops"
+     ]
     },
     {
      "name": "led_v",
+     "label": "LED level",
      "value": 1.0,
      "source": "run.toml",
      "detail": "run.toml [illumination]",
@@ -866,10 +1067,14 @@
      "group": "illumination",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "illumination.level_v"
+     ]
     },
     {
      "name": "led_low_v",
+     "label": "LED low level",
      "value": 0.4,
      "source": "run.toml",
      "detail": "run.toml [illumination]",
@@ -883,10 +1088,14 @@
      "group": "illumination",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "illumination.low_level_v"
+     ]
     },
     {
      "name": "voc",
+     "label": "V_oc",
      "value": null,
      "source": "default",
      "detail": "",
@@ -900,10 +1109,12 @@
      "group": "illumination",
      "nullable": true,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": []
     },
     {
      "name": "measure_dc",
+     "label": "DC metrics",
      "value": false,
      "source": "default",
      "detail": "",
@@ -917,10 +1128,12 @@
      "group": "illumination",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": []
     },
     {
      "name": "v_sat",
+     "label": "J_sat bias",
      "value": -1.0,
      "source": "run.toml",
      "detail": "run.toml [illumination]",
@@ -934,10 +1147,14 @@
      "group": "illumination",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "illumination.v_sat"
+     ]
     },
     {
      "name": "led_settle_s",
+     "label": "LED settle",
      "value": 2.0,
      "source": "default",
      "detail": "",
@@ -951,10 +1168,12 @@
      "group": "illumination",
      "nullable": false,
      "minimum": 0.0,
-     "maximum": null
+     "maximum": null,
+     "recipe": []
     },
     {
      "name": "led_settle_max_s",
+     "label": "LED settle limit",
      "value": 60.0,
      "source": "default",
      "detail": "",
@@ -968,10 +1187,12 @@
      "group": "illumination",
      "nullable": false,
      "minimum": 0.0,
-     "maximum": null
+     "maximum": null,
+     "recipe": []
     },
     {
      "name": "led_settle_tolerance",
+     "label": "LED settle tolerance",
      "value": 0.02,
      "source": "default",
      "detail": "",
@@ -985,10 +1206,12 @@
      "group": "illumination",
      "nullable": false,
      "minimum": 0.0,
-     "maximum": null
+     "maximum": null,
+     "recipe": []
     },
     {
      "name": "n_averages",
+     "label": "Hardware averages",
      "value": 200,
      "source": "run.toml",
      "detail": "run.toml [acquisition]",
@@ -1002,10 +1225,14 @@
      "group": "acquisition",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "acquisition.n_averages"
+     ]
     },
     {
      "name": "timebase_ns_per_div",
+     "label": "Timebase",
      "value": 200.0,
      "source": "run.toml",
      "detail": "run.toml [acquisition]",
@@ -1013,16 +1240,20 @@
      "type": "float",
      "unit": "ns/div",
      "default": 200.0,
-     "doc": "The scope's horizontal scale, in nanoseconds per division with ten divisions across the record \u2014 so the record is ten times this.",
-     "doc_full": "The scope's horizontal scale, in nanoseconds per division with ten\ndivisions across the record \u2014 so the record is ten times this.\n\n200 is what the LabVIEW panel shows (`Timebase (200 ns) = 200E+0`) and what\nthe 2026-08 archive was taken with. It briefly defaulted to 500 here on the\nargument that ten divisions should equal `pulse_width_ns`; a screenshot of\nthe panel on 2026-09-01 shows Timebase 200 ns *and* Pulse Width 5e3 ns side\nby side, so they were never meant to be equal. The record is a 2 us window\nonto a 5 us pulse: only the leading edge is in it, which is the edge the\nmeasurement is about.\n\nIt also fixes `t0_int_s`: at 200 ns/div the trigger sits 200 ns into the\nrecord, so the panel's record-referenced 320 ns is 120 ns after the trigger\n-- which is what `run.toml` carries as `trigger` + 1.185e-7.",
+     "doc": "The scope's horizontal scale, in nanoseconds per division with ten divisions across the record — so the record is ten times this.",
+     "doc_full": "The scope's horizontal scale, in nanoseconds per division with ten\ndivisions across the record — so the record is ten times this.\n\n200 is what the LabVIEW panel shows (`Timebase (200 ns) = 200E+0`) and what\nthe 2026-08 archive was taken with. It briefly defaulted to 500 here on the\nargument that ten divisions should equal `pulse_width_ns`; a screenshot of\nthe panel on 2026-09-01 shows Timebase 200 ns *and* Pulse Width 5e3 ns side\nby side, so they were never meant to be equal. The record is a 2 us window\nonto a 5 us pulse: only the leading edge is in it, which is the edge the\nmeasurement is about.\n\nIt also fixes `t0_int_s`: at 200 ns/div the trigger sits 200 ns into the\nrecord, so the panel's record-referenced 320 ns is 120 ns after the trigger\n-- which is what `run.toml` carries as `trigger` + 1.185e-7.",
      "choices": [],
      "group": "acquisition",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "acquisition.timebase_ns_per_div"
+     ]
     },
     {
      "name": "record_length",
+     "label": "Record length",
      "value": 5000,
      "source": "run.toml",
      "detail": "run.toml [acquisition]",
@@ -1031,15 +1262,19 @@
      "unit": "",
      "default": 5000,
      "doc": "How many samples the scope is asked for per trace.",
-     "doc_full": "How many samples the scope is asked for per trace. It may return fewer\n\u2014 5000 gave 4000 in the 2026-08-07 archive \u2014 so nothing here assumes it got\nwhat it asked for.",
+     "doc_full": "How many samples the scope is asked for per trace. It may return fewer\n— 5000 gave 4000 in the 2026-08-07 archive — so nothing here assumes it got\nwhat it asked for.",
      "choices": [],
      "group": "acquisition",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "acquisition.record_length"
+     ]
     },
     {
      "name": "t0_int_s",
+     "label": "Integration start",
      "value": 1.205e-07,
      "source": "run.toml",
      "detail": "run.toml [acquisition]",
@@ -1053,10 +1288,14 @@
      "group": "processing",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "acquisition.t0_int_s"
+     ]
     },
     {
      "name": "t0_int_reference",
+     "label": "",
      "value": "trigger",
      "source": "run.toml",
      "detail": "run.toml [acquisition]",
@@ -1064,8 +1303,8 @@
      "type": "enum",
      "unit": "",
      "default": "record",
-     "doc": "`record`, `trigger` or `pulse` \u2014 what `t0_int_s` is measured from.",
-     "doc_full": "`record`, `trigger` or `pulse` \u2014 what `t0_int_s` is measured from.\n\n**`record`** measures from the first sample. That is what the original\nengine did and what the 2026-08-07 regression reproduces to 1.6e-06, so it\nstays the default and nothing about the validated path changes.\n\nIts weakness is that the trigger's position inside the record is a function\nof the timebase (see `timebase_ns_per_div`), so a record-time window\nsilently slides relative to the signal whenever the timebase changes \u2014\n318 ns of record time is 118.5 ns *after* the trigger at 200 ns/div and\n182 ns *before* it at 500 ns/div.\n\n**`trigger`** measures from the trigger instead, using the instrument's own\n`:WAV:XOR?`, which every `Trace` carries as `t0`. The two agree exactly at\nthe archive's geometry \u2014 118.5 ns after a trigger sitting 199.5 ns into the\nrecord is 318.0 ns of record time, i.e. `3.18e-7` \u2014 so this is a change of\nspelling, not of value. Prefer it for new work; `run.toml` selects it.\n\n**`pulse`** measures from the applied pulse edge, i.e. from `:PULS:DEL1`.\nThe scope triggers on the 81150A's *Sync*, which is **not** delayed by\n`:PULS:DEL1` \u2014 only the output is. So along a delay axis the transient\nslides through the record while a trigger-referenced window stands still,\nand each point gets a different slice of its own transient. Q(delay) is then\nhalf physics and half window. `pulse` makes the window travel with the\ntransient, which is what a delay scan of a *measurement* wants.\n\n(For a delay scan whose job is to *find* the zero, `trigger` with\n`t0_int_s = 0` is the neutral choice instead: the window covers the whole\npost-trigger record, so every point is treated identically without assuming\nwhere the transient is. See `run-delay.toml`.)",
+     "doc": "`record`, `trigger` or `pulse` — what `t0_int_s` is measured from.",
+     "doc_full": "`record`, `trigger` or `pulse` — what `t0_int_s` is measured from.\n\n**`record`** measures from the first sample. That is what the original\nengine did and what the 2026-08-07 regression reproduces to 1.6e-06, so it\nstays the default and nothing about the validated path changes.\n\nIts weakness is that the trigger's position inside the record is a function\nof the timebase (see `timebase_ns_per_div`), so a record-time window\nsilently slides relative to the signal whenever the timebase changes —\n318 ns of record time is 118.5 ns *after* the trigger at 200 ns/div and\n182 ns *before* it at 500 ns/div.\n\n**`trigger`** measures from the trigger instead, using the instrument's own\n`:WAV:XOR?`, which every `Trace` carries as `t0`. The two agree exactly at\nthe archive's geometry — 118.5 ns after a trigger sitting 199.5 ns into the\nrecord is 318.0 ns of record time, i.e. `3.18e-7` — so this is a change of\nspelling, not of value. Prefer it for new work; `run.toml` selects it.\n\n**`pulse`** measures from the applied pulse edge, i.e. from `:PULS:DEL1`.\nThe scope triggers on the 81150A's *Sync*, which is **not** delayed by\n`:PULS:DEL1` — only the output is. So along a delay axis the transient\nslides through the record while a trigger-referenced window stands still,\nand each point gets a different slice of its own transient. Q(delay) is then\nhalf physics and half window. `pulse` makes the window travel with the\ntransient, which is what a delay scan of a *measurement* wants.\n\n(For a delay scan whose job is to *find* the zero, `trigger` with\n`t0_int_s = 0` is the neutral choice instead: the window covers the whole\npost-trigger record, so every point is treated identically without assuming\nwhere the transient is. See `run-delay.toml`.)",
      "choices": [
       "record",
       "trigger",
@@ -1074,10 +1313,12 @@
      "group": "processing",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": []
     },
     {
      "name": "output_polarity",
+     "label": "Output polarity",
      "value": "NORM",
      "source": "run.toml",
      "detail": "run.toml [acquisition]",
@@ -1086,7 +1327,7 @@
      "unit": "",
      "default": "auto",
      "doc": "What to do with the 81150A's output polarity (`:OUTP1:POL`): `auto`, `NORM`, `INV` or `leave`.",
-     "doc_full": "What to do with the 81150A's output polarity (`:OUTP1:POL`): `auto`,\n`NORM`, `INV` or `leave`.\n\n`auto` uses `inverted_output`, which is what every run did before this\nexisted. `leave` writes nothing: the polarity found on the instrument is\nread back and reported instead.\n\n`leave` is not laziness. Which level the device rests at between pulses\ndepends on how the sample is wired, and that is not always known \u2014 the\ndevice's own terminals may be reversed. Writing a polarity then is a guess,\nand a wrong guess puts the extraction on the *other* edge of the pulse,\n5 us away and outside the record, while still producing a transient (the\nstep into prebias) that integrates to a plausible charge. Declining to set\nit, and recording what was there, is the honest option.",
+     "doc_full": "What to do with the 81150A's output polarity (`:OUTP1:POL`): `auto`,\n`NORM`, `INV` or `leave`.\n\n`auto` uses `inverted_output`, which is what every run did before this\nexisted. `leave` writes nothing: the polarity found on the instrument is\nread back and reported instead.\n\n`leave` is not laziness. Which level the device rests at between pulses\ndepends on how the sample is wired, and that is not always known — the\ndevice's own terminals may be reversed. Writing a polarity then is a guess,\nand a wrong guess puts the extraction on the *other* edge of the pulse,\n5 us away and outside the record, while still producing a transient (the\nstep into prebias) that integrates to a plausible charge. Declining to set\nit, and recording what was there, is the honest option.",
      "choices": [
       "auto",
       "NORM",
@@ -1096,10 +1337,14 @@
      "group": "output",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "acquisition.output_polarity"
+     ]
     },
     {
      "name": "pulse_width_ns",
+     "label": "Pulse width",
      "value": 5000.0,
      "source": "run.toml",
      "detail": "run.toml [acquisition]",
@@ -1113,10 +1358,14 @@
      "group": "timing",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "acquisition.pulse_width_ns"
+     ]
     },
     {
      "name": "pulse_frequency_hz",
+     "label": "Pulse frequency",
      "value": 500.0,
      "source": "run.toml",
      "detail": "run.toml [acquisition]",
@@ -1130,10 +1379,14 @@
      "group": "timing",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "acquisition.pulse_frequency_hz"
+     ]
     },
     {
      "name": "duty_percent",
+     "label": "Duty cycle",
      "value": 50.0,
      "source": "run.toml",
      "detail": "run.toml [acquisition]",
@@ -1147,10 +1400,14 @@
      "group": "timing",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "acquisition.duty_percent"
+     ]
     },
     {
      "name": "offset_correct",
+     "label": "Baseline correction",
      "value": true,
      "source": "run.toml",
      "detail": "run.toml [acquisition]",
@@ -1164,10 +1421,14 @@
      "group": "processing",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "acquisition.offset_correct"
+     ]
     },
     {
      "name": "invert_polarity",
+     "label": "Invert levels",
      "value": true,
      "source": "run.toml",
      "detail": "run.toml [acquisition]",
@@ -1175,16 +1436,20 @@
      "type": "bool",
      "unit": "",
      "default": false,
-     "doc": "Swap and negate both 81150A bias levels in software, before they are written, for a device of the opposite architecture \u2014 the original's `New Sample?`.",
-     "doc_full": "Swap and negate both 81150A bias levels in software, before they are\nwritten, for a device of the opposite architecture \u2014 the original's\n`New Sample?`. A sign convention, not a feature \u2014\ngetting it wrong flips the charge, it does not merely disable something.\n\nThis is the *software* half. `inverted_output` below is the instrument half.\nThey are independent, and the two names are close enough that this docstring\nspent a while attached to the wrong one.",
+     "doc": "Swap and negate both 81150A bias levels in software, before they are written, for a device of the opposite architecture — the original's `New Sample?`.",
+     "doc_full": "Swap and negate both 81150A bias levels in software, before they are\nwritten, for a device of the opposite architecture — the original's\n`New Sample?`. A sign convention, not a feature —\ngetting it wrong flips the charge, it does not merely disable something.\n\nThis is the *software* half. `inverted_output` below is the instrument half.\nThey are independent, and the two names are close enough that this docstring\nspent a while attached to the wrong one.",
      "choices": [],
      "group": "processing",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "acquisition.invert_polarity"
+     ]
     },
     {
      "name": "inverted_output",
+     "label": "Inverted output",
      "value": false,
      "source": "run.toml",
      "detail": "run.toml [acquisition]",
@@ -1192,16 +1457,20 @@
      "type": "bool",
      "unit": "",
      "default": false,
-     "doc": "`:OUTP:POL INV` on the 81150A \u2014 a *different* knob from `invert_polarity`.",
-     "doc_full": "`:OUTP:POL INV` on the 81150A \u2014 a *different* knob from `invert_polarity`.\n\n`invert_polarity` is the MathScript half of the original's `New Sample?`:\nit swaps and negates the two computed levels. This is the other half.\n`Agilent 81150StandardWaveformTDCF20131120.vi` calls\n`Configure Output Polarity.vi` from a case structure whose two frames hold\n`Polarity = 0 (Normal)` and `Polarity = 1 (Inverted)`, so the original sets\none or the other per shot -- and which frame goes with which sample type was\nan open question, answered by measurement rather than by the binary.\n\nIt matters because the 81150A's *low* level is what the device sits at\nbetween pulses. With NORM and `LoLvl = Vcoll` the device is held in\nextraction and pulsed to V_pre; with INV it is held at V_pre and pulsed to\nV_coll, which is BACE as the physics describes it.",
+     "doc": "`:OUTP:POL INV` on the 81150A — a *different* knob from `invert_polarity`.",
+     "doc_full": "`:OUTP:POL INV` on the 81150A — a *different* knob from `invert_polarity`.\n\n`invert_polarity` is the MathScript half of the original's `New Sample?`:\nit swaps and negates the two computed levels. This is the other half.\n`Agilent 81150StandardWaveformTDCF20131120.vi` calls\n`Configure Output Polarity.vi` from a case structure whose two frames hold\n`Polarity = 0 (Normal)` and `Polarity = 1 (Inverted)`, so the original sets\none or the other per shot -- and which frame goes with which sample type was\nan open question, answered by measurement rather than by the binary.\n\nIt matters because the 81150A's *low* level is what the device sits at\nbetween pulses. With NORM and `LoLvl = Vcoll` the device is held in\nextraction and pulsed to V_pre; with INV it is held at V_pre and pulsed to\nV_coll, which is BACE as the physics describes it.",
      "choices": [],
      "group": "output",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "acquisition.inverted_output"
+     ]
     },
     {
      "name": "settle_s",
+     "label": "Light settle",
      "value": 0.3,
      "source": "run.toml",
      "detail": "run.toml [acquisition]",
@@ -1215,10 +1484,14 @@
      "group": "timing",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "acquisition.settle_s"
+     ]
     },
     {
      "name": "dark_settle_s",
+     "label": "Dark settle",
      "value": 0.3,
      "source": "run.toml",
      "detail": "run.toml [acquisition]",
@@ -1232,10 +1505,14 @@
      "group": "timing",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "acquisition.dark_settle_s"
+     ]
     },
     {
      "name": "dark_reference",
+     "label": "Dark reference",
      "value": "translated",
      "source": "default",
      "detail": "",
@@ -1252,10 +1529,14 @@
      "group": "processing",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "acquisition.dark_reference"
+     ]
     },
     {
      "name": "shutter_settle_s",
+     "label": "Shutter settle",
      "value": 5.0,
      "source": "run.toml",
      "detail": "run.toml [acquisition]",
@@ -1269,10 +1550,14 @@
      "group": "timing",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "acquisition.shutter_settle_s"
+     ]
     },
     {
      "name": "read_intensity",
+     "label": "Power per shot",
      "value": true,
      "source": "run.toml",
      "detail": "run.toml [acquisition]",
@@ -1286,10 +1571,14 @@
      "group": "acquisition",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "acquisition.read_intensity"
+     ]
     },
     {
      "name": "acquisition_timeout_s",
+     "label": "Acquisition timeout",
      "value": 30.0,
      "source": "default",
      "detail": "",
@@ -1303,10 +1592,14 @@
      "group": "acquisition",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "acquisition.acquisition_timeout_s"
+     ]
     },
     {
      "name": "external_trigger",
+     "label": "External trigger",
      "value": true,
      "source": "run.toml",
      "detail": "run.toml [acquisition]",
@@ -1320,10 +1613,14 @@
      "group": "trigger",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "acquisition.external_trigger"
+     ]
     },
     {
      "name": "trigger_slope_positive",
+     "label": "Rising-edge trigger",
      "value": true,
      "source": "run.toml",
      "detail": "run.toml [acquisition]",
@@ -1331,16 +1628,20 @@
      "type": "bool",
      "unit": "",
      "default": true,
-     "doc": "Arm the 81150A on the rising edge of the external trigger \u2014 the 33220A Sync.",
-     "doc_full": "Arm the 81150A on the rising edge of the external trigger \u2014 the 33220A\nSync. With the 33220A at\n`:OUTP:POL INV` the rising Sync edge is light-off, the edge extraction\nhas to follow; arming on the falling edge would extract in the middle of\ngeneration. Moot when `external_trigger` is False.",
+     "doc": "Arm the 81150A on the rising edge of the external trigger — the 33220A Sync.",
+     "doc_full": "Arm the 81150A on the rising edge of the external trigger — the 33220A\nSync. With the 33220A at\n`:OUTP:POL INV` the rising Sync edge is light-off, the edge extraction\nhas to follow; arming on the falling edge would extract in the middle of\ngeneration. Moot when `external_trigger` is False.",
      "choices": [],
      "group": "trigger",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "acquisition.trigger_slope_positive"
+     ]
     },
     {
      "name": "trigger_sweep",
+     "label": "Trigger sweep",
      "value": "AUTO",
      "source": "run.toml",
      "detail": "run.toml [acquisition]",
@@ -1348,8 +1649,8 @@
      "type": "enum",
      "unit": "",
      "default": "AUTO",
-     "doc": "**The scope's** trigger sweep mode, `AUTO` or `TRIG` \u2014 not the 81150A's arming, which is `external_trigger` beside it.",
-     "doc_full": "**The scope's** trigger sweep mode, `AUTO` or `TRIG` \u2014 not the 81150A's\narming, which is `external_trigger` beside it. The recovered driver used\nAUTO, so that is the default.\nAUTO sweeps anyway when no trigger arrives, so a loose sync cable produces\nuntriggered noise whose dark subtraction cancels to nearly zero charge \u2014 a\nplausible result from a disconnected cable. TRIG waits instead, turning that\ninto a timeout. Worth switching once the trigger path is known good.",
+     "doc": "**The scope's** trigger sweep mode, `AUTO` or `TRIG` — not the 81150A's arming, which is `external_trigger` beside it.",
+     "doc_full": "**The scope's** trigger sweep mode, `AUTO` or `TRIG` — not the 81150A's\narming, which is `external_trigger` beside it. The recovered driver used\nAUTO, so that is the default.\nAUTO sweeps anyway when no trigger arrives, so a loose sync cable produces\nuntriggered noise whose dark subtraction cancels to nearly zero charge — a\nplausible result from a disconnected cable. TRIG waits instead, turning that\ninto a timeout. Worth switching once the trigger path is known good.",
      "choices": [
       "AUTO",
       "TRIG"
@@ -1357,10 +1658,14 @@
      "group": "trigger",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "acquisition.trigger_sweep"
+     ]
     },
     {
      "name": "calibrate_trigger",
+     "label": "Calibrate trigger",
      "value": true,
      "source": "run.toml",
      "detail": "run.toml [acquisition]",
@@ -1374,10 +1679,14 @@
      "group": "trigger",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "acquisition.calibrate_trigger"
+     ]
     },
     {
      "name": "store_shots",
+     "label": "Store every shot",
      "value": false,
      "source": "run.toml",
      "detail": "run.toml [acquisition]",
@@ -1391,10 +1700,14 @@
      "group": "acquisition",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "acquisition.store_shots"
+     ]
     },
     {
      "name": "smu_current_compliance_a",
+     "label": "Current compliance",
      "value": 0.01,
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -1403,15 +1716,19 @@
      "unit": "A",
      "default": 0.05,
      "doc": "The most current the 2400 will pass while it sources voltage (`:SENS:CURR:PROT:LEV`); it clamps there rather than going higher.",
-     "doc_full": "The most current the 2400 will pass while it sources voltage\n(`:SENS:CURR:PROT:LEV`); it clamps there rather than going higher. Sized\nfor the pixel, not the instrument \u2014 a 2400 will happily deliver 1 A into a\nsmall cell.",
+     "doc_full": "The most current the 2400 will pass while it sources voltage\n(`:SENS:CURR:PROT:LEV`); it clamps there rather than going higher. Sized\nfor the pixel, not the instrument — a 2400 will happily deliver 1 A into a\nsmall cell.",
      "choices": [],
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.current_compliance_a"
+     ]
     },
     {
      "name": "smu_voltage_compliance_v",
+     "label": "Voltage compliance",
      "value": 2.0,
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -1420,15 +1737,19 @@
      "unit": "V",
      "default": 2.0,
      "doc": "The most voltage the 2400 will put across the device while it sources current (`:SENS:VOLT:PROT:LEV`).",
-     "doc_full": "The most voltage the 2400 will put across the device while it sources\ncurrent (`:SENS:VOLT:PROT:LEV`). With 0 A sourced \u2014 the V_oc reading \u2014 this\nis what stops the output swinging to the rail if a contact opens.",
+     "doc_full": "The most voltage the 2400 will put across the device while it sources\ncurrent (`:SENS:VOLT:PROT:LEV`). With 0 A sourced — the V_oc reading — this\nis what stops the output swinging to the rail if a contact opens.",
      "choices": [],
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.voltage_compliance_v"
+     ]
     },
     {
      "name": "smu_settle_jsc_ms",
+     "label": "J_sc settle",
      "value": 1000.0,
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -1442,10 +1763,14 @@
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.settle_jsc_ms"
+     ]
     },
     {
      "name": "smu_settle_voc_ms",
+     "label": "V_oc settle",
      "value": 1000.0,
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -1459,10 +1784,14 @@
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.settle_voc_ms"
+     ]
     },
     {
      "name": "smu_settle_jsat_ms",
+     "label": "J_sat settle",
      "value": 1000.0,
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -1476,10 +1805,14 @@
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.settle_jsat_ms"
+     ]
     },
     {
      "name": "smu_nplc",
+     "label": "NPLC",
      "value": 1.0,
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -1493,10 +1826,14 @@
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.nplc"
+     ]
     },
     {
      "name": "smu_averaging",
+     "label": "Readings averaged",
      "value": 10,
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -1510,10 +1847,14 @@
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.averaging"
+     ]
     },
     {
      "name": "smu_terminals",
+     "label": "Terminals",
      "value": "FRON",
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -1530,10 +1871,14 @@
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.terminals"
+     ]
     },
     {
      "name": "smu_four_wire",
+     "label": "Four-wire sensing",
      "value": false,
      "source": "run.toml",
      "detail": "run.toml [sourcemeter]",
@@ -1547,7 +1892,10 @@
      "group": "sourcemeter",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "sourcemeter.four_wire"
+     ]
     }
    ]
   },
@@ -1559,11 +1907,15 @@
    "relay": null,
    "estimate_s": 0.2,
    "estimate_text": "nothing to set",
+   "estimate": {
+    "seconds": 0.2
+   },
    "needs": [],
    "last": null,
    "params": [
     {
      "name": "shutter",
+     "label": "Shutter",
      "value": "leave",
      "source": "default",
      "detail": "",
@@ -1581,10 +1933,12 @@
      "group": "illumination",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": []
     },
     {
      "name": "led_mode",
+     "label": "LED mode",
      "value": "leave",
      "source": "default",
      "detail": "",
@@ -1603,10 +1957,12 @@
      "group": "illumination",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": []
     },
     {
      "name": "led_v",
+     "label": "LED level",
      "value": 1.0,
      "source": "run.toml",
      "detail": "run.toml [illumination]",
@@ -1620,10 +1976,14 @@
      "group": "illumination",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "illumination.level_v"
+     ]
     },
     {
      "name": "led_low_v",
+     "label": "LED low level",
      "value": 0.4,
      "source": "run.toml",
      "detail": "run.toml [illumination]",
@@ -1637,10 +1997,14 @@
      "group": "illumination",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "illumination.low_level_v"
+     ]
     },
     {
      "name": "pulse_frequency_hz",
+     "label": "Pulse frequency",
      "value": 500.0,
      "source": "run.toml",
      "detail": "run.toml [acquisition]",
@@ -1654,10 +2018,14 @@
      "group": "timing",
      "nullable": false,
      "minimum": 0.0,
-     "maximum": null
+     "maximum": null,
+     "recipe": [
+      "acquisition.pulse_frequency_hz"
+     ]
     },
     {
      "name": "duty_percent",
+     "label": "Duty cycle",
      "value": 50.0,
      "source": "run.toml",
      "detail": "run.toml [acquisition]",
@@ -1671,10 +2039,14 @@
      "group": "timing",
      "nullable": false,
      "minimum": 0.0,
-     "maximum": 100.0
+     "maximum": 100.0,
+     "recipe": [
+      "acquisition.duty_percent"
+     ]
     },
     {
      "name": "settle_s",
+     "label": "Settle after",
      "value": 0.0,
      "source": "default",
      "detail": "",
@@ -1688,7 +2060,8 @@
      "group": "timing",
      "nullable": false,
      "minimum": 0.0,
-     "maximum": null
+     "maximum": null,
+     "recipe": []
     }
    ]
   },
@@ -1700,11 +2073,15 @@
    "relay": null,
    "estimate_s": 0.1,
    "estimate_text": "one reading",
+   "estimate": {
+    "seconds": 0.1
+   },
    "needs": [],
    "last": null,
    "params": [
     {
      "name": "wavelength_nm",
+     "label": "Wavelength",
      "value": 530.0,
      "source": "default",
      "detail": "",
@@ -1718,10 +2095,12 @@
      "group": "acquisition",
      "nullable": false,
      "minimum": 0.0,
-     "maximum": null
+     "maximum": null,
+     "recipe": []
     },
     {
      "name": "samples",
+     "label": "Samples",
      "value": 1,
      "source": "default",
      "detail": "",
@@ -1735,7 +2114,8 @@
      "group": "acquisition",
      "nullable": false,
      "minimum": 1,
-     "maximum": null
+     "maximum": null,
+     "recipe": []
     }
    ]
   },
@@ -1746,17 +2126,21 @@
    "kind": "utility",
    "relay": null,
    "estimate_s": 60.0,
-   "estimate_text": "settle \u2014 (331 or operator) + hold 1.0 min",
+   "estimate_text": "settle — (331 or operator) + hold 1.0 min",
+   "estimate": {
+    "seconds": 60.0
+   },
    "needs": [
     {
      "code": "temperature",
-     "text": "331 not wired \u00b7 pauses for a manual set"
+     "text": "331 not wired · pauses for a manual set"
     }
    ],
    "last": null,
    "params": [
     {
      "name": "setpoint_k",
+     "label": "Setpoint",
      "value": 295.0,
      "source": "default",
      "detail": "",
@@ -1770,10 +2154,12 @@
      "group": "timing",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": []
     },
     {
      "name": "tolerance_k",
+     "label": "Tolerance",
      "value": 0.2,
      "source": "default",
      "detail": "",
@@ -1787,10 +2173,12 @@
      "group": "timing",
      "nullable": false,
      "minimum": 0.0,
-     "maximum": null
+     "maximum": null,
+     "recipe": []
     },
     {
      "name": "hold_s",
+     "label": "Hold",
      "value": 60.0,
      "source": "default",
      "detail": "",
@@ -1804,10 +2192,12 @@
      "group": "timing",
      "nullable": false,
      "minimum": 0.0,
-     "maximum": null
+     "maximum": null,
+     "recipe": []
     },
     {
      "name": "timeout_s",
+     "label": "Timeout",
      "value": 1800.0,
      "source": "default",
      "detail": "",
@@ -1821,7 +2211,8 @@
      "group": "timing",
      "nullable": false,
      "minimum": 0.0,
-     "maximum": null
+     "maximum": null,
+     "recipe": []
     }
    ]
   },
@@ -1833,6 +2224,9 @@
    "relay": null,
    "estimate_s": 1.0,
    "estimate_text": "outputs off, shutter shut",
+   "estimate": {
+    "seconds": 1.0
+   },
    "needs": [],
    "last": null,
    "params": []
@@ -1845,11 +2239,15 @@
    "relay": null,
    "estimate_s": 1.0,
    "estimate_text": "1.0 s",
+   "estimate": {
+    "seconds": 1.0
+   },
    "needs": [],
    "last": null,
    "params": [
     {
      "name": "seconds",
+     "label": "Duration",
      "value": 1.0,
      "source": "default",
      "detail": "",
@@ -1863,7 +2261,8 @@
      "group": "timing",
      "nullable": false,
      "minimum": 0.0,
-     "maximum": null
+     "maximum": null,
+     "recipe": []
     }
    ]
   },
@@ -1875,11 +2274,15 @@
    "relay": null,
    "estimate_s": 0.0,
    "estimate_text": "journal entry",
+   "estimate": {
+    "seconds": 0.0
+   },
    "needs": [],
    "last": null,
    "params": [
     {
      "name": "text",
+     "label": "Text",
      "value": "",
      "source": "default",
      "detail": "",
@@ -1893,7 +2296,8 @@
      "group": "",
      "nullable": false,
      "minimum": null,
-     "maximum": null
+     "maximum": null,
+     "recipe": []
     }
    ]
   }

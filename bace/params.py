@@ -122,7 +122,7 @@ class ParamSpec:
     doc: str = ""
     """One sentence naming the instrument and the parameter's effect.
 
-    The console displays it below the field. Names such as `smu_nplc`,
+    The console shows it in the field's tooltip and help line. Names such as `smu_nplc`,
     `trigger_sweep` and `duty_percent` need this context. The description must
     distinguish instrument polarity (`inverted_output`) from arithmetic on
     levels (`invert_polarity`).
@@ -141,6 +141,10 @@ class ParamSpec:
     minimum: float | None = None
     maximum: float | None = None
     nullable: bool = False
+    label: str = ""
+    """The name the console shows: a sentence-case noun phrase without a unit,
+    such as "Hardware averages". `name` stays the identifier in `run.toml`,
+    files and exports. The catalogue labels every module parameter."""
 
     def __post_init__(self) -> None:
         if self.type not in TYPES:
@@ -529,6 +533,7 @@ class ParamSet:
         for spec, pv in zip(self._specs.values(), self.resolve().values()):
             out.append({
                 "name": spec.name,
+                "label": spec.label,
                 "value": _jsonable(pv.value),
                 "source": pv.source.value,
                 "detail": pv.detail,

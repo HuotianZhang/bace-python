@@ -579,7 +579,8 @@ and sends those `PUT`s when the button under the list is clicked.
 {"modules": [
   {"name": "bace", "title": "bace", "status": "built"|"partial"|"not wired",
    "kind": "measurement"|"observer"|"utility",
-   "estimate_s": 16.0, "estimate_text": "one shot ≈ 0.8 s · 20 loops",
+   "estimate_s": 16.0, "estimate_text": "one shot ≈ 0.8 s · 20 loops × 1 pt ≈ 16 s",
+   "estimate": {"seconds": 16.0, "shot_s": 0.8, "shot_source": "default", "loops": 20, "points": 1},
    "needs": [{"code": "voc", "text": "none · run jv_bace first"}],
    "last": {"run_id": "…", "state": "done", "ts": …, "summary": "Q 8.520e-10 ± 1.8e-11 C · 20/20"} | null,
    "params": [ …ParamSet.as_wire()… ]},
@@ -632,9 +633,18 @@ what the run will centre on; rather than `default · null` with an empty
 The shipped `run.toml` has no `[jv]` table. The remaining layers are defaults,
 last used and edited values.
 
-`ParamSpec.doc` is the short field explanation; `doc_full` holds an expanded
-explanation when available. Dataclass fields use `params.field_docs`; service
-parameters also have explicit specifications. Both reach the console.
+`ParamSpec.label` is the name the console shows ("Hardware averages"); the
+catalogue gives every module parameter one (`modules.LABELS`) and refuses a
+parameter without it. `ParamSpec.doc` is the short field explanation;
+`doc_full` holds an expanded explanation when available. Dataclass fields use
+`params.field_docs`; service parameters also have explicit specifications. All
+three reach the console. Each record in `params` also carries `recipe`, the
+`run.toml` keys that set it (`["acquisition.n_averages"]`, empty when none).
+
+`estimate` holds the parts of `estimate_text`: `seconds` (equal to
+`estimate_s`) and, where the module has them, `shot_s` with `shot_source`
+(`journal` or `default`), `loops`, `points` and `curves`. `estimate_text` stays
+for clients that read the sentence.
 Groups are `axis`, `pinned`, `acquisition`, `processing`, `timing`, `trigger`,
 `output`, `illumination`, `sourcemeter` and `led`. `ui-fields.md` describes
 card placement; the service supplies the groups and values.
