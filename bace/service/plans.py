@@ -139,13 +139,18 @@ def _axis_violations(node: Module, allowed: Mapping[str, Mapping[str, Any]]) -> 
     if start != stop and "axis_step" not in node.params:
         return [f"{node.module} sweeps {axis} without axis_step, so the plan cannot tell "
                 "its points"]
+    numeric = sorted({float(c) for c in bound["choices"] if isinstance(c, (int, float))
+                      and not isinstance(c, bool)})
     try:
-        points = Axis(axis, float(start), float(stop),
-                      float(node.params.get("axis_step", 0.0))).values()
-    except (AxisError, TypeError, ValueError) as exc:
+        scan = Axis(axis, float(start), float(stop), float(node.params.get("axis_step", 0.0)))
+        # A scan's points are distinct, so more points than choices cannot all be
+        # choices; counting first keeps a tiny step from building a huge array.
+        if scan.n_points > len(numeric):
+            return [f"{node.module} sweeps {axis} through {scan.n_points} points, the plan "
+                    f"allows {_describe(bound)}"]
+        points = scan.values()
+    except (AxisError, TypeError, ValueError, OverflowError) as exc:
         return [f"{node.module}: the {axis} scan is not a scan ({exc})"]
-    numeric = [c for c in bound["choices"] if isinstance(c, (int, float))
-               and not isinstance(c, bool)]
     off = [float(p) for p in points
            if not any(math.isclose(p, c, rel_tol=1e-9, abs_tol=1e-12) for c in numeric)]
     return [f"{node.module} sweeps {axis} through {off[0]:g}, the plan allows "

@@ -122,7 +122,15 @@ def test_a_scan_over_discrete_choices_applies_only_those_values():
 
     assert env.violations(parsed(scan(-4.0, -0.5, 3.5))) == []
     [v] = env.violations(parsed(scan(-4.0, -0.5, 0.5)))
-    assert "through -3.5" in v
+    assert "through 8 points" in v
+    # a tiny step is refused from its point count, without building the scan
+    [v] = env.violations(parsed(scan(-4.0, -0.5, 1e-10)))
+    assert "through 35000000001 points" in v
+    # as many points as choices: each point is checked
+    three = Envelope.from_wire({**ENVELOPE, "modules": {"bace": {
+        **env.modules["bace"], "vcoll": {"choices": [-4.0, -2.0, -0.5]}}}}, catalogue=CAT)
+    [v] = three.violations(parsed(scan(-4.0, -0.5, 1.75)))
+    assert "through -2.25" in v
     assert env.violations(parsed(scan(-0.5, -0.5, 0.0))) == []
 
 
