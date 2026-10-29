@@ -157,7 +157,7 @@ During validation the previous answer stays visible and marked stale. Start
 is disabled; tree rows wait for the matching schedule. Shot events do not
 revalidate an unchanged tree. A node form uses the bench field component over
 resolved schedule values. Overrides, inherited/derived values and node-only
-rows stay visible; other values fold as "same as bench". A reset remains
+rows stay visible; other values fold as "as on the bench". A reset remains
 available for a forbidden override even when resolution locks the field.
 If resolution fails, the catalogue plus node overrides keeps the form editable.
 
