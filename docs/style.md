@@ -38,10 +38,22 @@ These rules apply to the manual, the other documents, code comments and docstrin
 
 ## The console
 
-| Rule | |
+The console is an instrument panel. Its text is shorter than the manual's: the
+screen shows what a value is and what state it is in, and the manual, the
+tooltip and the assistant explain why.
+
+| Rule | Example |
 |---|---|
-| Labels are nouns or short noun phrases; buttons are verbs | "Integration window", "Start" |
-| A warning states the evidence and the remedy, in that order | "Spike edge 11 ns (limit 8 ns): the trigger moved during the shot. Repeat the point." |
+| An element on screen is a label, a value, a unit and a state. Prose appears only in a warning, a refusal or an empty state, one line long | `Hardware averages  100` |
+| A label is a noun or noun phrase in sentence case, at most three words. A parameter's code name is its identifier, not its label | "Hardware averages", not `n_averages` |
+| A button is a verb in sentence case, at most three words. An armed button repeats the verb with a question mark | "Start", "Save recipe", "Abort now?" |
+| Headings, tabs and card titles are sentence-case nouns. Capitals come only from CSS, in the rail and the zone titles | "Results", "Checks" |
+| Values from the instruments or the wire stay verbatim, in mono. A unit follows the value once; a label never ends in a unit | `vpre`, `NORM`, `5.192 Ω` |
+| A warning or refusal is one line: the evidence, then the remedy. No history, no mechanism | "Spike edge 11 ns (limit 8 ns): the trigger moved. Repeat the point." |
+| An empty state is one noun phrase or one imperative | "No curves yet", "Add a loop or a module" |
+| No em dash in operator text; `—` alone marks an absent value. `·` joins at most two tokens of one value; three facts are cells of a row | `1.020 V · derived` |
+| No internals in operator text: routes, event names, file layouts, check ids as headings | Not: "through POST /plans" |
+| A tooltip is one to three sentences: the code name, what it is, what it changes. An element with a tooltip can take focus | `n_averages`. "Shots summed in the digitiser per point." |
 | Numbers follow `ui-rules.md` §2 | |
 
 ## Review
