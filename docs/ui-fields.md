@@ -156,8 +156,8 @@ account for every parameter.
 
 | # | field | render | shown when |
 |---|---|---|---|
-| 1 | `axis_name` | segmented, 3 choices, labelled *scan parameter* | always |
-| 2 | `axis_start` `axis_stop` `axis_step` | one range row labelled *scan range* + derived point count | always |
+| 1 | `axis_name` | segmented, 3 choices, labelled *Scan parameter* | always |
+| 2 | `axis_start` `axis_stop` `axis_step` | one range row labelled *Scan range* + derived point count | always |
 | 3 | `centre_on_voc` | bool | `axis_name == vpre` |
 | 4 | `voc` + `led_v` | needs row; see below | always |
 | 5 | `measure_dc` | bool | always; it is the *other* way to get a V_oc, and belongs beside the row that says there is none |

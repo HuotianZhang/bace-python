@@ -6,7 +6,7 @@
 
 import { h, fill } from './dom.js';
 import * as fmt from './format.js';
-import { cardModel, foldCount } from './fields.js';
+import { cardModel, foldCount, groupLabel } from './fields.js';
 import { icon } from './icons.js';
 
 /**
@@ -46,8 +46,7 @@ function header(model, ctx, busy, blocked) {
     const danger = action.action === 'led-off';
     buttons.push(h('button' + (danger ? '.btnd' : '.btns'), {
       disabled: busy || null,
-      title: busy ? 'a run holds the bench; only Park is allowed until it ends — Park is on the strip below'
-        : `${action.label} — acts on the bench now`,
+      title: busy ? BUSY_TITLE : `${action.label}. Acts on the bench now.`,
       onclick: () => ctx.act(model, action),
     }, action.label));
   }
@@ -60,14 +59,15 @@ function header(model, ctx, busy, blocked) {
     const plain = slow || PLAIN_RUN.has(model.name);
     buttons.push(h(last && !plain ? 'button.btnp' : slow ? 'button.btnw' : 'button.btns', {
       disabled: busy || blocked.length > 0 || null,
-      title: blocked.length ? blocked.map((c) => `${c.level}: ${c.text}`).join('\n') : model.estimate,
+      title: blocked.length ? blocked.map((c) => `${c.level}: ${c.text}`).join('\n')
+        : busy ? BUSY_TITLE : model.estimate,
       onclick: () => ctx.run(model, run),
     }, run.label));
   }
   return h('div.ch',
     h('span.cn', { text: model.name }),
     model.status !== 'built' ? h('span.tag.nb', { text: model.status }) : null,
-    h('span.cs', { text: subtitle(model) }),
+    subtitle(model),
     model.chips.map((text) => h('span.tag.cost', { text })),
     lastTag(model.last),
     h('span', { style: { flex: '1' } }),
@@ -83,13 +83,28 @@ const SLOW_RUN = new Set(['temperature']);
 /** A read-only run does not need the primary action treatment. */
 const PLAIN_RUN = new Set(['power']);
 
+const BUSY_TITLE = 'A run holds the bench. Only Park acts until it ends.';
+
 /**
- * The estimate describes run cost. Action-only cards omit it because a no-op run
- * estimate would contradict the editable values sent by their actions.
+ * The estimate describes run cost: the time in ink, its count in grey, the shot
+ * time and its source in the title. Action-only cards omit it because a no-op run
+ * estimate would contradict the editable values sent by their actions. Without the
+ * structured estimate the service's sentence stands.
  */
 function subtitle(model) {
-  if (!model.run.length && model.actions.length) return 'acts now · no run, no files';
-  return model.estimate;
+  if (!model.run.length && model.actions.length) return h('span.cs', { text: 'Acts now' });
+  const c = model.cost;
+  const count = c && Number.isInteger(c.points)
+    ? [Number.isInteger(c.loops) ? fmt.plural(c.loops, 'loop') : null,
+      Number.isInteger(c.curves) ? fmt.plural(c.curves, 'curve') : null,
+      fmt.plural(c.points, 'pt')].filter(Boolean).join(' × ')
+    : null;
+  if (!count || !(c.seconds > 0)) return h('span.cs', { text: model.estimate });
+  const shot = typeof c.shot_s === 'number'
+    ? `One shot ${fmt.duration(c.shot_s)}, ${c.shot_source === 'journal' ? 'measured on this bench' : 'default'}.`
+    : '';
+  return h('span.cs', { title: [model.estimate, shot].filter(Boolean).join('\n') },
+    h('span.cost', { text: `≈ ${fmt.duration(c.seconds)}` }), ' ', count);
 }
 
 /** The helper lists parameters above the fold, including composite rows. */
@@ -297,8 +312,8 @@ function provenance(spec, ctx, model, editable) {
     resettable
       ? h('button.link.undo', {
         title: spec.node
-          ? 'back to the bench — drop this node’s override, the value falls back to the module as it stands on the bench'
-          : 'drop the edit — the value falls back to the layer below',
+          ? 'Drop this override; the bench value applies.'
+          : 'Drop the edit; the layer below applies.',
         'aria-label': spec.node ? 'back to the bench' : 'reset',
         onclick: () => ctx.edit(model.name, { [spec.name]: null }),
       }, '↺')
@@ -306,14 +321,18 @@ function provenance(spec, ctx, model, editable) {
 }
 
 /**
- * The field name opens its complete explanation. A `title` on an unfocusable element
- * is mouse-only, so a button exposes `doc` and `doc_full` to keyboard users
- * (`docs/ui-rules.md` §1). The hover title remains available.
+ * The tooltip names the parameter by its code name, then says what it does
+ * (`docs/ui-rules.md` §1). The label button opens the same text as the help line,
+ * so keyboard users reach it too.
  */
-function help(spec) {
+function tooltip(spec) {
   const full = spec.doc_full && spec.doc_full !== spec.doc ? spec.doc_full : spec.doc;
+  return full ? `${spec.name}\n${full}` : spec.name;
+}
+
+function help(spec) {
   if (!spec.doc) return {};
-  return { class: 'has-help', title: full, 'data-doc': spec.doc };
+  return { class: 'has-help', title: tooltip(spec), 'data-doc': spec.doc };
 }
 
 /** The unit after a name, unless the name already ends in it (`settle_s`, `pixel_area_cm2`). */
@@ -323,28 +342,31 @@ function unitTag(spec, name) {
   return String(name).toLowerCase().endsWith(suffix) ? null : h('i', { text: spec.unit });
 }
 
-/** The name is a label or an explanation-opening button. */
+/** The label, or the code name where the service sends none, as text or a help button. */
 function label(spec, ctx, model, text) {
-  const name = text || spec.name;
+  const name = text || spec.label || spec.name;
   if (!spec.doc) {
-    return h('span.l', { text: name }, unitTag(spec, name));
+    return h('span.l', { text: name, title: spec.name }, unitTag(spec, name));
   }
   const key = `${model.name}:${spec.name}`;
   const open = ctx.docOpen ? ctx.docOpen(key) : false;
   return h('button.l.lh', {
     type: 'button',
     'aria-expanded': open ? 'true' : 'false',
-    title: spec.doc_full && spec.doc_full !== spec.doc ? spec.doc_full : spec.doc,
+    title: tooltip(spec),
     onclick: () => ctx.toggleDoc && ctx.toggleDoc(key),
   }, name, unitTag(spec, name));
 }
 
-/** The renderer places the explanation beneath its field. */
+/** The help line under its field: the code name and run.toml key, then the explanation. */
 function docLine(spec, ctx, model) {
   const key = `${model.name}:${spec.name}`;
   if (!spec.doc || !ctx.docOpen || !ctx.docOpen(key)) return null;
   const full = spec.doc_full && spec.doc_full !== spec.doc ? spec.doc_full : null;
-  return h('div.doc', h('span', { text: spec.doc }), full ? h('span.dfull', { text: full }) : null);
+  const recipe = (spec.recipe || []).filter((k) => k !== spec.name);
+  return h('div.doc',
+    h('span.dcode', { text: [spec.name, ...recipe].join('  ') }),
+    h('span', { text: spec.doc }), full ? h('span.dfull', { text: full }) : null);
 }
 
 /**
@@ -368,10 +390,9 @@ function rangeRow(row, ctx, model) {
         input(row.stop, commit(row.stop.name), false),
         h('i', 'step'),
         input(row.step, commit(row.step.name), false),
-        repeat ? h('span.tag.rep', 'repeat')
+        repeat ? h('span.tag.rep', { title: 'start = stop: one point, repeated n_loops times. The chart shows Q per loop.', tabindex: '0' }, 'repeat')
           : row.points !== null ? h('i.pts', { text: fmt.plural(row.points, 'pt') }) : null),
-      rangeProvenance(specs, ctx, model)),
-    repeat ? h('div.note1', { text: 'start = stop: one point, measured n_loops times — Q per loop, not Q(axis)' }) : null);
+      rangeProvenance(specs, ctx, model)));
 }
 
 /**
@@ -386,18 +407,18 @@ function rangeProvenance(specs, ctx, model) {
   const edited = specs.filter((s) => s.source === 'edited');
   const which = specs.filter((s) => s.source === top.source).map((s) => s.name).join(', ');
   return h('span.src',
-    h('span.tag.src-' + top.source, { title: `${which} — ${top.detail || top.source}`, text: top.source }),
+    h('span.tag.src-' + top.source, { title: `${top.detail || top.source}: ${which}`, text: top.source }),
     edited.length
       ? h('button.link', {
-        title: `drop the edits to ${edited.map((s) => s.name).join(', ')} — each falls back to the layer below`,
+        title: `Drop the edits to ${edited.map((s) => s.name).join(', ')}; the layer below applies.`,
         onclick: () => ctx.edit(model.name, Object.fromEntries(edited.map((s) => [s.name, null]))),
-      }, 'reset')
+      }, 'Reset')
       : null);
 }
 
 function rangeHelp(row) {
   return [row.start, row.stop, row.step]
-    .map((s) => `${s.name}${s.unit ? ' / ' + s.unit : ''} — ${s.doc_full || s.doc}`)
+    .map((s) => `${s.name}${s.unit ? ' / ' + s.unit : ''}: ${s.doc_full || s.doc}`)
     .join('\n\n');
 }
 
@@ -443,10 +464,10 @@ function polarityRow(row, ctx, model) {
   const commit = (value) => ctx.edit(model.name, { output_polarity: value });
   return h('div.pf.pol', {
     class: 'has-help',
-    title: `${mode.name} / ${row.fallback.name} — ${mode.doc_full || mode.doc}\n\n`
+    title: `${mode.name}: ${mode.doc_full || mode.doc}\n\n`
       + `${row.fallback.name}: ${row.fallback.doc_full || row.fallback.doc}`,
   },
-    h('span.l', '81150A output polarity'),
+    h('span.l', mode.label || 'Output polarity'),
     h('span.v',
       h('span.seg', { role: 'group', 'aria-label': mode.name },
         ...mode.choices.map((choice) => option(choice, mode.value === choice, () => commit(choice)))),
@@ -469,21 +490,18 @@ function polarityRow(row, ctx, model) {
 function readback(row) {
   if (row.kind === 'shutter') {
     return h('div.pf.ro.rb', { class: row.inferred ? 'inferred' : '' },
-      h('span.l', 'shutter'),
+      h('span.l', 'Shutter'),
       h('span.v', { text: row.open === null || row.open === undefined ? fmt.ABSENT : row.open ? 'open' : 'shut' }));
   }
   const level = row.lit === null ? 'warn' : row.lit ? 'lit' : 'dark';
   return h('div.pf.ro.rb.' + level, {
     class: row.inferred ? 'inferred' : '',
-    title: 'Read off the bench, not set by this module. It is what the curve '
-      + 'will be labelled by: `as found dark`, `as found 1.020 V`, or '
-      + '`as found unknown` when the bench cannot say whether light reaches '
-      + 'the sample. All three of shutter, LED output and LED mode have to be '
-      + 'readable for the answer to be anything but unknown.',
+    title: 'Read from the bench, not set here. The curve is labelled as found: '
+      + 'dark, 1.020 V or unknown. Unknown unless shutter, LED output and LED mode all read back.',
   },
-    h('span.l', 'illumination'),
+    h('span.l', 'Illumination'),
     h('span.v', { text: row.text },
-      h('i', { text: row.lit === null ? 'nothing will be labelled dark' : `shutter ${row.open ? 'open' : 'shut'}` })));
+      h('i', { text: row.lit === null ? 'labelled unknown' : `shutter ${row.open ? 'open' : 'shut'}` })));
 }
 
 // -- needs, verdicts and the fold ----------------------------------------
@@ -509,12 +527,13 @@ export function fold(model, ctx, open) {
     h('div.foldbar',
       // On a node form, the fold contains unchanged bench values; the fields above it
       // show differences.
-      h('span.cs', { text: `${total} more · ${model.form === 'node' ? 'same as bench' : 'run.toml'}` }),
+      h('span.cs', { text: model.form === 'node' ? `${total} as on the bench` : `${total} more` }),
       model.fold.map((group) => h('button.btng', {
         class: open.has(group.group) ? 'on' : '',
-        title: group.inert ? group.params[0].inert : '',
+        title: group.inert ? group.params[0].inert : group.group,
         onclick: () => ctx.toggle(model.name, group.group),
-      }, `${group.group} · ${group.count}${group.inert ? ' · not read' : ''}`))),
+      }, `${groupLabel(group.group)} ${group.count}`,
+      group.inert ? h('span.tag.off', { text: 'not read' }) : null))),
     model.fold.filter((g) => open.has(g.group)).map((g) => h('div.pr.folded',
       g.params.map((spec) => field(spec, ctx, model, {})))));
 }
@@ -535,6 +554,6 @@ function startBlockers(checks, model) {
 function blockedNote(blocked) {
   return h('div.blocked', blocked.map((c) => h('div.warn1.' + c.level,
     icon(c.level === 'crit' ? 'crit' : 'warn', { cls: 'ico' }),
-    h('span.code', { text: c.code }),
-    h('span', { text: c.text }))));
+    h('span', { text: c.text }),
+    h('span.code', { text: c.code }))));
 }
