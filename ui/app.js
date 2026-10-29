@@ -54,22 +54,33 @@ const viewEl = h('main.view');
 const stripEl = h('div.strip');
 const barEl = h('footer.stream-bar');
 
-// The bar's `ask` control opens the assistant beside every tab.
+// The bar's `ask` control opens the assistant beside every tab. The assistant and
+// the plans share the side of the view, so opening one closes the other.
 let askOpen = false;
 const assistant = createAssistantPanel({
-  api, onChange: (open) => { askOpen = open; renderChips(store.getState()); },
+  api, onChange: (open) => {
+    askOpen = open;
+    if (open && plansOpen) plansPanel.toggle(false);
+    renderChips(store.getState());
+  },
 });
 
 // The plans an agent proposed wait here for a person's decision.
 let plansOpen = false;
 let plansPending = 0;
 const plansPanel = createPlansPanel({
-  api, onChange: ({ open, pending }) => { plansOpen = open; plansPending = pending; renderChips(store.getState()); },
+  api, onChange: ({ open, pending }) => {
+    plansOpen = open;
+    plansPending = pending;
+    if (open && askOpen) assistant.toggle(false);
+    renderChips(store.getState());
+  },
 });
 
 document.getElementById('app').replaceChildren(
   h('div.bar', h('span.wordmark', 'bace'), tabsEl, h('span.spacer'), chipsEl),
-  identEl, railEl, powerEl, monitorEl, viewEl, stripEl, barEl, assistant.el, plansPanel.el);
+  identEl, railEl, powerEl, monitorEl, h('div.body', viewEl, assistant.el, plansPanel.el),
+  stripEl, barEl);
 
 let mounted = null;
 let mountedRoute = null;

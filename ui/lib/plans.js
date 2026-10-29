@@ -84,31 +84,39 @@ export function createPlansPanel({ api, onChange = () => {} }) {
     if (plan.state === 'proposed') {
       actions.push(h('button.pl-approve', {
         class: armed === plan.plan_id ? 'armed' : '',
-        text: armed === plan.plan_id ? `approve ${plan.fingerprint}?` : 'approve',
+        text: armed === plan.plan_id ? `Approve ${plan.fingerprint}?` : 'Approve',
         onclick: () => decide(plan, 'approve'),
       }));
-      actions.push(h('button.pl-reject', { text: 'reject', onclick: () => decide(plan, 'reject') }));
+      actions.push(h('button.pl-reject', { text: 'Reject', onclick: () => decide(plan, 'reject') }));
     } else if (plan.state === 'approved') {
-      actions.push(h('button.pl-close', { text: 'close', onclick: () => decide(plan, 'close') }));
+      actions.push(h('button.pl-close', { text: 'Close', onclick: () => decide(plan, 'close') }));
     }
+    // The limits the approval covers, one cell each.
+    const cells = [
+      ['Runs', `${(plan.runs || []).length} / ${caps.max_runs}`],
+      ['Time', `${minutes(plan.spent_s)} / ${minutes(caps.max_total_s)}`],
+      ['Approval', minutes(caps.expires_s)],
+      plan.expires_at ? ['Ends', new Date(plan.expires_at * 1000).toLocaleString()] : null,
+      ['Plan', plan.plan_id],
+      ['Fingerprint', plan.fingerprint],
+    ].filter(Boolean);
     return h('section.pl-card', { class: `pl-${plan.state}` },
-      h('div.pl-title', h('span', plan.title), h('span.pl-state', plan.state + (plan.state === 'approved' && !plan.open ? ' · spent or expired' : ''))),
+      h('div.pl-title', h('span', plan.title),
+        h('span.pl-state', plan.state === 'approved' && !plan.open ? 'spent' : plan.state)),
       h('p.pl-goal', plan.goal),
       h('table.pl-env',
-        h('thead', h('tr', h('th', 'module or loop'), h('th', 'parameter'), h('th', 'allowed'))),
+        h('thead', h('tr', h('th', 'Scope'), h('th', 'Parameter'), h('th', 'Allowed'))),
         h('tbody', ...envelopeRows(caps).map(([where, name, allowed]) =>
           h('tr', h('td', where), h('td', name), h('td', allowed))))),
-      h('p.pl-caps', `runs ${(plan.runs || []).length} of ${caps.max_runs} · time ${minutes(plan.spent_s)} of ${minutes(caps.max_total_s)} · approval lasts ${minutes(caps.expires_s)}`
-        + (plan.expires_at ? ` · ends ${new Date(plan.expires_at * 1000).toLocaleString()}` : '')),
-      h('p.pl-fp', `${plan.plan_id} · fingerprint ${plan.fingerprint}`),
+      h('dl.pl-caps', cells.map(([k, v]) => h('div', h('dt', k), h('dd', v)))),
       actions.length ? h('div.pl-actions', ...actions) : null);
   }
 
   function draw() {
-    fill(headEl, [h('span.as-title', 'plans'), h('span.spacer'),
-      h('button.as-link', { text: 'close', onclick: () => toggle(false) })]);
+    fill(headEl, [h('span.as-title', 'Plans'), h('span.spacer'),
+      h('button.as-link', { text: 'Close', onclick: () => toggle(false) })]);
     fill(noteEl, status ? [h('p', status)]
-      : plans.length ? [] : [h('p', 'No plan has been proposed. An agent proposes one through POST /plans; it runs only after it is approved here.')]);
+      : plans.length ? [] : [h('p', { title: 'An agent proposes a plan; it runs only after approval here.' }, 'No plans proposed')]);
     fill(listEl, [...plans].reverse().map(card));
   }
 

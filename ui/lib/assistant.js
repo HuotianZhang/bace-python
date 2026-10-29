@@ -125,7 +125,7 @@ export function applyFrame(state, frame) {
     case 'done':
       last.done = true;
       last.usage = frame.usage || null;
-      if (frame.stop_reason === 'refusal') last.error = 'the model declined to answer this';
+      if (frame.stop_reason === 'refusal') last.error = 'Declined by the model.';
       next.busy = false;
       break;
     case 'error':
@@ -242,14 +242,16 @@ function itemEl(item) {
     class: 'as-tool' + (t.ok === false ? ' bad' : ''),
     text: `${t.ok === null ? '…' : t.ok ? '✓' : '✕'} ${t.label}${t.note ? ` · ${t.note}` : ''}`,
   }));
-  return h('div.as-a',
+  // Token counts are the answer's title: useful for cost, not for reading.
+  return h('div.as-a', {
+    title: item.usage
+      ? `${item.usage.input} in, ${item.usage.output} out${item.usage.cache_read ? `, ${item.usage.cache_read} cached` : ''} tokens`
+      : null,
+  },
     tools.length ? h('div.as-tools', tools) : null,
     blocks(item.text).map(blockEl),
-    !item.done && !item.error && !item.text ? h('div.as-wait', { text: 'thinking …' }) : null,
-    item.error ? h('div.as-err', { text: item.error }) : null,
-    item.usage ? h('div.as-usage', {
-      text: `${item.usage.input} in · ${item.usage.output} out${item.usage.cache_read ? ` · ${item.usage.cache_read} cached` : ''} tokens`,
-    }) : null);
+    !item.done && !item.error && !item.text ? h('div.as-wait', { text: '…' }) : null,
+    item.error ? h('div.as-err', { text: item.error }) : null);
 }
 
 function readJson(name, fallback) {
@@ -293,8 +295,9 @@ export function createAssistantPanel({ api, onChange = () => {} }) {
   const headEl = h('div.as-head');
   const noteEl = h('div.as-note');
   const logEl = h('div.as-log');
-  const input = h('textarea', { rows: 3, placeholder: 'Ask about the bench, the physics or the console. Enter sends, Shift+Enter is a new line.' });
-  const sendBtn = h('button.as-send', { text: 'ask' });
+  const input = h('textarea', { rows: 3, placeholder: 'Ask about the bench, the physics or the console',
+                                title: 'Enter sends; Shift+Enter starts a new line.' });
+  const sendBtn = h('button.as-send', { text: 'Ask' });
   const composerEl = h('div.as-composer', input, sendBtn);
   el.append(headEl, noteEl, logEl, composerEl);
 
@@ -342,12 +345,12 @@ export function createAssistantPanel({ api, onChange = () => {} }) {
   function draw() {
     el.hidden = !state.open;
     fill(headEl,
-      h('span.as-title', 'assistant'),
+      h('span.as-title', 'Assistant'),
       h('span.as-model', { text: modelLabel() }),
       h('span.spacer'),
-      !editing() ? h('button.as-link.as-settings', { text: 'settings', title: 'model, address and key', onclick: openForm }) : null,
-      state.items.length ? h('button.as-link', { text: 'new', title: 'start a new conversation', onclick: reset }) : null,
-      h('button.as-link', { text: '✕', title: 'close', onclick: () => toggle(false) }));
+      !editing() ? h('button.as-link.as-settings', { text: 'Settings', title: 'Model, address and key', onclick: openForm }) : null,
+      state.items.length ? h('button.as-link', { text: 'New', title: 'Starts a new conversation.', onclick: reset }) : null,
+      h('button.as-link', { text: '✕', title: 'Close', onclick: () => toggle(false) }));
 
     const ps = providerStatus();
     if (editing() && !draft) draft = freshDraft();
@@ -360,14 +363,14 @@ export function createAssistantPanel({ api, onChange = () => {} }) {
     fill(logEl, state.items.length
       ? state.items.map(itemEl)
       : h('div.as-empty',
-        h('p', 'It reads the bench, the modules, the runs and the project documents, and it changes nothing: when something has to be done, it says where to click.'),
+        h('p', 'Reads the bench, the modules, the runs and the manual. Changes nothing.'),
         EXAMPLES.map((q) => h('button.as-example', { text: q, onclick: () => send(q) }))));
     if (near) logEl.scrollTop = logEl.scrollHeight;
 
     const ready = Boolean(ps && ps.available) && !editing();
     input.disabled = !ready;
     sendBtn.disabled = !ready && !state.busy;
-    sendBtn.textContent = state.busy ? 'stop' : 'ask';
+    sendBtn.textContent = state.busy ? 'Stop' : 'Ask';
   }
 
   /** The settings form edits `draft` before the Use action applies it. */
@@ -389,28 +392,28 @@ export function createAssistantPanel({ api, onChange = () => {} }) {
     const local = d.provider === 'openai' && isLocal(d.base_url);
     const keyInput = h('input', {
       type: 'password', autocomplete: 'off', value: d.key || '',
-      placeholder: d.provider === 'anthropic' ? 'sk-ant-…' : local ? 'not needed for a model on this PC' : 'API key',
+      placeholder: d.provider === 'anthropic' ? 'sk-ant-…' : local ? 'Not needed for a model on this PC' : 'API key',
       oninput: (e) => { d.key = e.target.value.trim(); d.keyFrom = keySlot(d); },
     });
     const model = h('input', {
       value: d.model || '', autocomplete: 'off',
       placeholder: d.provider === 'anthropic' ? (state.status && state.status.model) || 'claude-opus-5-5'
-        : 'as the provider spells it, e.g. deepseek-chat',
+        : 'As the provider spells it, e.g. deepseek-chat',
       oninput: (e) => { d.model = e.target.value.trim(); },
     });
     const remember = h('input', { type: 'checkbox', checked: d.remember,
                                   onchange: (e) => { d.remember = e.target.checked; } });
     const rows = [
       ps && !ps.available ? h('p.as-warn', { text: `Not available on this service: ${ps.reason}` }) : null,
-      h('p', { text: `Runs on your own ${d.provider === 'anthropic' ? 'Anthropic' : 'provider'} key. It goes to this service with each question and on to that API; the service does not keep it, and this browser keeps it only if you tick the box.` }),
-      field('provider', provider),
+      h('p', { text: 'Your key goes with each question and is not stored by the service. Tick the box to keep it in this browser.' }),
+      field('Provider', provider),
     ];
     if (d.provider === 'openai') {
       const preset = h('select', { onchange: (e) => e.target.value && moveTo({ base_url: e.target.value }) },
-        h('option', { value: '', text: 'choose …' }),
+        h('option', { value: '', text: 'Choose …' }),
         PRESETS.map((p) => h('option', { value: p.base_url, text: p.name, selected: p.base_url === d.base_url })));
-      rows.push(field('preset', preset),
-        field('address', h('input', { value: d.base_url || '', placeholder: 'https://…/v1', autocomplete: 'off',
+      rows.push(field('Preset', preset),
+        field('Address', h('input', { value: d.base_url || '', placeholder: 'https://…/v1', autocomplete: 'off',
                                       oninput: (e) => {
                                         d.base_url = e.target.value.trim();
                                         if (d.key && keySlot(d) !== d.keyFrom) {
@@ -421,8 +424,8 @@ export function createAssistantPanel({ api, onChange = () => {} }) {
                                         }
                                       } })));
     }
-    rows.push(field('model', model), field('key', keyInput),
-      h('label.as-remember', remember, ' remember the key on this computer'));
+    rows.push(field('Model', model), field('Key', keyInput),
+      h('label.as-remember', remember, ' Remember the key on this computer'));
     const problem = h('p.as-warn');
     const use = () => {
       const next = { provider: d.provider, base_url: d.provider === 'openai' ? d.base_url : '', model: d.model };
@@ -441,9 +444,9 @@ export function createAssistantPanel({ api, onChange = () => {} }) {
       input.focus();
     };
     const canCancel = state.editing && !missing(state.settings, state.key);
-    rows.push(h('div.as-actions', h('button', { text: 'use', onclick: use }),
-      canCancel ? h('button.as-link', { text: 'cancel', onclick: () => { draft = null; set({ editing: false }); } }) : null,
-      storedKey(d) ? h('button.as-link', { text: 'forget the stored key',
+    rows.push(h('div.as-actions', h('button', { text: 'Use', onclick: use }),
+      canCancel ? h('button.as-link', { text: 'Cancel', onclick: () => { draft = null; set({ editing: false }); } }) : null,
+      storedKey(d) ? h('button.as-link', { text: 'Forget key',
                                            onclick: () => { storeKey(d, ''); rebuild({ key: '', remember: false }); } }) : null),
     problem);
     return rows;
@@ -467,13 +470,13 @@ export function createAssistantPanel({ api, onChange = () => {} }) {
         },
       });
     } catch (error) {
-      const message = error.name === 'AbortError' ? 'stopped' : (error.text || error.message);
+      const message = error.name === 'AbortError' ? 'Stopped.' : (error.text || error.message);
       state = applyFrame(state, { type: 'error', message });
       if (error.status === 401 || error.status === 422) state = { ...state, editing: true };
     }
     // A stream ending without a terminal frame still closes the turn, including
     // service disconnects.
-    if (state.busy) state = applyFrame(state, { type: 'error', message: 'the answer was cut off' });
+    if (state.busy) state = applyFrame(state, { type: 'error', message: 'Answer cut off.' });
     controller = null;
     draw();
   }
