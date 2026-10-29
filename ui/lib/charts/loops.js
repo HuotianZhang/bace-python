@@ -119,7 +119,7 @@ export function loopsModel(found, options = {}) {
       // becomes Q per loop or Q(axis). The measured chart must make that switch
       // visible (`docs/ui-rules.md` §4).
       absent: {
-        text: 'no run yet — Q lands here, per loop or along the axis',
+        text: 'No shots yet',
         detail: null,
         frame: { width, height: qHeight, panels: [{ key: 'q', weight: 1, label: 'Q / C' }], margin: { left: 60 } },
       },
@@ -133,10 +133,10 @@ export function loopsModel(found, options = {}) {
     return {
       key: 'loops',
       absent: {
-        text: shots.length ? 'the axis is not known' : 'no shots yet',
+        text: shots.length ? 'Axis not known yet' : 'No shots yet',
         detail: shots.length
-          ? 'the run began before this console could see it — the axis arrives with the run’s record'
-          : 'Q per loop, or Q(axis), appears with the first shot',
+          ? 'The run began before this page opened; the axis arrives with its record.'
+          : null,
       },
       panels: [], notes: [],
     };
@@ -209,7 +209,7 @@ function repeatModel(common, panel, node, counts, options) {
     panels: [{
       ...panel,
       label: `Q per loop  ·  ${unitQ.label}  ·  loop →`,
-      note: `zero-width axis · ${where} · repeats, not a curve`,
+      note: `Repeats at ${where}`,
       noteColour: 'accent-dark',
       y: { scale: Y, ticks: axisTicks(Y, { count: 4 }) },
       series: [{
@@ -243,7 +243,7 @@ function repeatModel(common, panel, node, counts, options) {
     ],
     readout: readoutRepeat(series, last, counts),
     notes: notesFor(counts, done, node, { repeat: true, firstLoop }),
-    switch: { repeat: true, text: `zero-width axis · ${where}` },
+    switch: { repeat: true, text: `Repeats at ${where}` },
   };
 }
 

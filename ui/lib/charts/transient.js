@@ -387,7 +387,7 @@ function chargePanel(panel, set, X, cols, at, values, fromService) {
     label: fromService
       ? 'running integral  ·  Q / C  ·  the run\'s own record'
       : 'running integral  ·  Q / C  ·  computed from the trace above',
-    note: fromService ? null : 'not the run\'s Q — that is the number beside the chart',
+    note: fromService ? null : 'From the decimated trace; not the run\'s Q, which is beside the chart',
     y: { scale: Y, ticks: axisTicks(Y, { count: 3 }) },
     series: [{
       key: 'cumulative', label: 'running integral', colour: 'accent', width: 1.4, dash: '3 2',

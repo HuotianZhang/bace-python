@@ -23,7 +23,7 @@ export default {
 
   mount(container, { store, api, notify }) {
     let rows = [];
-    let rowsStatus = 'loading the runs …';
+    let rowsStatus = 'Loading …';
     let record = null;
     let recordStatus = '';
     let rerunState = null;
@@ -36,7 +36,7 @@ export default {
 
     const body = h('div.results');
     fill(container,
-      h('h1', 'results'),
+      h('h1', 'Results'),
       body);
     const listEl = h('div.card.hist');
     const openEl = h('div.card.open');
@@ -52,7 +52,7 @@ export default {
     const nodesEl = h('div');
     const panelEl = h('div');
     fill(openEl, headEl, h('div.cb.rbody',
-      h('div.rleft', gridEl, sumEl, chartEl, h('h3', 'nodes, in the order they ran'), nodesEl),
+      h('div.rleft', gridEl, sumEl, chartEl, h('h3', { title: 'In the order they ran.' }, 'Nodes'), nodesEl),
       h('div.rright', panelEl)));
 
     // -- fetching --------------------------------------------------------
@@ -62,7 +62,7 @@ export default {
         rows = await api.runs('all');
         rowsStatus = '';
       } catch (error) {
-        rowsStatus = `could not load the runs · ${error.text || error.message}`;
+        rowsStatus = `Runs not loaded: ${error.text || error.message}`;
       }
       if (disposed) return;
       if (!selectedRun && rows.length) selectedRun = rows[0].run_id;
@@ -72,14 +72,14 @@ export default {
 
     async function loadRecord(runId) {
       const mine = (recordRequest += 1);
-      recordStatus = `loading ${runId} …`;
+      recordStatus = `Loading ${runId} …`;
       render(store.getState());
       let got = null;
       try {
         got = await api.run(runId);
         recordStatus = '';
       } catch (error) {
-        recordStatus = `could not load ${runId} · ${error.text || error.message}`;
+        recordStatus = `${runId} not loaded: ${error.text || error.message}`;
       }
       if (disposed || mine !== recordRequest) return;
       if (got) {
@@ -124,11 +124,11 @@ export default {
       if (submitting) return;
       submitting = true;
       const overrides = rerunParams(params);
-      rerunState = { text: `starting ${node.module} …` };
+      rerunState = { text: `Starting ${node.module} …` };
       render(store.getState());
       try {
         const out = await api.startRun(node.module, overrides, `again: ${node.node_path || node.module}`);
-        rerunState = { text: `queued as ${out.run_id} · ${out.state}${out.position ? ' · position ' + out.position : ''}` };
+        rerunState = { text: `Queued as ${out.run_id}, ${out.state}${out.position ? ', position ' + out.position : ''}` };
       } catch (error) {
         rerunState = { text: error.text || error.message, checks: error.checks };
         notify(error.text || error.message, error.level === 'crit' ? 'crit' : 'warn', error.checks);
@@ -158,17 +158,17 @@ export default {
       }
       const groups = runGroups(rows, { live });
       keyed(listHead, JSON.stringify([groups.total, rowsStatus]), () => [
-        h('span.cn', 'runs'),
-        h('span.cs', { text: rowsStatus || `${groups.total} in the journal · ${groups.groups.length} session${groups.groups.length === 1 ? '' : 's'}` }),
+        h('span.cn', 'Runs'),
+        h('span.cs', { text: rowsStatus || `${fmt.plural(groups.total, 'run')}, ${fmt.plural(groups.groups.length, 'session')}` }),
         h('span.spacer'),
-        h('button.btng', { onclick: () => { rowsStatus = 'asking again …'; render(store.getState()); loadRows(); } }, 'reload'),
+        h('button.btng', { onclick: () => { rowsStatus = 'Loading …'; render(store.getState()); loadRows(); } }, 'Reload'),
       ]);
       keyed(listBody, JSON.stringify([groups, selectedRun]), () => renderGroups(groups, { selected: selectedRun, onSelect: select }));
 
       if (!record) {
         keyed(headEl, JSON.stringify(['none', recordStatus, selectedRun]), () => h('div.ch',
-          h('span.cn', { text: selectedRun || 'no run' }),
-          h('span.cs', { text: recordStatus || (rows.length ? '' : 'nothing to open yet') })));
+          h('span.cn', { text: selectedRun || 'No run' }),
+          h('span.cs', { text: recordStatus || '' })));
         for (const el of [gridEl, sumEl, chartEl, nodesEl, panelEl]) keyed(el, 'none', () => []);
         return;
       }
@@ -179,11 +179,14 @@ export default {
 
       keyed(headEl, recordKey, () => [
         h('div.ch',
-          h('span.cn', 'open'),
-          h('span.cs', { text: recordStatus || `${record.from === 'journal' ? 'from the journal' : 'from this session'}${record.data_in_memory === false ? ' · arrays not in memory' : ''}` }),
+          h('span.cn', 'Open'),
+          recordStatus ? h('span.cs', { text: recordStatus }) : null,
+          h('span.tag', { text: record.from === 'journal' ? 'journal' : 'this session' }),
+          record.data_in_memory === false
+            ? h('span.tag', { title: 'Scalars only; the arrays are in the HDF5 file.', text: 'arrays not in memory' }) : null,
           h('span.spacer'),
-          grid.shape === 'grid' ? h('button.btng', { onclick: () => exportCsv(grid) }, 'export grid · csv') : null,
-          h('button.btng', { onclick: () => loadRecord(record.run_id) }, 'reload')),
+          grid.shape === 'grid' ? h('button.btng', { onclick: () => exportCsv(grid) }, 'Export CSV') : null,
+          h('button.btng', { onclick: () => loadRecord(record.run_id) }, 'Reload')),
         renderRunHead(record, grid, summary),
       ]);
       keyed(gridEl, `${recordKey}|${selectedNode}`, () => renderGrid(grid, { selected: selectedNode, onSelect: selectNode }));
@@ -192,7 +195,7 @@ export default {
         if (grid.shape !== 'grid' || summary.present < 2) return [];
         return [
           h('div.schedbar',
-            h('span.cs', 'plot'),
+            h('span.cs', 'Plot'),
             h('span.filt', { role: 'group', 'aria-label': 'plot' },
               h('button.opt', { type: 'button', 'aria-pressed': chartBy === 'led' ? 'true' : 'false', class: chartBy === 'led' ? 'on' : '', onclick: () => { chartBy = 'led'; render(store.getState()); } }, 'Q(led_v) per T'),
               h('button.opt', { type: 'button', 'aria-pressed': chartBy === 'T' ? 'true' : 'false', class: chartBy === 'T' ? 'on' : '', onclick: () => { chartBy = 'T'; render(store.getState()); } }, 'Q(T) per led_v'))),

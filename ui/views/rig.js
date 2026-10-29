@@ -44,13 +44,13 @@ export default {
     const shot = h('div.card.mod.rig-shot');
     const readback = h('div.rig-readback');
     fill(container,
-      h('h1', 'rig', h('span.sub', 'reference — nothing here acts on the bench')),
+      h('h1', 'Rig', h('span.tag', { title: 'Nothing here acts on the bench.' }, 'reference')),
       h('div.rig', chain, shot),
       readback);
 
     // The chain never changes while the service runs: drawn once.
     keyed(chain, 'chain', () => [
-      h('div.ch', h('span.cn', 'the chain'), h('span.cs', 'who is wired to what')),
+      h('div.ch', h('span.cn', 'Wiring')),
       h('div.cb', chainSvg(), legend()),
     ]);
 
@@ -59,17 +59,17 @@ export default {
       // alter its bench-reference values.
       const axis = sweptAxis(state);
       keyed(shot, axis, () => [
-        h('div.ch', h('span.cn', 'one shot · three scales'),
-          h('span.cs', 'timing measured on this bench · swept · ', h('span.accent', { text: axis }))),
+        h('div.ch', h('span.cn', { title: 'Timing measured on this bench, at three scales.' }, 'One shot'),
+          h('span.cs', 'swept ', h('span.accent', { text: axis }))),
         h('div.cb', shotSvg(axis)),
       ]);
 
       const rig = state.bench && state.bench.rig;
       // `rig.toml` remains constant during the service session, so fingerprint-keyed
       // rendering avoids rebuilding unchanged read-back.
-      if (!rig) return keyed(readback, 'none', () => h('div.card', h('p.absent', 'no read-back yet')));
+      if (!rig) return keyed(readback, 'none', () => h('div.card', h('p.absent', 'No rig.toml read yet')));
       keyed(readback, rig.fingerprint || JSON.stringify(rig.values), () => h('div.card',
-        h('h2', `rig.toml · ${rig.fingerprint || ''}`),
+        h('h2', 'rig.toml ', h('span.num.cs', { text: rig.fingerprint || '' })),
         h('table.rows', Object.entries(rig.values || {}).map(([key, value]) => h('tr',
           h('th', { text: key }),
           h('td', h('span.num', { text: typeof value === 'number' ? fmt.sig(value, 6) : String(value) })))))));

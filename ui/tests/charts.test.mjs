@@ -656,7 +656,7 @@ test('the chart switches on the axis, and says so', () => {
   });
   assert.equal(repeat.switch.repeat, true);
   assert.match(repeat.panels[0].label, /^Q per loop/);
-  assert.match(repeat.panels[0].note, /zero-width axis · vpre 0\.9000 V = stop · repeats, not a curve/);
+  assert.match(repeat.panels[0].note, /^Repeats at vpre 0\.9000 V = stop$/);
   assert.equal(repeat.x.format(12), 'loop 12');
 });
 
@@ -786,6 +786,6 @@ test('a shot without traces still puts its point on the loop curve', () => {
 test('a node whose axis the ring never delivered says so rather than guessing', () => {
   const model = loopsModel({ record: { state: 'running' }, node: { node_path: 'bace', kind: 'bace', axis: null, values: [], shots: [{ index: 0, loop: 1, step: 1, q: 1e-10 }], loops: [] } });
   assert.ok(model.absent);
-  assert.match(model.absent.text, /axis is not known/);
+  assert.match(model.absent.text, /Axis not known/);
   assert.equal(isRepeat({ values: [], axis: null }), null);
 });

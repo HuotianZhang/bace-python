@@ -65,7 +65,7 @@ export function jvModel(curves, options = {}) {
       // change at the first point. Its y label stays generic before the run supplies
       // an area and therefore a unit.
       absent: {
-        text: 'no curves yet — a sweep draws here point by point',
+        text: 'No curves yet',
         detail: null,
         frame: {
           width,
@@ -304,7 +304,7 @@ export function metricsOf(list, quantity) {
       ],
     });
   }
-  return { entries: out, note: 'derived · interpolated from the curve, not measured points' };
+  return { entries: out, note: 'Derived: interpolated from the curve' };
 }
 
 /** Maximum-power-point values use readable prefixes, such as µW for a small cell. */
