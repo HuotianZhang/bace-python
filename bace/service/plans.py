@@ -106,7 +106,9 @@ def _axis_violations(node: Module, allowed: Mapping[str, Mapping[str, Any]]) -> 
     `delay_ns`. A tree that sets an end must therefore name its axis, the plan
     must let that parameter be set, and both ends must lie within its bound. A
     `vpre` axis centred on V_oc sweeps offsets from V_oc, not volts, so its ends
-    are held only to the bounds on `axis_start` and `axis_stop`."""
+    are held only to the bounds on `axis_start` and `axis_stop`. Whether a `vpre`
+    axis is centred can come from the layers (run.toml centres it), which the
+    plan cannot see, so a `vpre` scan states `centre_on_voc` itself."""
     ends = [k for k in AXIS_ENDS if k in node.params]
     if not ends:
         return []
@@ -114,8 +116,12 @@ def _axis_violations(node: Module, allowed: Mapping[str, Mapping[str, Any]]) -> 
     if axis is None:
         return [f"{node.module}.{ends[0]} is set without axis_name, so the plan "
                 "cannot tell which parameter's bound applies"]
-    if axis == "vpre" and node.params.get("centre_on_voc"):
-        return []
+    if axis == "vpre":
+        if "centre_on_voc" not in node.params:
+            return [f"{node.module} sweeps vpre without setting centre_on_voc, so the plan "
+                    "cannot tell offsets from V_oc from volts"]
+        if node.params["centre_on_voc"]:
+            return []
     bound = allowed.get(axis)
     if bound is None:
         return [f"{node.module} sweeps {axis}, and the plan does not let it be set"]

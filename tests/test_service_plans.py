@@ -94,10 +94,13 @@ def test_a_scan_is_held_to_the_bound_of_the_parameter_it_sweeps():
     found = env.violations(parsed(scan("vcoll", -0.5, -10.0, 0.5)))
     assert found == ["bace.axis_stop = -10.0 sweeps vcoll, the plan allows between -4 and -0.5"]
     # the plan does not let vpre be set, so it may not be swept either ...
-    [v] = env.violations(parsed(scan("vpre", 0.2, 0.6, 0.1)))
+    [v] = env.violations(parsed(scan("vpre", 0.2, 0.6, 0.1, centre_on_voc=False)))
     assert "sweeps vpre, and the plan does not let it be set" in v
     # ... except as offsets around V_oc, which only the axis bounds hold
     assert env.violations(parsed(scan("vpre", -0.05, 0.05, 0.05, centre_on_voc=True))) == []
+    # whether a vpre scan is centred cannot be left to the layers (run.toml centres it)
+    [v] = env.violations(parsed(scan("vpre", -0.05, 0.05, 0.05)))
+    assert "without setting centre_on_voc" in v
     # an end without its axis cannot be checked
     [v] = env.violations(parsed(bace(axis_start=30, axis_stop=150, axis_step=20)))
     assert "without axis_name" in v
