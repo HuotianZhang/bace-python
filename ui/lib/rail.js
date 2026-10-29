@@ -113,8 +113,8 @@ function relayCell(relay, inferred) {
   const value = { amplifier: 'amplifier', sourcemeter: 'Keithley 2400' }[position]
     || (answered ? 'neutral' : fmt.ABSENT);
   return {
-    key: 'relay', label: 'relay · interlock', value,
-    sub: how === 'cached' ? 'cached, not re-read' : how === 'unavailable' ? 'no router answering' : null,
+    key: 'relay', label: 'Relay', value,
+    sub: how === 'cached' ? 'cached' : how === 'unavailable' ? 'router not answering' : null,
     level: how === 'unavailable' ? 'warn' : null,
     inferred, how, position,
     // Which links are made: the device is always the middle node; the closed
@@ -134,7 +134,7 @@ function biasCell(bias, chain, inferred) {
   // decides whether the collection pulse lands where the recipe says.
   const level = live ? 'alert' : chainLevel(chain, 'bias') || (b.output === false ? 'off' : null);
   return {
-    key: 'bias', label: 'bias 81150A',
+    key: 'bias', label: 'Bias',
     value: live ? 'LIVE' : b.output === false ? 'off' : fmt.ABSENT,
     sub: live ? pulseLevels(b) : armText(b, chain),
     level, inferred, how: b.how,
@@ -178,7 +178,7 @@ function smuCell(smu, inferred) {
     : [current, voltage].filter(Boolean)
       .map((part) => (part.ceiling ? '≤ ' : '') + part.text).join(' / ');
   return {
-    key: 'smu', label: 'SMU 2400',
+    key: 'smu', label: 'SMU',
     value: s.output === true ? 'ON' : s.output === false ? 'off' : fmt.ABSENT,
     sub: text ? `cc ${text}` : null,
     level: s.output === true ? null : 'off',
@@ -199,9 +199,9 @@ function limit(chosen, ceiling, render) {
 function shutterCell(shutter, inferred) {
   const open = shutter && shutter.open;
   return {
-    key: 'shutter', label: 'shutter',
+    key: 'shutter', label: 'Shutter',
     value: open === true ? 'open' : open === false ? 'shut' : fmt.ABSENT,
-    sub: (shutter && shutter.how) === 'cached' ? 'cached, not re-read' : null,
+    sub: (shutter && shutter.how) === 'cached' ? 'cached' : null,
     level: null, inferred, how: shutter && shutter.how,
   };
 }
@@ -223,7 +223,7 @@ function ledCell(led, chain, inferred) {
   // one line.
   if (l.low_v !== null && l.low_v !== undefined) parts.push(`low ${fmt.volts(l.low_v, { decimals: 3, unit: false })} V`);
   return {
-    key: 'led', label: 'LED 33220A',
+    key: 'led', label: 'LED',
     value: on && l.high_v !== null && l.high_v !== undefined
       ? fmt.volts(l.high_v, { decimals: 3, unit: false }) + ' V'
       : on ? 'on' : l.output === false ? 'off' : fmt.ABSENT,
@@ -259,10 +259,10 @@ function powerCell(power) {
   const p = power || {};
   // Before the first bench response, meter state is unknown. Calling it unresponsive
   // would assert a query failure without evidence.
-  if (!power) return { key: 'power', label: 'optical power', value: fmt.ABSENT, sub: 'no read-back yet', level: null, inferred: false };
+  if (!power) return { key: 'power', label: 'Power', value: fmt.ABSENT, sub: 'no read-back yet', level: null, inferred: false };
   if (!p.available) {
-    return { key: 'power', label: 'optical power', value: fmt.ABSENT,
-      sub: p.reason || 'console not answering', level: 'warn', inferred: false };
+    return { key: 'power', label: 'Power', value: fmt.ABSENT,
+      sub: p.reason || 'meter not answering', level: 'warn', inferred: false };
   }
   const parts = [];
   if (p.wavelength_nm) parts.push(`${p.wavelength_nm} nm`);
@@ -272,7 +272,7 @@ function powerCell(power) {
   if (p.averaged === false) parts.push('not averaged');
   if (p.monitor) parts.push('monitored');
   return {
-    key: 'power', label: 'optical power', value: fmt.intensity(p.watts),
+    key: 'power', label: 'Power', value: fmt.intensity(p.watts),
     sub: parts.join(' · ') || null,
     level: p.trustworthy === false ? 'warn' : null,
     inferred: false,
@@ -371,8 +371,8 @@ function fixLabel(item) {
  */
 export function parkLabel(queued = 0) {
   return queued > 0
-    ? `abort the run, cancel ${fmt.plural(queued, 'queued run')}, and park?`
-    : 'abort the run and park?';
+    ? `Abort the run, cancel ${fmt.plural(queued, 'queued run')}, and park?`
+    : 'Abort the run and park?';
 }
 
 /**
@@ -381,10 +381,22 @@ export function parkLabel(queued = 0) {
  */
 export function parkTitle(queued = 0) {
   return queued > 0
-    ? `park aborts the run and cancels ${fmt.plural(queued, 'queued run')}`
-      + ' — the bench is safe now, not after the queue'
-    : 'park aborts the run — the bench is safe now';
+    ? `Park aborts the run and cancels ${fmt.plural(queued, 'queued run')}. `
+      + 'The bench is safe now, not after the queue.'
+    : 'Park aborts the run. The bench is safe now.';
 }
+
+/** The instrument behind each rail cell, for the name's tooltip. */
+const CELL_MODEL = {
+  relay: 'Relay: router between the Keithley 2400 and the amplifier, with interlock',
+  bias: 'Bias: Agilent 81150A pulse generator',
+  smu: 'SMU: Keithley 2400 source meter',
+  shutter: 'Shutter: on the Deditec DIO',
+  led: 'LED: Agilent 33220A function generator driving the light source',
+  voc: 'V_oc: open-circuit voltage in scope this session',
+  power: 'Power: Newport 1918-C optical power meter',
+  temperature: 'T: Lake Shore 331 temperature controller',
+};
 
 /**
  * The renderer keys the rail on its pure model. Rebuilding unchanged DOM on every
@@ -429,10 +441,10 @@ function cellEl(cell) {
   },
     h('span.brl',
       icon(CELL_ICON[cell.key] || 'blank'),
-      h('span', { text: cell.label }),
+      h('span', { text: cell.label, title: CELL_MODEL[cell.key] || null }),
       // Inference attaches to the label while the value remains numeric. A dashed
       // rule conveys it on one line; the hidden badge retains title text.
-      cell.inferred ? h('span.tag-inferred', { title: 'implied by the running step, not read back', text: 'inferred' }) : null),
+      cell.inferred ? h('span.tag-inferred', { title: 'Implied by the running step, not read back.', text: 'inferred' }) : null),
     h('span.brv', {
       text: cell.value,
       title: cell.inferred ? 'implied by the running step, not read back' : null,
@@ -506,7 +518,7 @@ export function renderChainStrip(el, state, { onFix, onPark, onDismiss, status, 
     h('span.st.quiet', { text: rigText(rig) }),
     h('button', {
       class: parkArmed ? 'btns armed' : 'btns',
-      title: model.busy ? parkTitle(model.queued) : 'outputs off, shutter shut, router park',
+      title: model.busy ? parkTitle(model.queued) : 'Outputs off, shutter shut, relay parked.',
       onclick: () => onPark && onPark(),
     }, parkArmed ? parkLabel(model.queued) : 'Park'),
   ]);

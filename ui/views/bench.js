@@ -16,7 +16,7 @@ import { RESULT_CARDS, createChartThrottle, resultKeys, resultPanel, runFor } fr
 
 export default {
   route: 'bench',
-  title: 'bench',
+  title: 'Bench',
 
   mount(container, { store, api, notify, query = {} }) {
     // Instruments act immediately; cards edit values used by later runs and pipeline

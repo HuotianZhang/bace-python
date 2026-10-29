@@ -81,7 +81,7 @@ test('the relay is a circuit, not a level: three nodes and the closed side', () 
   const unknown = cell(railModel(stateFrom({ instruments: { relay: { position: 'unknown', how: 'cached' } } })), 'relay');
   assert.equal(unknown.value, 'neutral');
   assert.deepEqual(unknown.links, [false, false], 'neither circuit is claimed');
-  assert.equal(unknown.sub, 'cached, not re-read');
+  assert.equal(unknown.sub, 'cached');
 });
 
 test('the chain says which cell reads wrong; the rail never re-derives it', () => {
@@ -257,15 +257,15 @@ test('an armed Park names the queue it is about to cancel', () => {
   // cancels every queued one. The confirmation said "abort the run and park?"
   // and named the queue only in a tooltip, so the operator who reached for it
   // to stop one scan lost the rest of the night silently (#53).
-  assert.equal(parkLabel(0), 'abort the run and park?', 'nothing behind it, nothing to say');
-  assert.equal(parkLabel(), 'abort the run and park?', 'and no count is the same case');
-  assert.equal(parkLabel(1), 'abort the run, cancel 1 queued run, and park?');
-  assert.equal(parkLabel(4), 'abort the run, cancel 4 queued runs, and park?');
+  assert.equal(parkLabel(0), 'Abort the run and park?', 'nothing behind it, nothing to say');
+  assert.equal(parkLabel(), 'Abort the run and park?', 'and no count is the same case');
+  assert.equal(parkLabel(1), 'Abort the run, cancel 1 queued run, and park?');
+  assert.equal(parkLabel(4), 'Abort the run, cancel 4 queued runs, and park?');
   // "not after the queue" is the point of the hover, and it only has one when
   // there is a queue to be ahead of.
-  assert.equal(parkTitle(0), 'park aborts the run — the bench is safe now');
+  assert.equal(parkTitle(0), 'Park aborts the run. The bench is safe now.');
   assert.equal(parkTitle(2),
-    'park aborts the run and cancels 2 queued runs — the bench is safe now, not after the queue');
+    'Park aborts the run and cancels 2 queued runs. The bench is safe now, not after the queue.');
 });
 
 test('the count Park names is the queue the strip already knows about', () => {
@@ -314,5 +314,5 @@ test('a console with no snapshot yet says so, and claims nothing', () => {
   const noRouter = cell(railModel(stateFrom({ instruments: { relay: { position: 'unknown', how: 'unavailable' } } })), 'relay');
   assert.equal(noRouter.value, '—');
   assert.equal(noRouter.level, 'warn');
-  assert.equal(noRouter.sub, 'no router answering');
+  assert.equal(noRouter.sub, 'router not answering');
 });
