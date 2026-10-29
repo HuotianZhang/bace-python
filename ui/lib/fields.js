@@ -1,6 +1,6 @@
 // The field layout maps catalogue entries to card rows through pure `cardModel`;
 // `ui/lib/card.js` renders them. Values, provenance, editability and estimates come
-// from the service (`docs/ui-rules.md` §6). Range counts come from `estimate_text` to
+// from the service (`docs/ui-rules.md` §6). Range counts come from the service estimate to
 // avoid duplicating rounding. Each field retains `doc` and `doc_full` for accessible
 // explanations (§1). Fold counts derive from their actual fields. Separating models
 // from DOM permits fixture tests without a browser.
@@ -23,7 +23,7 @@ export const FOLD_ORDER = [
 export const LAYOUT = {
   jv: {
     above: [
-      { kind: 'range', label: 'sweep', names: ['start_v', 'stop_v', 'step_v'] },
+      { kind: 'range', label: 'Sweep', names: ['start_v', 'stop_v', 'step_v'] },
       'settle_s', 'both_directions', 'pixel_area_cm2',
     ],
     readback: 'illumination',
@@ -41,7 +41,7 @@ export const LAYOUT = {
         when: (v, w) => !isBound(w.led_v), stepUnusedAtZeroWidth: true,
       },
       'led_settle_s', 'dark',
-      { kind: 'range', label: 'sweep', names: ['start_v', 'stop_v', 'step_v'] },
+      { kind: 'range', label: 'Sweep', names: ['start_v', 'stop_v', 'step_v'] },
       'settle_s', 'both_directions', 'pixel_area_cm2',
     ],
     readback: 'shutter',
@@ -54,8 +54,8 @@ export const LAYOUT = {
       // the experiment: `vpre` is BACE and `delay_ns` is TDCF. Operator labels
       // identify the scan parameter and range; wire identifiers retain `axis_*`
       // names.
-      { kind: 'segmented', name: 'axis_name', label: 'scan parameter', accent: true },
-      { kind: 'range', label: 'scan range', names: ['axis_start', 'axis_stop', 'axis_step'], accent: true, stepUnusedAtZeroWidth: true },
+      { kind: 'segmented', name: 'axis_name', label: 'Scan parameter', accent: true },
+      { kind: 'range', label: 'Scan range', names: ['axis_start', 'axis_stop', 'axis_step'], accent: true, stepUnusedAtZeroWidth: true },
       // `axis_name` selects the applicable V_oc flag. The `vpre` axis centres its
       // sweep on V_oc; other axes offset pinned V_pre from it. The inapplicable flag
       // is hidden rather than folded.
@@ -237,6 +237,7 @@ export function cardModel(entry, { bench = null, form = 'bench' } = {}) {
     kind: entry.kind,
     estimate: entry.estimate_text || '',
     estimate_s: entry.estimate_s,
+    cost: entry.estimate || null,
     last: entry.last || null,
     needs: entry.needs || [],
     chips: (layout.chips || []).filter((c) => c.when(values)).map((c) => c.text),
@@ -246,7 +247,7 @@ export function cardModel(entry, { bench = null, form = 'bench' } = {}) {
     hidden: [...hidden],
     run: layout.run ? [].concat(layout.run) : [],
     actions: (layout.actions || []).map((a) => ({ ...a, args: a.args ? a.args(values) : {} })),
-    points: points(entry.estimate_text),
+    points: pointsOf(entry),
   };
 }
 
@@ -269,8 +270,8 @@ function buildRow(row, wire, values, entry) {
     const zeroWidth = start.value !== null && start.value !== undefined
       && Number(start.value) === Number(stop.value);
     const step = row.stepUnusedAtZeroWidth && zeroWidth && !raw.inert
-      ? { ...raw, inert: 'start = stop · one point, so the step is not read' } : raw;
-    return { kind: 'range', label: row.label, start, stop, step, points: points(entry.estimate_text), accent: Boolean(row.accent) };
+      ? { ...raw, inert: 'start = stop: one point, step not read' } : raw;
+    return { kind: 'range', label: row.label, start, stop, step, points: pointsOf(entry), accent: Boolean(row.accent) };
   }
   if (row.kind === 'voc') {
     // The V_oc row shows the service's missing-value reason or derived provenance.
@@ -338,6 +339,23 @@ export function foldCount(model) {
 export function points(estimateText) {
   const m = /×\s*(\d+)\s*pts?\b/.exec(String(estimateText || ''));
   return m ? Number(m[1]) : null;
+}
+
+/** The entry's point count: the structured `estimate`, else the sentence. */
+function pointsOf(entry) {
+  const n = entry.estimate && entry.estimate.points;
+  return Number.isInteger(n) ? n : points(entry.estimate_text);
+}
+
+/** Display names of the service's fold groups; the wire names stay. */
+export const GROUP_LABELS = {
+  illumination: 'Illumination', led: 'LED', acquisition: 'Acquisition', timing: 'Timing',
+  trigger: 'Trigger', processing: 'Processing', output: 'Output', sourcemeter: 'Source meter',
+  axis: 'Axis', pinned: 'Pinned', other: 'Other',
+};
+
+export function groupLabel(group) {
+  return GROUP_LABELS[group] || group;
 }
 
 /**

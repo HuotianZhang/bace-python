@@ -40,17 +40,17 @@ export function panelModel(bench, light) {
     {
       key: 'shutter', label: 'Shutter', inferred: is('shutter'),
       positions: [
-        { id: 'open', label: 'open', on: shutter.open === true, action: 'shutter-open', args: {} },
-        { id: 'shut', label: 'shut', on: shutter.open === false, action: 'shutter-shut', args: {} },
+        { id: 'open', label: 'Open', on: shutter.open === true, action: 'shutter-open', args: {} },
+        { id: 'shut', label: 'Shut', on: shutter.open === false, action: 'shutter-shut', args: {} },
       ],
     },
     {
-      key: 'led', label: 'LED · 33220A', inferred: is('led'),
+      key: 'led', label: 'LED', model: 'Agilent 33220A', inferred: is('led'),
       positions: [
-        { id: 'off', label: 'off', on: ledPosition === 'off', action: 'led-off', args: {} },
+        { id: 'off', label: 'Off', on: ledPosition === 'off', action: 'led-off', args: {} },
         { id: 'dc', label: 'DC', on: ledPosition === 'dc', action: 'set-led-dc',
           args: { level: values.led_v } },
-        { id: 'pulse', label: 'pulse', on: ledPosition === 'pulse', action: 'set-led-pulse',
+        { id: 'pulse', label: 'Pulse', on: ledPosition === 'pulse', action: 'set-led-pulse',
           args: { level: values.led_v, low: values.led_low_v,
             frequency_hz: values.pulse_frequency_hz, duty_percent: values.duty_percent } },
       ],
@@ -65,8 +65,8 @@ export function panelModel(bench, light) {
     {
       key: 'relay', label: 'Relay', inferred: is('relay'),
       positions: [
-        { id: 'amplifier', label: 'amplifier', on: relay.position === 'amplifier', action: 'relay-to-amplifier', args: {} },
-        { id: 'sourcemeter', label: 'sourcemeter', on: relay.position === 'sourcemeter', action: 'relay-to-sourcemeter', args: {} },
+        { id: 'amplifier', label: 'Amplifier', on: relay.position === 'amplifier', action: 'relay-to-amplifier', args: {} },
+        { id: 'sourcemeter', label: 'Source meter', on: relay.position === 'sourcemeter', action: 'relay-to-sourcemeter', args: {} },
       ],
     },
   ];
@@ -85,14 +85,14 @@ export function renderInstruments(model, ctx) {
   const busy = Boolean(ctx.busy);
   return h('div.inst',
     model.rows.map((row) => h('div.irow', { class: row.inferred ? 'inferred' : '' },
-      h('span.n', { text: row.label }),
-      h('span.sw', { role: 'group', 'aria-label': row.label, title: row.inferred ? 'inferred from the running step, not read back' : '' },
+      h('span.n', { text: row.label, title: row.model || null }),
+      h('span.sw', { role: 'group', 'aria-label': row.label, title: row.inferred ? 'Inferred from the running step, not read back.' : '' },
         row.positions.map((p) => h('button.p', {
           type: 'button',
           class: p.on ? 'on' : '',
           'aria-pressed': p.on ? 'true' : 'false',
           disabled: busy || null,
-          title: busy ? 'a run holds the bench; only Park is allowed until it ends — Park is on the strip below' : `${row.label} → ${p.label}`,
+          title: busy ? 'A run holds the bench. Only Park acts until it ends.' : `${row.label}: ${p.label}`,
           onclick: () => { if (!p.on) ctx.act(p.action, p.args); },
         }, p.label))),
       row.levels ? levels(row, ctx) : h('span'))));
