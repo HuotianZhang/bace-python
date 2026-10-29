@@ -133,7 +133,10 @@ export function createPlansPanel({ api, onChange = () => {} }) {
   function toggle(want = !open) {
     open = Boolean(want);
     el.hidden = !open;
-    if (open) refresh(); else onChange({ open, pending: pendingCount(plans) });
+    // The open state is reported before the list is fetched, so the shell can close
+    // the assistant at once rather than after the service answers.
+    onChange({ open, pending: pendingCount(plans) });
+    if (open) refresh();
   }
 
   return { el, toggle, refresh, get pending() { return pendingCount(plans); } };
