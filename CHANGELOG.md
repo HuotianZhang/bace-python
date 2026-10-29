@@ -2,6 +2,13 @@
 
 Dated, newest first. Details and evidence are in `docs/`.
 
+## 2026-10-29
+
+- The assistant's address presets include the University of Potsdam LLM
+  Proxy (`https://llm.ki.k8s.rz.uni-potsdam.de`), an OpenAI-compatible
+  LiteLLM server open to university staff. The key comes from Account.UP; the
+  model is typed as the proxy's `/models` lists it.
+
 ## 2026-10-28
 
 - **The light source is a 1 W, 520 nm laser diode** (Nichia NDG7475), driven

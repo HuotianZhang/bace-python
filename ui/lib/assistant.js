@@ -15,6 +15,7 @@ export const KEYS_STORE = 'bace.assistant.keys';
  * because provider model names vary independently of the console.
  */
 export const PRESETS = [
+  { name: 'Uni Potsdam · LLM Proxy', base_url: 'https://llm.ki.k8s.rz.uni-potsdam.de' },
   { name: 'OpenAI', base_url: 'https://api.openai.com/v1' },
   { name: 'DeepSeek', base_url: 'https://api.deepseek.com' },
   { name: 'Qwen · DashScope', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
