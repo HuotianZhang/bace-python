@@ -604,9 +604,10 @@ export default {
       const resolved = (row && row.params) || null;
       const entry = {
         ...catalogue,
-        // Catalogue `estimate_text` describes the bench axis rather than this node.
-        // The fallback omits point count instead of showing another form's estimate.
-        estimate_text: '', estimate_s: row ? row.estimate_s : null, last: null, needs: [],
+        // The catalogue's estimate, sentence and parts alike, describes the bench
+        // axis rather than this node. The fallback omits the point count instead
+        // of showing another form's.
+        estimate_text: '', estimate: null, estimate_s: row ? row.estimate_s : null, last: null, needs: [],
         params: (catalogue.params || []).map((p) => {
           // Schedule values omit `editable`; catalogue editability describes bench
           // sources. Node editability must also exclude inherited and derived
