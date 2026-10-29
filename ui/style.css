@@ -1409,7 +1409,9 @@ aside.plans[hidden] { display: none; }
 .pl-env { width: 100%; border-collapse: collapse; font-size: 12px; }
 .pl-env th, .pl-env td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--rule); }
 .pl-env th { font-size: 10px; color: var(--grey); font-weight: 600; }
-.pl-caps, .pl-fp { font-family: var(--font-num); font-size: 11px; color: var(--grey); margin: 8px 0 0; }
+.pl-caps { display: grid; grid-template-columns: repeat(auto-fill, minmax(9em, 1fr)); gap: 6px 12px; margin: 8px 0 0; }
+.pl-caps dt { font-size: 10px; color: var(--grey); }
+.pl-caps dd { margin: 0; font-family: var(--font-num); font-size: 11.5px; overflow-wrap: anywhere; }
 .pl-actions { display: flex; gap: 8px; margin-top: 10px; }
 .pl-actions button { cursor: pointer; font: inherit; font-size: 12px; padding: 3px 10px; border: 1px solid var(--rule); background: var(--paper); }
 .pl-actions button.armed { background: var(--warn); border-color: var(--warn); color: #fff; }
@@ -1427,6 +1429,13 @@ aside.assistant {
   box-shadow: -6px 0 18px rgba(0,0,0,.08);
 }
 aside.assistant[hidden] { display: none; }
+/* The view and the side panels share one row. From 1280 px the open panel takes
+   its width from the view instead of covering it; below, it overlays as above. */
+.body { flex: 1 1 auto; display: flex; min-height: 0; }
+.body > .view { flex: 1 1 auto; min-width: 0; }
+@media (min-width: 1280px) {
+  aside.assistant, aside.plans { position: static; flex: 0 0 420px; width: 420px; box-shadow: none; }
+}
 .assistant .as-head {
   display: flex; align-items: baseline; gap: 10px; padding: 8px 12px;
   border-bottom: 1px solid var(--rule); background: var(--fill);
@@ -1478,7 +1487,6 @@ aside.assistant[hidden] { display: none; }
 .assistant .as-tool.bad { color: var(--warn); }
 .assistant .as-wait { font-size: 12px; color: var(--grey); }
 .assistant .as-err { font-size: 12px; color: var(--alert); }
-.assistant .as-usage { font-family: var(--font-num); font-size: 10px; color: var(--grey); opacity: .8; }
 .assistant .as-composer { display: flex; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--rule); }
 .assistant .as-composer textarea {
   flex: 1 1 auto; resize: none; padding: 6px; border: 1px solid var(--rule);
