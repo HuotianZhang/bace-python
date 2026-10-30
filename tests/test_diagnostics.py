@@ -520,3 +520,34 @@ def test_a_monitor_channel_that_will_not_fetch_costs_one_line_not_the_run():
 def test_a_monitor_channel_must_be_a_free_channel(channel):
     with pytest.raises(ValueError, match="monitor_channel"):
         RunConfig(monitor_channel=channel)
+
+
+def test_a_failed_monitor_fetch_leaves_the_other_shots_their_weight(tmp_path):
+    from dataclasses import replace
+
+    from bace.storage.hdf5 import read_run
+    from bace.storage.naming import RunMetadata
+
+    _, rig = _rig()
+    fetch = rig.scope.fetch_volts
+    calls = {"n": 0}
+
+    def flaky(source):
+        if source != "CHAN4":
+            return fetch(source)
+        calls["n"] += 1
+        if calls["n"] == 1:                   # the first light trace of loop 1
+            raise RuntimeError("channel not displayed")
+        return Trace(np.full_like(fetch(source).y, float(calls["n"])), DT, T0)
+
+    rig.scope.fetch_volts = flaky
+    rec = RunRecorder(str(tmp_path), RunMetadata(sample="sim", temperature_k=290.0,
+                                                  temperature_how="typed"))
+    list(record(run_transient_scan(rig, ScanSpec(axis=Axis("vpre", 1.0, 1.0), vcoll=-2.0, n_loops=3),
+                                   replace(CFG, monitor_channel="CHAN4"), sleep=NO_SLEEP), rec))
+    d = read_run([p for p in rec.written if p.endswith(".h5")][0])
+    assert calls["n"] == 6
+    # Fetches run light, dark, light, ...: light has 3 and 5, dark has 2, 4 and 6.
+    assert np.isfinite(d["monitor_light"]).all() and np.isfinite(d["monitor_dark"]).all()
+    assert d["monitor_light"][0, 0] == pytest.approx(4.0)
+    assert d["monitor_dark"][0, 0] == pytest.approx(4.0)
