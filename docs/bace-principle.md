@@ -28,7 +28,7 @@ This document maps the literature to the implementation. The manual explains
 | Interpret carrier density n = \|Q\|/(eAd) | Files retain signed Q; the code does not calculate n. | 2.4 |
 
 The bench converts the device current to a voltage on CHAN2 with the current
-chain's factor R_s = 5.192 V/A, and amplifies the bias by 4 (`rig.toml`;
+chain's factor R_s = 4.94 V/A, and amplifies the bias by 4.07 (`rig.toml`;
 [The bench](manual/1.2-bench.md)).
 
 ## What the extracted charge is

@@ -924,7 +924,7 @@ def test_rig_toml_carries_the_confirmed_addresses():
     assert r.led_address == "GPIB0::15::INSTR"
     assert r.bias_address == "GPIB0::12::INSTR"
     assert r.scope_address.startswith("TCPIP0::")
-    assert r.sense_resistor_ohm == pytest.approx(5.192)
+    assert r.sense_resistor_ohm == pytest.approx(4.94)
     assert r.current_sign == -1.0
     assert (r.shutter_module_nr, r.relay_module_nr) == (0, 1)
 

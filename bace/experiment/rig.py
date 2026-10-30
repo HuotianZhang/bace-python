@@ -21,7 +21,7 @@ class RigConfig:
     sense_resistor_ohm: float = 5.192
     """Resistance between the device and digitiser input, in Ω, used to convert measured voltage to current.
 
-    R_s is 5.192 Ω on this bench (manual 1.2). Absolute Q scales as `1 / R_s`, so
+    `rig.toml` holds this bench's value (manual 1.2). Absolute Q scales as `1 / R_s`, so
     an incorrect value rescales every charge.
     """
 

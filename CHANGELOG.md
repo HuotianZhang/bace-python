@@ -4,6 +4,11 @@ Dated, newest first. Details and evidence are in `docs/`.
 
 ## 2026-10-30
 
+- **R_s is 4.94 V/A and the bias gain 4.07**, each to ± 2 %. Known resistors on
+  the current cable gave 0.965 of the expected current; a compensated probe
+  put the step at 1.017 of the command. Q read about 5 % low and V_coll about
+  1.7 % high. Files record the values they used, so earlier runs are unchanged;
+  to compare them, multiply their Q by 5.192 / 4.94.
 - A parameter edit reaches every console. `PUT /modules/{m}/params` and its
   reset emit `ParamsEdited`, which is also journaled; a console refetches the
   catalogue and revalidates, so a second console no longer shows one value and

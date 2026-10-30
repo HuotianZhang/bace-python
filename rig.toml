@@ -5,12 +5,14 @@
 # (manual 1.2, 3.3).
 
 [electrical]
-sense_resistor_ohm = 5.192      # R_s, the current chain's conversion factor in V/A:
-                                # 5.192 for the present sample-holder amplifier.
+sense_resistor_ohm = 4.94       # R_s, the current chain's conversion factor in V/A,
+                                # measured with 4.58 kOhm on the current cable (± 2 %).
+                                # 5.192 until then; files record the value they used.
                                 # Q scales as 1/R_s; an error here rescales every Q
-                                # (manual 2.3).
-pulse_amp = 4.0                 # Gain of the bias amplifier on the sample holder,
-                                # 4 V/V; the 81150A levels are divided by it
+                                # (manual 2.3, 2.4).
+pulse_amp = 4.07                # Gain of the bias amplifier on the sample holder,
+                                # measured at the cable end (± 2 %, probe tolerance);
+                                # 4 until then. The 81150A levels are divided by it
                                 # (manual 1.2).
 probe_attenuation = 1.0
 trigger_offset_s = 35.1e-9      # Field latency: the voltage step's 50 % point is 35.1 ns

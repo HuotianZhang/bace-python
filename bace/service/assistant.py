@@ -96,7 +96,7 @@ the console.
 The bench: an Agilent 33220A drives the LED (the light); an Agilent 81150A \
 switches the device bias between the prebias V_pre (normally V_oc) and the \
 collection voltage, and triggers the shot; an Agilent/Keysight DSO9054H \
-records the current across a 5.192 ohm sense resistor; a Keithley 2400 measures V_oc, J_sc and \
+records the current through the sample-holder amplifier; a Keithley 2400 measures V_oc, J_sc and \
 J-V; a Lake Shore 331 holds the cryostat temperature; a Newport 1918-C reads \
 the light power; a shutter and a relay sit in the light and signal paths. Each \
 shot takes a light trace and a dark reference trace; Q is the integral of \
