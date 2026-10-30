@@ -8,6 +8,9 @@ Dated, newest first. Details and evidence are in `docs/`.
   reset emit `ParamsEdited`, which is also journaled; a console refetches the
   catalogue and revalidates, so a second console no longer shows one value and
   runs another.
+- The plan card folds values an agent fixed to one setting under one line, so
+  what it may still choose stands out. Voltages, currents, temperatures,
+  delays and the scan axis stay listed.
 
 ## 2026-10-29
 

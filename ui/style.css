@@ -1409,6 +1409,8 @@ aside.plans[hidden] { display: none; }
 .pl-env { width: 100%; border-collapse: collapse; font-size: 12px; }
 .pl-env th, .pl-env td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--rule); }
 .pl-env th { font-size: 10px; color: var(--grey); font-weight: 600; }
+.pl-fixed { margin-top: 6px; font-size: 12px; }
+.pl-fixed summary { cursor: pointer; color: var(--grey); }
 .pl-caps { display: grid; grid-template-columns: repeat(auto-fill, minmax(9em, 1fr)); gap: 6px 12px; margin: 8px 0 0; }
 .pl-caps dt { font-size: 10px; color: var(--grey); }
 .pl-caps dd { margin: 0; font-family: var(--font-num); font-size: 11.5px; overflow-wrap: anywhere; }
