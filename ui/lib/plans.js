@@ -4,6 +4,8 @@
 // (docs/service-contract.md section 8b). The panel shows everything the
 // approval covers, the envelope, the caps and the fingerprint, because the
 // approval names that fingerprint: the service refuses it for any other plan.
+// Values an agent pinned to keep its runs reproducible fold under one line, so
+// what the agent may still choose stands out; they stay one click away.
 // Approving takes two clicks, as every action that commits the bench does.
 
 import { h, fill } from './dom.js';
@@ -19,20 +21,48 @@ export function describeBound(bound) {
   return '';
 }
 
-/** One row per thing the envelope lets an agent set: `[where, name, allowed]`. */
-export function envelopeRows(envelope) {
-  const rows = [];
+/** Every bound of the envelope, in order: `[where, name, bound]`. */
+function bounds(envelope) {
+  const out = [];
   for (const [module, params] of Object.entries((envelope && envelope.modules) || {})) {
     const names = Object.keys(params || {});
-    if (!names.length) rows.push([module, '—', 'as on the bench']);
-    for (const name of names) rows.push([module, name, describeBound(params[name])]);
+    if (!names.length) out.push([module, '—', null]);
+    for (const name of names) out.push([module, name, params[name]]);
   }
   for (const [loop, params] of Object.entries((envelope && envelope.loops) || {})) {
-    for (const [name, bound] of Object.entries(params || {})) {
-      rows.push([`${loop} loop`, name, describeBound(bound)]);
-    }
+    for (const [name, bound] of Object.entries(params || {})) out.push([`${loop} loop`, name, bound]);
   }
-  return rows;
+  return out;
+}
+
+const row = ([where, name, bound]) => [where, name, bound ? describeBound(bound) : 'as on the bench'];
+
+/** One row per thing the envelope lets an agent set: `[where, name, allowed]`. */
+export function envelopeRows(envelope) {
+  return bounds(envelope).map(row);
+}
+
+/**
+ * Voltages, currents, temperatures, delays and the scan axis stay in view even when
+ * pinned: they are what a person rejects a plan for (manual 1.6). The rule follows the
+ * unit suffix of the parameter names, so a new voltage is caught without a list.
+ */
+const ALWAYS_SHOWN = /^(vcoll|vpre|voc|v_sat|delay_ns)$|_(v|k|a)$|_on_voc$|^axis_/;
+
+/** A bound that leaves the agent one value. */
+function pinned(bound) {
+  if (!bound) return false;
+  if (Array.isArray(bound.choices)) return bound.choices.length === 1;
+  return bound.min !== undefined && bound.min === bound.max;
+}
+
+/** The rows to read, and the pinned rows that fold: `{ shown, fixed }`. */
+export function splitRows(envelope) {
+  const shown = [], fixed = [];
+  for (const entry of bounds(envelope)) {
+    (pinned(entry[2]) && !ALWAYS_SHOWN.test(entry[1]) ? fixed : shown).push(row(entry));
+  }
+  return { shown, fixed };
 }
 
 /** Plans waiting for a decision. */
@@ -50,6 +80,8 @@ export function createPlansPanel({ api, onChange = () => {} }) {
   let armed = null;
   let armedTimer = null;
   let status = null;
+  /** Plans with their pinned values unfolded; a redraw must not fold them again. */
+  const unfolded = new Set();
 
   const el = h('aside.plans', { hidden: true, 'aria-label': 'plans' });
   const headEl = h('div.as-head');
@@ -78,8 +110,14 @@ export function createPlansPanel({ api, onChange = () => {} }) {
     await refresh();
   }
 
+  const envelopeTable = (rows) => h('table.pl-env',
+    h('thead', h('tr', h('th', 'Scope'), h('th', 'Parameter'), h('th', 'Allowed'))),
+    h('tbody', ...rows.map(([where, name, allowed]) =>
+      h('tr', h('td', where), h('td', name), h('td', allowed)))));
+
   function card(plan) {
     const caps = plan.envelope || {};
+    const { shown, fixed } = splitRows(caps);
     const actions = [];
     if (plan.state === 'proposed') {
       actions.push(h('button.pl-approve', {
@@ -104,10 +142,14 @@ export function createPlansPanel({ api, onChange = () => {} }) {
       h('div.pl-title', h('span', plan.title),
         h('span.pl-state', plan.state === 'approved' && !plan.open ? 'spent' : plan.state)),
       h('p.pl-goal', plan.goal),
-      h('table.pl-env',
-        h('thead', h('tr', h('th', 'Scope'), h('th', 'Parameter'), h('th', 'Allowed'))),
-        h('tbody', ...envelopeRows(caps).map(([where, name, allowed]) =>
-          h('tr', h('td', where), h('td', name), h('td', allowed))))),
+      envelopeTable(shown),
+      fixed.length ? h('details.pl-fixed', {
+        open: unfolded.has(plan.plan_id),
+        ontoggle: (e) => {
+          if (e.target.open) unfolded.add(plan.plan_id); else unfolded.delete(plan.plan_id);
+        },
+      }, h('summary', `${fixed.length} more fixed ${fixed.length === 1 ? 'value' : 'values'}`),
+      envelopeTable(fixed)) : null,
       h('dl.pl-caps', cells.map(([k, v]) => h('div', h('dt', k), h('dd', v)))),
       actions.length ? h('div.pl-actions', ...actions) : null);
   }
