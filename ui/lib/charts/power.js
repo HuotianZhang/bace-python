@@ -6,7 +6,8 @@
 
 import * as scale from '../scale.js';
 import * as fmt from '../format.js';
-import { layout, axisTicks, heightFor, ASPECT } from './frame.js';
+import { layout, axisTicks, heightFor, ASPECT, PLOT_MARGIN } from './frame.js';
+import { ranged } from './view.js';
 
 /** The windows the panel offers. `seconds: null` is the whole log. */
 export const WINDOWS = [
@@ -89,7 +90,7 @@ export function wattsUnit(points) {
  * exposes small drift, such as 1 %, in a settled LED.
  */
 export function powerModel(points, {
-  seconds = null, now, width = 1400, height = null, fromZero = false, columns = null,
+  seconds = null, now, width = 1400, height = null, fromZero = false, columns = null, view = null,
 } = {}) {
   const at = now !== undefined ? now : Date.now() / 1000;
   const inWindow = windowPoints(points, { seconds, now: at });
@@ -113,8 +114,8 @@ export function powerModel(points, {
   // and the ends carry the meaning and the middle is a baseline.
   const pPanel = [{ key: 'power', weight: 1 }];
   const frame = layout({
-    width, panels: pPanel, margin: { left: 60 },
-    height: height ?? heightFor(width, pPanel, { margin: { left: 60 }, aspect: ASPECT.strip }),
+    width, panels: pPanel, margin: PLOT_MARGIN,
+    height: height ?? heightFor(width, pPanel, { margin: PLOT_MARGIN, aspect: ASPECT.strip }),
   });
   const panel = frame.panels[0];
   const rect = panel.rect;
@@ -122,7 +123,7 @@ export function powerModel(points, {
   const xs = inWindow.map((p) => (p.ts - at) / div);
   const ys = inWindow.map((p) => p.watts / factor);
   const domain = scale.extent([ys], { includeZero: fromZero, pad: 0.08 }) || [0, 1];
-  const Y = scale.linear(domain, [rect.y + rect.h, rect.y]);
+  const Y = scale.linear(ranged(view, 'power', `${prefix}W`, domain), [rect.y + rect.h, rect.y]);
   const cols = columns || Math.round(rect.w);
   const nearest = (xValue) => {
     const ts = at + xValue * div;
@@ -143,7 +144,7 @@ export function powerModel(points, {
     note: `${stats.n} reading${stats.n === 1 ? '' : 's'} · ${fmt.duration(stats.span_s)}`
       + (stats.untrustworthy ? ` · ${stats.untrustworthy} flagged by the meter` : ''),
     noteColour: stats.untrustworthy ? 'alert' : 'grey',
-    y: { scale: Y, ticks: axisTicks(Y, { count: 4 }) },
+    y: { scale: Y, ticks: axisTicks(Y, { count: 4 }), title: `Power (${prefix}W)`, unit: `${prefix}W` },
     series: [{
       key: 'power', label: 'P', colour: 'ink', width: 1.3,
       d: inWindow.length > cols * 2
@@ -167,6 +168,10 @@ export function powerModel(points, {
       scale: X,
       ticks: axisTicks(X, { count: 6 }),
       label: `${unit} before now`,
+      title: `Time before now (${unit})`,
+      unit,
+      // The panel's window menu sets this axis.
+      fixed: true,
       format: (v) => `${ago(-v)} ${unit} ago`,
     },
     legend: dots.length ? [{ label: 'saturated or overrange, as the meter flagged it', colour: 'alert', marker: 'dot' }] : [],

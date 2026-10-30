@@ -9,7 +9,9 @@
 
 import * as scale from '../scale.js';
 import * as fmt from '../format.js';
-import { layout, axisTicks, heightFor, headLines, HEAD_LINE, ASPECT, MARGIN } from './frame.js';
+import { layout, axisTicks, heightFor, ASPECT, MAX_UNIT, PLOT_MARGIN } from './frame.js';
+import { chargeUnit } from './loops.js';
+import { ranged } from './view.js';
 
 /**
  * The helper resolves integration-window start in record time. `pulseDelayS` includes
@@ -163,27 +165,28 @@ export function runningIntegral(photo, x, from, to = null) {
 const NS = 1e9;
 const MA = 1e3;
 
+/** The stack's height at a given width. */
+const stackHeight = (width, panels) => heightFor(width, panels,
+  { margin: PLOT_MARGIN, aspect: ASPECT.stack, cap: MAX_UNIT.stack });
+
 /**
  * The model uses three panels on one x axis to avoid ambiguous dual y scales. Missing
  * data remains an explicit absence.
  */
-/** The plot's own width, which is what a label has to fit inside. */
-const plotWidth = (width) => width - MARGIN.left - MARGIN.right;
-
 /**
  * The empty frame reserves the two panels every shot has. An integral panel requires
  * a resolved integration window and is omitted before that exists.
  */
 const ABSENT_PANELS = [
-  { key: 'traces', weight: 1.25, label: 'light and dark  ·  I / mA' },
-  { key: 'photo', weight: 1, label: 'photocurrent = light − dark  ·  I / mA' },
+  { key: 'traces', weight: 1.25, label: 'Current (mA)' },
+  { key: 'photo', weight: 1, label: 'Light − dark (mA)' },
 ];
 
 export function transientModel(input, options = {}) {
   const {
     width = 560, height = null, columns = null,
     t0_int_s = null, t_int_width_s = null, pulse_delay_s = 0,
-    offset_corrected = null, offset_region = null, dark_reference = null,
+    offset_corrected = null, offset_region = null, dark_reference = null, view = null,
   } = options;
   const set = traceSet(input, { t0_int_s, t_int_width_s, pulse_delay_s });
   if (set.absent) {
@@ -195,9 +198,10 @@ export function transientModel(input, options = {}) {
         ...set.absent,
         frame: {
           width,
-          height: height ?? heightFor(width, ABSENT_PANELS, { aspect: ASPECT.trace }),
+          height: height ?? stackHeight(width, ABSENT_PANELS),
           panels: ABSENT_PANELS,
-          xLabel: 't / ns  →  record time',
+          margin: PLOT_MARGIN,
+          xLabel: 'Time (ns)',
         },
       },
       notes: [],
@@ -223,22 +227,24 @@ export function transientModel(input, options = {}) {
   if (hasCumulative || derived) {
     panels.push({ key: 'charge', weight: 0.8, label: 'running integral  ·  Q / C' });
   }
-  // Panel headers contain both captions and labels. Their wrapped height depends on
-  // plot width, so the tallest header sets `top` and the inter-panel gap.
-  const head = Math.max(...panels.map((p) => headLines(p.label + (p.suffix || ''), plotWidth(width), true)));
-  const margin = { top: 5 + head * HEAD_LINE, gap: MARGIN.gap + (head - 1) * HEAD_LINE };
-  // `ASPECT.trace` and panel weights set the height so time traces keep consistent
+  // `ASPECT.stack` and panel weights set the height so time traces keep consistent
   // proportions.
   const frame = layout({
-    width, panels, margin,
-    height: height ?? heightFor(width, panels, { margin, aspect: ASPECT.trace }),
+    width, panels, margin: PLOT_MARGIN,
+    height: height ?? stackHeight(width, panels),
   });
   const plot = frame.panels[0].rect;
   const cols = columns || Math.round(plot.w);
 
   const xEnd = set.n ? set.x(set.n - 1) : 0;
-  const X = scale.linear([0, xEnd * NS], [plot.x, plot.x + plot.w]);
-  const xTicks = axisTicks(X, { count: 5 });
+  const X = scale.linear(ranged(view, 'x', 'ns', [0, xEnd * NS]), [plot.x, plot.x + plot.w]);
+  const xTicks = axisTicks(X, { count: width > 520 ? 10 : 5 });
+  // Only the samples the x axis shows go into the paths: thinning the whole record
+  // would leave a zoom with fewer columns than it has pixels.
+  const span = {
+    from: Math.max(0, nearest(set, X.domain[0] / NS) - 1),
+    to: Math.min(set.n, nearest(set, X.domain[1] / NS) + 2),
+  };
   const at = (values, factor) => (xValue) => {
     if (!values) return null;
     const i = nearest(set, xValue / NS);
@@ -247,43 +253,41 @@ export function transientModel(input, options = {}) {
 
   const built = [];
   for (const panel of frame.panels) {
-    if (panel.key === 'traces') built.push(tracesPanel(panel, set, X, cols, at));
-    if (panel.key === 'photo') built.push(photoPanel(panel, set, X, cols, at));
+    if (panel.key === 'traces') built.push(tracesPanel(panel, set, X, cols, at, span, view));
+    if (panel.key === 'photo') built.push(photoPanel(panel, set, X, cols, at, span, view));
     if (panel.key === 'charge') {
       built.push(chargePanel(panel, set, X, cols, at, hasCumulative ? set.cumulative : integral.values,
-        hasCumulative));
+        hasCumulative, span, view));
     }
   }
+  built.forEach((panel, i) => { panel.letter = 'abc'[i]; });
+  built[0].keys = [
+    ...(set.light ? [{ label: 'Light', colour: 'ink' }] : []),
+    ...(set.dark ? [{ label: 'Dark', colour: 'grey', width: 1.6 }] : []),
+  ];
 
-  // The integration window shades every panel because it is the same time region for
-  // all traces.
+  // The integration window is the same time region for all traces, so its edges cross
+  // every panel. Thin lines leave the traces in front.
+  const windowNote = [];
   if (set.window !== null && set.window !== undefined) {
     const x0 = X(set.window * NS);
     // Both integration-window edges move with the pulse. A window extending beyond
-    // the record is clipped at its edge and marked with its intended endpoint.
+    // the record has no end line.
     const endS = set.windowEnd;
     const plotRight = plot.x + plot.w;
-    const x1 = endS === null || endS === undefined ? plotRight : Math.min(plotRight, X(endS * NS));
+    const ended = endS !== null && endS !== undefined && endS * NS <= xEnd * NS;
+    const x1 = ended ? X(endS * NS) : plotRight;
     for (const panel of built) {
-      panel.shades = [{ x: x0, w: Math.max(0, x1 - x0), colour: 'accent', opacity: 0.055 }];
-      panel.rules = [...(panel.rules || []), { x1: x0, colour: 'accent', width: 1.5 },
-        ...(endS === null || endS === undefined || X(endS * NS) > plotRight ? []
-          : [{ x1, colour: 'accent', width: 1, dash: '4 3' }])];
+      panel.rules = [...(panel.rules || []), { x1: x0, colour: 'grey', width: 0.9, dash: '3 3' },
+        ...(ended ? [{ x1, colour: 'grey', width: 0.9, dash: '3 3' }] : [])];
     }
     built[0].marks = [...(built[0].marks || []), {
-      x: x0 + 5, y: built[0].rect.y + 12, text: 't_0,int', colour: 'accent', weight: 600, mono: true, halo: true,
-    }, {
-      x: x0 + 5, y: built[0].rect.y + 22, halo: true,
-      text: `${fmt.sig(set.window * NS, 4)} ns of record time`
-        + (endS === null || endS === undefined ? '' : ` → ${fmt.sig(endS * NS, 4)} ns`),
-      colour: 'accent', size: 8.5,
-    },
-    // Window provenance belongs beside its boundary so the operator can read it
-    // against the interval it defines.
-    ...(set.windowSource ? [{
-      x: x0 + 5, y: built[0].rect.y + 32, halo: true,
-      text: set.windowSource, colour: 'grey', size: 8.5,
-    }] : [])];
+      x: (x0 + x1) / 2, y: built[0].rect.y + built[0].rect.h - 7, anchor: 'middle',
+      text: 'integration window', colour: 'grey', weight: 400, size: 10, halo: true,
+    }];
+    windowNote.push(`integration window ${fmt.sig(set.window * NS, 4)} ns of record time`
+      + (endS === null || endS === undefined ? '' : ` → ${fmt.sig(endS * NS, 4)} ns`)
+      + (set.windowSource ? `, ${set.windowSource}` : ''));
   }
   if (set.trigger !== null && set.trigger !== undefined && set.trigger > 0) {
     const x0 = X(set.trigger * NS);
@@ -305,18 +309,15 @@ export function transientModel(input, options = {}) {
       scale: X,
       ticks: xTicks,
       label: 't / ns  →  record time',
+      title: 'Time (ns)',
+      unit: 'ns',
       format: (v) => `${fmt.sig(v, 4)} ns`,
     },
-    legend: [
-      { label: 'light', colour: 'ink', width: 1.4 },
-      { label: 'dark', colour: 'grey', width: 1.4 },
-      { label: 'photocurrent', colour: 'ink', width: 1.4 },
-      ...(hasCumulative || derived ? [{ label: 'running integral', colour: 'accent', width: 1.6, dash: '3 2' }] : []),
-    ],
+    legend: [],
     // The readout row serves the crosshair. At rest it leaves Q, running mean and
     // uncertainty in the shot block, where their shot and point are identified.
     readout: '',
-    notes: notes(set, { hasCumulative, derived }),
+    notes: [...windowNote, ...notes(set, { hasCumulative, derived })],
   };
 }
 
@@ -328,24 +329,25 @@ function nearest(set, xValue) {
   return Math.min(set.n - 1, Math.max(0, i));
 }
 
-function tracesPanel(panel, set, X, cols, at) {
+function tracesPanel(panel, set, X, cols, at, span, view) {
   // Light and dark share a vertical scale because autorange runs on the light trace
   // and the dark trace inherits that range (`docs/ui-rules.md` §7). Separate scaling
   // would conceal a mismatch.
   const domain = scale.extent([set.light, set.dark], { includeZero: true }) || [-1, 1];
-  const Y = scale.linear([domain[0] * MA, domain[1] * MA], [panel.rect.y + panel.rect.h, panel.rect.y]);
+  const Y = scale.linear(ranged(view, panel.key, 'mA', [domain[0] * MA, domain[1] * MA]),
+    [panel.rect.y + panel.rect.h, panel.rect.y]);
   const series = [];
   if (set.dark) {
     series.push({
-      key: 'dark', label: 'dark', colour: 'grey', width: 1, opacity: 0.75,
-      d: scale.envelopePath(set.dark.map((v) => v * MA), (i) => X(set.x(i) * NS), Y, { columns: cols }),
+      key: 'dark', label: 'dark', colour: 'grey', width: 1.4,
+      d: scale.envelopePath(set.dark.map((v) => v * MA), (i) => X(set.x(i) * NS), Y, { columns: cols, ...span }),
       at: at(set.dark, MA), format: (v) => `${fmt.sig(v, 3)} mA`,
     });
   }
   if (set.light) {
     series.push({
-      key: 'light', label: 'light', colour: 'ink', width: 1.1,
-      d: scale.envelopePath(set.light.map((v) => v * MA), (i) => X(set.x(i) * NS), Y, { columns: cols }),
+      key: 'light', label: 'light', colour: 'ink', width: 1.15,
+      d: scale.envelopePath(set.light.map((v) => v * MA), (i) => X(set.x(i) * NS), Y, { columns: cols, ...span }),
       at: at(set.light, MA), format: (v) => `${fmt.sig(v, 3)} mA`,
     });
   }
@@ -353,34 +355,37 @@ function tracesPanel(panel, set, X, cols, at) {
     ...panel,
     note: railNote(set),
     noteColour: set.verdict && set.verdict.shared_extreme ? 'alert' : 'grey',
-    y: { scale: Y, ticks: axisTicks(Y, { count: 3 }) },
+    y: { scale: Y, ticks: axisTicks(Y, { count: 4 }), title: 'Current (mA)', unit: 'mA' },
     series,
   };
 }
 
-function photoPanel(panel, set, X, cols, at) {
+function photoPanel(panel, set, X, cols, at, span, view) {
   const domain = scale.extent([set.photo], { includeZero: true }) || [-1, 1];
-  const Y = scale.linear([domain[0] * MA, domain[1] * MA], [panel.rect.y + panel.rect.h, panel.rect.y]);
+  const Y = scale.linear(ranged(view, panel.key, 'mA', [domain[0] * MA, domain[1] * MA]),
+    [panel.rect.y + panel.rect.h, panel.rect.y]);
   return {
     ...panel,
     label: (set.photoLabel || panel.label) + (panel.suffix || ''),
     note: 'Q = ∫ (light − dark) dt',
-    y: { scale: Y, ticks: axisTicks(Y, { count: 3 }) },
+    y: { scale: Y, ticks: axisTicks(Y, { count: 3 }), title: 'Light − dark (mA)', unit: 'mA' },
     series: set.photo ? [{
-      key: 'photo', label: 'photocurrent', colour: 'ink', width: 1.3,
-      d: scale.envelopePath(set.photo.map((v) => v * MA), (i) => X(set.x(i) * NS), Y, { columns: cols }),
+      key: 'photo', label: 'photocurrent', colour: 'photo', width: 1.3,
+      d: scale.envelopePath(set.photo.map((v) => v * MA), (i) => X(set.x(i) * NS), Y, { columns: cols, ...span }),
       at: at(set.photo, MA), format: (v) => `${fmt.sig(v, 3)} mA`,
     }] : [],
   };
 }
 
-function chargePanel(panel, set, X, cols, at, values, fromService) {
+function chargePanel(panel, set, X, cols, at, values, fromService, span, view) {
   // Service `cumulative_q` begins at `t0_int_record_s`, not the record origin.
   // Starting at the record origin would shift the entire integral.
   const offset = fromService ? indexOf(set, set.cumulativeFrom ?? set.window) : 0;
   const finite = values.filter((v) => Number.isFinite(v));
-  const domain = scale.extent([finite], { includeZero: true }) || [-1, 1];
-  const Y = scale.linear(domain, [panel.rect.y + panel.rect.h, panel.rect.y]);
+  const unitQ = chargeUnit(finite);
+  const f = unitQ.factor;
+  const domain = scale.extent([finite.map((v) => v / f)], { includeZero: true }) || [-1, 1];
+  const Y = scale.linear(ranged(view, panel.key, unitQ.unit, domain), [panel.rect.y + panel.rect.h, panel.rect.y]);
   const xOf = (i) => X(set.x(i + offset) * NS);
   return {
     ...panel,
@@ -388,15 +393,19 @@ function chargePanel(panel, set, X, cols, at, values, fromService) {
       ? 'running integral  ·  Q / C  ·  the run\'s own record'
       : 'running integral  ·  Q / C  ·  computed from the trace above',
     note: fromService ? null : 'From the decimated trace; not the run\'s Q, which is beside the chart',
-    y: { scale: Y, ticks: axisTicks(Y, { count: 3 }) },
+    y: { scale: Y, ticks: axisTicks(Y, { count: 3 }), title: `Charge (${unitQ.unit})`, unit: unitQ.unit },
     series: [{
-      key: 'cumulative', label: 'running integral', colour: 'accent', width: 1.4, dash: '3 2',
-      d: scale.envelopePath(values, xOf, Y, { columns: cols }),
+      key: 'cumulative', label: 'running integral', colour: 'integral', width: 1.3,
+      d: scale.envelopePath(values.map((v) => (Number.isFinite(v) ? v / f : v)), xOf, Y, {
+        columns: cols,
+        from: Math.max(0, span.from - offset),
+        to: Math.min(values.length, Math.max(0, span.to - offset)),
+      }),
       at: (xValue) => {
         const i = nearest(set, xValue / NS) - offset;
-        return i < 0 || i >= values.length || !Number.isFinite(values[i]) ? null : { y: values[i] };
+        return i < 0 || i >= values.length || !Number.isFinite(values[i]) ? null : { y: values[i] / f };
       },
-      format: (v) => fmt.charge(v),
+      format: (v) => fmt.charge(v * f),
     }],
   };
 }

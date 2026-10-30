@@ -80,6 +80,31 @@ export function decades(lo, hi) {
   return out;
 }
 
+/** Minor ticks inside `[lo, hi]`: four or five to a major step of `dv`. */
+export function minorTicks(lo, hi, dv) {
+  if (!(dv > 0) || !Number.isFinite(lo) || !Number.isFinite(hi)) return [];
+  const [a, b] = lo <= hi ? [lo, hi] : [hi, lo];
+  const mantissa = Math.round(dv / 10 ** Math.floor(Math.log10(dv) + 1e-9));
+  const d = dv / (mantissa === 2 ? 4 : 5);
+  const out = [];
+  for (let i = Math.ceil(a / d - 1e-9); i * d <= b + d * 1e-9; i += 1) out.push(round(i * d, d));
+  return out;
+}
+
+/** The 2 to 9 of each decade inside `[lo, hi]`, for a log axis. */
+export function logMinorTicks(lo, hi) {
+  const a = Math.floor(Math.log10(lo));
+  const b = Math.ceil(Math.log10(hi));
+  const out = [];
+  for (let e = a; e < b; e += 1) {
+    for (let k = 2; k <= 9; k += 1) {
+      const v = Number(`${k}e${e}`);
+      if (v >= lo && v <= hi) out.push(v);
+    }
+  }
+  return out;
+}
+
 /** Step rounding formats `0.30000000000000004` as `0.3`. */
 export function round(value, dv) {
   const decimals = Math.max(0, -Math.floor(Math.log10(dv) + 1e-9));
@@ -153,23 +178,25 @@ export function linePath(xs, ys, X, Y) {
  * 4000-point trace in 450 px can miss the peak, contradicting the autorange verdict
  * beside it. Each column retains minimum and maximum to preserve envelope and edge
  * direction with one vertical segment per column. Below about two samples per column,
- * the exact polyline is cheaper.
+ * the exact polyline is cheaper. `from` and `to` restrict the path to the samples an
+ * axis range shows, so a zoom gets columns of its own samples rather than a stretched
+ * envelope of the whole record.
  */
-export function envelopePath(ys, X, Y, { columns } = {}) {
-  const n = ys.length;
+export function envelopePath(ys, X, Y, { columns, from = 0, to = ys.length } = {}) {
+  const n = to - from;
   const cols = Math.max(1, Math.floor(columns || 0));
-  if (!n) return '';
-  if (n <= cols * 2) return linePath((i) => i, ys, X, Y);
+  if (n <= 0) return '';
+  if (n <= cols * 2) return linePath((i) => i + from, ys.slice(from, to), X, Y);
   let d = '';
   let pen = false;
   for (let c = 0; c < cols; c += 1) {
-    const from = Math.floor((c * n) / cols);
-    const to = Math.min(n, Math.floor(((c + 1) * n) / cols));
+    const start = from + Math.floor((c * n) / cols);
+    const end = Math.min(to, from + Math.floor(((c + 1) * n) / cols));
     let lo = Infinity;
     let hi = -Infinity;
     let loAt = -1;
     let hiAt = -1;
-    for (let i = from; i < to; i += 1) {
+    for (let i = start; i < end; i += 1) {
       const v = ys[i];
       if (!Number.isFinite(v)) continue;
       if (v < lo) { lo = v; loAt = i; }
@@ -178,7 +205,7 @@ export function envelopePath(ys, X, Y, { columns } = {}) {
     if (loAt === -1) { pen = false; continue; }
     // `X` can look up sample times, so its index must be integral. A fractional array
     // index returns `undefined` and can collapse a column to x = 0.
-    const x = fixed(X(Math.round((from + to - 1) / 2)));
+    const x = fixed(X(Math.round((start + end - 1) / 2)));
     const first = loAt <= hiAt ? lo : hi;
     const second = loAt <= hiAt ? hi : lo;
     d += (pen ? 'L' : 'M') + x + ' ' + fixed(Y(first));

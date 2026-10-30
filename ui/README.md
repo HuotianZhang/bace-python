@@ -33,7 +33,8 @@ with no CORS or proxy. The offline server exposes the repository root at
 | `lib/dom.js` | `h()` and `keyed()`; replace an element only when its model changes |
 | `lib/svg.js` | Elements in the SVG namespace; HTML `createElement('svg')` has no SVG geometry |
 | `lib/scale.js` | Linear/log scales, ticks and min/max thinning that retains transient peaks |
-| `lib/charts/frame.js` | Stacked panels, axes, grid, captions, shading and crosshair from chart models |
+| `lib/charts/frame.js` | Stacked panels, journal-style plot frames, diagram panels, crosshair and drag zoom from chart models |
+| `lib/charts/view.js`, `lib/charts/axes.js` | Axis ranges and log switch per chart, kept for the session; the `Axes` dialog |
 | `lib/charts/jv.js`, `lib/charts/transient.js`, `lib/charts/timing.js` | J–V, transient and editable timing models |
 | `lib/charts/loops.js` | Q per loop or Q(axis), with the mode stated in the caption |
 | `lib/charts/schedule.js` | Settle and measurement time; unknown settles are hatched without invented duration |

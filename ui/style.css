@@ -8,6 +8,8 @@
   --rule: #d7d3d3;
   --fill: #eae7e7;
   --grid: #f2efef;            /* Faint gridlines keep traces prominent. */
+  --photo: #0072b2;           /* Light − dark, in the Okabe–Ito palette. */
+  --integral: #d55e00;        /* The running integral, same palette. */
   --paper: #ffffff;
   --view-pad-b: 40px;         /* Action bar cancels this space at the view edge. */
   --accent: #ec3013;          /* Accent marks the swept quantity and primary action. */
@@ -817,6 +819,36 @@ dl.shot-rows dd {
 .chart { margin: 0; display: flex; flex-direction: column; gap: 4px; }
 .chart-svg { width: 100%; }
 .chart-svg .series { vector-effect: non-scaling-stroke; }
+.chart-svg.zoomable { cursor: crosshair; }
+
+.chart-tools { display: flex; justify-content: flex-end; align-items: center; gap: 6px; min-height: 18px; }
+.chart-tool {
+  font: 500 11px var(--font-body); color: var(--grey); background: none;
+  border: 1px solid transparent; padding: 0 5px; cursor: pointer;
+}
+.chart-tool:hover { color: var(--ink); border-color: var(--rule); }
+.chart-tool.on { color: var(--ink); border-color: var(--ink); }
+.chart-info {
+  width: 14px; height: 14px; border: 1px solid var(--rule); border-radius: 50%;
+  font: italic 500 10px/12px var(--font-body); text-align: center; color: var(--grey); cursor: help;
+}
+div.axes-pop {
+  position: fixed; z-index: 60; padding: 10px; width: 340px; max-width: calc(100vw - 16px);
+  background: var(--paper); border: 1px solid var(--ink);
+  display: flex; flex-direction: column; gap: 8px; font-size: 12px;
+}
+.ax-grid { display: grid; grid-template-columns: minmax(0, 1fr) 72px 72px 44px; gap: 4px 6px; align-items: center; }
+.ax-head { color: var(--grey); font-size: 11px; }
+.ax-name { overflow-wrap: anywhere; }
+.ax-in {
+  width: 100%; min-width: 0; padding: 2px 4px; border: 1px solid var(--rule); background: var(--paper);
+  font-family: var(--font-num); font-size: 11.5px; color: var(--ink);
+}
+.ax-in:focus { border-color: var(--ink); outline: none; }
+.ax-in.bad { border-color: var(--alert); }
+.ax-in::placeholder { color: var(--grey); }
+.ax-log { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; }
+.ax-foot { display: flex; justify-content: flex-end; gap: 6px; }
 
 .chart-legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--grey); }
 .legend-item { display: inline-flex; align-items: center; gap: 4px; }
