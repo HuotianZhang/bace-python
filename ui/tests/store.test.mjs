@@ -675,3 +675,12 @@ test('a read-back is not authoritative about the pause, because it is not about 
     run: { run_id: 'r1', state: 'running' } }, { readBack: true });
   assert.ok(s.getState().runs.r1.needsOperator, 'still waiting for an answer');
 });
+
+test('ParamsEdited stamps the store and logs which parameters moved', () => {
+  const s = createStore({ schedule: () => {} });
+  s.applyFrame({ seq: 4, ts: 1, run_id: null, node_path: '', type: 'ParamsEdited',
+    data: { module: 'bace', before: {}, after: { n_loops: 3 }, changed: ['n_loops'] } });
+  const state = s.getState();
+  assert.equal(state.paramsEdited, 4, 'the views revalidate on this stamp');
+  assert.ok(state.log.some((line) => line.text.includes('bace') && line.text.includes('n_loops')));
+});

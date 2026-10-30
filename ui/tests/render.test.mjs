@@ -91,6 +91,29 @@ test('a shot phase asks for the bench, and a burst of them asks once', async () 
   assert.equal(h.asked.length, 2, 'the ask raised meanwhile is served when it opens, not dropped');
 });
 
+test('a parameter edit refetches the catalogue, so a second console shows what a run will use', async () => {
+  const h = watchHarness();
+  assert.equal(h.watch.frame({ type: 'ParamsEdited', data: { module: 'bace', changed: ['n_loops'] } }), true);
+  assert.equal(h.modules.length, 1, 'the catalogue was asked for');
+});
+
+test('the next round waits for the catalogue, so an older one cannot land after a newer one', async () => {
+  let finishModules;
+  const rounds = [];
+  const watch = createBenchWatch({
+    fetchBench: async () => { rounds.push('bench'); return {}; },
+    fetchModules: () => new Promise((resolve) => { rounds.push('modules'); finishModules = resolve; }),
+    throttleMs: 0,
+  });
+  watch.frame({ type: 'ParamsEdited', data: {} });
+  watch.frame({ type: 'ParamsEdited', data: {} });
+  await new Promise((done) => setTimeout(done, 5));
+  assert.deepEqual(rounds, ['bench', 'modules'], 'the second edit waits while the catalogue is out');
+  finishModules({});
+  await new Promise((done) => setTimeout(done, 5));
+  assert.deepEqual(rounds, ['bench', 'modules', 'bench', 'modules'], 'and is served afterwards');
+});
+
 test('a want raised behind a closed throttle is never lost', async () => {
   // The shutter moves twice a shot and can be dropped safely; the read-back
   // after `parked` cannot — it has no frame behind it to ask again.

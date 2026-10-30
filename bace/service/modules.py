@@ -935,6 +935,10 @@ class Catalogue:
             ps.update_layer(Source.EDITED, self._edited[name])
         return ps
 
+    def edited(self, name: str) -> dict[str, Any]:
+        """A copy of the module's edited layer."""
+        return dict(self._edited[name])
+
     def edit(self, name: str, values: Mapping[str, Any]) -> ParamSet:
         """The catalogue edit coerces and applies the edited layer atomically.
 

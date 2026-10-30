@@ -1229,11 +1229,13 @@ export default {
      * editor's next run, and must not rebuild the view.
      */
     let validatedAt = null;
+    let validatedEdit = null;
     let storeKey = null;
     const off = store.subscribe((state) => {
       const at = (state.bench && state.bench.read_at) || null;
-      if (at !== validatedAt) {
+      if (at !== validatedAt || state.paramsEdited !== validatedEdit) {
         validatedAt = at;
+        validatedEdit = state.paramsEdited;
         if (typed && answered) revalidate();
       }
       const run = state.runs[state.activeRunId] || null;

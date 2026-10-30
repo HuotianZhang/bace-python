@@ -347,8 +347,8 @@ extremes. Its rule differs from the service rule.
 - `RunQueued` (`experiment.events.RunQueued`; `service/journal.py run_queued()`
   builds the same line for a test or a script), `RunStateChanged`,
   `NodeStarted/NodeDone`, `Verdict`, `NeedsOperator`, `OperatorResumed`,
-  `BenchAction`, `TemperatureRead`, `PowerReading`, `SampleNamed` are all
-  journaled; so is every run event under the payload policy, except
+  `BenchAction`, `TemperatureRead`, `PowerReading`, `SampleNamed`,
+  `ParamsEdited` are all journaled; so is every run event under the payload policy, except
   `StepPhase` and `JVPoint`.
 
 ---
@@ -591,6 +591,13 @@ and sends those `PUT`s when the button under the list is clicked.
 sets the `edited` layer (coerced; 422 with the parameter name on error) and
 returns the module entry. Body value `null` resets that parameter (drops the
 edited value). `POST /modules/{m}/params/reset` drops the whole edited layer.
+
+The edited layer is shared by every client, and the last write to a parameter
+wins. A change emits `ParamsEdited(module, before, after, changed)`; `run_id`
+null, `node_path` `""`; with the module's whole edited layer before and after.
+A console refetches `/modules` on it and revalidates, so a second console does
+not show one value and run another. An unchanged layer emits no event and
+writes no line.
 
 `GET /modules/{m}` returns that module's entry; an unknown name returns 404.
 

@@ -168,6 +168,7 @@ export default {
 
     /** The helper identifies cards whose checks can change with read-back. */
     let validatedAt = null;
+    let validatedEdit = null;
 
     /**
      * The handler reports a refused preceding edit instead of performing Run or an
@@ -679,8 +680,9 @@ export default {
       // chain state or V_oc. `read_at` triggers validation rather than every stream
       // frame.
       const at = (state.bench && state.bench.read_at) || null;
-      if (at !== validatedAt) {
+      if (at !== validatedAt || state.paramsEdited !== validatedEdit) {
         validatedAt = at;
+        validatedEdit = state.paramsEdited;
         revalidate(names);
       }
     }

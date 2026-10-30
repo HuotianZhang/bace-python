@@ -2,6 +2,13 @@
 
 Dated, newest first. Details and evidence are in `docs/`.
 
+## 2026-10-30
+
+- A parameter edit reaches every console. `PUT /modules/{m}/params` and its
+  reset emit `ParamsEdited`, which is also journaled; a console refetches the
+  catalogue and revalidates, so a second console no longer shows one value and
+  runs another.
+
 ## 2026-10-29
 
 - The assistant's address presets include the University of Potsdam LLM
