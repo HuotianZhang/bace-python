@@ -1330,6 +1330,37 @@ def test_the_shutdown_route_refuses_a_run_it_was_not_told_about(tmp_path):
     assert not session.bench.sim.bench.bias_output
 
 
+def test_the_restart_route_refuses_a_run_and_a_replacement_that_would_not_start(tmp_path):
+    session = make_session(tmp_path, sid="20260902_220006")
+    with TestClient(create_app(session)) as client:
+        r = client.post("/service/restart")
+        assert r.status_code == 409 and "not started by" in r.json()["error"]
+
+    asked: list[int] = []
+    problem: list[str | None] = ["SyntaxError in bace/service/app.py"]
+    session = make_session(tmp_path, sid="20260902_220007")
+    with TestClient(create_app(session, request_restart=lambda: asked.append(1),
+                               restart_check=lambda: problem[0])) as client:
+        r = client.post("/service/restart", json={})
+        assert r.status_code == 409 and "SyntaxError" in r.json()["error"] and asked == []
+        assert client.get("/session").status_code == 200, "this service keeps running"
+
+        problem[0] = None
+        run_id = client.post("/pipelines", json={"tree": temperature_tree(bace(1, voc=0.9))}).json()["run_id"]
+        wait_until(lambda: client.get(f"/runs/{run_id}").json()["state"] == "paused")
+        r = client.post("/service/restart", json={})
+        assert r.status_code == 409 and r.json()["run"] == run_id and asked == []
+        r = client.post("/service/restart", json={"force": True})
+        assert r.status_code == 202 and r.json() == {"restarting": True, "aborts": run_id}
+        wait_until(lambda: asked == [1])
+
+
+def test_a_restart_argument_list_does_not_grow():
+    from bace.service.__main__ import service_args
+    assert service_args(["--sim", "--after-pid", "12", "--port", "8900"]) == ["--sim", "--port", "8900"]
+    assert service_args(["--after-pid=12", "--sim"]) == ["--sim"]
+
+
 # -- the CLI --------------------------------------------------------------------------------------
 def _free_port() -> int:
     with socket.socket() as s:
@@ -1418,6 +1449,60 @@ def test_one_service_per_port_and_the_console_ends_it(tmp_path):
         if first.poll() is None:
             first.kill()
             first.wait(10)
+
+
+def test_check_opens_nothing_and_says_when_the_configuration_will_not_read(tmp_path):
+    pytest.importorskip("uvicorn")
+    from bace.service.__main__ import check_replacement
+    port = _free_port()
+    assert check_replacement(["--sim", "--port", str(port)]) is None
+    bad = tmp_path / "rig.toml"
+    bad.write_text("[power_meter]\nrange = 9\n", encoding="utf-8")
+    assert "ranges 0 to 7" in check_replacement(["--sim", "--rig", str(bad)])
+
+
+def test_a_restart_ends_the_service_and_another_answers_on_the_port(tmp_path):
+    """The two processes for real: the replacement waits for the first to exit,
+    takes the port and the arguments, and is a new session."""
+    pytest.importorskip("uvicorn")
+    port = _free_port()
+    first = subprocess.Popen(
+        [sys.executable, "-m", "bace.service", "--sim", "--fast", "--port", str(port),
+         "--out", str(tmp_path / "runs")],
+        cwd=str(REPO), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def answer(not_this=None):
+        deadline = time.monotonic() + 60.0
+        while True:
+            assert time.monotonic() < deadline, "no service answered within 60 s"
+            try:
+                got = _get(f"http://127.0.0.1:{port}/session")
+                if got["id"] != not_this:
+                    return got
+            except (urllib.error.URLError, ConnectionError, OSError):
+                pass
+            time.sleep(0.2)
+
+    def post(route):
+        request = urllib.request.Request(f"http://127.0.0.1:{port}{route}", data=b"{}",
+                                         method="POST",
+                                         headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(request, timeout=150) as r:
+            return r.status, json.loads(r.read())
+
+    try:
+        before = answer()
+        assert post("/service/restart") == (202, {"restarting": True, "aborts": None})
+        assert first.wait(30) == 0
+        after = answer(not_this=before["id"])
+        assert after["mode"] == "sim" and after["fast"] is True
+    finally:
+        if first.poll() is None:
+            first.kill()
+        try:
+            post("/service/shutdown")
+        except OSError:
+            pass
 
 
 def test_the_cli_builds_a_sim_session_without_pyvisa_and_refuses_fast_on_the_rig(tmp_path, monkeypatch):

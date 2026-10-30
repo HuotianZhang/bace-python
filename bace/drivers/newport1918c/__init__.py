@@ -29,6 +29,7 @@ def open_power_meter(rig_config: Any, *, simulate: bool = False):
     wavelength = getattr(rig_config, "power_meter_wavelength_nm", None)
     averaging = bool(getattr(rig_config, "power_meter_averaging", True))
     digital = int(getattr(rig_config, "power_meter_digital_filter", 100))
+    held = getattr(rig_config, "power_meter_range", None)
     if console:
         meter = ConsolePowerMeter(console, timeout_s=5.0)
         if not meter.available():
@@ -62,6 +63,8 @@ def open_power_meter(rig_config: Any, *, simulate: bool = False):
                 "mode and the 5 Hz analog filter in that console, or clear "
                 "[power_meter] console so the service owns the meter and sets them.",
                 stacklevel=2)
+        # Written either way: the meter keeps the last owner's range across a restart.
+        meter.set_range(held)
     except BaseException:
         close = getattr(meter, "close", None)
         if close is not None:

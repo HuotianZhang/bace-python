@@ -64,7 +64,7 @@ scope setup and meter units/wavelength, not each instrument command.
 
 `GET /` lists every route with a
 one-line description; `/docs` is FastAPI's interactive page. Ctrl-C, or
-`POST /service/shutdown` (the console's `shut down`), aborts the job in
+`POST /service/shutdown` (the console's `shut down`) or `POST /service/restart`, aborts the job in
 flight, waits for the worker thread to end, parks the bench (bias and SMU off,
 shutter shut, LED unchanged) and closes the journal. The port is bound before the bench is
 built, so a second service on it exits before it opens an instrument.

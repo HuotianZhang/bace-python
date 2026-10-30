@@ -17,7 +17,8 @@ loopback address because the service has no authentication
 
 The port binds before session construction, so a second service exits with
 code 3 before opening instruments. Ctrl-C and `POST /service/shutdown` end
-the process and park the bench. `bace.launcher` starts it without a window.
+the process and park the bench. `POST /service/restart` then starts a new
+one with the same arguments. `bace.launcher` starts it without a window.
 
 `Bench.build_real` imports `pyvisa` lazily so `--sim` needs no VISA backend.
 Without a VISA runtime, a real bench starts with four unavailable VISA roles.
@@ -29,7 +30,9 @@ import argparse
 import ipaddress
 import os
 import socket
+import subprocess
 import sys
+import time
 from typing import Any, Callable
 
 from ..bench.checks import _find
@@ -37,6 +40,7 @@ from ..config import ConfigError, check_smu_limits, load_rig, load_run
 from ..drivers.keithley2400 import SourceMeterConfig
 from ..experiment.rig import RigConfig
 from ..experiment.transient import RunConfig
+from ..launcher import console_python, log_path, start_service
 from ..params import run_toml_layer
 from .monitors import MAX_INTERVAL_S, MIN_INTERVAL_S, TEMPERATURE_MONITOR_S
 from .session import Session
@@ -54,6 +58,15 @@ GRACEFUL_SHUTDOWN_S = 5.0
 
 WebSockets and assistant answers can stream indefinitely and otherwise
 prevent exit (`docs/service-contract.md`, section 9)."""
+
+RESTART_WAIT_S = 90.0
+"""How long a replacement waits for the old process to go.
+
+Closing can wait `WORKER_JOIN_S` for a blocked instrument call, and the old
+process holds the USB meter until it exits."""
+
+RESTART_CHECK_TIMEOUT_S = 120.0
+"""The limit on `--check`, which reads the code from a network drive at the lab."""
 
 SERVICE_EXTRA_HINT = ("the service needs the 'service' extra: pip install -e .[service] "
                       "(the lab PC needs the rig too: pip install -e .[lab])")
@@ -107,6 +120,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                     "pipeline tree over HTTP and WebSocket on one port.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__.split("\n\n", 1)[1] if "\n\n" in __doc__ else "")
+    ap.add_argument("--check", action="store_true",
+                    help="import the service, read the configuration and exit, opening "
+                         "nothing: what a restart tries before it ends this service")
+    ap.add_argument("--after-pid", type=int, default=None, metavar="PID",
+                    help="wait for this process to exit first (a restart's replacement)")
     ap.add_argument("--sim", action="store_true",
                     help="build the rig from the simulated drivers (no VISA)")
     ap.add_argument("--fast", action="store_true",
@@ -186,8 +204,66 @@ def build_session(a: argparse.Namespace, *, warn: Callable[[str], Any] = print,
                                                        TEMPERATURE_MONITOR_S)))
 
 
+def service_args(argv: list[str]) -> list[str]:
+    """The arguments a replacement needs: these, without the last restart's `--after-pid`."""
+    out, skip = [], False
+    for arg in argv:
+        if skip:
+            skip = False
+        elif arg == "--after-pid":
+            skip = True
+        elif not arg.startswith("--after-pid="):
+            out.append(arg)
+    return out
+
+
+def service_command(argv: list[str]) -> list[str]:
+    return [console_python(), "-m", "bace.service", *argv]
+
+
+def check_replacement(argv: list[str]) -> str | None:
+    """Why a service with these arguments would not start, or `None`.
+
+    A separate interpreter reads the files as they are on disk now, which this
+    process imported at its own start."""
+    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    try:
+        done = subprocess.run(service_command(argv) + ["--check"], capture_output=True,
+                              text=True, errors="replace", stdin=subprocess.DEVNULL,
+                              timeout=RESTART_CHECK_TIMEOUT_S, creationflags=flags)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"{type(exc).__name__}: {exc}"
+    if done.returncode == 0:
+        return None
+    lines = (done.stderr or done.stdout or "").strip().splitlines()
+    return " ".join(lines[-3:]) or f"exit code {done.returncode}"
+
+
+def wait_for_exit(pid: int, timeout_s: float = RESTART_WAIT_S) -> None:
+    """Return when process `pid` has gone, or after `timeout_s`."""
+    if sys.platform == "win32":
+        import ctypes
+        synchronize = 0x00100000
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(synchronize, False, pid)
+        if handle:
+            kernel32.WaitForSingleObject(handle, int(timeout_s * 1000))
+            kernel32.CloseHandle(handle)
+        return
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return
+        time.sleep(0.2)
+
+
 def main(argv: list[str] | None = None) -> int:
-    a = parse_args(argv)
+    args = sys.argv[1:] if argv is None else list(argv)
+    a = parse_args(args)
+    if a.after_pid is not None:
+        wait_for_exit(a.after_pid)
     # Check optional dependencies before building the session.
     # `build_session` opens VISA resources, resets the scope and writes
     # `SessionStarted`; missing `uvicorn` must be reported before these
@@ -228,6 +304,9 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as exc:
         print(f"config: {exc}")
         return 2
+    if a.check:
+        print("the service imports and its configuration reads")
+        return 0
     try:
         sock = listen_socket(a.host, a.port)
     except OSError as exc:
@@ -242,11 +321,20 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     server: uvicorn.Server | None = None
+    replace = False
+    again = service_args(args)
 
     def request_exit() -> None:
         server.should_exit = True
 
-    app = create_app(session, ui_dir=a.ui, request_exit=request_exit)
+    def request_restart() -> None:
+        nonlocal replace
+        replace = True
+        request_exit()
+
+    app = create_app(session, ui_dir=a.ui, request_exit=request_exit,
+                     request_restart=request_restart,
+                     restart_check=lambda: check_replacement(again))
     server = uvicorn.Server(uvicorn.Config(app, log_level="info",
                                            timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_S))
     url = f"http://{a.host}:{a.port}/"
@@ -263,6 +351,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  startup write  {write}")
     sys.stdout.flush()
     server.run(sockets=[sock])
+    if replace:
+        # The session has closed and the port is free; the replacement waits for
+        # this process, which still holds the USB meter until it exits.
+        start_service(service_command(again) + ["--after-pid", str(os.getpid())],
+                      log_path(), cwd=os.getcwd())
     return 0
 
 

@@ -749,3 +749,53 @@ def test_open_power_meter_warns_once_when_the_console_cannot_average(monkeypatch
         warnings.simplefilter("always")
         open_power_meter(RigConfig(power_meter_console="http://127.0.0.1:8918"))
     assert len(caught) == 1 and "no /api/filter route" in str(caught[0].message)
+
+
+# ===========================================================================
+# The held range
+# ===========================================================================
+
+def test_a_held_range_is_written_read_back_and_reported_with_each_reading():
+    """Auto-ranging follows the mean, so pulses that arrive after a dark beam are
+    clipped on a low range and the status word does not show it."""
+    m = DirectPowerMeter(simulate=True)
+    try:
+        assert m.set_range(5) == {"range": 5.0, "auto": False}
+        assert m._meter.query("PM:AUTO?") == "0" and m._meter.query("PM:RAN?") == "5"
+        assert m.auto_range is False and m.read().range == 5
+        assert m.set_range(None)["auto"] is True
+        assert m._meter.query("PM:AUTO?") == "1" and m.auto_range is True
+    finally:
+        m.close()
+
+
+def test_a_range_the_meter_does_not_take_is_an_error():
+    m = DirectPowerMeter(simulate=True)
+    try:
+        m._meter.set_range = lambda index: None
+        with pytest.raises(PowerMeterError, match="did not hold range 3"):
+            m.set_range(3)
+    finally:
+        m.close()
+
+
+def test_a_capture_refreshes_the_status_its_reading_is_judged_by():
+    """`trustworthy` is read from `last`, which a capture used to leave as it was."""
+    m = DirectPowerMeter(simulate=True)
+    try:
+        m.set_range(2)
+        m.read()
+        before = m.last
+        m.set_range(4)
+        m._meter.capture = lambda n, ms, fetch=False: {"collected": n, "mean": 1e-6, "sdev": 0.0}
+        m.read_statistics(2)
+        assert m.last is not before and m.last.range == 4
+    finally:
+        m.close()
+
+
+def test_the_console_refuses_a_held_range_and_asks_nothing_for_auto():
+    c = ConsolePowerMeter("http://127.0.0.1:1")
+    assert c.set_range(None) == {}
+    with pytest.raises(PowerMeterError, match=r"range = 3 cannot be set"):
+        c.set_range(3)

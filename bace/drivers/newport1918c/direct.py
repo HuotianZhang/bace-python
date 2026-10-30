@@ -67,6 +67,8 @@ class DirectPowerMeter:
         """Hold mode and filter read-back for bench checks.
 
         Fields describe mode, filter selection, analog bandwidth and digital count."""
+        self.auto_range: bool | None = None
+        """Record whether the meter ranges itself; `set_range` updates this state."""
         self.wavelength_nm: float | None = None
         """Keep wavelength read-back in nm for each `Reading`.
 
@@ -189,6 +191,28 @@ class DirectPowerMeter:
                 "average")
         return dict(self.averaging)
 
+    def set_range(self, index: int | None) -> dict:
+        """Hold range `index`, or return to auto with `None`; return the read-back.
+
+        Auto-ranging follows the mean, so a range reached from a dark beam clips the
+        peaks of pulses that arrive later, and the status word does not show it. A
+        held range makes a reading independent of what the meter saw before."""
+        from .meter import MeterError
+        try:
+            if index is None:
+                self._meter.set_auto(True)
+            else:
+                self._meter.set_range(int(index))
+            s = self._meter.settings()
+        except MeterError as exc:
+            raise PowerMeterError(str(exc)) from exc
+        auto, got = s.get("auto"), s.get("range")
+        self.auto_range = None if auto is None else bool(auto)
+        if index is not None and (self.auto_range is not False or got != int(index)):
+            raise PowerMeterError(f"the 1918-C did not hold range {index}: it reports "
+                                  f"range {got}, auto {auto}")
+        return {"range": got, "auto": self.auto_range}
+
     # -- reading ----------------------------------------------------------
     def read(self) -> Reading:
         from .meter import MeterError
@@ -202,7 +226,8 @@ class DirectPowerMeter:
                     overrange=bool(st.get("overrange")),
                     units=st.get("units"),
                     wavelength_nm=self.wavelength_nm,
-                    averaged=self.averaged)
+                    averaged=self.averaged,
+                    range=st.get("range"))
         self.last = r
         return r
 
@@ -214,7 +239,8 @@ class DirectPowerMeter:
 
         `interval_ms` is in ms. Sampling uses the meter clock; USB polling
         cannot guarantee a rate. Reject a short capture rather than average
-        data taken at an unconfirmed rate."""
+        data taken at an unconfirmed rate. One status read follows, so `last`
+        describes this capture and not an earlier reading."""
         from .meter import MeterError
         n = max(2, int(n))
         try:
@@ -227,6 +253,7 @@ class DirectPowerMeter:
                 f"capture collected {collected} of {n} samples "
                 f"({d.get('measuredMsPerSample')} ms/sample measured) — the "
                 "meter is not sampling at the requested rate")
+        self.read()
         return float(d["mean"]), float(d["sdev"])
 
     def errors(self) -> str:

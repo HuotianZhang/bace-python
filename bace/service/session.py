@@ -73,7 +73,7 @@ from .modules import Catalogue, RunContext, VocSource, coerce_sample, jsonable
 from .monitors import (MAX_INTERVAL_S, MIN_INTERVAL_S, TEMPERATURE_MONITOR_S,
                        PowerMonitor, TemperatureMonitor)
 from .pipeline import VOC_PARAM, Module, Schedule, Step, Validation
-from .plans import PlanBook
+from .plans import AUTO_APPROVED, PlanBook
 from .rigs import ACTIONS, Bench, BenchActionRefused, Unavailable, action_before
 from .wire import STEPDONE_ARRAYS, ephemeral_frame, is_ephemeral, make_envelope, payloads
 from .worker import TERMINAL, Blocked, Job, RunWorker, StopMode
@@ -896,12 +896,16 @@ class Session:
 
     # -- plans ------------------------------------------------------------------
     def propose_plan(self, data: Mapping[str, Any]) -> dict:
-        """Records a proposed plan and journals it; nothing runs until a person
-        approves it. Raises `plans.PlanError` for a plan that cannot be accepted."""
+        """Records a proposed plan and journals it; nothing runs until it is
+        approved, by a person or at once under `[plans] auto_approve`. Raises
+        `plans.PlanError` for a plan that cannot be accepted."""
         with self._lock:
             plan = self.plans.propose(data, catalogue=self.catalogue)
         wire = plan.as_wire()
         self._dispatch(None, E.PlanProposed(plan=wire), node_path="")
+        if self.rig_config.plans_auto_approve:
+            return self.decide_plan(plan.plan_id, "approve", fingerprint=plan.fingerprint,
+                                    reason=AUTO_APPROVED)
         return wire
 
     def decide_plan(self, plan_id: str, decision: str, *, fingerprint: str = "",

@@ -1,9 +1,10 @@
-"""Experiment plans: what an agent may run, as approved by a person.
+"""Experiment plans: what an agent may run, and who approved it.
 
 A plan states a goal and an envelope: the modules an agent may run, the
 parameters it may set in a submitted tree and their bounds, the loops it may
 use and their values, and caps on the number of runs, the estimated time and
-the plan's age. A person approves the plan in the console; the service then
+the plan's age. A person approves the plan in the console, or `[plans]
+auto_approve` in rig.toml approves it as it is proposed; the service then
 checks every submission that names the plan against the envelope and refuses
 what lies outside it. Inside the envelope no further confirmation is asked.
 
@@ -34,6 +35,9 @@ STATES: tuple[str, ...] = ("proposed", "approved", "rejected", "closed")
 """A plan is proposed, then approved or rejected; an approved plan is closed by
 a person or the agent, or ends when it expires or its budget is spent."""
 
+AUTO_APPROVED = "auto_approve in rig.toml"
+"""The reason journaled for a plan nobody looked at."""
+
 MAX_EXPIRES_S = 7 * 24 * 3600.0
 """The longest an approval may last."""
 
@@ -43,8 +47,8 @@ PLAN_CHECK: tuple[str, str, str, str] = (
     "A run submitted under a plan sets a module, parameter or loop value outside the "
     "plan's envelope, or the plan is not approved, has expired, or has spent its runs "
     "or its time.",
-    "Submit within the plan, or propose a plan that covers the run and have a person "
-    "approve it.")
+    "Submit within the plan, or propose a plan that covers the run; a person approves "
+    "it unless rig.toml approves plans.")
 """The submission check of a plan, as manual 4.2 lists it (`tools/build_manual.py`)."""
 
 

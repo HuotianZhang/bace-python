@@ -389,7 +389,9 @@ def _stem(name: str) -> str:
 # -- the app ---------------------------------------------------------------------
 def create_app(session: Session, *, ui_dir: str | None = None,
                read_back_at_start: bool = True,
-               request_exit: Callable[[], None] | None = None) -> FastAPI:
+               request_exit: Callable[[], None] | None = None,
+               request_restart: Callable[[], None] | None = None,
+               restart_check: Callable[[], str | None] | None = None) -> FastAPI:
     """The app factory exposes HTTP and WebSocket routes over `session`.
 
     `ui_dir` mounts the console at `/ui` and redirects `/` there. Without it,
@@ -397,7 +399,9 @@ def create_app(session: Session, *, ui_dir: str | None = None,
     so the bench card has state before an operator acts. Tests can disable it
     to inspect an untouched event stream. `request_exit` ends the hosting server.
     Without it, `/service/shutdown` is refused because the app cannot stop its
-    host process (`docs/service-contract.md`, section 9)."""
+    host process. `request_restart` ends it and starts a replacement; without it
+    `/service/restart` is refused. `restart_check` says why a replacement would
+    not start, or `None` (`docs/service-contract.md`, section 9)."""
     if ui_dir is not None and not os.path.isdir(ui_dir):
         raise ValueError(f"--ui: {ui_dir!r} is not a directory")
 
@@ -466,6 +470,28 @@ def create_app(session: Session, *, ui_dir: str | None = None,
                                "cancels the queue. Repeat with force to do so.", run=active)
         asyncio.get_running_loop().call_soon(request_exit)
         return {"shutting_down": True, "aborts": active}
+
+    @app.post("/service/restart", status_code=202)
+    async def restart(body: ShutdownRequest | None = Body(default=None)):
+        """The restart route ends this service and starts another from the files on disk.
+
+        It refuses an active run as shutdown does. The code and configuration on
+        disk are tried first in a separate interpreter: from a remote desk nobody
+        could start a service that fails on them, so this one keeps running. Plans
+        do not survive (`docs/service-contract.md`, section 9)."""
+        if request_restart is None:
+            return _error(409, "this service was not started by `python -m bace.service`; "
+                               "restart it where it was started")
+        active = session.run_active()
+        if active is not None and not (body and body.force):
+            return _error(409, f"run {active} holds the bench; restarting aborts it and "
+                               "cancels the queue. Repeat with force to do so.", run=active)
+        problem = await run_in_threadpool(restart_check) if restart_check is not None else None
+        if problem:
+            return _error(409, f"a new service would not start, so this one keeps running: "
+                               f"{problem}")
+        asyncio.get_running_loop().call_soon(request_restart)
+        return {"restarting": True, "aborts": active}
 
     # -- /bench --------------------------------------------------------------
     @app.get("/bench")
@@ -855,7 +881,7 @@ def create_app(session: Session, *, ui_dir: str | None = None,
 
     @app.post("/plans", status_code=201)
     async def propose_plan(body: PlanRequest):
-        """Records a proposed plan; nothing runs under it until a person approves it."""
+        """Records a proposed plan; nothing runs under it until it is approved."""
         try:
             return session.propose_plan(body.model_dump())
         except PlanError as exc:

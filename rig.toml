@@ -85,6 +85,9 @@ averaging = true                # DC-continuous mode and 5 Hz analog filtering a
                                 # filtering but still sets the mode.
 digital_filter = 100            # 100 samples of digital smoothing over the analog
                                 # filter; 0 disables PM:DIGITALFILTER.
+# range = 0                     # A range index, 0 to 7, held for every reading. Left
+                                # out, the meter auto-ranges, and under pulses the
+                                # reading depends on what it saw before (manual 1.2).
 wavelength_nm = 520.0           # The source's wavelength, which sets the detector's
                                 # responsivity (manual 1.2). Readings taken at the
                                 # earlier 530 nm setting are low by the ratio of the
@@ -134,6 +137,12 @@ dll_path = ""                   # Empty selects DELIB for the interpreter archit
 #
 # The run writes only the setpoint. Heater range, PID, ramp and loop wiring
 # are front-panel settings that the service only reads (manual 1.2).
+[plans]
+auto_approve = true             # An agent's plan is approved as it is proposed, with no
+                                # click in the console. The envelope, the checks, the
+                                # interlocks and park still apply; the agent writes the
+                                # envelope itself (manual 1.6).
+
 [temperature]
 console = ""                    # Empty selects direct GPIB; use http://127.0.0.1:8331
                                 # when the 331 console owns it.

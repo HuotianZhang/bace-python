@@ -1047,7 +1047,7 @@ def plan_verdict(plan_id: str, refusals: list[str]) -> Verdict:
     (`service.plans`): every reason, so the agent can correct them together."""
     return _v("invalid", "plan.envelope",
               f"outside plan {plan_id}: " + "; ".join(refusals)
-              + ". A different run needs a plan a person approves.",
+              + ". A different run needs another plan.",
               plan=plan_id, refusals=list(refusals))
 
 

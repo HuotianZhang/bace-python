@@ -450,7 +450,8 @@ LABELS: dict[str, str] = {
     "trigger_sweep": "Trigger sweep", "calibrate_trigger": "Calibrate trigger",
     "store_shots": "Store every shot",
     # power, temperature, wait, note
-    "wavelength_nm": "Wavelength", "samples": "Samples", "setpoint_k": "Setpoint",
+    "wavelength_nm": "Wavelength", "samples": "Samples", "meter_range": "Meter range",
+    "setpoint_k": "Setpoint",
     "tolerance_k": "Tolerance", "hold_s": "Hold", "timeout_s": "Timeout",
     "seconds": "Duration", "text": "Text",
 }
@@ -662,6 +663,10 @@ def _jv_bace_specs() -> list[ParamSpec]:
     return sweep + _jv_led_specs() + acq + _smu_specs()
 
 
+METER_RANGE_SETTLE_S = 2.0
+"""The 5 Hz analog filter and 100 digital samples settle within this after a range change."""
+
+
 def _power_specs(rig_config: RigConfig) -> list[ParamSpec]:
     return [
         ParamSpec("wavelength_nm", "float", rig_config.power_meter_wavelength_nm,
@@ -673,6 +678,10 @@ def _power_specs(rig_config: RigConfig) -> list[ParamSpec]:
                   doc="How many readings the 1918-C is asked for: 1 reads one "
                       "value, more asks the meter for a mean over that many, on its "
                       "own clock."),
+        ParamSpec("meter_range", "int", -1, group="acquisition", minimum=-1, maximum=7,
+                  doc="The range held for this reading, 0 to 7; -1 keeps what rig.toml "
+                      "says. The rig's setting returns after the reading. Reading "
+                      "pulses on each range finds the ones that clip them (manual 1.2)."),
     ]
 
 
@@ -1476,10 +1485,25 @@ class Catalogue:
                               "console is not answering")
         wavelength = float(p["wavelength_nm"])
         samples = int(p["samples"])
+        held = int(p["meter_range"])
 
         def run() -> Iterator[E.Event]:
             rig.power.set_wavelength(wavelength)
-            yield power_reading(rig.power, samples=samples)
+            if held < 0:
+                reading = power_reading(rig.power, samples=samples)
+            else:
+                rig.power.set_range(held)
+                try:
+                    ctx.sleep(METER_RANGE_SETTLE_S)
+                    reading = power_reading(rig.power, samples=samples)
+                finally:
+                    rig.power.set_range(self.rig_config.power_meter_range)
+            yield reading
+            if reading.auto_range and rig.led is not None \
+                    and str(getattr(rig.led, "mode", "")).upper().startswith("PULS"):
+                yield E.Notice("warning", "the meter is on auto under pulses, so this reading "
+                                          "depends on what it saw before (manual 1.2). Set "
+                                          "[power_meter] range in rig.toml.")
 
         return run()
 

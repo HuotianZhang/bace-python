@@ -41,6 +41,8 @@ class Reading:
     Without the filter a pulsed LED reading samples a phase; with it, the
     reading is the mean, half the DC level at 50 % duty. `None` means the
     adapter cannot confirm filtering, including a console without `/api/filter`."""
+    range: int | None = None
+    """The range index in the status word, `None` when the status gave none."""
 
     @property
     def trustworthy(self) -> bool:
@@ -62,6 +64,8 @@ class ConsolePowerMeter:
         self.averaged: bool | None = None
         """What `set_averaging` last managed to set, or None when this console
         has never been asked -- or has no route for it."""
+        self.auto_range: bool | None = None
+        """Unknown here: the console owns the range."""
 
     # -- transport --------------------------------------------------------
     def _get(self, path: str) -> dict:
@@ -144,6 +148,15 @@ class ConsolePowerMeter:
         self.averaged = bool(on)
         return True
 
+    def set_range(self, index: int | None) -> dict:
+        """Refuse a held range: the console has no route to set one. `None` asks nothing."""
+        if index is not None:
+            raise PowerMeterError(
+                f"[power_meter] range = {index} cannot be set through the console at "
+                f"{self.base_url}. Clear [power_meter] console so the service owns the "
+                "meter, or set the range in that console and leave the key out.")
+        return {}
+
     # -- reading ----------------------------------------------------------
     def read(self) -> Reading:
         d = self._get("/api/reading")
@@ -153,7 +166,8 @@ class ConsolePowerMeter:
                     overrange=bool(st.get("overrange")),
                     units=int(d["units"]) if d.get("units") is not None else None,
                     wavelength_nm=d.get("wavelength"),
-                    averaged=self.averaged)
+                    averaged=self.averaged,
+                    range=st.get("range"))
         self.last = r
         if self.strict and not r.trustworthy:
             raise PowerMeterError(_why(r))
@@ -181,6 +195,7 @@ class ConsolePowerMeter:
                 f"({d.get('measuredMsPerSample')} ms/sample measured) — the meter "
                 "is not sampling at the requested rate"
             )
+        self.read()
         return float(d["mean"]), float(d["sdev"])
 
     def errors(self) -> str:

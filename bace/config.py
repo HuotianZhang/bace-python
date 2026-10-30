@@ -52,6 +52,7 @@ def load_rig(path: str | Path = "rig.toml") -> RigConfig:
     smu, led = d.get("sourcemeter", {}), d.get("led", {})
     pm, dio, bias = d.get("power_meter", {}), d.get("dio", {}), d.get("bias", {})
     timing, t = d.get("timing", {}), d.get("temperature", {})
+    plans = d.get("plans", {})
 
     _check(e, {"sense_resistor_ohm", "pulse_amp", "probe_attenuation",
                "trigger_offset_s", "current_sign"}, "electrical")
@@ -66,8 +67,9 @@ def load_rig(path: str | Path = "rig.toml") -> RigConfig:
     # `console` selects external instrument ownership. Unknown keys must
     # fail: a typo can silently leave the bench without a meter or cryostat.
     _check(pm, {"wavelength_nm", "on_beam_splitter", "dll_path", "console",
-                "averaging", "digital_filter"},
+                "averaging", "digital_filter", "range"},
            "power_meter")
+    _check(plans, {"auto_approve"}, "plans")
     _check(t, {"address", "max_setpoint_k", "control_loop", "console"},
            "temperature")
 
@@ -100,6 +102,8 @@ def load_rig(path: str | Path = "rig.toml") -> RigConfig:
             power_meter_averaging=bool(pm.get("averaging", RigConfig.power_meter_averaging)),
             power_meter_digital_filter=int(pm.get("digital_filter",
                                                   RigConfig.power_meter_digital_filter)),
+            power_meter_range=pm.get("range", RigConfig.power_meter_range),
+            plans_auto_approve=bool(plans.get("auto_approve", RigConfig.plans_auto_approve)),
             temperature_address=t.get("address", RigConfig.temperature_address),
             temperature_max_setpoint_k=t.get("max_setpoint_k",
                                              RigConfig.temperature_max_setpoint_k),
@@ -111,6 +115,9 @@ def load_rig(path: str | Path = "rig.toml") -> RigConfig:
         )
     except ValueError as exc:                 # `RigConfig` validation
         raise ConfigError(str(exc)) from exc
+    if cfg.power_meter_range is not None and cfg.power_meter_range not in range(8):
+        raise ConfigError(f"[power_meter] range = {cfg.power_meter_range!r}: the 1918-C "
+                          "has ranges 0 to 7. Leave the key out for auto.")
     if cfg.shutter_module_nr == cfg.relay_module_nr:
         raise ConfigError(
             f"shutter and relay are both on DIO module {cfg.shutter_module_nr}. "

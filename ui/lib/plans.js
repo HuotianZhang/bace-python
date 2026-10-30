@@ -142,6 +142,7 @@ export function createPlansPanel({ api, onChange = () => {} }) {
       h('div.pl-title', h('span', plan.title),
         h('span.pl-state', plan.state === 'approved' && !plan.open ? 'spent' : plan.state)),
       h('p.pl-goal', plan.goal),
+      plan.state === 'approved' && plan.reason ? h('p.pl-goal', `Approved: ${plan.reason}`) : null,
       envelopeTable(shown),
       fixed.length ? h('details.pl-fixed', {
         open: unfolded.has(plan.plan_id),

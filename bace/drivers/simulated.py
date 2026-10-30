@@ -763,6 +763,9 @@ class SimulatedPowerMeter:
         selects the real filter. With
         pulsed light the model returns duty-weighted mean power when enabled,
         or the sampled phase and resulting flicker otherwise."""
+        self.range: int | None = None
+        self.auto_range = True
+        """Record the held range; the model's readings do not depend on it."""
 
     def set_wavelength(self, nm: float) -> None:
         self.wavelength_nm = float(nm)
@@ -770,6 +773,11 @@ class SimulatedPowerMeter:
     def set_averaging(self, on: bool = True, **_: object) -> dict:
         self.averaged = bool(on)
         return {"mode": 0, "analog_filter": 4 if on else 0}
+
+    def set_range(self, index: int | None) -> dict:
+        self.range = None if index is None else int(index)
+        self.auto_range = index is None
+        return {"range": self.range, "auto": self.auto_range}
 
     def read_power(self) -> float:
         b = self.bench

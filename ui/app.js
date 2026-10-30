@@ -152,8 +152,14 @@ function renderChips(state) {
     h('button', {
       class: 'chip plans' + (plansPending ? ' bad' : '') + (plansOpen ? ' on' : ''),
       text: plansPending ? `Plans ${plansPending}` : 'Plans',
-      title: 'Plans proposed by an agent. Each runs only after approval here.',
+      title: 'Plans proposed by an agent. Each runs once approved here, or at once under [plans] auto_approve in rig.toml.',
       'aria-expanded': plansOpen ? 'true' : 'false', onclick: () => plansPanel.toggle(),
+    }),
+    h('button', {
+      class: 'chip quit' + (restartArmed ? ' armed' : ''),
+      text: restartArmed ? 'Restart?' : 'Restart',
+      title: 'Aborts the run, parks the bench, then starts the service again from the files on disk. Plans are forgotten.',
+      onclick: () => restartService(),
     }),
     h('button', {
       class: 'chip quit' + (quitArmed ? ' armed' : ''),
@@ -177,6 +183,30 @@ function armQuit(on) {
   clearTimeout(quitArmedTimer);
   quitArmedTimer = on ? setTimeout(() => { quitArmed = false; renderChips(store.getState()); }, 6000) : null;
   renderChips(store.getState());
+}
+
+let restartArmed = false;
+let restartArmedTimer = null;
+
+function armRestart(on) {
+  restartArmed = on;
+  clearTimeout(restartArmedTimer);
+  restartArmedTimer = on ? setTimeout(() => { restartArmed = false; renderChips(store.getState()); }, 6000) : null;
+  renderChips(store.getState());
+}
+
+async function restartService() {
+  if (!restartArmed) return armRestart(true);
+  armRestart(false);
+  try {
+    await api.restart(true);
+  } catch (error) {
+    notify(error.text || error.message, 'bad');
+    return;
+  }
+  stream.close();
+  document.getElementById('app').replaceChildren(h('div.ended', h('p.wordmark', 'bace'),
+    h('h1', 'Restarting'), h('p', 'Parking the bench and reading the instruments. Reload this page when the service answers.')));
 }
 
 async function shutDown() {

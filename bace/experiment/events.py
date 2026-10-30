@@ -397,6 +397,12 @@ class PowerReading(Event):
     the reading is half the LED DC power (manual 1.2). `None` means the driver
     cannot report the filter state, such as a console without a filter route.
     """
+    meter_range: int | None = None
+    """The range index in the meter's status word; `None` when it gave none."""
+    auto_range: bool | None = None
+    """Whether the meter was ranging itself. Under pulses that makes the reading
+    depend on what the meter saw before (manual 1.2). `None` means not known.
+    """
 
 
 @dataclass(frozen=True)

@@ -51,7 +51,7 @@ def test_initialize_lists_tools_and_offers_no_approval(client):
     init = rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
                               "clientInfo": {"name": "test", "version": "0"}})["result"]
     assert init["protocolVersion"] == "2025-06-18"
-    assert init["serverInfo"]["name"] == "bace" and "approves" in init["instructions"]
+    assert init["serverInfo"]["name"] == "bace" and "approved" in init["instructions"]
     assert rpc("initialize", {"protocolVersion": "1999-01-01"})["result"]["protocolVersion"] \
         == mcp.PROTOCOL_VERSIONS[0]
     r = c.post("/mcp", json={"jsonrpc": "2.0", "method": "notifications/initialized"})
