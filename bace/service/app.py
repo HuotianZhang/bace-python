@@ -571,10 +571,9 @@ def create_app(session: Session, *, ui_dir: str | None = None,
 
         The contract is `docs/service-contract.md`, section 5."""
         try:
-            session.catalogue.edit(name, values)
+            return session.edit_params(name, values)
         except KeyError:
             return _error(404, f"no such module: {name}", modules=session.catalogue.names())
-        return session.module_wire(name)
 
     @app.post("/modules/{name}/params/reset")
     async def reset_params(name: str):
@@ -582,10 +581,9 @@ def create_app(session: Session, *, ui_dir: str | None = None,
 
         The contract is `docs/service-contract.md`, section 5."""
         try:
-            session.catalogue.reset(name)
+            return session.reset_params(name)
         except KeyError:
             return _error(404, f"no such module: {name}", modules=session.catalogue.names())
-        return session.module_wire(name)
 
     # -- /runs ---------------------------------------------------------------------
     @app.post("/runs", status_code=202)

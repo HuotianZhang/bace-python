@@ -716,6 +716,35 @@ class Session:
         return {"session": self.session_info(), "changed": list(changed),
                 "run_active": active}
 
+    def edit_params(self, name: str, values: Mapping[str, Any]) -> dict:
+        """Applies `PUT /modules/{name}/params` and returns the module entry.
+
+        A coercion error raises before anything changes. Unknown modules raise
+        `KeyError`.
+        """
+        with self._lock:
+            before = self.catalogue.edited(name)
+            self.catalogue.edit(name, values)
+            after = self.catalogue.edited(name)
+        return self._params_edited(name, before, after)
+
+    def reset_params(self, name: str) -> dict:
+        """Applies `POST /modules/{name}/params/reset` and returns the module entry."""
+        with self._lock:
+            before = self.catalogue.edited(name)
+            self.catalogue.reset(name)
+            after = self.catalogue.edited(name)
+        return self._params_edited(name, before, after)
+
+    def _params_edited(self, name: str, before: dict, after: dict) -> dict:
+        """Announces a changed edited layer to every console (`E.ParamsEdited`)."""
+        changed = sorted(k for k in set(before) | set(after)
+                         if before.get(k) != after.get(k))
+        if changed:
+            self._dispatch(None, E.ParamsEdited(module=name, before=before, after=after,
+                                                changed=changed), node_path="")
+        return self.module_wire(name)
+
     def hello(self) -> dict:
         """Returns `data` for the first WebSocket frame."""
         return {"session": self.session_info(), "seq": self.last_seq,

@@ -120,6 +120,7 @@ def realistic_events() -> dict[type, E.Event]:
         E.SampleNamed(before={"sample": "", "material": ""},
                       after={"sample": "s4", "material": "PTQ10IT4F"},
                       changed=["material", "sample"]),
+        E.ParamsEdited(module="bace", before={}, after={"n_loops": 3}, changed=["n_loops"]),
         E.PlanProposed(plan={"plan_id": "S-P01", "title": "t", "goal": "g",
                              "envelope": {"modules": {"bace": {}}}, "fingerprint": "0" * 16}),
         E.PlanDecided(plan_id="S-P01", decision="approve", fingerprint="0" * 16),

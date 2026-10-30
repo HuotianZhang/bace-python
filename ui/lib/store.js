@@ -624,6 +624,12 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         log(frame, 'info', `sample · ${(data.changed || []).join(', ') || 'named'}`);
         break;
 
+      case 'ParamsEdited':
+        // The views revalidate on this stamp; `lib/watch.js` refetches the values.
+        state.paramsEdited = frame.seq;
+        log(frame, 'info', `params · ${data.module} · ${(data.changed || []).join(', ')}`);
+        break;
+
       case 'TemperatureRead':
         state.temperature = { kelvin: data.kelvin, setpoint_k: data.setpoint_k, in_band: data.in_band,
                               source: data.source, ts: frame.ts };
@@ -798,6 +804,7 @@ export function emptyState() {
   return {
     connection: { state: 'idle', session: null, seq: null, stats: null },
     session: null,
+    paramsEdited: null,
     bench: null,
     benchState: 'idle',
     readAt: null,

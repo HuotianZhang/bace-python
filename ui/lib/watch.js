@@ -68,15 +68,16 @@ export function createBenchWatch({
     // `readBack` applies instruments, chain and verdicts while leaving run, queue and
     // bench state to the ordered stream because HTTP can race a queued run's
     // preflight.
-    (async () => {
+    // Both requests share `fetching`, so an older catalogue cannot land after a newer
+    // one when edits arrive in quick succession.
+    const bench = async () => {
       try { onBench(await fetchBench()); } catch { /* the next frame asks again */ }
-      finally { fetching = false; pump(); }
-    })();
-    if (modules && fetchModules) {
-      (async () => {
-        try { onModules(await fetchModules()); } catch { /* the catalogue keeps what it had */ }
-      })();
-    }
+    };
+    const catalogue = async () => {
+      if (!modules || !fetchModules) return;
+      try { onModules(await fetchModules()); } catch { /* the catalogue keeps what it had */ }
+    };
+    Promise.all([bench(), catalogue()]).finally(() => { fetching = false; pump(); });
   }
 
   return {
@@ -89,6 +90,12 @@ export function createBenchWatch({
       if (frame.type === 'RunStateChanged' && frame.data && frame.data.state === 'parked') {
         // Park releases the worker and removes the inference overlay. Refetch
         // supplies the bench for the next run and catalogue last-result values.
+        want({ modules: true });
+        return true;
+      }
+      if (frame.type === 'ParamsEdited') {
+        // Every console shares the edited layer, and a run uses it, so a console that
+        // keeps the old value would show one value and run another.
         want({ modules: true });
         return true;
       }

@@ -431,6 +431,25 @@ class SampleNamed(Event):
 
 
 @dataclass(frozen=True)
+class ParamsEdited(Event):
+    """The edited layer of a module changed through `PUT /modules/{name}/params` or its reset.
+
+    It is a session event: `run_id` is `None` and `node_path` is empty. `before`
+    and `after` contain the module's whole edited layer; `changed` lists the
+    modified keys.
+
+    The layer is shared by every console, and a run started from one console
+    uses it. A console therefore refetches its catalogue on this event, so that
+    what it shows is what a run will use.
+    """
+
+    module: str
+    before: dict
+    after: dict
+    changed: list
+
+
+@dataclass(frozen=True)
 class PlanProposed(Event):
     """A plan was proposed: its id, title, goal, envelope and fingerprint.
 

@@ -320,6 +320,38 @@ def test_the_sample_block_is_merged_and_a_null_puts_a_key_back_to_the_file(servi
         .get("operator") is None
 
 
+def test_a_parameter_edit_is_an_event_and_a_journal_line(service):
+    """The edited layer is shared, so every console has to hear about a change."""
+    client, session = service
+    before = session.last_seq
+    client.put("/modules/bace/params", json={"n_loops": 3})
+    edits = [f for f in frames(client, since=before) if f["type"] == "ParamsEdited"]
+    assert len(edits) == 1
+    ev = edits[0]
+    assert ev["run_id"] is None and ev["node_path"] == "", "a session-level event"
+    assert ev["data"]["module"] == "bace" and ev["data"]["changed"] == ["n_loops"]
+    assert ev["data"]["before"] == {} and ev["data"]["after"] == {"n_loops": 3}
+    assert any(line.get("type") == "ParamsEdited" for line in journal_lines(session))
+
+    # Nothing moved, nothing said.
+    seq = session.last_seq
+    client.put("/modules/bace/params", json={"n_loops": 3})
+    assert session.last_seq == seq, "an unchanged layer emits nothing"
+
+    # A refused edit changes nothing, so it says nothing.
+    assert client.put("/modules/bace/params", json={"n_loops": "abc"}).status_code == 422
+    assert session.last_seq == seq
+
+    client.post("/modules/bace/params/reset")
+    reset = [f for f in frames(client, since=seq) if f["type"] == "ParamsEdited"]
+    assert len(reset) == 1 and reset[0]["data"]["after"] == {}
+    assert reset[0]["data"]["before"] == {"n_loops": 3}
+
+    seq = session.last_seq
+    client.post("/modules/bace/params/reset")
+    assert session.last_seq == seq, "resetting an empty layer emits nothing"
+
+
 def test_naming_the_sample_is_an_event_and_a_journal_line(service):
     client, session = service
     before = session.last_seq
