@@ -24,6 +24,7 @@ from bace.params import (LOCKED, PRECEDENCE, ParamError, ParamSet, ParamSpec,
 REPO = pathlib.Path(__file__).resolve().parents[1]
 
 RUN_CHOICES = {"dark_reference": ("translated", "same"),
+               "monitor_channel": ("off", "CHAN1", "CHAN4"),
                "output_polarity": ("auto", "NORM", "INV", "leave")}
 """What `RunConfig.__post_init__` accepts. The dataclass validates these in
 code rather than in its annotations, so the catalogue has to say them."""

@@ -461,3 +461,62 @@ def test_the_file_says_which_shots_took_the_dark_trace_first(tmp_path):
     assert np.isfinite(diag["pre_trigger_light_ua"]).all()
     assert np.isfinite(diag["pre_trigger_dark_ua"]).all()
     assert diag["late_offset_ua"].shape == (2, 2)
+
+
+# -- the monitor channel ----------------------------------------------------
+def test_a_monitor_channel_is_kept_in_volts_beside_the_current(tmp_path):
+    from dataclasses import replace
+
+    from bace.storage.hdf5 import read_run
+    from bace.storage.naming import RunMetadata
+
+    _, rig = _rig()
+    fetched = []
+    fetch = rig.scope.fetch_volts
+    rig.scope.fetch_volts = lambda source: (fetched.append(source), fetch(source))[1]
+    rec = RunRecorder(str(tmp_path), RunMetadata(sample="sim", temperature_k=290.0,
+                                                  temperature_how="typed"))
+    list(record(run_transient_scan(rig, ScanSpec(axis=Axis("vpre", 1.0, 1.0), vcoll=-2.0, n_loops=2),
+                                   replace(CFG, monitor_channel="CHAN4"), sleep=NO_SLEEP), rec))
+    assert fetched.count("CHAN4") == 4, "one for each light and dark trace"
+    d = read_run([p for p in rec.written if p.endswith(".h5")][0])
+    assert d["monitor_light"].shape == d["light"].shape
+    assert d["monitor_dark"].shape == d["dark"].shape
+
+
+def test_without_a_monitor_channel_nothing_is_fetched_or_stored():
+    _, rig = _rig()
+    fetched = []
+    fetch = rig.scope.fetch_volts
+    rig.scope.fetch_volts = lambda source: (fetched.append(source), fetch(source))[1]
+    evs = list(run_transient_scan(rig, ScanSpec(axis=Axis("vpre", 1.0, 1.0), vcoll=-2.0),
+                                  CFG, sleep=NO_SLEEP))
+    assert "CHAN4" not in fetched and "CHAN1" not in fetched
+    shots = [e for e in evs if isinstance(e, E.StepDone)]
+    assert all(s.monitor_light is None and s.monitor_dark is None for s in shots)
+
+
+def test_a_monitor_channel_that_will_not_fetch_costs_one_line_not_the_run():
+    from dataclasses import replace
+
+    _, rig = _rig()
+    fetch = rig.scope.fetch_volts
+
+    def refuse(source):
+        if source == "CHAN4":
+            raise RuntimeError("channel not displayed")
+        return fetch(source)
+
+    rig.scope.fetch_volts = refuse
+    evs = list(run_transient_scan(rig, ScanSpec(axis=Axis("vpre", 1.0, 1.0), vcoll=-2.0, n_loops=2),
+                                  replace(CFG, monitor_channel="CHAN4"), sleep=NO_SLEEP))
+    shots = [e for e in evs if isinstance(e, E.StepDone)]
+    assert len(shots) == 2 and all(s.monitor_light is None for s in shots)
+    assert all(isinstance(s.sync_light, Trace) for s in shots)
+    assert len([e for e in evs if isinstance(e, E.Notice) and "monitor trace" in e.text]) == 1
+
+
+@pytest.mark.parametrize("channel", ["CHAN2", "CHAN3", "chan4"])
+def test_a_monitor_channel_must_be_a_free_channel(channel):
+    with pytest.raises(ValueError, match="monitor_channel"):
+        RunConfig(monitor_channel=channel)

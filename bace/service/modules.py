@@ -318,6 +318,7 @@ RUN_CHOICES: dict[str, tuple[str, ...]] = {
     "dark_reference": ("translated", "same"),
     "light_shutter": ("open", "shut"),
     "offset_region": ("tail", "pre-trigger"),
+    "monitor_channel": ("off", "CHAN1", "CHAN4"),
     "output_polarity": ("auto", "NORM", "INV", "leave"),
     "trigger_sweep": ("AUTO", "TRIG"),
 }
@@ -335,8 +336,9 @@ RUN_UNITS: dict[str, str] = {
 
 RUN_GROUPS: dict[str, str] = {
     **{f: "acquisition" for f in ("n_averages", "timebase_ns_per_div", "record_length",
-                                  "read_intensity", "acquisition_timeout_s",
-                                  "light_shutter", "alternate_order")},
+                                  "read_intensity", "monitor_channel",
+                                  "acquisition_timeout_s", "light_shutter",
+                                  "alternate_order")},
     **{f: "processing" for f in ("t0_int_s", "t_int_width_s", "offset_correct",
                                  "offset_region", "invert_polarity", "dark_reference")},
     **{f: "timing" for f in ("settle_s", "dark_settle_s", "shutter_settle_s",
@@ -442,7 +444,8 @@ LABELS: dict[str, str] = {
     "invert_polarity": "Invert levels", "inverted_output": "Inverted output",
     "dark_settle_s": "Dark settle", "dark_reference": "Dark reference",
     "light_shutter": "Light-trace shutter", "shutter_settle_s": "Shutter settle",
-    "read_intensity": "Power per shot", "acquisition_timeout_s": "Acquisition timeout",
+    "read_intensity": "Power per shot", "monitor_channel": "Monitor channel",
+    "acquisition_timeout_s": "Acquisition timeout",
     "external_trigger": "External trigger", "trigger_slope_positive": "Rising-edge trigger",
     "trigger_sweep": "Trigger sweep", "calibrate_trigger": "Calibrate trigger",
     "store_shots": "Store every shot",

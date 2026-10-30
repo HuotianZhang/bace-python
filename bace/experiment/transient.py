@@ -298,6 +298,15 @@ class RunConfig:
     runs. Disabling it leaves `StepDone.intensity_w` empty and loses that record.
     """
 
+    monitor_channel: str = "off"
+    """A further digitiser channel to store beside each trace, in V: `CHAN1`, `CHAN4` or `off` for none.
+
+    It shares the current trace's record and averaging, so a photodiode or the
+    step at the cable end can be timed against the current. Its vertical scale
+    and input impedance are set by hand on the digitiser, and it must be
+    displayed. `off` saves nothing and fetches nothing.
+    """
+
     acquisition_timeout_s: float = 30.0
     """How long to wait for the digitiser to return a trace before giving up on the shot, in s.
 
@@ -364,6 +373,11 @@ class RunConfig:
             raise ValueError(
                 f"light_shutter must be 'open' or 'shut', not {self.light_shutter!r}"
             )
+        if self.monitor_channel not in ("off", "CHAN1", "CHAN4"):
+            raise ValueError(
+                f"monitor_channel must be 'off', 'CHAN1' or 'CHAN4', not "
+                f"{self.monitor_channel!r}: the current and Sync channels are "
+                "already stored")
         if self.offset_region not in ("tail", "pre-trigger"):
             raise ValueError(
                 f"offset_region must be 'tail' or 'pre-trigger', not "
@@ -594,6 +608,7 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
 
         # -- the loop ------------------------------------------------------
         sync_failed = False
+        monitor_failed = False
         # Each point retains its light trace's vertical range and clipping
         # flag. A dark trace acquired first reuses that range: auto-ranging
         # on the dark trace alone can choose a range that clips the light trace.
@@ -637,6 +652,7 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                                  k=phases.index(name) + 1, of=of)
 
             sync_failed_box = [sync_failed]
+            monitor_failed_box = [monitor_failed]
 
             def take(which: str, autorange: bool, window=None):
                 trace = rig.scope.acquire(config.n_averages, source=cfg.current_source,
@@ -650,10 +666,15 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                 if note:
                     sync_failed_box[0] = True
                     notes.append(note)
+                monitor, note = _monitor_trace(rig, config.monitor_channel,
+                                               monitor_failed_box[0])
+                if note:
+                    monitor_failed_box[0] = True
+                    notes.append(note)
                 note = _averages_notice(trace, config.n_averages, s.index, which)
                 if note:
                     notes.append(note)
-                return trace, sync, notes
+                return trace, sync, monitor, notes
 
             def light_part(autorange: bool):
                 # Levels and shutter changes must precede settling and acquisition.
@@ -670,9 +691,9 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                 if config.read_intensity and rig.power is not None:
                     intensity = rig.power.read_power()
                 yield phase("acquire light")
-                trace, sync, notes = take("light", autorange)
+                trace, sync, monitor, notes = take("light", autorange)
                 yield from notes
-                return trace, sync, intensity
+                return trace, sync, monitor, intensity
 
             def dark_part(autorange: bool, window=None):
                 # With `same` after a light trace, only the shutter changes.
@@ -689,22 +710,26 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                 rig.shutter.shut()
                 sleep(config.shutter_settle_s)
                 yield phase("acquire dark")
-                trace, sync, notes = take("dark", autorange, window)
+                trace, sync, monitor, notes = take("dark", autorange, window)
                 yield from notes
-                return trace, sync
+                return trace, sync, monitor
 
             # Both traces share a vertical range and scope zero. A light trace
             # sets the range; a dark trace taken first uses the range of this
             # point's light trace from the preceding loop.
             if dark_first:
                 window, clipped = light_windows[s.step]
-                dark, sync_dark = yield from dark_part(autorange=False, window=window)
-                light, sync_light, intensity = yield from light_part(autorange=False)
+                dark, sync_dark, monitor_dark = yield from dark_part(autorange=False,
+                                                                     window=window)
+                light, sync_light, monitor_light, intensity = yield from light_part(
+                    autorange=False)
             else:
-                light, sync_light, intensity = yield from light_part(autorange=True)
+                light, sync_light, monitor_light, intensity = yield from light_part(
+                    autorange=True)
                 clipped = light_windows[s.step][1]
-                dark, sync_dark = yield from dark_part(autorange=False)
+                dark, sync_dark, monitor_dark = yield from dark_part(autorange=False)
             sync_failed = sync_failed_box[0]
+            monitor_failed = monitor_failed_box[0]
             yield phase("process")
 
             # -- process ---------------------------------------------------
@@ -787,6 +812,7 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                            # The flag describes the range shared by both traces.
                            clipped=clipped,
                            sync_light=sync_light, sync_dark=sync_dark,
+                           monitor_light=monitor_light, monitor_dark=monitor_dark,
                            t0_int_record_s=t0_rec, t1_int_record_s=t1_rec,
                            dark_first=dark_first)
 
@@ -843,6 +869,26 @@ def _sync_trace(rig: Rig, cfg: RigConfig, already_failed: bool):
                             "the shots of this run carry no sync edge and the "
                             "verdict cannot say which side of the trigger chain "
                             "jitters. Check that the channel is displayed")
+
+
+def _monitor_trace(rig: Rig, channel: str, already_failed: bool):
+    """The monitor fetch returns `channel` in V from the acquired record.
+
+    `off` fetches nothing. As with Sync, a failure returns `None` and
+    a `Notice` once, so a missing channel does not stop the run.
+    """
+    fetch = getattr(rig.scope, "fetch_volts", None)
+    if channel == "off" or fetch is None:
+        return None, None
+    try:
+        return fetch(channel), None
+    except Exception as exc:                                # noqa: BLE001
+        if already_failed:
+            return None, None
+        return None, Notice("warning",
+                            f"the monitor trace on {channel} could not be fetched "
+                            f"({type(exc).__name__}: {exc}); this run stores none. "
+                            "Check that the channel is displayed")
 
 
 def _averages_notice(trace: Trace, asked: int, index: int, which: str):
