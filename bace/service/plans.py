@@ -82,9 +82,11 @@ def _bound(where: str, spec: Any) -> dict[str, Any]:
 
 
 def _within(value: Any, bound: Mapping[str, Any]) -> bool:
-    if "choices" in bound:
-        return value in bound["choices"]
+    """Whether `value` keeps to `bound`; a list must keep to it element by element,
+    for choices as for a range (a loop's `levels_v` [1.02] against choices [1.02])."""
     values = value if isinstance(value, (list, tuple)) else [value]
+    if "choices" in bound:
+        return all(v in bound["choices"] for v in values)
     for v in values:
         if isinstance(v, bool) or not isinstance(v, (int, float)):
             return False
