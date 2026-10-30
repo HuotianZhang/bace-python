@@ -13,7 +13,11 @@ import { transientModel, traceSet, sampleTime, windowRecordS, windowEndRecordS, 
 import { jvModel, currentOf, ramp, RAMP } from '../lib/charts/jv.js';
 import { timingModel, shotSegments, cyclePlan, biasLevels, timingAlerts, recordPlan } from '../lib/charts/timing.js';
 import { runFor, shotRows } from '../lib/results.js';
-import { axisTicks, layout, heightFor, ASPECT } from '../lib/charts/frame.js';
+import {
+  alertsOf, axesOf, axisTicks, detailsOf, layout, heightFor, minorValues, zoomRanges, ASPECT, MAX_UNIT,
+} from '../lib/charts/frame.js';
+import { clearViews, isManual, parseRange, ranged, resetView, setRange, viewOf } from '../lib/charts/view.js';
+import { powerModel } from '../lib/charts/power.js';
 import * as scale from '../lib/scale.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -49,11 +53,11 @@ test('the two traces share one vertical window, as the digitiser did', () => {
   assert.match(model.panels[0].note, /autorange|shared vertical window/);
 });
 
-test('the integration window is a region on every panel, not a number in a caption', () => {
+test('the integration window crosses every panel, as thin lines that leave the traces in front', () => {
   const model = transientModel(TRANSIENT);
   for (const panel of model.panels) {
-    assert.equal(panel.shades.length, 1, `${panel.key} carries the window`);
-    assert.ok(panel.rules.some((r) => r.colour === 'accent'));
+    assert.equal(panel.shades, undefined, `${panel.key} has no fill behind its traces`);
+    assert.ok(panel.rules.some((r) => r.colour === 'grey' && r.dash), `${panel.key} carries the window`);
   }
 });
 
@@ -135,20 +139,41 @@ test('the settings under the transient became labels on the panel they define', 
   // And the two "the running integral is …" notes were the charge panel's own
   // label, printed again a few pixels below it.
   assert.ok(!model.notes.some((n) => /running integral/.test(n)), model.notes.join(' | '));
-  // Where the window came from now sits beside the window it dates.
-  const marks = model.panels[0].marks || [];
-  assert.ok(marks.some((m) => /pinned to the pulse|the window the run integrated/.test(m.text)), JSON.stringify(marks));
-  // And the window has an end: the shade stops at t0 + width, not at the record's edge.
-  const shade = model.panels[0].shades[0];
+  // Where the window came from reaches the info tip with its numbers.
+  assert.ok(model.notes.some((n) => /^integration window .*(pinned to the pulse|the window the run integrated)/.test(n)),
+    model.notes.join(' | '));
+  // And the window has an end: the second line stops at t0 + width, not at the record's edge.
+  const edges = model.panels[0].rules.filter((r) => r.dash === '3 3');
   const plotRight = model.panels[0].rect.x + model.panels[0].rect.w;
-  assert.ok(shade.x + shade.w < plotRight - 1, `the shade ends before the record: ${shade.x + shade.w} vs ${plotRight}`);
+  assert.ok(edges.length >= 2 && edges[1].x1 < plotRight - 1, JSON.stringify(edges));
 });
 
-test('every chart is built to one of the three stated aspects', () => {
+test('a plot names its axes and carries its unit in the title', () => {
+  const model = transientModel(TRANSIENT);
+  assert.equal(model.x.title, 'Time (ns)');
+  assert.deepEqual(model.panels.map((p) => p.y.title), ['Current (mA)', 'Light − dark (mA)', 'Charge (pC)']);
+  assert.deepEqual(model.panels.map((p) => p.letter), ['a', 'b', 'c']);
+  assert.deepEqual(model.panels[0].keys.map((k) => k.label), ['Light', 'Dark']);
+  assert.ok(!model.panels[2].y.ticks.some((t) => /e/.test(t.text)), 'charge ticks in a prefix, not in exponents');
+});
+
+test('captions go to the info tip, and a warning stays on screen', () => {
+  const quiet = transientModel(TRANSIENT);
+  assert.deepEqual(alertsOf(quiet), []);
+  assert.ok(detailsOf(quiet).some((d) => /Q = ∫/.test(d)));
+  const clipped = transientModel(liveRun().lastShot, { t0_int_s: 0, pulse_delay_s: 1e-7 });
+  clipped.panels[0].note = 'both traces at an extreme';
+  clipped.panels[0].noteColour = 'alert';
+  assert.deepEqual(alertsOf(clipped), ['both traces at an extreme']);
+  assert.ok(!detailsOf(clipped).includes('both traces at an extreme'));
+});
+
+test('every chart is built to one of the stated aspects', () => {
   // Before `ASPECT` each chart carried a hand-picked viewBox and, measured per
   // panel, the console ran 2.1:1 (the J–V) to 12.3:1 (the power monitor) with
   // nothing to appeal to. The families are the rule now, so a new chart that
   // invents a ratio fails here rather than being noticed a year later.
+  const PLOT = { left: 60, right: 16, top: 10, bottom: 42, gap: 7 };
   const at = (width, model, family, margin = {}) => {
     const panels = model.panels.length ? model.panels : [{ key: 'x', weight: 1 }];
     const height = heightFor(width, panels, { margin, aspect: ASPECT[family] });
@@ -159,11 +184,11 @@ test('every chart is built to one of the three stated aspects', () => {
     return unit.rect.w / unit.rect.h;
   };
   const cases = [
-    ['transient', 570, { panels: [{ weight: 1.25 }, { weight: 1 }, { weight: 0.8 }] }, 'trace', {}],
-    ['jv', 570, { panels: [{ weight: 1 }] }, 'curve', { left: 58, bottom: 28, top: 18 }],
-    ['loops', 570, { panels: [{ weight: 1 }] }, 'curve', { left: 60 }],
-    ['grid', 620, { panels: [{ weight: 1 }] }, 'curve', { left: 64 }],
-    ['power', 1896, { panels: [{ weight: 1 }] }, 'strip', { left: 60 }],
+    ['transient', 570, { panels: [{ weight: 1.25 }, { weight: 1 }, { weight: 0.8 }] }, 'stack', PLOT],
+    ['jv', 570, { panels: [{ weight: 1 }] }, 'curve', PLOT],
+    ['loops', 570, { panels: [{ weight: 1 }] }, 'curve', PLOT],
+    ['grid', 620, { panels: [{ weight: 1 }] }, 'curve', PLOT],
+    ['power', 1896, { panels: [{ weight: 1 }] }, 'strip', PLOT],
   ];
   for (const [name, width, model, family, margin] of cases) {
     const got = at(width, model, family, margin);
@@ -180,6 +205,13 @@ test('a wider chart gets longer, never squarer', () => {
   const ratio = (w, hh) => (w - 56 - 16) / (hh - 16 - 26);
   assert.ok(Math.abs(ratio(400, narrow) - ratio(900, wide)) < 0.05,
     'the ratio the chart was drawn to survives the container it is put in');
+});
+
+test('a wide plot stops growing, so what is below it stays on the screen', () => {
+  const panels = [{ key: 'p', weight: 1 }];
+  const capped = (width) => heightFor(width, panels, { aspect: ASPECT.curve, cap: MAX_UNIT.curve });
+  assert.equal(capped(2000), capped(3000));
+  assert.ok(capped(400) < capped(2000));
 });
 
 test('a tick position is formatted, not computed — a renderer must coerce before it adds', () => {
@@ -208,11 +240,11 @@ test('an unrun slot carries the frame of the chart that will fill it', () => {
   const t = transientModel(null);
   assert.ok(t.absent.frame, 'the transient slot is a frame, not a sentence');
   assert.deepEqual(t.absent.frame.panels.map((p) => p.key), ['traces', 'photo']);
-  assert.match(t.absent.frame.xLabel, /t \/ ns/);
+  assert.equal(t.absent.frame.xLabel, 'Time (ns)');
 
   const j = jvModel([]);
   assert.ok(j.absent.frame, 'the J–V slot too');
-  assert.match(j.absent.frame.xLabel, /V \/ V/);
+  assert.equal(j.absent.frame.xLabel, 'Voltage (V)');
 });
 
 // -- the J–V --------------------------------------------------------------
@@ -294,7 +326,7 @@ test('the −4 V start is a layout problem, so x is never cropped', () => {
   assert.ok(model.panels[0].note.includes('sweep starts at'));
 });
 
-test('the illumination ramp is ordered — one hue, strictly darkening', () => {
+test('the series ramp is ordered — strictly darkening', () => {
   // The design's five values splice a grey pair to a red trio, and in OKLab
   // the first and third have the same lightness: five levels that cannot be
   // put in order are not a sequential encoding.
@@ -574,7 +606,7 @@ test('the integration window travels with the shot\'s own delay, not the form\'s
   assert.equal(shot.setpoint.delay_ns, 200, 'the shot on screen is not the pinned point');
   const window = (delay) => transientModel(shot, {
     t0_int_s: 0, pulse_delay_s: delay,
-  }).panels[0].shades[0].x;
+  }).panels[0].rules[0].x1;
   assert.notEqual(window(pulseDelayS(shot, { delay_ns: 0 }, {})),
     window(pulseDelayS(null, { delay_ns: 0 }, {})),
     'the shot\'s own delay shades a different window from the form\'s');
@@ -753,10 +785,10 @@ test('the running mean and its band are the service\'s own, not a statistic of t
   assert.equal(first[0].sigma, null);
 });
 
-test('the charge axis is one power of ten for the whole chart, never a prefix per value', () => {
-  assert.deepEqual(chargeUnit([3.65e-10, 4.1e-10]), { factor: 1e-10, label: 'Q / 1e-10 C' });
-  assert.deepEqual(chargeUnit([-2.3e-12, 9e-13]), { factor: 1e-12, label: 'Q / 1e-12 C' });
-  assert.equal(chargeUnit([]).label, 'Q / 1e-12 C');
+test('the charge axis is one prefix for the whole chart, never a prefix per value', () => {
+  assert.deepEqual(chargeUnit([3.65e-10, 4.1e-9]), { factor: 1e-9, label: 'Q (nC)', unit: 'nC' });
+  assert.deepEqual(chargeUnit([-2.3e-12, 9e-13]), { factor: 1e-12, label: 'Q (pC)', unit: 'pC' });
+  assert.equal(chargeUnit([]).label, 'Q (pC)');
 });
 
 test('a shot without traces still puts its point on the loop curve', () => {
@@ -788,4 +820,102 @@ test('a node whose axis the ring never delivered says so rather than guessing', 
   assert.ok(model.absent);
   assert.match(model.absent.text, /Axis not known/);
   assert.equal(isRepeat({ values: [], axis: null }), null);
+});
+
+// -- the axes -------------------------------------------------------------
+
+test('a set range holds through the next shot, and only while its unit does', () => {
+  clearViews();
+  const view = viewOf('bace/transient');
+  setRange(view, 'x', 'ns', 300, 500);
+  setRange(view, 'traces', 'mA', -5, 1);
+  const zoomed = transientModel(TRANSIENT, { view });
+  assert.deepEqual(zoomed.x.scale.domain, [300, 500]);
+  assert.deepEqual(zoomed.panels[0].y.scale.domain, [-5, 1]);
+  assert.notDeepEqual(zoomed.panels[1].y.scale.domain, [-5, 1], 'each panel has its own range');
+
+  setRange(view, 'charge', 'nC', -1, 0);
+  const charge = transientModel(TRANSIENT, { view }).panels[2];
+  assert.notDeepEqual(charge.y.scale.domain, [-1, 0], 'nC limits do not apply to an axis now in pC');
+
+  resetView(view);
+  assert.ok(!isManual(view));
+  assert.notDeepEqual(transientModel(TRANSIENT, { view }).x.scale.domain, [300, 500]);
+});
+
+test('a zoom draws its own samples, not a stretched envelope of the record', () => {
+  const view = { ranges: { x: { lo: 300, hi: 340, unit: 'ns' } }, log: null };
+  const whole = transientModel(TRANSIENT);
+  const zoomed = transientModel(TRANSIENT, { view });
+  const turns = (d) => (d.match(/L/g) || []).length;
+  assert.ok(whole.panels[1].series[0].d !== zoomed.panels[1].series[0].d);
+  const inFrame = zoomed.panels[1].series[0].d.split(/[ML]/).filter(Boolean)
+    .map((p) => Number(p.split(' ')[0]));
+  const { rect } = zoomed.panels[1];
+  assert.ok(inFrame.filter((x) => x >= rect.x && x <= rect.x + rect.w).length >= 20,
+    `${turns(zoomed.panels[1].series[0].d)} segments in the path`);
+});
+
+test('every plot offers its axes, and the power monitor keeps its window menu', () => {
+  const transient = axesOf(transientModel(TRANSIENT)).map((a) => a.key);
+  assert.deepEqual(transient, ['x', 'traces', 'photo', 'charge']);
+  const jv = axesOf(jvModel(JV.curves));
+  assert.deepEqual(jv.map((a) => a.key), ['x', 'jv']);
+  assert.equal(jv[1].canLog, true);
+  assert.equal(jv[1].log, false);
+  const power = axesOf(powerModel([{ ts: 1, watts: 1e-3 }, { ts: 2, watts: 2e-3 }], { now: 2 }));
+  assert.deepEqual(power.map((a) => a.key), ['power']);
+});
+
+test('a current axis takes its prefix from what it shows, not from what it crops', () => {
+  const current = [-1.2e-6, -1.1e-6, -1e-6, 1e-6, 2e-3];
+  const voltage = [-1, -0.5, 0, 0.5, 1];
+  const model = jvModel([{ voltage, current, dark: false }]);
+  assert.ok(model.notes.some((n) => /power quadrant/.test(n)));
+  assert.equal(model.panels[0].y.title, 'I (µA)');
+});
+
+test('the log switch overrides the automatic choice, and a linear range does not carry over', () => {
+  const view = { ranges: { jv: { lo: -5, hi: 5, unit: 'mA cm⁻²' } }, log: true };
+  const model = jvModel(JV.curves, { view });
+  assert.equal(model.panels[0].y.scale.kind, 'log10');
+  assert.match(model.panels[0].y.title, /^\|J\|/);
+  assert.ok(model.panels[0].y.scale.domain[0] > 0);
+  const off = jvModel(JV.curves.map((c) => ({ ...c, dark: true })), { view: { ranges: {}, log: false } });
+  assert.equal(off.panels[0].y.scale.kind, 'linear');
+});
+
+test('a drag sets the axes it crossed', () => {
+  const model = transientModel(TRANSIENT);
+  const panel = model.panels[1];
+  const { rect } = panel;
+  const flat = zoomRanges(model, panel, [rect.x + 20, rect.y + 20], [rect.x + 120, rect.y + 22]);
+  assert.deepEqual(flat.map((r) => r.key), ['x']);
+  assert.ok(flat[0].range[0] < flat[0].range[1]);
+  const box = zoomRanges(model, panel, [rect.x + 120, rect.y + 50], [rect.x + 20, rect.y + 10]);
+  assert.deepEqual(box.map((r) => r.key), ['x', 'photo']);
+  assert.ok(box[1].range[0] < box[1].range[1], 'either direction');
+  assert.deepEqual(zoomRanges(model, panel, [rect.x + 20, rect.y + 20], [rect.x + 22, rect.y + 21]), [], 'a click');
+});
+
+test('a typed range is read the way the axis can draw it', () => {
+  assert.deepEqual(parseRange('', '', [0, 1]), { auto: true });
+  assert.deepEqual(parseRange('−5', '', [0, 1]), { lo: -5, hi: 1 });
+  assert.deepEqual(parseRange('', '0.5', [0, 1]), { lo: 0, hi: 0.5 });
+  assert.equal(parseRange('2', '1', [0, 3]), null);
+  assert.equal(parseRange('x', '1', [0, 3]), null);
+  assert.equal(parseRange('0', '1', [0, 3], { log: true }), null);
+  assert.deepEqual(ranged(null, 'x', 'ns', [0, 1]), [0, 1]);
+});
+
+test('frames carry minor ticks, and a log axis zoomed inside a decade still has labels', () => {
+  const X = scale.linear([0, 10], [0, 100]);
+  assert.equal(minorValues(X, axisTicks(X, { count: 5 })).length, 21);
+  const wide = scale.log10([1e-6, 1e-2], [100, 0]);
+  const decades = axisTicks(wide);
+  assert.equal(decades[0].power, '−6');
+  assert.ok(minorValues(wide, decades).includes(2e-6));
+  const narrow = scale.log10([2e-5, 8e-5], [100, 0]);
+  assert.ok(axisTicks(narrow).length >= 2);
+  assert.equal(axisTicks(narrow)[0].power, undefined);
 });

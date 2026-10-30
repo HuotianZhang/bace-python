@@ -199,7 +199,7 @@ export default {
             h('span.filt', { role: 'group', 'aria-label': 'plot' },
               h('button.opt', { type: 'button', 'aria-pressed': chartBy === 'led' ? 'true' : 'false', class: chartBy === 'led' ? 'on' : '', onclick: () => { chartBy = 'led'; render(store.getState()); } }, 'Q(led_v) per T'),
               h('button.opt', { type: 'button', 'aria-pressed': chartBy === 'T' ? 'true' : 'false', class: chartBy === 'T' ? 'on' : '', onclick: () => { chartBy = 'T'; render(store.getState()); } }, 'Q(T) per led_v'))),
-          chart((w) => gridChartModel(grid, { by: chartBy, width: w })),
+          chart((w, view) => gridChartModel(grid, { by: chartBy, width: w, view }), { id: `grid/${chartBy}` }),
         ];
       });
       keyed(nodesEl, `${recordKey}|${selectedNode}`, () => renderNodes(record, { selected: selectedNode, onSelect: selectNode }));

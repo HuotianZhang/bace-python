@@ -10,10 +10,14 @@
 
 import * as scale from '../scale.js';
 import * as fmt from '../format.js';
-import { layout, axisTicks, heightFor, ASPECT } from './frame.js';
+import { layout, axisTicks, heightFor, ASPECT, MAX_UNIT, PLOT_MARGIN } from './frame.js';
+import { ranged } from './view.js';
 
 /** Swept quantities use slash-unit labels (`docs/ui-rules.md` §2). */
 export const AXIS_UNITS = { vpre: 'V', vcoll: 'V', delay_ns: 'ns' };
+
+/** The plain names of the swept quantities, for an axis title. */
+const AXIS_NAMES = { vpre: 'V_pre', vcoll: 'V_coll', delay_ns: 'Delay' };
 
 /**
  * The helper classifies an axis as repeat (`true`), sweep (`false`) or unresolved
@@ -83,14 +87,18 @@ export function loopSeries(node) {
 }
 
 /**
- * `Q / 1e-12 C`: one power of ten for the axis, chosen from the data, never per value.
+ * `Q (nC)`: one SI prefix for the axis, chosen from the data, never per value.
  */
 export function chargeUnit(values) {
   let peak = 0;
   for (const v of values) if (finite(v) && Math.abs(v) > peak) peak = Math.abs(v);
-  const e = peak > 0 ? Math.floor(Math.log10(peak)) : -12;
-  return { factor: 10 ** e, label: `Q / 1e${e} C` };
+  const [value, prefix] = fmt.prefixed(peak > 0 ? peak : 1e-12);
+  const factor = 10 ** Math.round(Math.log10((peak > 0 ? peak : 1e-12) / value));
+  return { factor, label: `Q (${prefix}C)`, unit: `${prefix}C` };
 }
+
+/** The notes that stay under the plot: a run that fell short of what was asked. */
+const shortfalls = (notes) => notes.filter((n) => /completed · |without traces/.test(n));
 
 /** The caption uses the run outcome to identify truncation. */
 function ending(record, node) {
@@ -109,7 +117,7 @@ export function loopsModel(found, options = {}) {
   const { width = 560, height = null } = options;
   // Q against the swept axis: a quantity against a quantity, so `curve`.
   const qPanel = [{ key: 'q', weight: 1 }];
-  const qHeight = height ?? heightFor(width, qPanel, { margin: { left: 60 }, aspect: ASPECT.curve });
+  const qHeight = height ?? heightFor(width, qPanel, { margin: PLOT_MARGIN, aspect: ASPECT.curve, cap: MAX_UNIT.curve });
   const node = found && found.node;
   const record = found && found.record;
   if (!node) {
@@ -121,7 +129,7 @@ export function loopsModel(found, options = {}) {
       absent: {
         text: 'No shots yet',
         detail: null,
-        frame: { width, height: qHeight, panels: [{ key: 'q', weight: 1, label: 'Q / C' }], margin: { left: 60 } },
+        frame: { width, height: qHeight, panels: [{ key: 'q', weight: 1, label: 'Q' }], margin: PLOT_MARGIN },
       },
       panels: [],
       notes: [],
@@ -149,7 +157,7 @@ export function loopsModel(found, options = {}) {
   const kept = finite(node.kept) ? Math.max(node.kept, shots.length) : shots.length;
   const loopsDone = Math.max((node.loops || []).length, Math.floor(kept / points));
   const ended = ending(record, node);
-  const frame = layout({ width, height: qHeight, panels: qPanel, margin: { left: 60 } });
+  const frame = layout({ width, height: qHeight, panels: qPanel, margin: PLOT_MARGIN });
   const panel = frame.panels[0];
   const common = { key: 'loops', width: frame.width, height: frame.height, margin: frame.margin };
   const counts = { points, kept, requestedShots, loopsDone, loopsRequested, ended };
@@ -176,15 +184,16 @@ function repeatModel(common, panel, node, counts, options) {
   const done = Math.max(lastLoop, counts.loopsDone);
   const total = counts.loopsRequested || Math.max(done, 1);
   const { rect } = panel;
-  const X = scale.linear([0.5, total + 0.5], [rect.x, rect.x + rect.w]);
+  const view = options.view || null;
+  const X = scale.linear(ranged(view, 'x', 'loop', [0.5, total + 0.5]), [rect.x, rect.x + rect.w]);
   const unitQ = chargeUnit(series.map((s) => s.q));
   const scaled = series.map((s) => s.q / unitQ.factor);
   const band = series.filter((s) => s.sigma !== null)
     .flatMap((s) => [(s.mean + s.sigma) / unitQ.factor, (s.mean - s.sigma) / unitQ.factor]);
   const domain = scale.extent([scaled, band], { includeZero: false }) || [-1, 1];
-  const Y = scale.linear(domain, [rect.y + rect.h, rect.y]);
+  const Y = scale.linear(ranged(view, 'q', unitQ.unit, domain), [rect.y + rect.h, rect.y]);
 
-  const dots = series.map((s) => ({ x: scale.fixed(X(s.loop)), y: scale.fixed(Y(s.q / unitQ.factor)), r: 2.2, colour: 'ink', opacity: 0.6 }));
+  const dots = series.map((s) => ({ x: scale.fixed(X(s.loop)), y: scale.fixed(Y(s.q / unitQ.factor)), r: 2.2, colour: 'grey', opacity: 0.8 }));
   const meanPath = scale.linePath(series.map((s) => X(s.loop)), series.map((s) => s.mean / unitQ.factor), (v) => v, Y);
   const bands = bandPath(series.filter((s) => s.sigma !== null), X, Y, unitQ.factor);
 
@@ -202,7 +211,10 @@ function repeatModel(common, panel, node, counts, options) {
       text: `${counts.ended} at loop ${done}` });
   }
   const last = series[series.length - 1];
-  const loopTicks = axisTicks(X, { values: loopTickValues(total) });
+  const loopTicks = axisTicks(X, {
+    values: view && view.ranges.x ? null : loopTickValues(total), count: 5,
+  });
+  const said = notesFor(counts, done, node, { repeat: true, firstLoop });
 
   return {
     ...common,
@@ -211,9 +223,9 @@ function repeatModel(common, panel, node, counts, options) {
       label: `Q per loop  ·  ${unitQ.label}  ·  loop →`,
       note: `Repeats at ${where}`,
       noteColour: 'accent-dark',
-      y: { scale: Y, ticks: axisTicks(Y, { count: 4 }) },
+      y: { scale: Y, ticks: axisTicks(Y, { count: 4 }), title: unitQ.label, unit: unitQ.unit },
       series: [{
-        key: 'mean', label: 'running mean', colour: 'accent', width: 1.6, d: meanPath,
+        key: 'mean', label: 'running mean', colour: 'photo', width: 1.5, d: meanPath,
         at: (loop) => {
           const s = nearestLoop(series, loop);
           return s ? { y: s.mean / unitQ.factor } : null;
@@ -227,22 +239,25 @@ function repeatModel(common, panel, node, counts, options) {
         },
         format: (v) => fmt.charge(v * unitQ.factor),
       }],
-      bands: bands ? [{ d: bands, colour: 'accent', opacity: 0.12 }] : [],
+      bands: bands ? [{ d: bands, colour: 'photo', opacity: 0.12 }] : [],
       dots, shades, rules, marks,
     }],
     x: {
       scale: X,
       ticks: loopTicks,
       label: `loop  →  ${counts.loopsRequested ? counts.loopsRequested + ' requested' : ''}`.trim(),
+      title: 'Loop',
+      unit: 'loop',
       format: (v) => `loop ${Math.round(v)}`,
     },
     legend: [
-      { label: 'Q, each loop', marker: 'dot', colour: 'ink' },
-      { label: 'running mean', colour: 'accent', width: 1.6 },
-      { label: '± σ so far', marker: 'band', colour: 'accent' },
+      { label: 'Q, each loop', marker: 'dot', colour: 'grey' },
+      { label: 'running mean', colour: 'photo', width: 1.5 },
+      { label: '± σ so far', marker: 'band', colour: 'photo' },
     ],
     readout: readoutRepeat(series, last, counts),
-    notes: notesFor(counts, done, node, { repeat: true, firstLoop }),
+    notes: said,
+    alerts: shortfalls(said),
     switch: { repeat: true, text: `Repeats at ${where}` },
   };
 }
@@ -289,7 +304,8 @@ function sweepModel(common, panel, node, counts, options) {
   const { rect } = panel;
   const xs = points.map((p) => p.x);
   const xd = scale.extent([xs], { pad: 0.08 }) || [0, 1];
-  const X = scale.linear(xd, [rect.x, rect.x + rect.w]);
+  const view = options.view || null;
+  const X = scale.linear(ranged(view, 'x', unit, xd), [rect.x, rect.x + rect.w]);
   const all = points.flatMap((p) => p.q);
   const unitQ = chargeUnit([...all, ...points.map((p) => p.mean)]);
   const f = unitQ.factor;
@@ -297,7 +313,7 @@ function sweepModel(common, panel, node, counts, options) {
     .flatMap((p) => [(p.mean + p.sigma) / f, (p.mean - p.sigma) / f]);
   const domain = scale.extent([all.map((v) => v / f), points.map((p) => (p.mean === null ? NaN : p.mean / f)), bars],
     { includeZero: false }) || [-1, 1];
-  const Y = scale.linear(domain, [rect.y + rect.h, rect.y]);
+  const Y = scale.linear(ranged(view, 'q', unitQ.unit, domain), [rect.y + rect.h, rect.y]);
 
   const dots = [];
   const rules = [];
@@ -312,7 +328,7 @@ function sweepModel(common, panel, node, counts, options) {
     const y = scale.fixed(Y(p.mean / f));
     if (p.sigma !== null) {
       dots.push({ x, y, r: 2.8, colour: 'ink', shape: 'dot' });
-      rules.push({ x1: x, y1: scale.fixed(Y((p.mean + p.sigma) / f)), y2: scale.fixed(Y((p.mean - p.sigma) / f)), colour: 'ink', width: 1 });
+      rules.push({ x1: x, y1: scale.fixed(Y((p.mean + p.sigma) / f)), y2: scale.fixed(Y((p.mean - p.sigma) / f)), colour: 'ink', width: 0.9, cap: 2.2 });
     } else {
       dots.push({ x, y, r: 2.6, colour: 'ink', shape: 'square', hollow: true });
     }
@@ -321,6 +337,8 @@ function sweepModel(common, panel, node, counts, options) {
   const meanPath = scale.linePath(measured.map((p) => X(p.x)), measured.map((p) => p.mean / f), (v) => v, Y);
   const withSigma = points.filter((p) => p.sigma !== null).length;
   const current = currentPoint(node, points);
+  const said = notesFor(counts, counts.loopsDone, node, { repeat: false, withSigma, points: points.length });
+  const name = AXIS_NAMES[axis.name] || axis.name || 'Axis';
 
   return {
     ...common,
@@ -330,9 +348,9 @@ function sweepModel(common, panel, node, counts, options) {
       note: counts.loopsRequested
         ? `loop ${Math.min(counts.loopsDone + (current ? 1 : 0), counts.loopsRequested)} of ${counts.loopsRequested}`
         : `${counts.loopsDone} loops`,
-      y: { scale: Y, ticks: axisTicks(Y, { count: 4 }) },
+      y: { scale: Y, ticks: axisTicks(Y, { count: 4 }), title: unitQ.label, unit: unitQ.unit },
       series: [{
-        key: 'mean', label: 'mean', colour: 'ink', width: 1.2, d: meanPath,
+        key: 'mean', label: 'mean', colour: 'ink', width: 1.1, d: meanPath,
         at: (xv) => {
           const p = nearestPoint(measured, xv);
           return p ? { y: p.mean / f } : null;
@@ -357,6 +375,8 @@ function sweepModel(common, panel, node, counts, options) {
       scale: X,
       ticks: axisTicks(X, { count: 5 }),
       label: `${axis.name || 'axis'}${unit ? ' / ' + unit : ''}  →`,
+      title: `${name}${unit ? ` (${unit})` : ''}`,
+      unit,
       format: (v) => `${fmt.sig(v, 4)}${unit ? ' ' + unit : ''}`,
     },
     legend: [
@@ -366,7 +386,8 @@ function sweepModel(common, panel, node, counts, options) {
       { label: 'each shot', marker: 'dot-faint', colour: 'grey' },
     ],
     readout: readoutSweep(points, counts, withSigma),
-    notes: notesFor(counts, counts.loopsDone, node, { repeat: false, withSigma, points: points.length }),
+    notes: said,
+    alerts: shortfalls(said),
     switch: { repeat: false, text: `swept ${axis.name || 'axis'} · ${points.length} points` },
   };
 }

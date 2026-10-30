@@ -156,7 +156,7 @@ export function createChartThrottle({
  */
 export function resultPanel(name, { entry, found, bench }) {
   if (name === 'bace') return baceResult(entry, found, bench);
-  if (name === 'jv' || name === 'jv_bace') return jvResult(found);
+  if (name === 'jv' || name === 'jv_bace') return jvResult(name, found);
   return [];
 }
 
@@ -179,8 +179,8 @@ function baceResult(entry, found, bench) {
   // chart geometry with an empty sentence before acquisition.
   if (!shot) {
     return [
-      chart((w) => transientModel(null, { width: w })),
-      chart((w) => loopsModel(null, { width: w })),
+      chart((w) => transientModel(null, { width: w }), { id: `${entry.name}/transient` }),
+      chart((w) => loopsModel(null, { width: w }), { id: `${entry.name}/q` }),
       ...diagram,
     ];
   }
@@ -188,16 +188,17 @@ function baceResult(entry, found, bench) {
   const config = ((found.node.config || found.record.config || {}).run) || {};
   return [
     shotBlock(shot, found, config),
-    chart((w) => transientModel(shot, {
+    chart((w, view) => transientModel(shot, {
       width: w,
+      view,
       t0_int_s: values.t0_int_s,
       t_int_width_s: values.t_int_width_s,
       pulse_delay_s: pulseDelayS(shot, values, rig),
       offset_corrected: values.offset_correct,
       offset_region: values.offset_region,
       dark_reference: values.dark_reference,
-    })),
-    chart((w) => loopsModel(found, { width: w })),
+    }), { id: `${entry.name}/transient` }),
+    chart((w, view) => loopsModel(found, { width: w, view }), { id: `${entry.name}/q` }),
     ...diagram,
   ];
 }
@@ -275,7 +276,7 @@ export function pulseDelayS(shot, values, rig) {
   return (Number(delayNs) || 0) * 1e-9 + (Number(rig.trigger_offset_s) || 0);
 }
 
-function jvResult(found) {
+function jvResult(name, found) {
   const node = found && found.node;
   const curves = ((node && node.curves) || []).slice();
   // The curve being swept, drawn with the finished ones — point by point,
@@ -283,7 +284,7 @@ function jvResult(found) {
   if (node && node.partial && node.partial.voltage.length) curves.push(node.partial);
   // As in `baceResult`: `jvModel([])` is an `absent` model, and the frame it
   // carries is the sweep's own, so the slot holds its shape before the run.
-  if (!curves.length) return [chart((w) => jvModel([], { width: w }))];
+  if (!curves.length) return [chart((w) => jvModel([], { width: w }), { id: `${name}/jv` })];
   // The planned sweep range, so the axis does not grow with the curve.
   const jv = found.record && found.record.jv;
   const cfg = jv && jv.config && jv.config.jv;
@@ -291,7 +292,7 @@ function jvResult(found) {
   // Charts wait for measured width; text metrics do not depend on width and render
   // immediately. Separate builds meet both constraints.
   const model = jvModel(curves, { planned });
-  const out = [chart((w) => jvModel(curves, { planned, width: w }))];
+  const out = [chart((w, view) => jvModel(curves, { planned, width: w, view }), { id: `${name}/jv` })];
   if (model.metrics.entries.length) out.push(metricsTable(model.metrics));
   return out;
 }

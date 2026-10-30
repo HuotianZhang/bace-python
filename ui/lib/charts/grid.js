@@ -7,9 +7,10 @@
 
 import * as scale from '../scale.js';
 import * as fmt from '../format.js';
-import { layout, axisTicks, heightFor, ASPECT } from './frame.js';
+import { layout, axisTicks, heightFor, ASPECT, MAX_UNIT, PLOT_MARGIN } from './frame.js';
 import { ramp } from './jv.js';
 import { chargeUnit } from './loops.js';
+import { ranged } from './view.js';
 import { cellName } from '../history.js';
 
 const finite = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -18,7 +19,7 @@ const finite = (v) => typeof v === 'number' && Number.isFinite(v);
  * `by: 'led'` plots `led_v` with one series per temperature. `by: 'T'` transposes the
  * same cells.
  */
-export function gridChartModel(grid, { by = 'led', width = 620, height = null } = {}) {
+export function gridChartModel(grid, { by = 'led', width = 620, height = null, view = null } = {}) {
   const present = (grid && grid.cells ? grid.cells : []).filter((c) => !c.missing && finite(c.q));
   if (!present.length) {
     return { key: 'grid-chart', absent: { text: 'nothing to plot', detail: 'a bace node with a Q gives the grid a point' }, panels: [], notes: [] };
@@ -36,18 +37,19 @@ export function gridChartModel(grid, { by = 'led', width = 620, height = null } 
   // Q against temperature or LED level — a quantity against a quantity.
   const qPanel = [{ key: 'q', weight: 1 }];
   const frame = layout({
-    width, panels: qPanel, margin: { left: 64 },
-    height: height ?? heightFor(width, qPanel, { margin: { left: 64 }, aspect: ASPECT.curve }),
+    width, panels: qPanel, margin: PLOT_MARGIN,
+    height: height ?? heightFor(width, qPanel, { margin: PLOT_MARGIN, aspect: ASPECT.curve, cap: MAX_UNIT.curve }),
   });
   const panel = frame.panels[0];
   const { rect } = panel;
   const xd = xs.length === 1 ? [xs[0] - 1, xs[0] + 1] : scale.extent([xs], { pad: 0.1 });
-  const X = scale.linear(xd, [rect.x, rect.x + rect.w]);
+  const xUnit = by === 'T' ? 'K' : 'V';
+  const X = scale.linear(ranged(view, 'x', xUnit, xd), [rect.x, rect.x + rect.w]);
   const unitQ = chargeUnit(present.map((c) => c.q));
   const f = unitQ.factor;
   const bars = present.filter((c) => c.sigma !== null).flatMap((c) => [(c.q + c.sigma) / f, (c.q - c.sigma) / f]);
   const domain = scale.extent([present.map((c) => c.q / f), bars], { includeZero: false }) || [-1, 1];
-  const Y = scale.linear(domain, [rect.y + rect.h, rect.y]);
+  const Y = scale.linear(ranged(view, 'q', unitQ.unit, domain), [rect.y + rect.h, rect.y]);
 
   const series = [];
   const dots = [];
@@ -76,7 +78,7 @@ export function gridChartModel(grid, { by = 'led', width = 620, height = null } 
       const x = scale.fixed(X(p.x));
       const y = scale.fixed(Y(p.cell.q / f));
       if (p.cell.sigma !== null) {
-        rules.push({ x1: x, y1: scale.fixed(Y((p.cell.q + p.cell.sigma) / f)), y2: scale.fixed(Y((p.cell.q - p.cell.sigma) / f)), colour: p.cell.partial ? 'accent' : colour, width: 1 });
+        rules.push({ x1: x, y1: scale.fixed(Y((p.cell.q + p.cell.sigma) / f)), y2: scale.fixed(Y((p.cell.q - p.cell.sigma) / f)), colour: p.cell.partial ? 'accent' : colour, width: 0.9, cap: 2.2 });
         dots.push({ x, y, r: 2.6, colour: p.cell.partial ? 'accent' : colour, hollow: p.cell.partial });
       } else {
         dots.push({ x, y, r: 2.6, shape: 'square', hollow: true, colour: p.cell.partial ? 'accent' : colour });
@@ -101,18 +103,21 @@ export function gridChartModel(grid, { by = 'led', width = 620, height = null } 
       ...panel,
       label: `Q  ·  ${unitQ.label}  ·  ${by === 'T' ? 'one line per LED level' : 'one line per temperature'}`,
       note: `${present.length} cell${present.length === 1 ? '' : 's'} · the cell's Q at V_pre = V_oc`,
-      y: { scale: Y, ticks: axisTicks(Y, { count: 4 }) },
+      y: { scale: Y, ticks: axisTicks(Y, { count: 4 }), title: unitQ.label, unit: unitQ.unit },
       series, dots, rules, marks, shades: [], bands: [],
     }],
     x: {
       scale: X,
-      ticks: axisTicks(X, { values: xs.length <= 9 ? xs : null, count: 6 }),
+      ticks: axisTicks(X, { values: xs.length <= 9 && !(view && view.ranges.x) ? xs : null, count: 6 }),
       label: `${xLabel}  →`,
+      title: by === 'T' ? 'T (K)' : 'LED (V)',
+      unit: xUnit,
       format: (v) => (by === 'T' ? fmt.kelvin(v) : fmt.volts(v, { decimals: 3 })),
     },
     legend,
     readout: '',
     notes,
+    alerts: notes,
     by,
   };
 }

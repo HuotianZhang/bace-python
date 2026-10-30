@@ -4,6 +4,12 @@ Dated, newest first. Details and evidence are in `docs/`.
 
 ## 2026-10-30
 
+- Plots look like journal figures: closed frame, inward ticks, no gridlines,
+  units in the axis titles, nC rather than `2e-10`. Captions moved to an info
+  tip beside the plot; warnings stay under it.
+- Every plot's axes can be set. `Axes` takes a min and max for each axis and,
+  on the J–V, the log scale. Drag on a plot to zoom, double-click to go back.
+  A set range holds through new shots until `Auto`.
 - **R_s is 4.94 V/A and the bias gain 4.07**, each to ± 2 %. Known resistors on
   the current cable gave 0.965 of the expected current; a compensated probe
   put the step at 1.017 of the command. Q read about 5 % low and V_coll about

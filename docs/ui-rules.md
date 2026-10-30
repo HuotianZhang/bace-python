@@ -48,7 +48,7 @@ gives the text rules; the visual ones are:
 | Quantity | Rendering |
 |---|---|
 | Text | IBM Plex Sans; Archivo for wordmark, card titles and buttons |
-| Numbers | IBM Plex Mono, tabular figures |
+| Numbers | IBM Plex Mono, tabular figures; chart tick labels in IBM Plex Sans, as in a printed figure |
 | Q | Six significant figures in scientific notation, e.g. `3.65257e-10 C`, in the shared formatter; summary views can show nC |
 | V_oc and potentials | Four decimals |
 | Current density | Three significant figures, fixed unit mA/cm² |
@@ -86,7 +86,20 @@ different sources. `design/README.md` records the palette.
 
 J–V, timing, transient, loop and grid charts share axes and panel rules in
 `ui/lib/charts/`. `design/bace-charts.js` and `design/bace-charts-r3.js`
-are design references.
+are design references for the diagrams.
+
+Plots follow journal figures: a closed frame, inward ticks on all four sides,
+minor ticks, no gridlines, and the unit in the axis title, `Time (ns)`. Ticks
+use SI prefixes, nC and not `2e-10`. The console's timing and schedule
+drawings are diagrams and keep their own headers.
+
+Text inside a plot names what is drawn. Captions and provenance go to the info
+tip beside `Axes`; a warning stays on screen under the plot.
+
+`Axes` sets each axis's range, and the J–V's log scale. Drag on a plot to zoom
+and double-click to go back. A flat drag sets x only and a tall one y only. Set
+ranges last for the session, through new shots, and `Auto` clears them. An
+axis whose unit changes returns to automatic.
 
 | Case | Rule and reason |
 |---|---|
@@ -96,6 +109,8 @@ are design references.
 | FF versus intensity | Preserve the curve's derived value; do not force a trend from a model. Series resistance can reduce FF as intensity rises. |
 | Photocurrent across a delay scan | Keep DC illumination evidence beside Q(delay), so changing illumination is visible. |
 | Running integral | Use a separate stacked panel. It reaches Q at the window end; flattening helps assess the extraction tail. |
+| Integration window | Thin dashed lines across every panel; no fill behind the traces. |
+| Series | Sequential ramp (viridis without its pale end), never a rainbow: LED levels and temperatures keep their order in greyscale. |
 | Light, dark and difference | Show together; their difference alone hides two clipped parents. |
 | Absent arrays | State whether data are unavailable or evicted from replay; retain scalar statistics. |
 

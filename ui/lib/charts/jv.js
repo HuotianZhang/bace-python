@@ -7,15 +7,15 @@
 
 import * as scale from '../scale.js';
 import * as fmt from '../format.js';
-import { layout, axisTicks, heightFor, ASPECT } from './frame.js';
+import { layout, axisTicks, heightFor, ASPECT, MAX_UNIT, PLOT_MARGIN } from './frame.js';
+import { ranged } from './view.js';
 
 /**
- * The illumination ramp darkens monotonically from dim to bright so levels remain
- * ordered in greyscale and print. The reference palette's OKLab lightnesses, measured
- * on this bench, are 0.78, 0.68, 0.78, 0.68 and 0.48, which collapse five levels into
- * three. This ramp spans 0.78 to 0.48 without repeating lightness.
+ * The series ramp darkens monotonically so LED levels and temperatures remain ordered
+ * in greyscale and print. It is viridis without its pale end, which vanishes on white;
+ * a rainbow has no such order and is not safe for colour-blind readers.
  */
-export const RAMP = ['#ff9783', '#ff563c', '#ec3013', '#cc2408', '#ae1800'];
+export const RAMP = ['#7ad151', '#35b779', '#26828e', '#3b528b', '#440154'];
 
 export function ramp(i, n) {
   if (n <= 1) return RAMP[RAMP.length - 2];
@@ -43,20 +43,38 @@ export function currentOf(curves) {
   // All curves share one quantity and unit. If any curve lacks density because its
   // area is absent, every curve uses A; mixing A and mA/cm² on one scale is invalid.
   const all = curves.length > 0 && curves.every((c) => Array.isArray(c.density) && c.density.length);
-  return all
-    ? { key: 'density', label: 'J / mA cm⁻²', magnitude: '|J| / mA cm⁻²', format: (v) => fmt.density(v), unit: 'mA/cm²' }
-    : { key: 'current', label: 'I / A', magnitude: '|I| / A', format: (v) => fmt.amps(v), unit: 'A' };
+  if (all) {
+    return {
+      key: 'density', label: 'J / mA cm⁻²', magnitude: '|J| / mA cm⁻²', format: (v) => fmt.density(v), unit: 'mA/cm²',
+      factor: 1, title: 'J (mA cm⁻²)', logTitle: '|J| (mA cm⁻²)', axisUnit: 'mA cm⁻²',
+    };
+  }
+  const peak = Math.max(0, ...curves.flatMap((c) => (c.current || []).filter(Number.isFinite).map(Math.abs)));
+  return {
+    key: 'current', label: 'I / A', magnitude: '|I| / A', format: (v) => fmt.amps(v), unit: 'A',
+    logTitle: '|I| (A)', ...currentUnit(peak),
+  };
+}
+
+/** One prefix for the whole axis, from the largest current the axis shows. */
+function currentUnit(peak) {
+  const [value, prefix] = peak > 0 ? fmt.prefixed(peak) : [1, ''];
+  return {
+    factor: peak > 0 ? 10 ** Math.round(Math.log10(peak / value)) : 1,
+    title: `I (${prefix}A)`,
+    axisUnit: `${prefix}A`,
+  };
 }
 
 export function jvModel(curves, options = {}) {
   // `planned` supplies the requested voltage limits so incoming points fill a stable
   // frame rather than continually extending the axis.
-  const { width = 530, height = null, log = null, planned = null } = options;
+  const { width = 530, height = null, log = null, planned = null, view = null } = options;
   // A J–V uses `curve` aspect because the power quadrant and reverse-bias slope are
   // read by shape.
   const panelSpec = [{ key: 'jv', weight: 1 }];
-  const jvMargin = { left: 58, bottom: 28, top: 18 };
-  const jvHeight = height ?? heightFor(width, panelSpec, { margin: jvMargin, aspect: ASPECT.curve });
+  const jvMargin = PLOT_MARGIN;
+  const jvHeight = height ?? heightFor(width, panelSpec, { margin: jvMargin, aspect: ASPECT.curve, cap: MAX_UNIT.curve });
   const list = (curves || []).filter((c) => c && Array.isArray(c.voltage) && c.voltage.length);
   if (!list.length) {
     return {
@@ -70,23 +88,41 @@ export function jvModel(curves, options = {}) {
         frame: {
           width,
           height: jvHeight,
-          panels: [{ key: 'jv', weight: 1, label: 'I  ·  V' }],
+          panels: [{ key: 'jv', weight: 1, label: 'Current' }],
           margin: jvMargin,
-          xLabel: 'V / V',
+          xLabel: 'Voltage (V)',
         },
       },
       panels: [],
       notes: [],
     };
   }
-  const quantity = currentOf(list);
-  const values = list.map((c) => c[quantity.key]);
+  const measured = currentOf(list);
 
   // A fully dark sweep uses a logarithmic leakage axis. `dark` can be `true`, `false`
   // or `null`; an unreadable illumination state must not select a dark axis for a
-  // curve that can contain photocurrent.
+  // curve that can contain photocurrent. The operator's switch overrides that.
   const allDark = list.every((c) => c.dark === true);
-  const useLog = log === null ? allDark : log;
+  const logSet = view && view.log !== null ? view.log : log;
+  const useLog = logSet === null ? allDark : logSet;
+
+  // The y window crops forward injection, which can reach hundreds of mA/cm² and
+  // flatten the power quadrant on a full scale. The x axis retains the −4 V start to
+  // preserve the reverse arm (`docs/ui-rules.md` §4).
+  const raw = list.map((c) => c[measured.key]);
+  const whole = scale.extent(raw, { includeZero: true, pad: 0.08 }) || [-1, 1];
+  const quadrant = useLog ? null : powerQuadrant(list, measured.key);
+  const cropped = Boolean(quadrant) && (whole[1] - whole[0]) > (quadrant[1] - quadrant[0]) * 2;
+
+  // A cropped axis takes its prefix from the window, not from the current cut off it.
+  const quantity = cropped && measured.key === 'current'
+    ? { ...measured, ...currentUnit(Math.max(...quadrant.map(Math.abs))) } : measured;
+
+  // A log axis stays in the base unit, where its decades are powers of ten.
+  const factor = useLog ? 1 : quantity.factor;
+  const axisUnit = useLog ? `log ${quantity.key}` : quantity.axisUnit;
+  const inUnit = (y) => y.map((v) => (Number.isFinite(v) ? v / factor : v));
+  const values = list.map((c) => (Array.isArray(c[quantity.key]) ? inUnit(c[quantity.key]) : c[quantity.key]));
 
   // Ramp position encodes LED level, so both directions at one level share a colour.
   // Ranking curves separately would imply different illumination. Dashes distinguish
@@ -102,7 +138,7 @@ export function jvModel(curves, options = {}) {
   const xDomain = scale.extent([list.map((c) => c.voltage).flat().concat(
     Array.isArray(planned) && planned.length === 2 && planned.every(Number.isFinite) ? planned : [])],
   { pad: 0.02 }) || [-1, 1];
-  const X = scale.linear(xDomain, [rect.x, rect.x + rect.w]);
+  const X = scale.linear(ranged(view, 'x', 'V', xDomain), [rect.x, rect.x + rect.w]);
 
   let Y;
   let clamped = 0;
@@ -111,16 +147,13 @@ export function jvModel(curves, options = {}) {
     const floor = 10 ** Math.floor(Math.log10(Math.max(1e-12, quantile(magnitudes, 0.02))));
     clamped = magnitudes.filter((v) => v <= floor).length;
     const top = 10 ** Math.ceil(Math.log10(Math.max(floor * 10, ...magnitudes)));
-    Y = scale.log10([floor, top], [rect.y + rect.h, rect.y], { floor });
+    const shown = ranged(view, 'jv', axisUnit, [floor, top]);
+    Y = scale.log10(shown, [rect.y + rect.h, rect.y], { floor: shown[0] });
   } else {
-    const full = scale.extent(values, { includeZero: true, pad: 0.08 }) || [-1, 1];
-    const framed = powerQuadrant(list, quantity.key);
-    // The y window crops forward injection, which can reach hundreds of mA/cm² and
-    // flatten the power quadrant on a full scale. The x axis retains the −4 V start
-    // to preserve the reverse arm (`docs/ui-rules.md` §4).
-    const cropped = framed && (full[1] - full[0]) > (framed[1] - framed[0]) * 2;
-    Y = scale.linear(cropped ? framed : full, [rect.y + rect.h, rect.y]);
-    Y.cropped = cropped ? countOutside(values, framed) : 0;
+    const auto = (cropped ? quadrant : whole).map((v) => v / factor);
+    const shown = ranged(view, 'jv', axisUnit, auto);
+    Y = scale.linear(shown, [rect.y + rect.h, rect.y]);
+    Y.cropped = cropped ? countOutside(values, shown) : 0;
   }
 
   const series = [];
@@ -128,8 +161,8 @@ export function jvModel(curves, options = {}) {
   const marks = [];
   const dots = [];
   for (const curve of list) {
-    const y = curve[quantity.key];
-    if (!Array.isArray(y) || !y.length) continue;
+    if (!Array.isArray(curve[quantity.key]) || !curve[quantity.key].length) continue;
+    const y = inUnit(curve[quantity.key]);
     const colour = curve.dark === true
       ? 'ink'
       : ramp(levels.indexOf(curve.led_level_v ?? null), Math.max(1, levels.length));
@@ -158,7 +191,7 @@ export function jvModel(curves, options = {}) {
         if (i < 0 || !Number.isFinite(y[i])) return null;
         return { y: useLog ? Math.abs(y[i]) : y[i] };
       },
-      format: quantity.format,
+      format: (v) => quantity.format(v * factor),
     });
     legend.push({
       label: partial ? `${label} · sweeping ${curve.k || y.length} of ${curve.of || '?'}`
@@ -193,6 +226,7 @@ export function jvModel(curves, options = {}) {
     rules.push({ x1: X(0), y1: rect.y, x2: X(0), y2: rect.y + rect.h, colour: 'rule', width: 1 });
   }
 
+  const said = notes(list, quantity, { useLog, clamped, allDark, cropped: Y.cropped || 0 });
   return {
     key: 'jv',
     width: frame.width,
@@ -202,16 +236,23 @@ export function jvModel(curves, options = {}) {
       ...panel,
       label: `${useLog ? quantity.magnitude : quantity.label}  ·  V / V →`,
       note: sweepNote(list, xDomain),
-      y: { scale: Y, ticks: axisTicks(Y, { count: 4 }) },
+      y: {
+        scale: Y, ticks: axisTicks(Y, { count: 4 }), canLog: true,
+        title: useLog ? quantity.logTitle : quantity.title, unit: axisUnit,
+      },
       series, rules, marks, dots,
     }],
-    x: { scale: X, ticks: axisTicks(X, { count: 6 }), label: 'V / V', format: (v) => fmt.volts(v, { decimals: 3 }) },
+    x: {
+      scale: X, ticks: axisTicks(X, { count: 6 }), label: 'V / V', title: 'Voltage (V)', unit: 'V',
+      format: (v) => fmt.volts(v, { decimals: 3 }),
+    },
     legend: legend.length > 1 ? legend : [],
     readout: '',
     // Incomplete sweeps have no metrics because a partial curve cannot support the
     // completed sweep's V_oc.
     metrics: metricsOf(list.filter((c) => c.partial !== true), quantity),
-    notes: notes(list, quantity, { useLog, clamped, allDark, cropped: Y.cropped || 0 }),
+    notes: said,
+    alerts: said.filter((n) => /clipped|could not read/.test(n)),
   };
 }
 

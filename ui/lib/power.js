@@ -178,9 +178,9 @@ export function renderPowerPanel(el, state, ui, handlers = {}) {
   chartEl.hidden = !shape.chart;
   if (shape.chart) {
     keyed(chartEl, key.chart,
-      () => chart((w) => powerModel(state.powerLog || [], {
-        width: w, seconds: model.window.seconds, fromZero: model.fromZero,
-      })));
+      () => chart((w, view) => powerModel(state.powerLog || [], {
+        width: w, seconds: model.window.seconds, fromZero: model.fromZero, view,
+      }), { id: 'power' }));
   } else if (chartEl.__key !== undefined) {
     // The hidden chart is emptied because SVG export serializes `.pw-chart`. A
     // retained SVG would export a stale trace after monitoring stops.

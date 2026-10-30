@@ -1,12 +1,19 @@
-// The chart frame renders pure models as SVG with shared axes, gridlines, captions
-// and a crosshair. `ui/lib/scale.js` supplies the non-DOM geometry. Keeping model
-// functions pure permits tests without a browser. The running integral has a separate
-// panel on the transient's x axis: two y scales would create arbitrary crossings and
-// obscure which scale a curve uses (`docs/ui-rules.md` §4).
+// The chart frame renders pure models as SVG with shared axes, captions and a
+// crosshair. `ui/lib/scale.js` supplies the non-DOM geometry. Keeping model functions
+// pure permits tests without a browser. The running integral has a separate panel on
+// the transient's x axis: two y scales would create arbitrary crossings and obscure
+// which scale a curve uses (`docs/ui-rules.md` §4).
+//
+// A panel whose `y` carries a `title` is a plot: a closed frame with inward ticks on
+// all four sides, no gridlines, and its unit in the axis title. Its label and note go
+// to the chart's info tip. Panels without a title are diagrams (timing, schedule) and
+// keep their header lines.
 
 import { s, root } from '../svg.js';
 import { h, fill } from '../dom.js';
 import * as scale from '../scale.js';
+import { closeAxes, openAxes, publish } from './axes.js';
+import { isManual, resetView, setRange, viewOf } from './view.js';
 
 /** A model colour is a `style.css` token name, or a literal hex from a ramp. */
 export function paint(colour) {
@@ -19,6 +26,9 @@ export const FONT_S = "var(--font-body)";
 /** The surround uses model units and one shared default. */
 export const MARGIN = { left: 56, right: 16, top: 16, bottom: 26, gap: 22 };
 
+/** The surround of a plot: room for tick labels and titles outside its frame. */
+export const PLOT_MARGIN = { left: 60, right: 16, top: 10, bottom: 42, gap: 7 };
+
 /**
  * The aspect ratios describe plot width divided by height for a panel of weight 1.
  * Time traces need length to resolve thousands of samples; quantity-against-quantity
@@ -29,20 +39,27 @@ export const MARGIN = { left: 56, right: 16, top: 16, bottom: 26, gap: 22 };
  * to 6.8:1, with `trace` near their middle.
  */
 export const ASPECT = {
-  trace: 6,     // a quantity against time — the transient's panels
-  curve: 2.6,   // a quantity against another quantity — J–V, Q(axis), the grid
+  trace: 6,     // a lane of time — the timing diagram
+  stack: 3.6,   // a quantity against time, one of a stack — the transient's panels
+  curve: 1.6,   // a quantity against another quantity — J–V, Q(axis), the grid
   strip: 11,    // a length of time seen whole — the power monitor, the schedule
 };
+
+/**
+ * The tallest a panel of weight 1 grows, by family. A plot in a full-width view would
+ * otherwise push everything below it off the screen.
+ */
+export const MAX_UNIT = { stack: 130, curve: 320 };
 
 /**
  * The helper derives chart height from panel aspects and width. Resizing preserves
  * the plot proportions in every container.
  */
-export function heightFor(width, panels, { margin = {}, aspect = ASPECT.trace } = {}) {
+export function heightFor(width, panels, { margin = {}, aspect = ASPECT.trace, cap = Infinity } = {}) {
   const m = { ...MARGIN, ...margin };
   const total = panels.reduce((sum, p) => sum + (p.weight || 1), 0);
   const plot = Math.max(1, width - m.left - m.right);
-  return Math.round((plot / aspect) * total + m.top + m.bottom + m.gap * (panels.length - 1));
+  return Math.round(Math.min(plot / aspect, cap) * total + m.top + m.bottom + m.gap * (panels.length - 1));
 }
 
 /**
@@ -70,12 +87,12 @@ export function layout({ width, height, panels, margin = {} }) {
  * readout lets the operator compare values while moving the pointer and cannot cover
  * the trace. Its empty row retains height to prevent layout jumps.
  */
-export function chart(model) {
+export function chart(model, { id = null } = {}) {
   if (typeof model !== 'function') {
     const figure = h('figure.chart', { dataset: { chart: model.key || '' } });
     return drawInto(figure, model);
   }
-  return responsive(model);
+  return responsive(model, id);
 }
 
 /**
@@ -94,18 +111,25 @@ const MIN_WIDTH = 240;
  * text. Measurements on this bench put a nominal 9.5 px label between 8.6 px and 12.9
  * px across containers. Matching model and container widths keeps that text at 9.5
  * px. The figure stays empty before the observer's first width rather than drawing a
- * guessed layout.
+ * guessed layout. With an `id` the chart has a view (`view.js`) that `make` receives
+ * and that survives the rebuild of a live card.
  */
-function responsive(make) {
+function responsive(make, id) {
   const figure = h('figure.chart');
+  const view = id ? viewOf(id) : null;
   let drawn = null;
+  const redraw = () => {
+    const model = make(drawn, view);
+    figure.dataset.chart = model.key || '';
+    const ctx = id ? { id, view, redraw, axes: () => axesOf(model) } : null;
+    drawInto(figure, model, ctx);
+    if (ctx) publish(ctx);
+  };
   const draw = (raw) => {
     const width = Math.max(MIN_WIDTH, Math.round(raw / WIDTH_STEP) * WIDTH_STEP);
     if (width === drawn) return;
     drawn = width;
-    const model = make(width);
-    figure.dataset.chart = model.key || '';
-    drawInto(figure, model);
+    redraw();
   };
   if (typeof ResizeObserver === 'function') {
     // The container sets figure width and the SVG fills it. Painting cannot change
@@ -120,20 +144,76 @@ function responsive(make) {
   return figure;
 }
 
-function drawInto(figure, model) {
+function drawInto(figure, model, ctx = null) {
   if (model.absent) {
     fill(figure, absent(model.absent));
     return figure;
   }
   const readout = h('div.chart-readout', { text: model.readout || '' });
-  const svg = renderSvg(model, readout);
-  fill(figure, svg,
+  const svg = renderSvg(model, readout, ctx);
+  const plot = isPlot(model);
+  const shown = plot ? alertsOf(model) : model.notes || [];
+  fill(figure, plot ? tools(model, ctx) : null, svg,
     model.legend && model.legend.length ? legend(model.legend) : null,
     readout,
-    model.notes && model.notes.length
-      ? h('div.chart-notes', model.notes.map((n) => h('span.chart-note', { text: n })))
+    shown.length
+      ? h('div.chart-notes', shown.map((n) => h('span.chart-note', { text: n })))
       : null);
   return figure;
+}
+
+const isPlot = (model) => model.panels.some((p) => p.y && p.y.title);
+
+/** What the info tip says: every caption that a plot no longer prints. */
+export function detailsOf(model) {
+  const out = [];
+  for (const panel of model.panels) {
+    if (panel.label) out.push(panel.label);
+    if (panel.note && panel.noteColour !== 'alert') out.push(panel.note);
+  }
+  const alerts = model.alerts || [];
+  return [...out, ...(model.notes || []).filter((n) => !alerts.includes(n))];
+}
+
+/** What stays on screen under a plot: warnings, not explanations. */
+export function alertsOf(model) {
+  return [
+    ...model.panels.filter((p) => p.note && p.noteColour === 'alert').map((p) => p.note),
+    ...(model.alerts || []),
+  ];
+}
+
+/** The axes an operator can set: the shared x, then each panel's y. */
+export function axesOf(model) {
+  const out = [];
+  if (model.x && model.x.title && !model.x.fixed) {
+    out.push({ key: 'x', title: model.x.title, unit: model.x.unit, scale: model.x.scale });
+  }
+  for (const panel of model.panels) {
+    if (!panel.y || !panel.y.title) continue;
+    out.push({
+      key: panel.key, title: panel.y.title, unit: panel.y.unit, scale: panel.y.scale,
+      canLog: panel.y.canLog === true, log: panel.y.scale.kind === 'log10',
+    });
+  }
+  return out;
+}
+
+function tools(model, ctx) {
+  const info = detailsOf(model);
+  const manual = ctx && isManual(ctx.view);
+  return h('div.chart-tools',
+    info.length ? h('span.chart-info', { tabindex: 0, title: info.join('\n'), text: 'i' }) : null,
+    manual ? h('button.chart-tool', {
+      type: 'button',
+      title: 'Back to automatic ranges',
+      onclick: () => { resetView(ctx.view); closeAxes(); ctx.redraw(); },
+    }, 'Auto') : null,
+    ctx ? h('button.chart-tool', {
+      type: 'button', class: manual ? 'on' : '', 'aria-haspopup': 'dialog',
+      title: 'Set the axis ranges. Drag on the plot to zoom, double-click to go back.',
+      onclick: (e) => openAxes(e.currentTarget, ctx.id),
+    }, 'Axes') : null);
 }
 
 /**
@@ -162,8 +242,8 @@ function absentSvg(spec) {
     }));
     if (panel.label) {
       kids.push(s('text', {
-        x: rect.x, y: rect.y - 5,
-        style: { font: `600 9px ${FONT_S}`, fill: paint('grey') }, text: panel.label,
+        x: rect.x + 6, y: rect.y + 13,
+        style: { font: `400 11px ${FONT_S}`, fill: paint('grey') }, text: panel.label,
       }));
     }
   }
@@ -175,8 +255,8 @@ function absentSvg(spec) {
   if (f.xLabel) {
     const last = frame.panels[frame.panels.length - 1].rect;
     kids.push(s('text', {
-      x: last.x + last.w, y: last.y + last.h + 14, 'text-anchor': 'end',
-      style: { font: `400 9px ${FONT_S}`, fill: paint('grey') }, text: f.xLabel,
+      x: last.x + last.w / 2, y: last.y + last.h + 33, 'text-anchor': 'middle',
+      style: { font: `400 11px ${FONT_S}`, fill: paint('grey') }, text: f.xLabel,
     }));
   }
   return root(frame.width, frame.height, { class: 'chart-svg' }, ...kids);
@@ -250,7 +330,7 @@ export function wrapLabel(label, width, per = 4.8) {
 /** Clip-path ids have to be unique in a document, and a card holds several charts. */
 let uid = 0;
 
-function renderSvg(model, readout) {
+function renderSvg(model, readout, ctx) {
   const kids = [];
   const clip = `chart-clip-${(uid += 1)}`;
   // Hatching marks the space requested but not acquired. A stopped curve must not
@@ -262,34 +342,45 @@ function renderSvg(model, readout) {
     s('pattern', { id: hatch, width: 6, height: 6, patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)' },
       s('line', { x1: 0, y1: 0, x2: 0, y2: 6, stroke: paint('rule'), 'stroke-width': 2 }))));
   model.panels.forEach((panel, i) => { panel.clip = `${clip}-${i}`; panel.hatch = hatch; });
-  for (const panel of model.panels) kids.push(renderPanel(panel, model));
+  for (const panel of model.panels) {
+    kids.push(panel.y && panel.y.title ? renderPlotPanel(panel, model) : renderPanel(panel));
+  }
   // Shared panels use one x axis; independent panels need their own. Timing spans can
   // be 11 s, 2 ms and 2 µs, so a shared scale would collapse two panels at the
   // origin.
-  if (model.x) kids.push(renderXAxis(model, model.x, model.panels[model.panels.length - 1]));
+  if (model.x) {
+    const last = model.panels[model.panels.length - 1];
+    kids.push(model.x.title ? renderPlotXAxis(model.x, last) : renderXAxis(model, model.x, last));
+  }
   for (const panel of model.panels) if (panel.x) kids.push(renderXAxis(model, panel.x, panel));
   const cursor = s('g.cursor', { style: { display: 'none' } },
     s('line', { class: 'cursor-rule', y1: model.margin.top, y2: model.height - model.margin.bottom,
       stroke: paint('ink'), 'stroke-width': 1, 'stroke-dasharray': '2 2' }));
   if (model.cursor !== false) kids.push(cursor);
-  const svg = root(model.width, model.height, { class: 'chart-svg' }, kids);
+  const band = s('rect.zoom-band', { fill: paint('ink'), 'fill-opacity': 0.08, stroke: paint('ink'),
+    'stroke-width': 0.8, style: { display: 'none' } });
+  if (ctx) kids.push(band);
+  const svg = root(model.width, model.height, { class: ctx ? 'chart-svg zoomable' : 'chart-svg' }, kids);
   if (model.cursor !== false) attachCursor(svg, model, cursor, readout);
+  if (ctx) attachZoom(svg, model, band, ctx);
   return svg;
 }
 
-function renderPanel(panel, model) {
+function shadesOf(panel) {
+  const { rect } = panel;
+  return (panel.shades || []).map((shade) => s('rect', {
+    x: shade.x, y: rect.y, width: Math.max(0, shade.w), height: rect.h,
+    fill: shade.hatch ? `url(#${panel.hatch})` : paint(shade.colour || 'accent'),
+    'fill-opacity': shade.hatch ? 1 : shade.opacity ?? 0.055,
+  }));
+}
+
+function renderPanel(panel) {
   const { rect } = panel;
   const kids = [s('rect', {
     x: rect.x, y: rect.y, width: rect.w, height: rect.h,
     fill: paint('paper'), stroke: paint('rule'), 'stroke-width': 1,
-  })];
-  for (const shade of panel.shades || []) {
-    kids.push(s('rect', {
-      x: shade.x, y: rect.y, width: Math.max(0, shade.w), height: rect.h,
-      fill: shade.hatch ? `url(#${panel.hatch})` : paint(shade.colour || 'accent'),
-      'fill-opacity': shade.hatch ? 1 : shade.opacity ?? 0.055,
-    }));
-  }
+  }), ...shadesOf(panel)];
   for (const tick of (panel.y && panel.y.ticks) || []) {
     kids.push(s('line', {
       x1: rect.x, y1: tick.y, x2: rect.x + rect.w, y2: tick.y,
@@ -303,12 +394,128 @@ function renderPanel(panel, model) {
       style: { font: `400 9.5px ${FONT_N}`, fill: paint('grey') }, text: tick.text,
     }));
   }
+  kids.push(...contentOf(panel));
+  // Header labels wrap above the note. A shared row can make them overlap in narrow
+  // panels; with SVG overflow visible, a long label can also cover adjacent card
+  // content.
+  const lines = [];
+  if (panel.label) lines.push(...wrapLabel(panel.label, rect.w));
+  const noteAt = rect.y - 5;
+  const labelTop = noteAt - (panel.note ? HEAD_LINE : 0) - (lines.length - 1) * HEAD_LINE;
+  lines.forEach((line, i) => {
+    kids.push(s('text', { x: rect.x, y: labelTop + i * HEAD_LINE,
+      style: { font: `600 9px ${FONT_S}`, fill: paint('ink') }, text: line }));
+  });
+  if (panel.note) {
+    kids.push(s('text', { x: rect.x, y: noteAt,
+      style: { font: `400 9px ${FONT_S}`, fill: paint(panel.noteColour || 'grey') }, text: panel.note }));
+  }
+  kids.push(...cursorDots(panel));
+  return s('g.panel', { dataset: { panel: panel.key } }, kids);
+}
+
+/** The tick length of a plot's frame, major and minor. */
+const TICK = { major: 5, minor: 2.6 };
+
+/** Ticks of one length along one edge, inward by `sign`, as a single path. */
+function edgeTicks(values, f, length, { at, sign, vertical }) {
+  const d = values.map((v) => {
+    const p = scale.fixed(f(v));
+    return vertical ? `M${at} ${p}h${sign * length}` : `M${p} ${at}v${sign * length}`;
+  }).join('');
+  return d;
+}
+
+/** Major and minor ticks on the four sides of a plot frame. */
+function frameTicks(panel, model) {
+  const { rect } = panel;
+  const paths = [];
+  const side = (axis, f, at, sign, vertical) => {
+    const majors = axis.ticks.map((t) => t.v);
+    paths.push([edgeTicks(majors, f, TICK.major, { at, sign, vertical }), 0.9]);
+    paths.push([edgeTicks(minorValues(f, axis.ticks), f, TICK.minor, { at, sign, vertical }), 0.7]);
+  };
+  if (panel.y) {
+    side(panel.y, panel.y.scale, rect.x, 1, true);
+    side(panel.y, panel.y.scale, rect.x + rect.w, -1, true);
+  }
+  if (model.x) {
+    side(model.x, model.x.scale, rect.y + rect.h, -1, false);
+    side(model.x, model.x.scale, rect.y, 1, false);
+  }
+  return paths.filter(([d]) => d).map(([d, width]) => s('path', {
+    d, fill: 'none', stroke: paint('ink'), 'stroke-width': width,
+  }));
+}
+
+/** The minor tick values of an axis, from its scale and its major step. */
+export function minorValues(f, ticks) {
+  const [a, b] = f.domain;
+  if (f.kind === 'log10') return scale.logMinorTicks(Math.min(a, b), Math.max(a, b));
+  if (ticks.length < 2) return [];
+  return scale.minorTicks(a, b, Math.abs(ticks[ticks.length - 1].v - ticks[ticks.length - 2].v));
+}
+
+/** A log tick is set as a power of ten; every other tick is its text. */
+function tickLabel(tick, attrs) {
+  if (tick.power === undefined) return s('text', { ...attrs, text: tick.text });
+  return s('text', attrs, '10', s('tspan', { dy: -4, style: { font: `400 8.5px ${FONT_S}` } }, tick.power));
+}
+
+const LABEL = `400 11px ${FONT_S}`;
+
+function renderPlotPanel(panel, model) {
+  const { rect } = panel;
+  const bottom = rect.y + rect.h;
+  const kids = [s('rect', { x: rect.x, y: rect.y, width: rect.w, height: rect.h, fill: paint('paper') })];
+  for (const tick of panel.y.ticks) {
+    if (tick.zero) {
+      kids.push(s('line', { x1: rect.x, y1: tick.y, x2: rect.x + rect.w, y2: tick.y,
+        stroke: paint('rule'), 'stroke-width': 1 }));
+    }
+    kids.push(tickLabel(tick, { x: rect.x - 6, y: Number(tick.y) + 4, 'text-anchor': 'end',
+      style: { font: LABEL, fill: paint('ink') } }));
+  }
+  // A set axis range leaves marks outside the frame, and the frame must contain them.
+  kids.push(s('g', { 'clip-path': `url(#${panel.clip})` }, ...shadesOf(panel), ...contentOf(panel)));
+  kids.push(s('rect', { x: rect.x, y: rect.y, width: rect.w, height: rect.h,
+    fill: 'none', stroke: paint('ink'), 'stroke-width': 0.9 }));
+  kids.push(...frameTicks(panel, model));
+  const titleX = rect.x - 45;
+  kids.push(s('text', { x: titleX, y: rect.y + rect.h / 2, 'text-anchor': 'middle',
+    transform: `rotate(-90 ${titleX} ${rect.y + rect.h / 2})`,
+    style: { font: LABEL, fill: paint('ink') }, text: panel.y.title }));
+  if (panel.letter) {
+    kids.push(s('text', { x: rect.x + 8, y: bottom - 7,
+      style: { font: `600 12px ${FONT_S}`, fill: paint('ink') }, text: panel.letter }));
+  }
+  (panel.keys || []).forEach((key, i) => {
+    const x = rect.x + rect.w * 0.62;
+    const y = rect.y + rect.h * 0.42 + i * 16;
+    kids.push(s('line', { x1: x, y1: y, x2: x + 18, y2: y,
+      stroke: paint(key.colour), 'stroke-width': key.width || 1.3 }));
+    kids.push(s('text', { x: x + 23, y: y + 4, style: { font: LABEL, fill: paint('ink') }, text: key.label }));
+  });
+  kids.push(...cursorDots(panel));
+  return s('g.panel', { dataset: { panel: panel.key } }, kids);
+}
+
+/** Rules, bands, series, dots and marks: what a panel draws from its data. */
+function contentOf(panel) {
+  const { rect } = panel;
+  const kids = [];
   for (const rule of panel.rules || []) {
     kids.push(s('line', {
       x1: rule.x1, y1: rule.y1 ?? rect.y, x2: rule.x2 ?? rule.x1, y2: rule.y2 ?? rect.y + rect.h,
       stroke: paint(rule.colour || 'accent'), 'stroke-width': rule.width || 1.5,
       'stroke-dasharray': rule.dash || null,
     }));
+    if (rule.cap) {
+      for (const y of [rule.y1, rule.y2]) {
+        kids.push(s('line', { x1: Number(rule.x1) - rule.cap, y1: y, x2: Number(rule.x1) + rule.cap, y2: y,
+          stroke: paint(rule.colour || 'accent'), 'stroke-width': rule.width || 1.5 }));
+      }
+    }
   }
   for (const band of panel.bands || []) {
     kids.push(s('path', { d: band.d, fill: paint(band.colour || 'accent'),
@@ -354,32 +561,30 @@ function renderPanel(panel, model) {
       text: mark.text,
     }));
   }
-  // Header labels wrap above the note. A shared row can make them overlap in narrow
-  // panels; with SVG overflow visible, a long label can also cover adjacent card
-  // content.
-  const lines = [];
-  if (panel.label) lines.push(...wrapLabel(panel.label, rect.w));
-  const noteAt = rect.y - 5;
-  const labelTop = noteAt - (panel.note ? HEAD_LINE : 0) - (lines.length - 1) * HEAD_LINE;
-  lines.forEach((line, i) => {
-    kids.push(s('text', { x: rect.x, y: labelTop + i * HEAD_LINE,
-      style: { font: `600 9px ${FONT_S}`, fill: paint('ink') }, text: line }));
-  });
-  if (panel.note) {
-    kids.push(s('text', { x: rect.x, y: noteAt,
-      style: { font: `400 9px ${FONT_S}`, fill: paint(panel.noteColour || 'grey') }, text: panel.note }));
-  }
-  // Crosshair dots are created with the chart so pointer movement only updates
-  // existing elements.
-  for (const series of panel.series || []) {
-    if (!series.at) continue;
-    kids.push(s('circle', {
-      class: 'cursor-dot', r: 2.6, fill: paint(series.colour),
-      stroke: paint('paper'), 'stroke-width': 1.5, style: { display: 'none' },
-      dataset: { panel: panel.key, series: series.key },
-    }));
-  }
-  return s('g.panel', { dataset: { panel: panel.key } }, kids);
+  return kids;
+}
+
+/**
+ * Crosshair dots are created with the chart so pointer movement only updates existing
+ * elements.
+ */
+function cursorDots(panel) {
+  return (panel.series || []).filter((series) => series.at).map((series) => s('circle', {
+    class: 'cursor-dot', r: 2.6, fill: paint(series.colour),
+    stroke: paint('paper'), 'stroke-width': 1.5, style: { display: 'none' },
+    dataset: { panel: panel.key, series: series.key },
+  }));
+}
+
+/** Tick labels and the centred title under the last panel; the ticks are the frame's. */
+function renderPlotXAxis(axis, panel) {
+  const { rect } = panel;
+  const baseline = rect.y + rect.h;
+  const kids = axis.ticks.map((tick) => tickLabel(tick, { x: tick.x, y: baseline + 16,
+    'text-anchor': 'middle', style: { font: LABEL, fill: paint('ink') } }));
+  kids.push(s('text', { x: rect.x + rect.w / 2, y: baseline + 33, 'text-anchor': 'middle',
+    style: { font: LABEL, fill: paint('ink') }, text: axis.title }));
+  return s('g.xaxis', kids);
 }
 
 function renderXAxis(model, axis, panel) {
@@ -454,24 +659,122 @@ function attachCursor(svg, model, cursor, readout) {
   svg.addEventListener('pointerleave', leave);
 }
 
+/** A drag shorter than this, in model units, is a click. */
+const MIN_DRAG = 6;
+
+/** The panel under a point of the chart, or `undefined` outside every frame. */
+function panelAt(model, x, y) {
+  return model.panels.find(({ rect, y: axis }) => axis && axis.title
+    && x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h);
+}
+
+/**
+ * The ranges a drag selects. A flat drag sets x alone and a tall one y alone, so a
+ * zoom along time does not also fix the current axis by accident.
+ */
+export function zoomRanges(model, panel, [x0, y0], [x1, y1]) {
+  const out = [];
+  const pair = (f, a, b) => {
+    const [u, v] = [f.invert(a), f.invert(b)];
+    return u < v ? [u, v] : [v, u];
+  };
+  if (Math.abs(x1 - x0) >= MIN_DRAG && model.x && !model.x.fixed) {
+    out.push({ key: 'x', unit: model.x.unit, range: pair(model.x.scale, x0, x1) });
+  }
+  if (Math.abs(y1 - y0) >= MIN_DRAG) {
+    const { rect } = panel;
+    const clamp = (y) => Math.min(rect.y + rect.h, Math.max(rect.y, y));
+    out.push({ key: panel.key, unit: panel.y.unit, range: pair(panel.y.scale, clamp(y0), clamp(y1)) });
+  }
+  return out;
+}
+
+/** Drag on a plot to set its ranges, double-click to return them to automatic. */
+function attachZoom(svg, model, band, ctx) {
+  let start = null;
+  let panel = null;
+  const point = (event) => {
+    const box = svg.getBoundingClientRect();
+    return [((event.clientX - box.left) / box.width) * model.width,
+      ((event.clientY - box.top) / box.height) * model.height];
+  };
+  svg.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    const at = point(event);
+    panel = panelAt(model, at[0], at[1]);
+    if (!panel) return;
+    start = at;
+    svg.setPointerCapture(event.pointerId);
+  });
+  svg.addEventListener('pointermove', (event) => {
+    if (!start) return;
+    const [x, y] = point(event);
+    const { rect } = panel;
+    const right = Math.min(rect.x + rect.w, Math.max(rect.x, x));
+    const low = Math.min(rect.y + rect.h, Math.max(rect.y, y));
+    band.setAttribute('x', Math.min(start[0], right));
+    band.setAttribute('y', Math.min(start[1], low));
+    band.setAttribute('width', Math.abs(right - start[0]));
+    band.setAttribute('height', Math.abs(low - start[1]));
+    band.style.display = '';
+  });
+  svg.addEventListener('pointerup', (event) => {
+    if (!start) return;
+    const ranges = zoomRanges(model, panel, start, point(event));
+    start = null;
+    band.style.display = 'none';
+    if (!ranges.length) return;
+    for (const { key, unit, range } of ranges) setRange(ctx.view, key, unit, range[0], range[1]);
+    ctx.redraw();
+  });
+  svg.addEventListener('dblclick', () => {
+    if (!isManual(ctx.view)) return;
+    resetView(ctx.view);
+    ctx.redraw();
+  });
+}
+
 /**
  * The tick model for an axis: values from `scale.ticks`, their pixels, and
  * their labels at the step's own precision.
  */
 export function axisTicks(f, { count = 5, values = null, zeroAt = null } = {}) {
   const [d0, d1] = f.domain;
-  const list = values || (f.kind === 'log10' ? scale.decades(d0, d1) : scale.ticks(d0, d1, count));
-  const dv = f.kind === 'log10' ? null : scale.step(Math.abs(d1 - d0), count);
+  const log = f.kind === 'log10';
+  const dv = log ? null : scale.step(Math.abs(d1 - d0), count);
+  const decades = log ? scale.decades(d0, d1) : null;
+  // A range zoomed inside one decade has no decade to label.
+  const fine = log && decades.length < 2 && !values;
+  const list = values || (fine ? fineLogTicks(d0, d1) : log ? decades : scale.ticks(d0, d1, count));
   return list.map((v) => ({
     v,
     x: scale.fixed(f(v)),
     y: scale.fixed(f(v)),
-    text: f.kind === 'log10' ? logText(v) : scale.tickText(v, dv),
+    text: fine ? String(Number(v.toPrecision(2))).replace('-', scale.MINUS)
+      : log ? logText(v) : scale.tickText(v, dv),
     zero: zeroAt === null ? v === 0 : v === zeroAt,
+    ...(log && !fine ? powerOf(v) : {}),
   }));
 }
 
 function logText(v) {
   const e = Math.round(Math.log10(v));
   return e === 0 ? '1' : `1e${e}`.replace('-', scale.MINUS);
+}
+
+/** The exponent a decade tick is set with; 1 stays plain. */
+function powerOf(v) {
+  const e = Math.round(Math.log10(v));
+  return e === 0 ? {} : { power: String(e).replace('-', scale.MINUS) };
+}
+
+function fineLogTicks(lo, hi) {
+  const out = [];
+  for (let e = Math.floor(Math.log10(lo)); e <= Math.ceil(Math.log10(hi)); e += 1) {
+    for (const k of [1, 2, 5]) {
+      const v = Number(`${k}e${e}`);
+      if (v >= lo && v <= hi) out.push(v);
+    }
+  }
+  return out;
 }
