@@ -108,6 +108,19 @@ def test_a_scan_is_held_to_the_bound_of_the_parameter_it_sweeps():
     assert "without axis_stop" in v
 
 
+def test_a_loop_list_keeps_to_choices_element_by_element():
+    """A plan that fixes the LED level with choices [1.02] must accept the loop
+    [1.02]; the whole list compared to the choices refused it."""
+    env = Envelope.from_wire({**ENVELOPE, "loops": {
+        "illumination": {"levels_v": {"choices": [1.02, 1.03]}}}}, catalogue=CAT)
+    loop = lambda levels: {"kind": "loop", "loop": "illumination", "levels_v": levels,  # noqa: E731
+                           "children": [bace(vcoll=-1.0)]}
+    assert env.violations(parsed(loop([1.02]))) == []
+    assert env.violations(parsed(loop([1.02, 1.03]))) == []
+    [v] = env.violations(parsed(loop([1.02, 1.01])))
+    assert "levels_v" in v and "one of 1.02, 1.03" in v
+
+
 def test_a_scan_over_discrete_choices_applies_only_those_values():
     """With choices, the points between the ends matter: -4 to -0.5 in 0.5 V
     steps also runs -3.5, -3.0 ..., which a plan of [-4, -0.5] does not allow."""
