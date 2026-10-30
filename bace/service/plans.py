@@ -27,6 +27,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from ..core.axis import Axis, AxisError
 from .pipeline import LOOPS, Loop, Module, Node, walk
 
 STATES: tuple[str, ...] = ("proposed", "approved", "rejected", "closed")
@@ -92,6 +93,68 @@ def _within(value: Any, bound: Mapping[str, Any]) -> bool:
         if "max" in bound and v > bound["max"]:
             return False
     return True
+
+
+AXIS_ENDS: tuple[str, ...] = ("axis_start", "axis_stop")
+"""A scan's end values: they are values of the parameter `axis_name` names."""
+
+
+def _axis_violations(node: Module, allowed: Mapping[str, Mapping[str, Any]]) -> list[str]:
+    """A scan's ends held to the bound of the parameter it sweeps.
+
+    The bounds on `axis_start` and `axis_stop` alone do not say which quantity
+    the values are: a scan of `vcoll` from -10 V would pass a bound written for
+    `delay_ns`. A tree that sets an end must therefore name its axis, the plan
+    must let that parameter be set, and both ends must lie within its bound. A
+    `vpre` axis centred on V_oc sweeps offsets from V_oc, not volts, so its ends
+    are held only to the bounds on `axis_start` and `axis_stop`. Whether a `vpre`
+    axis is centred can come from the layers (run.toml centres it), which the
+    plan cannot see, so a `vpre` scan states `centre_on_voc` itself."""
+    ends = [k for k in AXIS_ENDS if k in node.params]
+    if not ends:
+        return []
+    axis = node.params.get("axis_name")
+    if axis is None:
+        return [f"{node.module}.{ends[0]} is set without axis_name, so the plan "
+                "cannot tell which parameter's bound applies"]
+    if axis == "vpre":
+        if "centre_on_voc" not in node.params:
+            return [f"{node.module} sweeps vpre without setting centre_on_voc, so the plan "
+                    "cannot tell offsets from V_oc from volts"]
+        if node.params["centre_on_voc"]:
+            return []
+    bound = allowed.get(axis)
+    if bound is None:
+        return [f"{node.module} sweeps {axis}, and the plan does not let it be set"]
+    if len(ends) < len(AXIS_ENDS):
+        missing = next(k for k in AXIS_ENDS if k not in node.params)
+        return [f"{node.module}.{ends[0]} is set without {missing}, so the scan's other "
+                "end comes from the layers"]
+    if "choices" not in bound:
+        # A range holds every point between two ends that lie inside it.
+        return [f"{node.module}.{k} = {node.params[k]!r} sweeps {axis}, the plan allows "
+                f"{_describe(bound)}" for k in ends if not _within(node.params[k], bound)]
+    # Discrete choices: every point the scan will apply must be one of them.
+    start, stop = node.params["axis_start"], node.params["axis_stop"]
+    if start != stop and "axis_step" not in node.params:
+        return [f"{node.module} sweeps {axis} without axis_step, so the plan cannot tell "
+                "its points"]
+    numeric = sorted({float(c) for c in bound["choices"] if isinstance(c, (int, float))
+                      and not isinstance(c, bool)})
+    try:
+        scan = Axis(axis, float(start), float(stop), float(node.params.get("axis_step", 0.0)))
+        # A scan's points are distinct, so more points than choices cannot all be
+        # choices; counting first keeps a tiny step from building a huge array.
+        if scan.n_points > len(numeric):
+            return [f"{node.module} sweeps {axis} through {scan.n_points} points, the plan "
+                    f"allows {_describe(bound)}"]
+        points = scan.values()
+    except (AxisError, TypeError, ValueError, OverflowError) as exc:
+        return [f"{node.module}: the {axis} scan is not a scan ({exc})"]
+    off = [float(p) for p in points
+           if not any(math.isclose(p, c, rel_tol=1e-9, abs_tol=1e-12) for c in numeric)]
+    return [f"{node.module} sweeps {axis} through {off[0]:g}, the plan allows "
+            f"{_describe(bound)}"] if off else []
 
 
 def _describe(bound: Mapping[str, Any]) -> str:
@@ -189,6 +252,7 @@ class Envelope:
                     elif not _within(value, bound):
                         out.append(f"{node.module}.{p} = {value!r}, the plan allows "
                                    f"{_describe(bound)}")
+                out += _axis_violations(node, allowed)
             elif isinstance(node, Loop):
                 allowed = self.loops.get(node.loop)
                 if allowed is None:

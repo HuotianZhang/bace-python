@@ -76,6 +76,64 @@ def test_what_a_tree_sets_must_lie_inside_the_envelope():
     assert env.violations(parsed(temp)) == ["a temperature loop is not in the plan"]
 
 
+def test_a_scan_is_held_to_the_bound_of_the_parameter_it_sweeps():
+    """Loose bounds on axis_start and axis_stop must not let a scan of V_coll
+    reach -10 V when the plan holds V_coll to -4 V."""
+    loose = {**ENVELOPE, "modules": {"bace": {
+        **ENVELOPE["modules"]["bace"],
+        "axis_name": {"choices": ["vpre", "vcoll", "delay_ns"]},
+        "axis_start": {"min": -10, "max": 400}, "axis_stop": {"min": -10, "max": 400},
+        "axis_step": {"min": 0, "max": 50}, "centre_on_voc": {"choices": [True, False]}}}}
+    env = Envelope.from_wire(loose, catalogue=CAT)
+
+    def scan(name, start, stop, step, **more):
+        return bace(axis_name=name, axis_start=start, axis_stop=stop, axis_step=step, **more)
+
+    assert env.violations(parsed(scan("delay_ns", 30, 150, 20))) == []
+    assert env.violations(parsed(scan("vcoll", -0.5, -2.0, 0.5))) == []
+    found = env.violations(parsed(scan("vcoll", -0.5, -10.0, 0.5)))
+    assert found == ["bace.axis_stop = -10.0 sweeps vcoll, the plan allows between -4 and -0.5"]
+    # the plan does not let vpre be set, so it may not be swept either ...
+    [v] = env.violations(parsed(scan("vpre", 0.2, 0.6, 0.1, centre_on_voc=False)))
+    assert "sweeps vpre, and the plan does not let it be set" in v
+    # ... except as offsets around V_oc, which only the axis bounds hold
+    assert env.violations(parsed(scan("vpre", -0.05, 0.05, 0.05, centre_on_voc=True))) == []
+    # whether a vpre scan is centred cannot be left to the layers (run.toml centres it)
+    [v] = env.violations(parsed(scan("vpre", -0.05, 0.05, 0.05)))
+    assert "without setting centre_on_voc" in v
+    # an end without its axis cannot be checked, nor one end without the other
+    [v] = env.violations(parsed(bace(axis_start=30, axis_stop=150, axis_step=20)))
+    assert "without axis_name" in v
+    [v] = env.violations(parsed(bace(axis_name="vcoll", axis_start=-0.5, axis_step=0.5)))
+    assert "without axis_stop" in v
+
+
+def test_a_scan_over_discrete_choices_applies_only_those_values():
+    """With choices, the points between the ends matter: -4 to -0.5 in 0.5 V
+    steps also runs -3.5, -3.0 ..., which a plan of [-4, -0.5] does not allow."""
+    env = Envelope.from_wire({**ENVELOPE, "modules": {"bace": {
+        "vcoll": {"choices": [-4.0, -0.5]},
+        "axis_name": {"choices": ["vcoll"]},
+        "axis_start": {"min": -4, "max": 0}, "axis_stop": {"min": -4, "max": 0},
+        "axis_step": {"min": 0, "max": 4}}}}, catalogue=CAT)
+
+    def scan(start, stop, step):
+        return bace(axis_name="vcoll", axis_start=start, axis_stop=stop, axis_step=step)
+
+    assert env.violations(parsed(scan(-4.0, -0.5, 3.5))) == []
+    [v] = env.violations(parsed(scan(-4.0, -0.5, 0.5)))
+    assert "through 8 points" in v
+    # a tiny step is refused from its point count, without building the scan
+    [v] = env.violations(parsed(scan(-4.0, -0.5, 1e-10)))
+    assert "through 35000000001 points" in v
+    # as many points as choices: each point is checked
+    three = Envelope.from_wire({**ENVELOPE, "modules": {"bace": {
+        **env.modules["bace"], "vcoll": {"choices": [-4.0, -2.0, -0.5]}}}}, catalogue=CAT)
+    [v] = three.violations(parsed(scan(-4.0, -0.5, 1.75)))
+    assert "through -2.25" in v
+    assert env.violations(parsed(scan(-0.5, -0.5, 0.0))) == []
+
+
 # -- the book ----------------------------------------------------------------------
 def test_a_plan_is_approved_by_its_fingerprint_and_then_spent():
     book = PlanBook("S")
