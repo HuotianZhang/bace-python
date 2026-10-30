@@ -79,7 +79,8 @@ STEPDONE_SCALARS: tuple[str, ...] = ("index", "loop", "step", "setpoint", "axis_
                                      "q", "q_mean", "q_std", "intensity_w", "clipped",
                                      "t0_int_record_s", "t1_int_record_s", "dark_first")
 STEPDONE_ARRAYS: tuple[str, ...] = ("light", "dark", "photo", "photo_averaged",
-                                    "sync_light", "sync_dark")
+                                    "sync_light", "sync_dark",
+                                    "monitor_light", "monitor_dark")
 JVCURVE_SCALARS: tuple[str, ...] = ("index", "label", "dark", "led_level_v", "direction",
                                     "intensity_w")
 JVCURVE_ARRAYS: tuple[str, ...] = ("voltage", "current", "density")

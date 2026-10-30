@@ -68,6 +68,10 @@ class RunRecorder:
     _dark: RunningAverage | None = None
     _sync_light: RunningAverage | None = None
     _sync_dark: RunningAverage | None = None
+    _monitor_light: RunningAverage | None = None
+    _monitor_dark: RunningAverage | None = None
+    _fetched: dict = field(init=False, default_factory=dict)
+    """Traces averaged so far per (channel average, step): a fetch can fail."""
     _diag: dict | None = None
     """Per-shot diagnostics with shape `(n_loops, n_steps)` per field.
 
@@ -148,11 +152,14 @@ class RunRecorder:
         self._setpoints[i] = ev.setpoint
 
     def _sync(self, ev: E.StepDone) -> None:
-        """Average available trigger-channel traces over loops, in V.
+        """Average available trigger and monitor traces over loops, in V.
 
-        The averaging follows the light and dark traces.
+        The averaging follows the light and dark traces, and counts the fetches
+        that arrived, so a failed one leaves the others their full weight.
         """
-        for name, tr in (("_sync_light", ev.sync_light), ("_sync_dark", ev.sync_dark)):
+        for name, tr in (("_sync_light", ev.sync_light), ("_sync_dark", ev.sync_dark),
+                         ("_monitor_light", ev.monitor_light),
+                         ("_monitor_dark", ev.monitor_dark)):
             if tr is None:
                 continue
             avg = getattr(self, name)
@@ -160,7 +167,9 @@ class RunRecorder:
                 avg = RunningAverage(self._n_steps, int(np.asarray(tr.y).size))
                 setattr(self, name, avg)
             if int(np.asarray(tr.y).size) == avg.traces.shape[1]:
-                avg.update(ev.step, ev.loop, np.asarray(tr.y, dtype=float))
+                n = self._fetched.get((name, ev.step), 0) + 1
+                self._fetched[name, ev.step] = n
+                avg.update(ev.step, n, np.asarray(tr.y, dtype=float))
 
     DIAG_KEYS = ("averages_light", "averages_dark", "spike_lag_ns", "sync_lag_ns",
                  "edge_light_ns",
@@ -265,6 +274,8 @@ class RunRecorder:
             intensity_std=i_std if have_intensity else None,
             sync_light=None if self._sync_light is None else self._sync_light.traces,
             sync_dark=None if self._sync_dark is None else self._sync_dark.traces,
+            monitor_light=None if self._monitor_light is None else self._monitor_light.traces,
+            monitor_dark=None if self._monitor_dark is None else self._monitor_dark.traces,
             diagnostics=self._diag,
             window_s=self._window, trace_t0_s=self._trace_t0,
         )

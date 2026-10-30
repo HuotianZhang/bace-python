@@ -96,6 +96,8 @@ def write_run(path: str, *, metadata: dict, rig_config: dict, run_config: dict,
               intensity_std: np.ndarray | None = None,
               sync_light: np.ndarray | None = None,
               sync_dark: np.ndarray | None = None,
+              monitor_light: np.ndarray | None = None,
+              monitor_dark: np.ndarray | None = None,
               diagnostics: dict | None = None,
               window_s: np.ndarray | None = None,
               trace_t0_s: np.ndarray | None = None,
@@ -167,6 +169,12 @@ def write_run(path: str, *, metadata: dict, rig_config: dict, run_config: dict,
             d = tr.create_dataset(name, data=np.asarray(arr, dtype=float), **COMPRESSION)
             d.attrs["unit"] = "V"
             d.attrs["note"] = "the trigger channel, same record as the current trace"
+        for name, arr in (("monitor_light", monitor_light), ("monitor_dark", monitor_dark)):
+            if arr is None:
+                continue
+            d = tr.create_dataset(name, data=np.asarray(arr, dtype=float), **COMPRESSION)
+            d.attrs["unit"] = "V"
+            d.attrs["note"] = "the monitor channel, same record as the current trace"
         if diagnostics:
             # Per-shot diagnostics preserve timing and N_avg checks that averaging
             # traces can hide: `:WAV:COUN?` counts, spike lag and spike and sync

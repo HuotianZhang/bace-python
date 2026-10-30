@@ -126,6 +126,8 @@ class StepDone(Event):
     clipped: bool = False
     sync_light: Trace | None = None
     sync_dark: Trace | None = None
+    monitor_light: Trace | None = None
+    monitor_dark: Trace | None = None
     t0_int_record_s: float | None = None
     t1_int_record_s: float | None = None
     """The integration bounds locate Q in seconds from the first record sample.
