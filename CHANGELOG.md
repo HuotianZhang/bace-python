@@ -6,8 +6,9 @@ Dated, newest first. Details and evidence are in `docs/`.
 
 - `[power_meter] range` holds one 1918-C range for every reading. On auto the
   meter's reading of pulses depended on what it saw before: 6 uW after a shut
-  beam, 191 uW after DC, at one LED level. The key is not set yet: the range
-  has to be found on the bench with the `power` module's new `meter_range`.
+  beam, 191 uW after DC, at one LED level. The bench holds range 2: ranges 0 and
+  1 clip the pulses with no status flag, and ranges 2 to 4 agree (manual 1.2).
+  Pulsed intensities recorded before this are 9 to 31 times low.
 - `PowerReading` carries the range and whether the meter was on auto, and the
   `power` module warns on auto under pulses. A capture now refreshes the status
   that `trustworthy` is read from; it used to report an earlier reading.
