@@ -8,6 +8,7 @@
 // shared extreme alone is not a flag.
 
 import * as fmt from './format.js';
+import { moduleTitle } from './fields.js';
 
 /** Modules whose node is one cell of the grid: one Q per node. */
 export const GRID_MODULES = new Set(['bace']);
@@ -56,8 +57,8 @@ export function spanOf(started, finished) {
  */
 export function runLabel(row) {
   if (!row) return fmt.ABSENT;
-  if (row.kind === 'pipeline') return row.tree_summary ? `pipeline · ${row.tree_summary}` : 'pipeline';
-  return row.module || row.kind || 'run';
+  if (row.kind === 'pipeline') return 'Sequence';
+  return moduleTitle(row.module || row.kind || 'run');
 }
 
 /** Row severity reserves alert for failure (`docs/ui-rules.md` §3). */
@@ -111,9 +112,9 @@ export function runGroups(rows, { live = {} } = {}) {
 function vocRange(row) {
   if (!finite(row.voc_min)) return null;
   if (finite(row.voc_max) && row.voc_max !== row.voc_min) {
-    return `V_oc ${fmt.volts(row.voc_min, { unit: false })} … ${fmt.volts(row.voc_max)}`;
+    return `Voc ${fmt.volts(row.voc_min, { unit: false })} … ${fmt.volts(row.voc_max)}`;
   }
-  return `V_oc ${fmt.volts(row.voc_min)}`;
+  return `Voc ${fmt.volts(row.voc_min)}`;
 }
 
 // -- the record's nodes -----------------------------------------------------
@@ -153,7 +154,7 @@ export function cellQ(node) {
   if (means.length > 1) {
     if (finite(node.voc) && values.length === means.length) {
       index = nearest(values, node.voc);
-      at = `nearest V_oc, ${axisName(node)} = ${fmt.sig(values[index], 4)}`;
+      at = `nearest Voc, ${axisName(node)} = ${fmt.sig(values[index], 4)}`;
     } else {
       index = Math.floor(means.length / 2);
       at = `the middle point, ${axisName(node)} = ${values.length === means.length ? fmt.sig(values[index], 4) : index + 1}`;
@@ -206,7 +207,7 @@ export function gridModel(record) {
   }
   for (const v of asked.levels) {
     colsBy.set(ledKey(v), { key: ledKey(v), led_v: v, asked: v,
-      label: `led_v ${fmt.volts(v, { decimals: 3 })}`, ran: false });
+      label: `LED ${fmt.volts(v, { decimals: 3 })}`, ran: false });
   }
   for (const node of nodes) {
     // Nodes group under the requested setpoint, even when confirmed nearby. The
@@ -234,7 +235,7 @@ export function gridModel(record) {
     const lk = ledKey(askedV !== null ? askedV : node.led_v);
     if (!colsBy.has(lk)) {
       colsBy.set(lk, { key: lk, led_v: finite(node.led_v) ? node.led_v : null, asked: askedV,
-        label: finite(node.led_v) ? `led_v ${fmt.volts(node.led_v, { decimals: 3 })}` : 'led_v not recorded', ran: false });
+        label: finite(node.led_v) ? `LED ${fmt.volts(node.led_v, { decimals: 3 })}` : 'LED not recorded', ran: false });
     }
     colsBy.get(lk).ran = true;
     const key = `${tk}|${lk}`;
@@ -344,48 +345,25 @@ export function summaryModel(grid, record) {
   const missing = grid.cells.filter((c) => c.missing);
   const lines = [];
 
-  if (complete.length) {
-    const qs = complete.map((c) => c.q);
-    const lo = Math.min(...qs);
-    const hi = Math.max(...qs);
-    const decades = lo !== 0 && hi !== 0 && Math.sign(lo) === Math.sign(hi)
-      ? Math.abs(Math.log10(Math.abs(hi) / Math.abs(lo))) : null;
-    const sign = qs.every((q) => q < 0) ? 'all negative' : qs.every((q) => q > 0) ? 'all positive' : 'both signs';
-    let text = `${fmt.charge(lo)} → ${fmt.charge(hi)}`;
-    if (decades !== null) text += ` · ${decades < 0.05 ? 'flat' : decades < 0.5 ? 'within a factor of ' + fmt.sig(10 ** decades, 2) : fmt.sig(decades, 2) + ' decades'}`;
-    text += ` · ${sign}`;
-    text += ` · over ${complete.length} complete cell${complete.length === 1 ? '' : 's'}`;
-    if (partial.length) text += `, ${partial.length} partial excluded`;
-    lines.push({ key: 'span', label: 'span', text });
-  } else {
-    lines.push({ key: 'span', label: 'span', text: present.length ? 'no complete cell' : 'no bace node in this run', absent: true });
-  }
-
   const withSigma = present.filter((c) => c.sigmaRecorded);
   if (present.length) {
     const rowsWith = [...new Set(withSigma.map((c) => grid.rows.find((r) => r.key === c.row)).filter(Boolean).map((r) => r.label))];
-    lines.push({
-      key: 'sigma', label: 'σ_Q',
-      text: withSigma.length === present.length
-        ? `recorded on every cell (${present.length} of ${present.length})`
-        : withSigma.length === 0
-          ? 'recorded on no cell · a zero is not a σ, it means the loops were not recorded'
-          : `recorded at ${rowsWith.join(', ')} only · zero elsewhere means not recorded`,
-      level: withSigma.length ? '' : 'warn',
-    });
+    if (withSigma.length !== present.length) {
+      lines.push({
+        key: 'sigma', label: 'σQ',
+        text: withSigma.length ? `only at ${rowsWith.join(', ')}` : 'not recorded',
+        level: withSigma.length ? '' : 'warn',
+      });
+    }
   }
 
   const shots = present.reduce((n, c) => n + (c.node.shots || 0), 0);
   const withIntensity = present.reduce((n, c) => n + (c.node.intensity_recorded || 0), 0);
-  if (shots) {
+  if (shots && withIntensity !== shots) {
     lines.push({
-      key: 'intensity', label: 'intensity',
-      text: withIntensity === shots
-        ? `read on every shot (${shots} of ${shots}) · watts at the meter, never mW/cm²`
-        : withIntensity === 0
-          ? `null on ${shots} of ${shots} shots · the meter did not answer; watts not recorded, mW/cm² never inferred`
-          : `null on ${shots - withIntensity} of ${shots} shots · watts where read, mW/cm² never inferred`,
-      level: withIntensity === shots ? '' : 'warn',
+      key: 'intensity', label: 'Intensity',
+      text: `missing on ${shots - withIntensity} of ${shots} shots`,
+      level: 'warn',
     });
   }
 
@@ -393,17 +371,19 @@ export function summaryModel(grid, record) {
   const parts = [];
   if (partial.length) parts.push(`${partial.length} partial (${partial.map((c) => cellName(grid, c)).join(', ')})`);
   if (missing.length) parts.push(`${missing.length} never run (${missing.map((c) => cellName(grid, c)).join(', ')})`);
-  if (flagged) parts.push(`${flagged} of ${shots} shots flagged by the digitiser check`);
+  if (flagged) parts.push(`${flagged} of ${shots} shots flagged by the scope check`);
   const verdicts = (record && record.verdicts) || [];
   const warn = verdicts.filter((v) => v.level === 'warn').length;
   const crit = verdicts.filter((v) => v.level === 'crit').length;
   if (crit) parts.push(`${crit} crit at Start`);
   if (warn) parts.push(`${warn} warn at Start`);
-  lines.push({
-    key: 'flags', label: 'flags',
-    text: parts.length ? parts.join(' · ') : 'none · every cell complete, no shot flagged, nothing to say at Start',
-    level: partial.length || missing.length || flagged || crit ? 'warn' : '',
-  });
+  if (parts.length) {
+    lines.push({
+      key: 'flags', label: 'Warnings',
+      text: parts.join(', '),
+      level: partial.length || missing.length || flagged || crit ? 'warn' : '',
+    });
+  }
   return { lines, complete: complete.length, partial: partial.length, missing: missing.length, present: present.length };
 }
 
@@ -486,13 +466,13 @@ export function flagsFor(record, node) {
       text: `${node.kept} of ${node.requested} ${unit} kept · ${why}${node.reason && node.outcome !== 'failed' ? ' · ' + node.reason : ''} · the statistics are over the ${unit} that ran, and this cell is never averaged in silently` });
   }
   if (node.module === 'bace' && (node.q_mean || []).length && !sigmaRecorded(node)) {
-    flags.push({ level: 'warn', code: 'sigma', text: 'σ_Q not recorded · a zero is not a σ: one loop leaves nothing to deviate from' });
+    flags.push({ level: 'warn', code: 'sigma', text: 'σQ not recorded · a zero is not a σ: one loop leaves nothing to deviate from' });
   }
   if (shots && node.shots_flagged) {
-    flags.push({ level: 'warn', code: 'digitiser',
-      text: `${node.shots_flagged} of ${shots} shots flagged by the digitiser check — a rail or a shared extreme on a trace; the shot's own line in its card says which. Do not interpret those charges` });
+    flags.push({ level: 'warn', code: 'scope',
+      text: `${node.shots_flagged} of ${shots} shots flagged by the scope check — a rail or a shared extreme on a trace; the shot's own line in its card says which. Do not interpret those charges` });
   } else if (shots && node.module === 'bace') {
-    flags.push({ level: 'info', code: 'digitiser', text: `digitiser check: no shot flagged, ${shots} of ${shots} judged` });
+    flags.push({ level: 'info', code: 'scope', text: `scope check: no shot flagged, ${shots} of ${shots} judged` });
   }
   if (shots) {
     const with_ = node.intensity_recorded || 0;
@@ -502,8 +482,8 @@ export function flagsFor(record, node) {
   const t = temperatureText(node);
   if (t.level === 'warn') flags.push({ level: 'warn', code: 'temperature', text: `temperature ${t.text}` });
   const v = vocText(node);
-  if (v.mismatch) flags.push({ level: 'warn', code: 'voc', text: `V_oc ${v.text} · a V_oc from a different illumination is worse than none` });
-  else if (node.module === 'bace' && v.level === 'warn') flags.push({ level: 'warn', code: 'voc', text: `V_oc ${v.text}` });
+  if (v.mismatch) flags.push({ level: 'warn', code: 'voc', text: `Voc ${v.text} · a Voc from a different illumination is worse than none` });
+  else if (node.module === 'bace' && v.level === 'warn') flags.push({ level: 'warn', code: 'voc', text: `Voc ${v.text}` });
   if (node.offset_corrected === false) {
     flags.push({ level: 'info', code: 'baseline', text: 'baseline not subtracted (offset_correct = false) · the dark trace is taken as it came' });
   }

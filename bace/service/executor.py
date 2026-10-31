@@ -147,8 +147,7 @@ class _Tally:
         elif isinstance(ev, E.RunFinished):
             self.kept = self.requested
             self.finished = True
-            self.summary = finished_text({"q_mean": ev.q_mean, "q_std": ev.q_std, "q_all": ev.q_all},
-                                         self.kept, self.requested)
+            self.summary = finished_text({"q_mean": ev.q_mean, "q_std": ev.q_std, "q_all": ev.q_all})
         elif isinstance(ev, E.RunAborted):
             self.aborted = ev
             self.kept, self.requested = ev.done, ev.total
@@ -168,9 +167,9 @@ class _Tally:
             self.finished = True
             self.summary = f"{n} curve" + ("" if n == 1 else "s")
             if self.last_voc is not None:
-                self.summary += f" · V_oc {self.last_voc:.3f} V"
+                self.summary += f" · Voc {self.last_voc:.3f} V"
         elif isinstance(ev, E.DCMeasured):
-            self.summary = f"V_oc {ev.dc.voc:.3f} V (DC)"
+            self.summary = f"Voc {ev.dc.voc:.3f} V (DC)"
         elif isinstance(ev, E.PowerReading):
             self.summary = f"{ev.watts:.3e} W"
         elif isinstance(ev, E.TemperatureRead):
@@ -557,9 +556,9 @@ class _Executor:
             # `run_jv` warns about unknown light but accepts this lit pulse
             # curve. An explicit notice explains why it supplies no V_oc;
             # otherwise only a later `bace` source failure would expose it.
-            return ("V_oc not taken from this curve: the LED was in "
+            return ("Voc not taken from this curve: the LED was in "
                     f"{found.get('led_mode')}, and a curve measured under a "
-                    "chopped lamp gives a time average, not a V_oc. Set the "
+                    "chopped lamp gives a time average, not a Voc. Set the "
                     "LED to DC (or use jv_bace / measure_dc) for a source.")
         source = VocSource(value=float(ev.metrics.voc), led_v=float(ev.led_level_v),
                            run_id=ctx.run_id, node_path=step.node_path,

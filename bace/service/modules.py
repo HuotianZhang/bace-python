@@ -230,9 +230,9 @@ class ModuleSpec:
 
     The executor marks a transition whenever the requirement changes."""
     provides_voc: bool
-    """The V_oc provider flag identifies a light curve used to centre `bace`."""
+    """The Voc provider flag identifies a light curve used to centre `bace`."""
     needs_voc_param: str | None
-    """The named boolean parameter requires a V_oc source when enabled."""
+    """The named boolean parameter requires a Voc source when enabled."""
     led_params: tuple[str, ...]
     """The illumination loop owns these parameters and forbids module overrides."""
     groups: tuple[str, ...]
@@ -361,16 +361,16 @@ AXIS_DOCS: dict[str, str] = {
     "axis_name": "The scan parameter -- which quantity the scan range steps through: "
                  "vpre (BACE), delay_ns (TDCF) or vcoll (field dependence). The other "
                  "two stay pinned at the values below.",
-    "axis_start": "First value of the swept quantity; an offset from V_oc when "
+    "axis_start": "First value of the swept quantity; an offset from Voc when "
                    "centre_on_voc is on.",
     "axis_stop": "Last value of the swept quantity; start = stop is one point "
                   "(repeats come from n_loops).",
     "axis_step": "Spacing of the swept values; the point count is rounded from the "
                   "span, never truncated.",
     "centre_on_voc": "With vpre as the scan parameter: read the scan range as offsets "
-                     "from V_oc rather than as volts, so -0.01 .. +0.01 straddles V_oc at "
-                     "whatever illumination is in force and 0 .. 0 is BACE at V_oc. The "
-                     "V_oc comes from jv_bace at this led_v, measure_dc, or a typed voc. "
+                     "from Voc rather than as volts, so -0.01 .. +0.01 straddles Voc at "
+                     "whatever illumination is in force and 0 .. 0 is BACE at Voc. The "
+                     "Voc comes from jv_bace at this led_v, measure_dc, or a typed voc. "
                      "Applies to a swept vpre only; with another scan parameter the flag "
                      "is ignored (the pinned vpre has vpre_on_voc instead).",
 }
@@ -378,7 +378,7 @@ AXIS_DOCS: dict[str, str] = {
 PINNED_DOCS: dict[str, str] = {
     "vpre": "Prebias at the device, sourced by the 81150A -- `core.pulses` divides it "
             "by the amplifier gain before it is written -- when it is not the swept "
-            "axis; an offset from V_oc when vpre_on_voc is set.",
+            "axis; an offset from Voc when vpre_on_voc is set.",
     "vcoll": "Collection bias at the device, sourced by the 81150A through the same "
              "gain division, when it is not the swept axis.",
     "delay_ns": "The wait from the LED falling edge to the collection pulse, as the "
@@ -391,9 +391,9 @@ PINNED_DOCS: dict[str, str] = {
 
 VPRE_ON_VOC_SPEC = ParamSpec(
     "vpre_on_voc", "bool", False, group="pinned",
-    doc="Pin the prebias relative to V_oc: vpre becomes an offset from the V_oc in "
-        "scope (TDCF at V_oc is vpre_on_voc with vpre = 0). Only when vpre is not the "
-        "swept axis; a swept vpre follows V_oc through centre_on_voc.")
+    doc="Pin the prebias relative to Voc: vpre becomes an offset from the Voc in "
+        "scope (TDCF at Voc is vpre_on_voc with vpre = 0). Only when vpre is not the "
+        "swept axis; a swept vpre follows Voc through centre_on_voc.")
 """The pinned V_pre offset is relative to V_oc when delay or V_coll is scanned.
 
 `Catalogue._build_bace` adds the offset to the V_oc source selected for
@@ -414,39 +414,39 @@ def _regroup(specs: list[ParamSpec], groups: Mapping[str, str], cls: type) -> li
 
 LABELS: dict[str, str] = {
     # J-V sweep and source meter
-    "start_v": "Sweep start", "stop_v": "Sweep stop", "step_v": "Sweep step",
-    "settle_s": "Dwell per point", "both_directions": "Both directions",
-    "pixel_area_cm2": "Pixel area",
+    "start_v": "Start Voltage", "stop_v": "End Voltage", "step_v": "dV",
+    "settle_s": "Stab. time", "both_directions": "Both directions",
+    "pixel_area_cm2": "Pixel Area",
     "smu_current_compliance_a": "Current compliance",
     "smu_voltage_compliance_v": "Voltage compliance",
-    "smu_settle_jsc_ms": "J_sc settle", "smu_settle_voc_ms": "V_oc settle",
-    "smu_settle_jsat_ms": "J_sat settle", "smu_nplc": "NPLC",
-    "smu_averaging": "Readings averaged", "smu_terminals": "Terminals",
-    "smu_four_wire": "Four-wire sensing",
+    "smu_settle_jsc_ms": "Settle Time Jsc", "smu_settle_voc_ms": "Settle Time Voc",
+    "smu_settle_jsat_ms": "Settle Time Jsat", "smu_nplc": "NPLC",
+    "smu_averaging": "Averaging", "smu_terminals": "Terminals",
+    "smu_four_wire": "Four-wire",
     # illumination
-    "led_v": "LED level", "led_start_v": "LED start", "led_stop_v": "LED stop",
-    "led_step_v": "LED step", "led_low_v": "LED low level", "led_settle_s": "LED settle",
-    "led_settle_max_s": "LED settle limit", "led_settle_tolerance": "LED settle tolerance",
+    "led_v": "LED Voltage", "led_start_v": "Start Voltage LED", "led_stop_v": "End Voltage LED",
+    "led_step_v": "dV LED", "led_low_v": "Voltage Low", "led_settle_s": "LED stab. time",
+    "led_settle_max_s": "LED stab. limit", "led_settle_tolerance": "LED stab. tolerance",
     "dark": "Dark curve", "led_mode": "LED mode", "shutter": "Shutter",
     # bace axis and pinned values
-    "axis_name": "Scan parameter", "axis_start": "Scan start", "axis_stop": "Scan stop",
-    "axis_step": "Scan step", "centre_on_voc": "Centre on V_oc", "vpre": "V_pre",
-    "vcoll": "V_coll", "delay_ns": "Delay", "vpre_on_voc": "V_pre from V_oc",
-    "n_loops": "Loops", "voc": "V_oc", "measure_dc": "DC metrics",
-    "v_sat": "J_sat bias",
+    "axis_name": "Scan", "axis_start": "Scan start", "axis_stop": "Scan end",
+    "axis_step": "Scan step", "centre_on_voc": "Centre on Voc", "vpre": "Vpre",
+    "vcoll": "Vcoll", "delay_ns": "Delay", "vpre_on_voc": "Vpre from Voc",
+    "n_loops": "# of Loops", "voc": "Voc", "measure_dc": "Voc/Jsc/Jsat",
+    "v_sat": "Vcoll for Jsat",
     # bace acquisition
-    "n_averages": "Hardware averages", "timebase_ns_per_div": "Timebase",
-    "record_length": "Record length", "t0_int_s": "Integration start",
-    "t_int_width_s": "Integration width", "output_polarity": "Output polarity",
-    "pulse_width_ns": "Pulse width", "pulse_frequency_hz": "Pulse frequency",
-    "duty_percent": "Duty cycle", "offset_correct": "Baseline correction",
-    "offset_region": "Baseline region", "alternate_order": "Alternate order",
+    "n_averages": "# Averages", "timebase_ns_per_div": "Timebase",
+    "record_length": "Record Length", "t0_int_s": "t0 Integration",
+    "t_int_width_s": "Integration time", "output_polarity": "Output polarity",
+    "pulse_width_ns": "Pulse Width", "pulse_frequency_hz": "Freq",
+    "duty_percent": "Duty Cycle", "offset_correct": "Offset corr.",
+    "offset_region": "Offset region", "alternate_order": "Alternate order",
     "invert_polarity": "Invert levels", "inverted_output": "Inverted output",
-    "dark_settle_s": "Dark settle", "dark_reference": "Dark reference",
-    "light_shutter": "Light-trace shutter", "shutter_settle_s": "Shutter settle",
-    "read_intensity": "Power per shot", "monitor_channel": "Monitor channel",
+    "dark_settle_s": "Wait before dark", "dark_reference": "Dark reference",
+    "light_shutter": "Shutter for light", "shutter_settle_s": "Shutter wait",
+    "read_intensity": "Recording Intensity", "monitor_channel": "Monitor channel",
     "acquisition_timeout_s": "Acquisition timeout",
-    "external_trigger": "External trigger", "trigger_slope_positive": "Rising-edge trigger",
+    "external_trigger": "Ext. trig", "trigger_slope_positive": "Trigger Slope positive",
     "trigger_sweep": "Trigger sweep", "calibrate_trigger": "Calibrate trigger",
     "store_shots": "Store every shot",
     # power, temperature, wait, note
@@ -458,8 +458,8 @@ LABELS: dict[str, str] = {
 """The console's label for each parameter name (`ParamSpec.label`)."""
 
 MODULE_LABELS: dict[tuple[str, str], str] = {
-    ("bace", "settle_s"): "Light settle",
-    ("light", "settle_s"): "Settle after",
+    ("bace", "settle_s"): "Wait before measure",
+    ("light", "settle_s"): "Wait after",
 }
 """Labels for a name whose meaning differs by module; `LABELS` holds the rest."""
 
@@ -552,24 +552,24 @@ def _bace_specs(rig_config: RigConfig) -> list[ParamSpec]:
     loops = [replace(s, minimum=1) for s in loops]
     illumination = [
         ParamSpec("led_v", "float", 1.0, unit="V", group="illumination",
-                  doc="33220A pulse high level: the same number the V_oc was measured at."),
+                  doc="33220A pulse high level: the same number the Voc was measured at."),
         ParamSpec("led_low_v", "float", 0.4, unit="V", group="illumination",
                   doc="The 33220A pulse low level, below the LED threshold so the "
                       "dark half-cycle is dark."),
         ParamSpec("voc", "float", None, unit="V", group="illumination", nullable=True,
-                  doc="V_oc the axis is centred on. Derived from jv_bace or measure_dc; "
+                  doc="Voc the axis is centred on. Derived from jv_bace or measure_dc; "
                       "typed by hand only as a last resort, and the validator says so."),
         ParamSpec("measure_dc", "bool", False, group="illumination",
-                  doc="Measure V_oc / J_sc / J_sat on the Keithley under the LED first, "
+                  doc="Measure Voc / Jsc / Jsat on the Keithley under the LED first, "
                       "as the intensity series does."),
         ParamSpec("v_sat", "float", -1.0, unit="V", group="illumination",
-                  doc="The bias the 2400 holds while it reads J_sat (measure_dc "
+                  doc="The bias the 2400 holds while it reads Jsat (measure_dc "
                       "only)."),
         ParamSpec("led_settle_s", "float", 2.0, unit="s", group="illumination",
                   minimum=0.0,
                   doc="The least time after the LED is set to pulse before anything is "
                       "measured; with a power meter the wait goes on past it until the "
-                      "meter reads stable (measure_dc: also the DC settle before V_oc)."),
+                      "meter reads stable (measure_dc: also the DC settle before Voc)."),
         ParamSpec("led_settle_max_s", "float", 60.0, unit="s", group="illumination",
                   minimum=0.0,
                   doc="The most time to wait for the power meter to read stable after "
@@ -616,7 +616,7 @@ def _light_specs() -> list[ParamSpec]:
                       "the sample, whatever the generator is doing."),
         ParamSpec("led_mode", "enum", "leave", group="illumination",
                   choices=("dc", "pulse", "off", "leave"),
-                  doc="`dc` for a steady level (a J-V under light, a V_oc), `pulse` "
+                  doc="`dc` for a steady level (a J-V under light, a Voc), `pulse` "
                       "for the transient's square wave, `off` to disable the output, "
                       "`leave` to touch nothing. Prefer the shutter over `off`: a "
                       "generator that is cycled loses its thermal steady state and "
@@ -624,7 +624,7 @@ def _light_specs() -> list[ParamSpec]:
         ParamSpec("led_v", "float", 1.0, unit="V",
                   group="illumination",
                   doc="The 33220A drive level: its DC offset under `dc`, its pulse "
-                      "high level under `pulse`. The same number the V_oc must be "
+                      "high level under `pulse`. The same number the Voc must be "
                       "measured at and `bace` must pulse at -- the coupling invariant "
                       "is one level, in one place."),
         ParamSpec("led_low_v", "float", 0.4, unit="V",
@@ -648,7 +648,7 @@ def _light_specs() -> list[ParamSpec]:
                       "`:OUTP:POL INV`, which flips which half is lit, so the lit "
                       "fraction is `100 - duty_percent` and raising this shortens "
                       "the illumination. Whether the lit half is long enough for "
-                      "the device to reach its light V_oc is the operator's call: "
+                      "the device to reach its light Voc is the operator's call: "
                       "nothing checks it."),
         ParamSpec("settle_s", "float", 0.0, unit="s", group="timing", minimum=0.0,
                   doc="Wait after the light is set, before the node finishes -- so "
@@ -828,33 +828,33 @@ class Catalogue:
             # No `led_params`: this module is the one that does not touch the
             # light, so there is nothing for the bench's LED actions to take
             # its levels from.
-            "jv": self._spec("jv", "J-V", "measurement", "built", "dc",
+            "jv": self._spec("jv", "JV", "measurement", "built", "dc",
                              provides_voc=False, needs_voc_param=None, led_params=()),
-            "jv_bace": self._spec("jv_bace", "J-V light", "measurement", "built", "dc",
+            "jv_bace": self._spec("jv_bace", "Intensity JV", "measurement", "built", "dc",
                                   provides_voc=True, needs_voc_param=None,
                                   led_params=("led_v", "led_start_v", "led_stop_v",
                                               "led_step_v", "led_low_v")),
-            "bace": self._spec("bace", "bace", "measurement", "built", "transient",
+            "bace": self._spec("bace", "BACE", "measurement", "built", "transient",
                                provides_voc=False, needs_voc_param="centre_on_voc",
                                led_params=("led_v", "led_low_v")),
-            "light": self._spec("light", "light", "utility", "built", None,
+            "light": self._spec("light", "Light", "utility", "built", None,
                                 provides_voc=False, needs_voc_param=None,
                                 led_params=("led_v", "led_low_v")),
-            "power": self._spec("power", "power", "observer", "built", None,
+            "power": self._spec("power", "Power Meter", "observer", "built", None,
                                 provides_voc=False, needs_voc_param=None, led_params=()),
             # `partial`: works both ways. Settles through the 331 console
             # when `rig.temperature` holds one (setpoint written, band
             # waited for, the console's ceiling and heater range left to
             # it), pauses for a manual set when it does not -- and `needs`
             # says which on the card.
-            "temperature": self._spec("temperature", "temperature", "utility",
+            "temperature": self._spec("temperature", "Temperature", "utility",
                                       "partial", None, provides_voc=False,
                                       needs_voc_param=None, led_params=()),
-            "park": self._spec("park", "park", "utility", "built", None,
+            "park": self._spec("park", "All off", "utility", "built", None,
                                provides_voc=False, needs_voc_param=None, led_params=()),
-            "wait": self._spec("wait", "wait", "utility", "built", None,
+            "wait": self._spec("wait", "Wait", "utility", "built", None,
                                provides_voc=False, needs_voc_param=None, led_params=()),
-            "note": self._spec("note", "note", "utility", "built", None,
+            "note": self._spec("note", "Note", "utility", "built", None,
                                provides_voc=False, needs_voc_param=None, led_params=()),
         }
         self._edited: dict[str, dict[str, Any]] = {n: {} for n in MODULE_NAMES}
@@ -1349,7 +1349,7 @@ class Catalogue:
         if needs_voc and source is None and not measure_dc:
             flag = "centre_on_voc" if axis.centre_on_voc else "vpre_on_voc"
             raise ModuleError(
-                f"{name}: {flag}: no V_oc source in scope at {led_v:.3f} V -- "
+                f"{name}: {flag}: no Voc source in scope at {led_v:.3f} V -- "
                 "run jv_bace at this level first, set measure_dc, or type voc")
         if needs_voc and source is not None:
             # The coupling invariant, checked with nothing touched: a V_oc

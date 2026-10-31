@@ -178,7 +178,7 @@ function smuCell(smu, inferred) {
     : [current, voltage].filter(Boolean)
       .map((part) => (part.ceiling ? '≤ ' : '') + part.text).join(' / ');
   return {
-    key: 'smu', label: 'SMU',
+    key: 'smu', label: 'Keithley',
     value: s.output === true ? 'ON' : s.output === false ? 'off' : fmt.ABSENT,
     sub: text ? `cc ${text}` : null,
     level: s.output === true ? null : 'off',
@@ -238,16 +238,16 @@ function ledCell(led, chain, inferred) {
  */
 function vocCell(voc) {
   const v = voc || {};
-  if (!voc) return { key: 'voc', label: 'V_oc', value: fmt.ABSENT, sub: 'no read-back yet', level: null, inferred: false };
+  if (!voc) return { key: 'voc', label: 'Voc', value: fmt.ABSENT, sub: 'no read-back yet', level: null, inferred: false };
   if (v.value === null || v.value === undefined) {
-    return { key: 'voc', label: 'V_oc', value: fmt.ABSENT, sub: 'none this session', level: 'off', inferred: false };
+    return { key: 'voc', label: 'Voc', value: fmt.ABSENT, sub: 'none this session', level: 'off', inferred: false };
   }
   const from = v.from || {};
   const parts = [];
   if (v.led_v !== null && v.led_v !== undefined) parts.push(`@ ${fmt.volts(v.led_v, { decimals: 3, unit: false })} V`);
   if (from.how) parts.push(from.how);
   if (from.ts) parts.push(fmt.clock(from.ts));
-  return { key: 'voc', label: 'V_oc', value: fmt.volts(v.value), sub: parts.join(' · ') || null, level: null, inferred: false };
+  return { key: 'voc', label: 'Voc', value: fmt.volts(v.value), sub: parts.join(' · ') || null, level: null, inferred: false };
 }
 
 /**
@@ -371,8 +371,8 @@ function fixLabel(item) {
  */
 export function parkLabel(queued = 0) {
   return queued > 0
-    ? `Abort the run, cancel ${fmt.plural(queued, 'queued run')}, and park?`
-    : 'Abort the run and park?';
+    ? `Abort the run, cancel ${fmt.plural(queued, 'queued run')}, and turn all off?`
+    : 'Abort the run and turn all off?';
 }
 
 /**
@@ -381,19 +381,19 @@ export function parkLabel(queued = 0) {
  */
 export function parkTitle(queued = 0) {
   return queued > 0
-    ? `Park aborts the run and cancels ${fmt.plural(queued, 'queued run')}. `
+    ? `All off aborts the run and cancels ${fmt.plural(queued, 'queued run')}. `
       + 'The bench is safe now, not after the queue.'
-    : 'Park aborts the run. The bench is safe now.';
+    : 'All off aborts the run. The bench is safe now.';
 }
 
 /** The instrument behind each rail cell, for the name's tooltip. */
 const CELL_MODEL = {
   relay: 'Relay: router between the Keithley 2400 and the amplifier, with interlock',
   bias: 'Bias: Agilent 81150A pulse generator',
-  smu: 'SMU: Keithley 2400 source meter',
+  smu: 'Keithley 2400',
   shutter: 'Shutter: on the Deditec DIO',
   led: 'LED: Agilent 33220A function generator driving the light source',
-  voc: 'V_oc: open-circuit voltage in scope this session',
+  voc: 'Voc: open-circuit voltage in scope this session',
   power: 'Power: Newport 1918-C optical power meter',
   temperature: 'T: Lake Shore 331 temperature controller',
 };
@@ -476,7 +476,7 @@ export function renderChainStrip(el, state, { onFix, onPark, onDismiss, status, 
   // are part of what is drawn, so both are part of the key.
   const key = JSON.stringify([model, rig, status, parkArmed]);
   keyed(el, key, () => [
-    h('span.sk', { text: model.total === null ? 'trigger chain' : `trigger chain ${model.ok} / ${model.total}` }),
+    h('span.sk', { text: model.total === null ? 'Trigger' : `Trigger ${model.ok} / ${model.total}` }),
     model.items.map((item) => h('span', { class: 'st ' + (item.level === 'ok' ? '' : 'bad') },
       h('span', { text: `${item.label} ${item.value}` }),
       // Verdict icons match adjacent numbers in optical weight and inherit severity
@@ -518,16 +518,16 @@ export function renderChainStrip(el, state, { onFix, onPark, onDismiss, status, 
     h('span.st.quiet', { text: rigText(rig) }),
     h('button', {
       class: parkArmed ? 'btns armed' : 'btns',
-      title: model.busy ? parkTitle(model.queued) : 'Outputs off, shutter shut, relay parked.',
+      title: model.busy ? parkTitle(model.queued) : 'Outputs off, shutter shut, relay to the Keithley side.',
       onclick: () => onPark && onPark(),
-    }, parkArmed ? parkLabel(model.queued) : 'Park'),
+    }, parkArmed ? parkLabel(model.queued) : 'All off'),
   ]);
 }
 
 function rigText(rig) {
   const parts = [];
-  if (rig.sense_resistor_ohm) parts.push(`R_sense ${rig.sense_resistor_ohm} Ω`);
-  if (rig.pulse_amp) parts.push(`gain ×${rig.pulse_amp}`);
+  if (rig.sense_resistor_ohm) parts.push(`Resistor ${rig.sense_resistor_ohm} Ω`);
+  if (rig.pulse_amp) parts.push(`Pulse Amp ×${rig.pulse_amp}`);
   if (rig.current_sign) parts.push(`sign ${rig.current_sign > 0 ? '+1' : '−1'}`);
   return parts.join(' · ');
 }

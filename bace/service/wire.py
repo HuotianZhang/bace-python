@@ -140,7 +140,7 @@ rise: it remains 6.0-6.5 ns over 220-295 K while spike decay varies by
 SHOT_CHECKS: tuple[tuple[str, str, str, str], ...] = (
     ("Rail", "warn",
      f"One trace holds a single extreme value for {RAIL_RUN_SAMPLES} or more consecutive "
-     "samples: the digitiser clipped, and the shot's charge is meaningless.",
+     "samples: the scope clipped, and the shot's charge is meaningless.",
      "Reduce the swing, or check the auto-range."),
     ("Repeated extreme", "warn",
      f"An extreme value occurs more than {RAIL_REPEAT_SAMPLES} times in one trace: an "
@@ -153,8 +153,8 @@ SHOT_CHECKS: tuple[tuple[str, str, str, str], ...] = (
      "and the spike does not cancel.",
      "Check the Sync cables and the trigger threshold, then repeat the point."),
     ("Empty trace", "warn",
-     "The digitiser returned no samples: there is nothing to integrate.",
-     "Check the digitiser and its connection."),
+     "The scope returned no samples: there is nothing to integrate.",
+     "Check the scope and its connection."),
 )
 """Describes `shot_verdict` checks by name, level, condition and remedy.
 Warnings mark shots without excluding them from the mean.
@@ -350,7 +350,7 @@ def shot_verdict(light_y, dark_y,
             "shared_extreme": False, "peak_light_a": _peak(light_arr), "peak_dark_a": _peak(dark_arr),
             **align,
             "level": "warn",
-            "text": "an empty trace: the digitiser returned no samples, so there "
+            "text": "an empty trace: the scope returned no samples, so there "
                     "is nothing to judge and nothing to integrate"}
     else:
         light, dark = light_arr, dark_arr
@@ -362,7 +362,7 @@ def shot_verdict(light_y, dark_y,
         if worst_run >= RAIL_RUN_SAMPLES:
             which = ("light" if run_light >= run_dark else "dark")
             text = (f"the {which} trace holds one extreme value for {worst_run} consecutive "
-                    "samples: that is the digitiser's rail, not the signal, so the charge "
+                    "samples: that is the scope's rail, not the signal, so the charge "
                     "of this shot is meaningless. Widen the range or reduce the swing")
             level = "warn"
         elif worst > RAIL_REPEAT_SAMPLES:

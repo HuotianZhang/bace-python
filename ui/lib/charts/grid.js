@@ -84,13 +84,13 @@ export function gridChartModel(grid, { by = 'led', width = 620, height = null, v
         dots.push({ x, y, r: 2.6, shape: 'square', hollow: true, colour: p.cell.partial ? 'accent' : colour });
       }
       if (p.cell.partial) {
-        marks.push({ x: x + 5, y: y - 5, colour: 'accent-dark', size: 8.5, mono: true,
+        marks.push({ x: x + 5, y: y - 5, colour: 'accent-dark', size: 11,
           text: `${fmt.keptOf(p.cell.kept, p.cell.requested)} kept` });
       }
     }
   });
-  legend.push({ label: 'σ_Q measured', marker: 'dot', colour: 'ink' });
-  legend.push({ label: 'σ_Q not recorded', marker: 'square-hollow', colour: 'ink' });
+  legend.push({ label: 'σQ measured', marker: 'dot', colour: 'ink' });
+  legend.push({ label: 'σQ not recorded', marker: 'square-hollow', colour: 'ink' });
   const partial = present.filter((c) => c.partial);
   const missing = grid.cells.filter((c) => c.missing);
   const notes = [];
@@ -102,7 +102,7 @@ export function gridChartModel(grid, { by = 'led', width = 620, height = null, v
     panels: [{
       ...panel,
       label: `Q  ·  ${unitQ.label}  ·  ${by === 'T' ? 'one line per LED level' : 'one line per temperature'}`,
-      note: `${present.length} cell${present.length === 1 ? '' : 's'} · the cell's Q at V_pre = V_oc`,
+      note: `${present.length} cell${present.length === 1 ? '' : 's'} · the cell's Q at Vpre = Voc`,
       y: { scale: Y, ticks: axisTicks(Y, { count: 4 }), title: unitQ.label, unit: unitQ.unit },
       series, dots, rules, marks, shades: [], bands: [],
     }],

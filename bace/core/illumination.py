@@ -121,7 +121,7 @@ def assert_axis_centre(drive: LedDrive, voc_measured_at: float) -> None:
     """
     if abs(drive.level - voc_measured_at) > 1e-9:
         raise IlluminationError(
-            f"V_oc was measured at {voc_measured_at} V drive but the transient "
+            f"Voc was measured at {voc_measured_at} V drive but the transient "
             f"will run at {drive.level} V — the prebias axis would be centred on "
-            "the wrong V_oc. These must be the same level."
+            "the wrong Voc. These must be the same level."
         )

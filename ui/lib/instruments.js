@@ -66,7 +66,7 @@ export function panelModel(bench, light) {
       key: 'relay', label: 'Relay', inferred: is('relay'),
       positions: [
         { id: 'amplifier', label: 'Amplifier', on: relay.position === 'amplifier', action: 'relay-to-amplifier', args: {} },
-        { id: 'sourcemeter', label: 'Source meter', on: relay.position === 'sourcemeter', action: 'relay-to-sourcemeter', args: {} },
+        { id: 'sourcemeter', label: 'Keithley', on: relay.position === 'sourcemeter', action: 'relay-to-sourcemeter', args: {} },
       ],
     },
   ];
@@ -92,7 +92,7 @@ export function renderInstruments(model, ctx) {
           class: p.on ? 'on' : '',
           'aria-pressed': p.on ? 'true' : 'false',
           disabled: busy || null,
-          title: busy ? 'A run holds the bench. Only Park acts until it ends.' : `${row.label}: ${p.label}`,
+          title: busy ? 'A run holds the bench. Only All off acts until it ends.' : `${row.label}: ${p.label}`,
           onclick: () => { if (!p.on) ctx.act(p.action, p.args); },
         }, p.label))),
       row.levels ? levels(row, ctx) : h('span'))));

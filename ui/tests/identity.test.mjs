@@ -26,7 +26,7 @@ test('an unnamed session says what its folders will be called instead', () => {
 
 test('the preview is the folder name the next run starts with, in the archive’s order', () => {
   // `storage.naming.folder_name`: sample, material, pixel, then the
-  // temperature, the LED level, the V_oc and the stamp — which are not this
+  // temperature, the LED level, the Voc and the stamp — which are not this
   // panel's, and the ellipsis is where they go.
   const model = identityModel(session({ sample: 's4', material: 'PTQ10IT4F', pixel: 'pxa' }));
   assert.equal(model.stem, 's4_PTQ10IT4F_pxa');

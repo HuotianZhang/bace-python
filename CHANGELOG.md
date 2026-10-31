@@ -4,6 +4,18 @@ Dated, newest first. Details and evidence are in `docs/`.
 
 ## 2026-10-31
 
+- Console type: IBM Plex Sans alone, with tabular figures; Plex Mono and Archivo
+  removed. Body text 13 px, nothing under 11 px, secondary grey darkened to 7:1.
+- Buttons, switches and inputs are 24 px high and boxed. Measure shows JV and
+  Intensity JV side by side and BACE across the full width. The stat column no
+  longer reserves space on the JV cards.
+- Console names follow the LabVIEW panel (`docs/ui-rules.md`, Names). Tabs are
+  Measure, Sequence, Results and Setup; Park is All off; Dry run is Check. Wire
+  names, recipes and files are unchanged.
+- Repeated counts and provenance lines are gone from the cards, the sequence
+  summary and Results. Run lists give Q in nC, pC or fC.
+- The Setup diagrams no longer show fixed sample, resistor and bias values.
+
 - `[power_meter] range` holds one 1918-C range for every reading. On auto the
   meter's reading of pulses depended on what it saw before: 6 uW after a shut
   beam, 191 uW after DC, at one LED level. The bench holds range 2: ranges 0 and

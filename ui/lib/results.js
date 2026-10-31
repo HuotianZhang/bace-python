@@ -220,13 +220,13 @@ export function shotRows(shot, found) {
   // as the monitor's `shot 4 of 24` and the record's `kept` do.
   const nth = shot.index + 1;
   const rows = [
-    ['Q · shot ' + nth, fmt.charge(shot.q)],
-    [`running mean · point ${shot.step}`, fmt.charge(shot.q_mean)],
-    [`σ · point ${shot.step}`, sigma ? `${sigma} C` : 'σ_Q not recorded'],
+    ['Q', fmt.charge(shot.q)],
+    ['Mean Q', fmt.charge(shot.q_mean)],
+    ['σQ', sigma ? `${sigma} C` : fmt.ABSENT],
   ];
   if (v) {
-    rows.push(['peak · light', fmt.amps(v.peak_light_a)]);
-    rows.push(['peak · dark', fmt.amps(v.peak_dark_a)]);
+    rows.push(['Peak light', fmt.amps(v.peak_light_a)]);
+    rows.push(['Peak dark', fmt.amps(v.peak_dark_a)]);
   }
   return rows;
 }
@@ -234,10 +234,6 @@ export function shotRows(shot, found) {
 export function shotBlock(shot, found, config) {
   const v = shot.verdict || null;
   const axis = (found && found.node && found.node.axis) || null;
-  const unit = axis ? AXIS_UNITS[axis.name] || '' : '';
-  const where = axis && shot.axis_value !== undefined && shot.axis_value !== null
-    ? ` · ${axis.name} ${fmt.sig(shot.axis_value, 4)}${unit ? ' ' + unit : ''}`
-    : '';
   const level = v && v.level === 'warn' ? 'alert' : v ? 'ok' : '';
   const nearZero = v && Number.isFinite(shot.q) && Number.isFinite(v.peak_light_a)
     && Math.abs(shot.q) < 1e-13;
@@ -246,19 +242,19 @@ export function shotBlock(shot, found, config) {
   const trigger = config.trigger_sweep ? String(config.trigger_sweep).toUpperCase() : null;
   return h('div.shot', { class: level },
     h('div.shot-head',
-      h('span.shot-title', { text: `shot ${nth} · loop ${shot.loop}${where}` }),
+      h('span.shot-title', { text: `Shot ${nth}, loop ${shot.loop}` }),
       shot.clipped ? h('span.tag.bad', { text: 'clipped' }) : null,
       shot.tracesGone ? h('span.tag', { text: 'no traces' }) : null),
     // A definition list pairs labels and values in the narrow chart-side column,
     // stacking each label above its number.
     h('dl.shot-rows', rows.map(([k, val]) => [h('dt', { text: k }), h('dd.num', { text: val })])),
-    v ? h('div', { class: 'shot-verdict ' + level, text: `digitiser · ${v.text}` }) : null,
+    v && level === 'alert' ? h('div', { class: 'shot-verdict ' + level, text: v.text }) : null,
     trigger ? h('div', {
       class: 'shot-trigger' + (trigger === 'AUTO' ? ' auto' : ''),
       title: trigger === 'AUTO'
         ? 'AUTO sweeps anyway when no trigger arrives: a loose sync cable gives untriggered noise whose dark subtraction cancels to almost nothing'
         : 'TRIG waits for the edge, and a missing trigger becomes a timeout with a message',
-      text: `trigger ${trigger}` + (trigger === 'AUTO' && nearZero ? ' · Q near zero under AUTO — check the sync before believing it' : ''),
+      text: `Trigger ${trigger}` + (trigger === 'AUTO' && nearZero ? ': Q near zero, check the sync cable' : ''),
     }) : null);
 }
 
@@ -372,5 +368,5 @@ function metricsTable(metrics) {
   });
   return h('div.metrics',
     h('table.rows', h('thead', header), h('tbody', body)),
-    h('p.chart-note', { text: metrics.note }));
+    metrics.note ? h('p.chart-note', { text: metrics.note }) : null);
 }

@@ -527,7 +527,7 @@ class _Run:
         elif kind == "RunFinished":
             if self.requested is not None:
                 self.kept = self.requested
-            self.outcome_text = finished_text(data, self.kept, self.requested)
+            self.outcome_text = finished_text(data)
             self._result(line).update(finished_result(data))
         elif kind == "RunFailed":
             self.error = str(data.get("error", ""))
@@ -604,8 +604,8 @@ class _Run:
         if self._last_voc is None:
             return ""
         if self.light_curves > 1 and self.voc_min != self.voc_max:
-            return f" · V_oc {self.voc_min:.4f} … {self.voc_max:.4f} V"
-        return f" · V_oc {self._last_voc:.3f} V"
+            return f" · Voc {self.voc_min:.4f} … {self.voc_max:.4f} V"
+        return f" · Voc {self._last_voc:.3f} V"
 
     def record(self) -> dict:
         """Returns `summary` with tree and node reductions for `GET /runs/{id}`."""
@@ -795,14 +795,13 @@ def _int(value: Any, fallback: int | None) -> int | None:
     return int(value)
 
 
-def finished_text(data: dict, kept: int | None, requested: int | None) -> str:
-    """Formats Q and its standard error over loops in nC.
+def finished_text(data: dict) -> str:
+    """Formats Q and its standard error over loops, in nC, pC or fC.
 
     Standard error (`sem`) describes precision of the mean, while `q_std`
     is loop scatter. `data` holds `RunFinished` fields. Both run list and
     node summary use this text.
     """
-    tail = f" · {kept}/{requested}" if kept is not None and requested is not None else ""
     def nc(key: str) -> np.ndarray:
         values = data.get(key)
         return np.array([np.nan if q is None else q for q in ([] if values is None else values)],
@@ -812,20 +811,23 @@ def finished_text(data: dict, kept: int | None, requested: int | None) -> str:
     n = (np.isfinite(np.asarray(q_all, dtype=float).reshape(-1, q_mean.size)).sum(axis=0)
          if q_all is not None and q_mean.size else np.zeros(q_mean.size, dtype=int))
     if not np.isfinite(q_mean).any():
-        return f"{q_mean.size} point" + ("" if q_mean.size == 1 else "s") + tail
+        return f"{q_mean.size} point" + ("" if q_mean.size == 1 else "s")
     sem = np.full(q_mean.size, np.nan)
     if q_std.size == q_mean.size:
         sem = np.where(n > 1, q_std / np.sqrt(np.maximum(n, 1)), np.nan)
-    loops = int(n.max())
-    of = f", {loops} loop" + ("" if loops == 1 else "s") if loops else ""
+    peak = float(np.nanmax(np.abs(q_mean)))
+    factor, unit = (1.0, "nC") if peak >= 1 else (1e3, "pC") if peak >= 1e-3 else (1e6, "fC")
     if q_mean.size == 1:
-        text = f"Q {q_mean[0]:#.3g}"
-        text += f" ± {sem[0]:.2g} nC (sem)" if np.isfinite(sem[0]) else " nC"
-        return f"{text}{of}{tail}"
-    text = f"{q_mean.size} points, Q {np.nanmin(q_mean):#.3g} to {np.nanmax(q_mean):#.3g} nC"
-    if np.isfinite(sem).any():
-        text += f", sem ≤ {np.nanmax(sem):.2g}"
-    return f"{text}{of}{tail}"
+        text = f"Q {_sig(q_mean[0] * factor, 3)}"
+        text += f" ± {_sig(sem[0] * factor, 2)} {unit}" if np.isfinite(sem[0]) else f" {unit}"
+        return text
+    return (f"{q_mean.size} points, Q {_sig(np.nanmin(q_mean) * factor, 3)} to "
+            f"{_sig(np.nanmax(q_mean) * factor, 3)} {unit}")
+
+
+def _sig(value: float, figures: int) -> str:
+    """Rounds to significant figures without falling into an exponent."""
+    return f"{float(f'{value:.{figures}g}'):g}"
 
 
 _LOOP_HEAD = {"temperature": "T", "illumination": "led", "repeat": "rep"}

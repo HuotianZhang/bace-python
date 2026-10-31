@@ -9,11 +9,11 @@ import { charge, sigmaQ, volts, kelvin, intensity, duration, keptOf, plural, sig
 
 test('a charge keeps five to six significant figures, in the archive\'s own spelling', () => {
   assert.equal(charge(3.65257e-10), '3.65257e-10 C');
-  assert.equal(charge(-1.7183827170358963e-10), '-1.71838e-10 C');
+  assert.equal(charge(-1.7183827170358963e-10), '−1.71838e-10 C');
   assert.equal(charge(null), ABSENT);
 });
 
-test('V_oc to four decimals, T to one', () => {
+test('Voc to four decimals, T to one', () => {
   assert.equal(volts(1.0277123), '1.0277 V');
   assert.equal(kelvin(294.83), '294.8 K');
 });
@@ -41,7 +41,7 @@ test('the three time scales read as themselves', () => {
 
 test('significant figures, not decimal places', () => {
   assert.equal(sig(0.55051, 3), '0.551', 'FF, to three');
-  assert.equal(sig(126.127, 3), '126', 'J_sc in A/m², to three');
+  assert.equal(sig(126.127, 3), '126', 'Jsc in A/m², to three');
   assert.equal(sig(0, 3), '0');
 });
 

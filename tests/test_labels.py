@@ -21,6 +21,10 @@ def cat():
     return Catalogue(rig_config=RigConfig(), run_toml={}, history=None)
 
 
+# Names kept as the LabVIEW panel wrote them.
+PANEL_NAMES = {"dV", "dV LED", "t0 Integration", "# Averages", "# of Loops"}
+
+
 def test_every_module_parameter_has_a_label(cat):
     for name in MODULE_NAMES:
         labels = [s.label for s in cat.param_specs(name)]
@@ -34,18 +38,18 @@ def test_a_label_is_a_short_sentence_case_noun_phrase_without_a_unit(cat):
         for s in cat.param_specs(name):
             words = s.label.split()
             assert 1 <= len(words) <= 3, f"{s.name}: {s.label!r} is longer than three words"
-            assert s.label[0].isupper(), f"{s.name}: {s.label!r} is not sentence case"
+            assert s.label[0].isupper() or s.label in PANEL_NAMES, f"{s.name}: {s.label!r} is not sentence case"
             assert not re.search(r"\b[a-z]+_[a-z]", s.label), f"{s.name}: {s.label!r} is a code name"
             assert words[-1].lower().strip("()") not in units, f"{s.name}: {s.label!r} ends in a unit"
 
 
 def test_the_wire_carries_the_label_and_the_run_toml_key(cat):
     row = {r["name"]: r for r in cat.as_wire("bace")["params"]}["n_averages"]
-    assert row["label"] == "Hardware averages"
+    assert row["label"] == "# Averages"
     assert row["recipe"] == ["acquisition.n_averages"]
     settle = {r["name"]: r for r in cat.as_wire("jv")["params"]}["settle_s"]
-    assert settle["label"] == "Dwell per point"
-    assert {r["name"]: r for r in cat.as_wire("bace")["params"]}["settle_s"]["label"] == "Light settle"
+    assert settle["label"] == "Stab. time"
+    assert {r["name"]: r for r in cat.as_wire("bace")["params"]}["settle_s"]["label"] == "Wait before measure"
 
 
 def test_a_parameter_without_a_label_is_refused():

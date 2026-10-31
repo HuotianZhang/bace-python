@@ -82,7 +82,7 @@ test('the jv card reads the light off the bench, and unknown is not dark', () =>
 test('the axis rows are labelled for the operator, and the wire names stay', () => {
   const model = cardModel(entry('bace', { axis_name: 'vpre' }));
   const seg = model.above.find((row) => row.kind === 'segmented' && row.spec.name === 'axis_name');
-  assert.equal(seg.label, 'Scan parameter');
+  assert.equal(seg.label, 'Scan');
   const range = model.above.find((row) => row.kind === 'range');
   assert.equal(range.label, 'Scan range');
   assert.deepEqual([range.start.name, range.stop.name, range.step.name], ['axis_start', 'axis_stop', 'axis_step']);
@@ -141,10 +141,10 @@ test('centre_on_voc and vpre_on_voc are one decision, and axis_name makes it', (
   assert.ok(delay.hidden.includes('centre_on_voc'));
 });
 
-test('the V_oc row carries led_v, and says which of the two states it is in', () => {
+test('the Voc row carries led_v, and says which of the two states it is in', () => {
   const none = cardModel(entry('bace'));
   const row = none.above.find((r) => r.kind === 'voc');
-  assert.ok(row, 'the V_oc row exists');
+  assert.ok(row, 'the Voc row exists');
   assert.equal(row.voc.value, null);
   assert.ok(row.need && /run jv_bace first/.test(row.need.text));
   assert.equal(row.led.name, 'led_v', 'the level lives in this row: one number, one place');
@@ -195,7 +195,7 @@ test('the fold is groups with computed counts, in reach order', () => {
 test('store_shots is folded but not silent', () => {
   assert.deepEqual(cardModel(entry('bace')).chips, []);
   assert.deepEqual(cardModel(entry('bace', { store_shots: true })).chips,
-    ['store_shots · every shot kept']);
+    ['Every shot stored']);
 });
 
 test('jv_bace shows the LED range, or the inherited level instead of it', () => {

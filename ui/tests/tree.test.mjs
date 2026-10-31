@@ -161,7 +161,7 @@ test('a module row carries the ParamSet the schedule resolved for it, provenance
   assert.equal(bace.params.led_v.value, 1.010, 'the first iteration\'s level');
   assert.equal(bace.params.n_loops.value, 100);
   assert.equal(bace.params.n_loops.detail, 'pipeline node');
-  assert.equal(bace.voc.how, 'jv_bace', 'and which measurement will supply its V_oc');
+  assert.equal(bace.voc.how, 'jv_bace', 'and which measurement will supply its Voc');
   assert.equal(bace.voc.led_v, 1.010, 'at the level it is measured at — §6\'s coupling');
 });
 
@@ -455,7 +455,7 @@ test('an unmeasured settle is hatched and has no width, and the axis is elapsed 
     'each a mark, not a duration — never the median of the others');
   // The hold beside it is a number the tree typed, and is drawn at its width.
   assert.ok(shades.some((s) => !s.hatch && s.colour === 'grey'), 'the holds are drawn');
-  assert.match(model.x.label, /elapsed/);
+  assert.match(model.x.label, /from Start/);
   assert.ok(model.notes.some((n) => n.startsWith('at least ')));
   assert.ok(!model.notes.some((n) => /finish \d\d:\d\d/.test(n)),
     'no clock time under a floor — the note says why there is none');
@@ -466,10 +466,8 @@ test('a cost that is not a floor gets its wall clock back', () => {
     blocks: timeline(scheduleTree(BOUND.schedule)),
     cost: costModel(BOUND.cost),
   });
-  assert.equal(model.x.label, 'clock');
-  const when = model.notes.find((n) => n.includes('finish'));
-  assert.ok(/start \d\d:\d\d · finish \d\d:\d\d/.test(when), when);
-  assert.ok(!when.includes('at least'));
+  assert.equal(model.x.label, 'Time');
+  assert.ok(!model.notes.some((n) => n.includes('at least')));
 });
 
 test('an empty pipeline draws an absence, not a chart of nothing', () => {

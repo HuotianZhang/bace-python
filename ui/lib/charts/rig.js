@@ -8,12 +8,12 @@
 
 import { root } from '../svg.js';
 
-const F = "'IBM Plex Mono',monospace";
 const FS = "'IBM Plex Sans',sans-serif";
+const F = FS;
 const A = '#ec3013';    // `--accent`
 const AD = '#ae1800';   // `--accent-dark`
 const K = '#201e1d';    // `--ink`
-const G = '#7d7979';    // `--grey`
+const G = '#5c5858';    // `--grey`
 const L = '#d7d3d3';    // `--rule`
 const LL = '#eae7e7';   // `--fill`
 const W = '#fff';       // `--paper`
@@ -48,13 +48,13 @@ function box(x, y, w, h, lines, o) {
 /** The chain diagram shows instrument wiring in a 960 × 470 reference layout. */
 export const CHAIN_SIZE = { width: 960, height: 470 };
 
-export function chainMarkup() {
+export function chainMarkup(resistor = null) {
   let s = markers;
   // instruments
   s += box(44, 30, 220, 58, ['33220A', 'LED drive · master clock', '1 kHz · 50 % · low 0.400 V']);
   s += box(44, 118, 220, 58, ['81150A', 'bias pulser', 'ARM EXT POS · :PULS:DEL1 = delay_ns'], { s: A, sw: 1.4 });
-  s += box(44, 206, 220, 58, ['Keithley 2400', 'SMU · DC', 'V_oc · J_sc · J_sat · cc ≤ 50 mA']);
-  s += box(44, 294, 220, 58, ['Infiniium', 'digitiser', 'CHAN1 I(t) · CHAN3 trigger · avg 100']);
+  s += box(44, 206, 220, 58, ['Keithley 2400', 'SMU · DC', 'Voc · Jsc · Jsat · cc ≤ 50 mA']);
+  s += box(44, 294, 220, 58, ['Infiniium', 'scope', 'CHAN1 I(t) · CHAN3 trigger']);
   s += box(44, 382, 220, 58, ['Deditec DIO', 'shutter = module 0 · relay = module 1', 'ID 9'], { s: G, d: '3 3' });
   // bench
   s += box(344, 30, 90, 58, ['LED amp', 'fixed gain', '≈ 83 ns']);
@@ -64,9 +64,9 @@ export function chainMarkup() {
   s += box(814, 30, 130, 58, ['1918-C', 'optical power', 'W · :8918']);
   s += box(344, 118, 90, 58, ['× 4 amp', 'bias', ''], { s: A, sw: 1.4 });
   s += box(514, 190, 150, 84, ['relay · DIO 1', '2400  ↔  amplifier · never both', ''], { sw: 1.4 });
-  s += box(734, 190, 210, 70, ['device in cryostat', 's4 · PTQ10:IT-4F · pixel a', 'V_pre held · pulsed to V_coll'], { sw: 2 });
-  s += box(734, 300, 210, 50, ['R_sense 5.192 Ω', 'I = V / R', ''], {});
-  s += box(734, 390, 210, 50, ['Lake Shore 331', 'cryostat temperature · not wired', 'console :8331'], { s: G, d: '3 3' });
+  s += box(734, 190, 210, 70, ['device in cryostat', 'Vpre held · pulsed to Vcoll', ''], { sw: 2 });
+  s += box(734, 300, 210, 50, [`Resistor ${resistor ?? '—'} Ω`, 'I = V / R', ''], {});
+  s += box(734, 390, 210, 50, ['Lake Shore 331', 'cryostat temperature', ''], { s: G, d: '3 3' });
   // relay poles
   s += `<circle cx="530" cy="246" r="3" fill="${K}"/><circle cx="530" cy="264" r="3" fill="${K}"/><circle cx="648" cy="255" r="3" fill="${K}"/>`;
   s += line(530, 264, 648, 255, K, 1.6);
@@ -86,7 +86,7 @@ export function chainMarkup() {
   s += t(14, 252, 'SYNC → CHAN3', { f: `500 9px ${FS}`, c: AD, a: 'middle', tr: 'rotate(-90 14 252)' });
   // bias
   s += path('M264 147H342', A, 2, null, { m: 'aa' }); s += path('M434 147H474V246H512', A, 2, null, { m: 'aa' });
-  s += t(438, 142, 'V_pre → V_coll', { f: `500 9px ${FS}`, c: AD });
+  s += t(438, 142, 'Vpre → Vcoll', { f: `500 9px ${FS}`, c: AD });
   // DC
   s += path('M264 264H512', K, 1.6, null, { m: 'ak' }); s += t(300, 260, 'DC', { f: `400 9px ${FS}` });
   // relay -> device
@@ -128,7 +128,7 @@ export function shotMarkup(axis = 'vpre') {
   const xs = XA(0.43), yhL = 104, ybL = 122, yhD = 108, ybD = 126;
   s += path(`M90 ${yhL}H${xs}`, hv ? A : K, 1.4); s += path(`M${xs} ${yhD}H980`, K, 1.4);
   for (let j = 0; j < 80; j += 1) { const xb = 90 + j * per + per / 2, lt = xb < xs; s += line(xb, lt ? yhL : yhD, xb, lt ? ybL : ybD, hc ? A : K, 1); }
-  s += t(90, 170, 'LED drive never stops · the light at the sample follows 502 ns later   ·   bias: V_pre ⇄ V_coll (1.0423 → −4.00 V) for 5 µs at every LED-off edge   ·   dark half: 0 ⇄ −5.04 V, the same swing shifted by −V_oc', { f: `400 9px ${FS}` });
+  s += t(90, 170, 'LED drive never stops · the light at the sample follows 502 ns later   ·   bias: Vpre ⇄ Vcoll for 5 µs at every LED-off edge   ·   dark half: the same swing shifted by −Voc', { f: `400 9px ${FS}` });
   s += rect(XA(0.25), 136, XA(0.35) - XA(0.25), 18, A); s += rect(XA(0.65), 136, XA(0.75) - XA(0.65), 18, K);
   s += t(XA(0.30), 148, 'light · 100 cycles', { a: 'middle', f: `500 9px ${FS}`, c: W }); s += t(XA(0.70), 148, 'dark · 100 cycles', { a: 'middle', f: `500 9px ${FS}`, c: W });
   s += t(XA(0.14), 148, 'settle_s 0.20', { a: 'middle' }); s += t(XA(0.54), 148, 'dark_settle_s 0.20', { a: 'middle' }); s += t(XA(0.775), 148, 'Q', { a: 'middle', f: `600 10px ${F}`, c: K });
@@ -149,8 +149,8 @@ export function shotMarkup(axis = 'vpre') {
   s += t(XB(0.52), 265, 'SYNC ↑ · 380 ns after the drive-off edge · arms 81150A · scope trigger', { f: `500 9px ${FS}`, c: AD });
   const xp = XB(0.5) + 0.5;
   s += path(`M90 296H${xp}`, hv ? A : K, hv ? 2.4 : 1.6); s += path(`M${xp} 296V318H${xp + 5}V296`, hc ? A : K, hc ? 2.4 : 1.6); s += path(`M${xp + 5} 296H980`, hv ? A : K, hv ? 2.4 : 1.6);
-  s += t(XB(0.05), 291, 'V_pre = V_oc + 0.000 → 1.0423 V', { f: `${hv ? '600' : '500'} 9.5px ${F}`, c: hv ? A : K });
-  s += t(xp + 20, 307, ':PULS:DEL1 = delay_ns 60 · V_coll −4.00 V for 5 µs', { f: `${(hd || hc) ? '600' : '400'} 9px ${F}`, c: hd ? A : (hc ? A : G) });
+  s += t(XB(0.05), 291, 'Vpre', { f: `${hv ? '600' : '500'} 9.5px ${F}`, c: hv ? A : K });
+  s += t(xp + 20, 307, ':PULS:DEL1 = Delay · Vcoll for 5 µs', { f: `${(hd || hc) ? '600' : '400'} 9px ${F}`, c: hd ? A : (hc ? A : G) });
   s += t(xp + 20, 319, 'the 5 µs record starts 0.48 µs before the Sync', { f: `400 9px ${F}`, c: G });
   s += line(xp + 1, 330, xp + 1, 346, A, 1.6);
   s += t(xp + 20, 341, 'trigger ← 81150A SYNC · one record per cycle', { f: `400 9px ${FS}` });
@@ -168,8 +168,8 @@ export function shotMarkup(axis = 'vpre') {
   s += path(`M90 442H${XC(0)}V428H980`, A, 1.6);
   s += t(XC(0) - 5, 439, '0 · Sync = trigger', { a: 'end', f: `500 9px ${F}`, c: AD });
   s += path(`M90 450H${XC(60)}`, hv ? A : K, hv ? 2.4 : 1.6); s += path(`M${XC(60)} 450V472H980`, hc ? A : K, hc ? 2.4 : 1.6);
-  s += t(XC(-460), 447, 'V_pre 1.0423 V', { f: `${hv ? '600' : '500'} 9px ${F}`, c: hv ? A : K });
-  s += t(XC(60) + 8, 458, '+60 · :PULS:DEL1 = delay_ns · V_coll −4.00 V', { f: `${(hd || hc) ? '600' : '500'} 9px ${F}`, c: hd ? A : (hc ? A : K) });
+  s += t(XC(-460), 447, 'Vpre', { f: `${hv ? '600' : '500'} 9px ${F}`, c: hv ? A : K });
+  s += t(XC(60) + 8, 458, '+Delay · :PULS:DEL1 · Vcoll', { f: `${(hd || hc) ? '600' : '500'} 9px ${F}`, c: hd ? A : (hc ? A : K) });
   s += path(`M90 484H${XC(122)}V498H980`, K, 1.6, '5 3');
   s += t(XC(107) - 8, 495, 'light off at the sample · +122 · 502 ns after the drive edge', { a: 'end', f: `500 9px ${F}`, c: K });
   s += rect(XC(107), 506, XC(122) - XC(107), 42, A, { op: 0.14 });
@@ -188,8 +188,8 @@ export function shotMarkup(axis = 'vpre') {
   s += rect(90, 600, 890, 130, W, { s: L });
   s += t(8, 626, 'bias', { f: `600 10px ${FS}`, c: K }); s += t(8, 680, 'photocurrent', { f: `600 10px ${FS}`, c: K });
   s += path(`M90 614H${XD(60)}`, hv ? A : K, hv ? 2.4 : 1.6); s += path(`M${XD(60)} 614V634H980`, hc ? A : K, hc ? 2.4 : 1.6);
-  s += t(XD(-460), 610, 'V_pre', { f: `500 9.5px ${F}`, c: hv ? A : K });
-  s += t(976, 610, 'V_coll −4.00 V · back to V_pre at +5.06 µs, after the record ends', { a: 'end', f: `${hc ? '600' : '500'} 9.5px ${F}`, c: hc ? A : K });
+  s += t(XD(-460), 610, 'Vpre', { f: `500 9.5px ${F}`, c: hv ? A : K });
+  s += t(976, 610, 'Vcoll −4.00 V · back to Vpre at +5.06 µs, after the record ends', { a: 'end', f: `${hc ? '600' : '500'} 9.5px ${F}`, c: hc ? A : K });
   s += rect(XD(118.5), 642, 980 - XD(118.5), 80, A, { op: 0.07 });
   s += line(XD(118.5), 642, XD(118.5), 722, A, 1.5);
   let dd = `M90 712H${XD(107)}L${XD(122)} 660`;
@@ -212,5 +212,5 @@ function svgOf({ width, height }, markup) {
   return el;
 }
 
-export const chainSvg = () => svgOf(CHAIN_SIZE, chainMarkup());
+export const chainSvg = (resistor) => svgOf(CHAIN_SIZE, chainMarkup(resistor));
 export const shotSvg = (axis) => svgOf(SHOT_SIZE, shotMarkup(axis));

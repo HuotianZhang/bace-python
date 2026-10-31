@@ -23,7 +23,7 @@ export const FOLD_ORDER = [
 export const LAYOUT = {
   jv: {
     above: [
-      { kind: 'range', label: 'Sweep', names: ['start_v', 'stop_v', 'step_v'] },
+      { kind: 'range', label: 'Voltage', names: ['start_v', 'stop_v', 'step_v'] },
       'settle_s', 'both_directions', 'pixel_area_cm2',
     ],
     readback: 'illumination',
@@ -37,11 +37,11 @@ export const LAYOUT = {
       // binding and folds rather than disappearing.
       { kind: 'field', name: 'led_v', when: (v, w) => isBound(w.led_v), otherwise: 'fold' },
       {
-        kind: 'range', label: 'LED levels', names: ['led_start_v', 'led_stop_v', 'led_step_v'],
+        kind: 'range', label: 'LED Voltage', names: ['led_start_v', 'led_stop_v', 'led_step_v'],
         when: (v, w) => !isBound(w.led_v), stepUnusedAtZeroWidth: true,
       },
       'led_settle_s', 'dark',
-      { kind: 'range', label: 'Sweep', names: ['start_v', 'stop_v', 'step_v'] },
+      { kind: 'range', label: 'Voltage', names: ['start_v', 'stop_v', 'step_v'] },
       'settle_s', 'both_directions', 'pixel_area_cm2',
     ],
     readback: 'shutter',
@@ -54,7 +54,7 @@ export const LAYOUT = {
       // the experiment: `vpre` is BACE and `delay_ns` is TDCF. Operator labels
       // identify the scan parameter and range; wire identifiers retain `axis_*`
       // names.
-      { kind: 'segmented', name: 'axis_name', label: 'Scan parameter', accent: true },
+      { kind: 'segmented', name: 'axis_name', label: 'Scan', accent: true },
       { kind: 'range', label: 'Scan range', names: ['axis_start', 'axis_stop', 'axis_step'], accent: true, stepUnusedAtZeroWidth: true },
       // `axis_name` selects the applicable V_oc flag. The `vpre` axis centres its
       // sweep on V_oc; other axes offset pinned V_pre from it. The inapplicable flag
@@ -74,7 +74,7 @@ export const LAYOUT = {
     run: [{ label: 'Shot', kind: 'shot' }, { label: 'Scan', kind: 'run' }],
     chips: [
       // High storage cost must stay visible before a run can allocate gigabytes.
-      { when: (v) => Boolean(v.store_shots), text: 'store_shots · every shot kept' },
+      { when: (v) => Boolean(v.store_shots), text: 'Every shot stored' },
     ],
   },
 
@@ -347,11 +347,21 @@ function pointsOf(entry) {
   return Number.isInteger(n) ? n : points(entry.estimate_text);
 }
 
+/** Display names of the modules; the wire names stay. */
+export const MODULE_TITLES = {
+  jv: 'JV', jv_bace: 'Intensity JV', bace: 'BACE', light: 'Light', power: 'Power Meter',
+  temperature: 'Temperature', park: 'All off', wait: 'Wait', note: 'Note',
+};
+
+export function moduleTitle(name) {
+  return MODULE_TITLES[name] || name;
+}
+
 /** Display names of the service's fold groups; the wire names stay. */
 export const GROUP_LABELS = {
   illumination: 'Illumination', led: 'LED', acquisition: 'Acquisition', timing: 'Timing',
-  trigger: 'Trigger', processing: 'Processing', output: 'Output', sourcemeter: 'Source meter',
-  axis: 'Axis', pinned: 'Pinned', other: 'Other',
+  trigger: 'Trigger', processing: 'Processing', output: 'Output', sourcemeter: 'Keithley',
+  axis: 'Scan', pinned: 'Fixed', other: 'Other',
 };
 
 export function groupLabel(group) {

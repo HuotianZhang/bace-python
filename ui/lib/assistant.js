@@ -55,7 +55,7 @@ export function keySlot(settings) {
 export const EXAMPLES = [
   'What does BACE measure, and why is the dark reference taken from 0 V?',
   'Why does n_averages on the bace card have the value it has?',
-  'Walk me through one BACE measurement at V_oc, click by click.',
+  'Walk me through one BACE measurement at Voc, click by click.',
 ];
 
 const TOOL_LABELS = {

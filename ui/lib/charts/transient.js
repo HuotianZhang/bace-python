@@ -179,7 +179,7 @@ const stackHeight = (width, panels) => heightFor(width, panels,
  */
 const ABSENT_PANELS = [
   { key: 'traces', weight: 1.25, label: 'Current (mA)' },
-  { key: 'photo', weight: 1, label: 'Light − dark (mA)' },
+  { key: 'photo', weight: 1, label: 'PhotoCurrent (mA)' },
 ];
 
 export function transientModel(input, options = {}) {
@@ -283,7 +283,7 @@ export function transientModel(input, options = {}) {
     }
     built[0].marks = [...(built[0].marks || []), {
       x: (x0 + x1) / 2, y: built[0].rect.y + built[0].rect.h - 7, anchor: 'middle',
-      text: 'integration window', colour: 'grey', weight: 400, size: 10, halo: true,
+      text: 'integration window', colour: 'grey', weight: 400, size: 11, halo: true,
     }];
     windowNote.push(`integration window ${fmt.sig(set.window * NS, 4)} ns of record time`
       + (endS === null || endS === undefined ? '' : ` → ${fmt.sig(endS * NS, 4)} ns`)
@@ -295,7 +295,7 @@ export function transientModel(input, options = {}) {
       panel.rules = [...(panel.rules || []), { x1: x0, colour: 'grey', width: 1, dash: '3 3' }];
     }
     built[0].marks = [...(built[0].marks || []), {
-      x: x0 - 5, y: built[0].rect.y + 12, text: 'trigger', colour: 'grey', anchor: 'end', size: 8.5, halo: true,
+      x: x0 - 5, y: built[0].rect.y + 12, text: 'trigger', colour: 'grey', anchor: 'end', size: 11, halo: true,
     }];
   }
 
@@ -368,7 +368,7 @@ function photoPanel(panel, set, X, cols, at, span, view) {
     ...panel,
     label: (set.photoLabel || panel.label) + (panel.suffix || ''),
     note: 'Q = ∫ (light − dark) dt',
-    y: { scale: Y, ticks: axisTicks(Y, { count: 3 }), title: 'Light − dark (mA)', unit: 'mA' },
+    y: { scale: Y, ticks: axisTicks(Y, { count: 3 }), title: 'PhotoCurrent (mA)', unit: 'mA' },
     series: set.photo ? [{
       key: 'photo', label: 'photocurrent', colour: 'photo', width: 1.3,
       d: scale.envelopePath(set.photo.map((v) => v * MA), (i) => X(set.x(i) * NS), Y, { columns: cols, ...span }),
@@ -431,7 +431,7 @@ function readoutLine(set) {
   if (set.q !== null && set.q !== undefined) parts.push(`Q ${fmt.charge(set.q)}`);
   if (set.q_mean !== null && set.q_mean !== undefined) parts.push(`mean ${fmt.charge(set.q_mean)}`);
   const sigma = fmt.sigmaQ(set.q_std);
-  parts.push(sigma ? `σ ${sigma} C` : 'σ_Q not recorded');
+  parts.push(sigma ? `σ ${sigma} C` : 'σQ not recorded');
   return parts.join('  ·  ');
 }
 

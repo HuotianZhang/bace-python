@@ -38,8 +38,9 @@ gives the text rules; the visual ones are:
 
 | Rule | |
 |---|---|
-| Type scale | 13 px values and labels, 11 px secondary text, 10.5 px mono identifiers, 9 px engraved zone titles |
-| Identifiers | Code names, node paths, run ids, check codes and file stems share one style: mono, grey, 10.5 px |
+| Type scale | 13 px values, labels and controls; 12 px secondary text; 11 px chart ticks and marks; 15, 17 and 20 px headings and large readouts |
+| Secondary text | `--grey`, 7:1 on paper. Text is never lighter |
+| Controls | Buttons, switches and inputs are 24 px high with a 1 px box |
 | Field row | Label, value, state. Nothing sits between rows except a warning about the row above |
 | Side panels | The assistant and the plans share one side panel. It narrows the view on a wide screen and overlays it below 1280 px |
 
@@ -47,14 +48,13 @@ gives the text rules; the visual ones are:
 
 | Quantity | Rendering |
 |---|---|
-| Text | IBM Plex Sans; Archivo for wordmark, card titles and buttons |
-| Numbers | IBM Plex Mono, tabular figures; chart tick labels in IBM Plex Sans, as in a printed figure |
+| Text and numbers | IBM Plex Sans throughout, tabular figures |
 | Q | Six significant figures in scientific notation, e.g. `3.65257e-10 C`, in the shared formatter; summary views can show nC |
 | V_oc and potentials | Four decimals |
 | Current density | Three significant figures, fixed unit mA/cm² |
 | Temperature | One decimal in K |
 | Traces | Three significant figures |
-| Axis labels | Quantity / unit: `V_pre / V`, `Q / C`, `time / s`, `T / K` |
+| Axis labels | Quantity (unit): `Vpre (V)`, `Q (pC)`, `Time (ns)`, `T (K)` |
 | Other currents, times and powers | SI prefixes where readable: mA, ns, mW |
 
 `ui/lib/format.js` owns these rules. Names and symbols follow the glossary:
@@ -69,6 +69,32 @@ changes its prefix per value. `JVCurveDone.density` arrives in mA/cm².
 A computed standard deviation can also be zero for one acquired shot.
 The marker reports unavailable spread, not proof of zero noise
 (`bace/core/process.py`, `ui/lib/format.js`).
+
+## Names
+
+A parameter keeps its name from the LabVIEW panel (`BACE_Mehrdad.vi`, pictured in the BACE Quick Guide). Where the panel has no name, use the plainest common word. Code names stay on the wire and in tooltips.
+
+| Console | Code or old name |
+|---|---|
+| Measure, Sequence, Setup | Bench, Pipeline and Rig tabs |
+| JV, Intensity JV, BACE, Power Meter | `jv`, `jv_bace`, `bace`, `power` |
+| Measurement, step | module, node |
+| All off | park |
+| Check | dry run |
+| Keithley | source meter, SMU |
+| Vpre, Vcoll, Voc, Jsc, Jsat | `V_pre`, `V_coll`, `V_oc`, `J_sc`, `J_sat` |
+| Start Voltage, End Voltage, dV, Stab. time | `start_v`, `stop_v`, `step_v`, `settle_s` on JV |
+| Start Voltage LED, End Voltage LED, dV LED, LED stab. time | `led_start_v`, `led_stop_v`, `led_step_v`, `led_settle_s` |
+| LED Voltage, Voltage Low, Freq, Duty Cycle | `led_v`, `led_low_v`, `pulse_frequency_hz`, `duty_percent` |
+| Settle Time Jsc, Settle Time Voc, Settle Time Jsat | `smu_settle_*_ms` |
+| Voc/Jsc/Jsat, Vcoll for Jsat | `measure_dc`, `v_sat` |
+| # Averages, # of Loops | `n_averages`, `n_loops` |
+| t0 Integration, Integration time | `t0_int_s`, `t_int_width_s` |
+| Offset corr., Ext. trig, Recording Intensity | `offset_correct`, `external_trigger`, `read_intensity` |
+| Wait before measure | `settle_s` on BACE |
+| Resistor, Pulse Amp | `sense_resistor_ohm`, `pulse_amp` |
+
+`t0 Integration` is measured from the field's arrival, not from the first sample as on the panel.
 
 ## 3 · Colour
 

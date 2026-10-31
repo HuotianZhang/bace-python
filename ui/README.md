@@ -53,7 +53,7 @@ with no CORS or proxy. The offline server exposes the repository root at
 | `preview.html` | Real shell and bench view with stub API; bench saves last only for the tab lifetime; `#/rig` opens the rig view |
 | `studies/rail-density.html`, `studies/bench-head.html` | Layout comparison records |
 | `views/` | Bench: five module cards and Instruments. Pipeline: tree and schedule. Results: run records and grids. Rig: chain, shot timing and read-back. |
-| `fonts/` | IBM Plex Sans/Mono and Archivo, 24 WOFF2 files, about 387 kB; no font request at runtime |
+| `fonts/` | IBM Plex Sans, 6 WOFF2 files, about 180 kB; no font request at runtime |
 | `fixtures/` | Recorded API and event data listed below |
 | `tests/` | Node tests, also run by `tests/test_ui.py` when Node exists |
 | `eslint.config.mjs` | `no-undef` over library, views, entry points and tests, with explicit browser globals |

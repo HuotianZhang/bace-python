@@ -126,7 +126,7 @@ def _axis_violations(node: Module, allowed: Mapping[str, Mapping[str, Any]]) -> 
     if axis == "vpre":
         if "centre_on_voc" not in node.params:
             return [f"{node.module} sweeps vpre without setting centre_on_voc, so the plan "
-                    "cannot tell offsets from V_oc from volts"]
+                    "cannot tell offsets from Voc from volts"]
         if node.params["centre_on_voc"]:
             return []
     bound = allowed.get(axis)

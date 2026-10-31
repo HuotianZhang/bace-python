@@ -88,7 +88,7 @@ export function jvModel(curves, options = {}) {
         frame: {
           width,
           height: jvHeight,
-          panels: [{ key: 'jv', weight: 1, label: 'Current' }],
+          panels: [{ key: 'jv', weight: 1 }],
           margin: jvMargin,
           xLabel: 'Voltage (V)',
         },
@@ -213,7 +213,7 @@ export function jvModel(curves, options = {}) {
         x: X(curve.voltage[0]) + 5,
         y: Math.min(rect.y + rect.h - 4,
           Math.max(rect.y + 9, Y(useLog ? Math.abs(y[0]) : y[0]) - 5)),
-        text: label, colour, anchor: 'start', weight: 600, size: 9,
+        text: label, colour, anchor: 'start', weight: 600, size: 11,
       });
     }
   }
@@ -235,7 +235,7 @@ export function jvModel(curves, options = {}) {
     panels: [{
       ...panel,
       label: `${useLog ? quantity.magnitude : quantity.label}  ·  V / V →`,
-      note: sweepNote(list, xDomain),
+      note: sweepNote(list),
       y: {
         scale: Y, ticks: axisTicks(Y, { count: 4 }), canLog: true,
         title: useLog ? quantity.logTitle : quantity.title, unit: axisUnit,
@@ -306,20 +306,17 @@ function nearestVoltage(voltage, v) {
 }
 
 export function curveLabel(curve) {
-  if (curve.label) return curve.label;
+  if (curve.label) return curve.label.replace(/^as found /, '');
   if (curve.dark === true) return 'dark';
   if (curve.led_level_v !== null && curve.led_level_v !== undefined) return `${fmt.volts(curve.led_level_v, { decimals: 3 })}`;
   return curve.illumination || 'curve';
 }
 
-function sweepNote(list, xDomain) {
-  const from = Math.min(...list.map((c) => c.voltage[0]));
-  const done = list.filter((c) => c.partial !== true);
-  const parts = [`${done.length} curve${done.length === 1 ? '' : 's'}`];
+function sweepNote(list) {
+  const parts = [];
   const live = list.find((c) => c.partial === true);
   if (live) parts.push(`sweeping ${curveLabel(live)} · point ${live.k || live.voltage.length} of ${live.of || '?'}`);
-  if (xDomain[0] < -1) parts.push(`sweep starts at ${fmt.volts(from, { decimals: 2 })}`);
-  if (list.some((c) => c.direction === 'reverse')) parts.push('reverse arm dashed — a second sweep');
+  if (list.some((c) => c.direction === 'reverse')) parts.push('reverse dashed');
   return parts.join(' · ');
 }
 
@@ -336,16 +333,16 @@ export function metricsOf(list, quantity) {
     out.push({
       label: curveLabel(curve),
       rows: [
-        { key: 'V_oc', value: m.voc === null || m.voc === undefined ? fmt.ABSENT : fmt.volts(m.voc) },
-        { key: 'J_sc', value: m.jsc === null || m.jsc === undefined ? fmt.ABSENT : fmt.amps(m.jsc), note: 'in amps' },
+        { key: 'Voc', value: m.voc === null || m.voc === undefined ? fmt.ABSENT : fmt.volts(m.voc) },
+        { key: 'Jsc', value: m.jsc === null || m.jsc === undefined ? fmt.ABSENT : fmt.amps(m.jsc) },
         { key: 'FF', value: m.fill_factor === null || m.fill_factor === undefined
           ? fmt.ABSENT : fmt.sig(m.fill_factor * 100, 3) + ' %' },
-        { key: 'P_mpp', value: watts(m.p_max) },
-        { key: 'V_mpp', value: m.v_mpp === null || m.v_mpp === undefined ? fmt.ABSENT : fmt.volts(m.v_mpp) },
+        { key: 'Pmpp', value: watts(m.p_max) },
+        { key: 'Vmpp', value: m.v_mpp === null || m.v_mpp === undefined ? fmt.ABSENT : fmt.volts(m.v_mpp) },
       ],
     });
   }
-  return { entries: out, note: 'Derived: interpolated from the curve' };
+  return { entries: out };
 }
 
 /** Maximum-power-point values use readable prefixes, such as µW for a small cell. */
@@ -359,18 +356,16 @@ function watts(value) {
 function notes(list, quantity, { useLog, clamped, allDark, cropped = 0 }) {
   const out = [];
   if (quantity.key === 'current') {
-    out.push('no pixel area on this run, so the axis is amps — a density would be inventing one');
+    out.push('No Pixel Area: current in A');
   }
   if (cropped) {
-    out.push(`the axis is the power quadrant · ${cropped} sample${cropped === 1 ? '' : 's'} `
-      + 'of forward injection above it, clipped rather than compressed away');
+    out.push(`${cropped} point${cropped === 1 ? '' : 's'} above the axis`);
   }
   if (useLog) {
-    out.push('|J| on a log axis: a dark sweep is read over decades');
-    if (clamped) out.push(`${clamped} sample${clamped === 1 ? '' : 's'} at or below the floor, clamped to it`);
+    if (clamped) out.push(`${clamped} point${clamped === 1 ? '' : 's'} below the axis`);
   }
   if (!allDark && list.some((c) => c.dark === null || c.dark === undefined)) {
-    out.push('a curve whose illumination the bench could not read back — labelled from the read-back, and it said nothing');
+    out.push('Illumination unknown');
   }
   const levels = list.map((c) => c.led_level_v).filter((v) => v !== null && v !== undefined);
   if (levels.length > 1) {

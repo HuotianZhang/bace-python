@@ -52,7 +52,7 @@ export default {
     const nodesEl = h('div');
     const panelEl = h('div');
     fill(openEl, headEl, h('div.cb.rbody',
-      h('div.rleft', gridEl, sumEl, chartEl, h('h3', { title: 'In the order they ran.' }, 'Nodes'), nodesEl),
+      h('div.rleft', gridEl, sumEl, chartEl, h('h3', { title: 'In the order they ran.' }, 'Steps'), nodesEl),
       h('div.rright', panelEl)));
 
     // -- fetching --------------------------------------------------------
@@ -179,11 +179,11 @@ export default {
 
       keyed(headEl, recordKey, () => [
         h('div.ch',
-          h('span.cn', 'Open'),
+          h('span.cn', 'Run'),
           recordStatus ? h('span.cs', { text: recordStatus }) : null,
-          h('span.tag', { text: record.from === 'journal' ? 'journal' : 'this session' }),
+          record.from === 'journal' ? h('span.tag', { text: 'journal' }) : null,
           record.data_in_memory === false
-            ? h('span.tag', { title: 'Scalars only; the arrays are in the HDF5 file.', text: 'arrays not in memory' }) : null,
+            ? h('span.tag', { title: 'Scalars only; the arrays are in the HDF5 file.', text: 'summary only' }) : null,
           h('span.spacer'),
           grid.shape === 'grid' ? h('button.btng', { onclick: () => exportCsv(grid) }, 'Export CSV') : null,
           h('button.btng', { onclick: () => loadRecord(record.run_id) }, 'Reload')),
@@ -197,8 +197,8 @@ export default {
           h('div.schedbar',
             h('span.cs', 'Plot'),
             h('span.filt', { role: 'group', 'aria-label': 'plot' },
-              h('button.opt', { type: 'button', 'aria-pressed': chartBy === 'led' ? 'true' : 'false', class: chartBy === 'led' ? 'on' : '', onclick: () => { chartBy = 'led'; render(store.getState()); } }, 'Q(led_v) per T'),
-              h('button.opt', { type: 'button', 'aria-pressed': chartBy === 'T' ? 'true' : 'false', class: chartBy === 'T' ? 'on' : '', onclick: () => { chartBy = 'T'; render(store.getState()); } }, 'Q(T) per led_v'))),
+              h('button.opt', { type: 'button', 'aria-pressed': chartBy === 'led' ? 'true' : 'false', class: chartBy === 'led' ? 'on' : '', onclick: () => { chartBy = 'led'; render(store.getState()); } }, 'Q vs LED'),
+              h('button.opt', { type: 'button', 'aria-pressed': chartBy === 'T' ? 'true' : 'false', class: chartBy === 'T' ? 'on' : '', onclick: () => { chartBy = 'T'; render(store.getState()); } }, 'Q vs T'))),
           chart((w, view) => gridChartModel(grid, { by: chartBy, width: w, view }), { id: `grid/${chartBy}` }),
         ];
       });

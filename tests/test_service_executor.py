@@ -207,8 +207,8 @@ def test_the_canonical_tree_runs_with_the_three_bindings(tmp_path):
         source = measured[parent_of(p) + "/jv_bace"]
         assert ev.voc == source and ev.values[0] == pytest.approx(source)
     assert measured["T=295K/led=1.040V/jv_bace"] > measured["T=295K/led=1.020V/jv_bace"], (
-        "the simulated device's V_oc rises with drive, so a bace that centred on "
-        "the wrong level's V_oc would be visible here")
+        "the simulated device's Voc rises with drive, so a bace that centred on "
+        "the wrong level's Voc would be visible here")
     assert [(v.how, v.led_v, v.node_path) for v in vocs] == [
         ("jv_bace", 1.02, "T=295K/led=1.020V/jv_bace"),
         ("jv_bace", 1.04, "T=295K/led=1.040V/jv_bace"),
@@ -267,11 +267,11 @@ def test_the_canonical_tree_runs_with_the_three_bindings(tmp_path):
     for p, ev in done.items():
         if p.endswith("/bace"):
             assert (ev.detail["kept"], ev.detail["requested"]) == (2, 2)
-            assert ev.detail["summary"].startswith("Q ") and ev.detail["summary"].endswith("2/2")
+            assert ev.detail["summary"].startswith("Q ")
             assert ev.detail["voc"]["how"] == "jv_bace"
             assert (store[p]["kept"], store[p]["requested"]) == (2, 2)
         elif p.endswith("/jv_bace"):
-            assert ev.detail["summary"].startswith("2 curves · V_oc ")
+            assert ev.detail["summary"].startswith("2 curves · Voc ")
             assert len(store[p]["curves"]) == 2
     loops = [(p, ev.done, ev.total) for p, ev, _ in h.of(E.Progress) if ev.node_path]
     assert loops[:3] == [("T=295K", 0, 2), ("T=295K/led=1.020V", 0, 2),
@@ -471,7 +471,7 @@ def test_stopping_while_paused_closes_the_temperature_node_and_aborting_unwinds_
 
 # -- failure ----------------------------------------------------------------------------
 def test_a_module_the_builder_refuses_fails_the_run_with_the_node_named(tmp_path):
-    """No V_oc source and `centre_on_voc`: `validate` would have refused the
+    """No Voc source and `centre_on_voc`: `validate` would have refused the
     tree, and the builder refuses it again before touching anything."""
     b = bench()
     schedule = schedule_of(bace_node(1))            # resolve alone does not refuse
@@ -1018,8 +1018,8 @@ def test_the_run_summary_is_q_in_nc_with_the_standard_error_of_the_mean():
     from bace.service.journal import finished_text
     q = np.array([[-1.80e-10], [-2.00e-10], [-1.90e-10], [-1.90e-10]])
     data = {"q_mean": q.mean(0), "q_std": q.std(0, ddof=1), "q_all": q}
-    assert finished_text(data, 4, 4) == "Q -0.190 ± 0.0041 nC (sem), 4 loops · 4/4"
+    assert finished_text(data) == "Q -190 ± 4.1 pC"
     q3 = np.hstack([q, q * 1.05, q * 0.95])
     data3 = {"q_mean": q3.mean(0), "q_std": q3.std(0, ddof=1), "q_all": q3.tolist()}
-    assert finished_text(data3, 12, 12) ==         "3 points, Q -0.200 to -0.180 nC, sem ≤ 0.0043, 4 loops · 12/12"
-    assert finished_text({"q_mean": [-1.9e-10], "q_std": [None]}, None, None) == "Q -0.190 nC",         "a journal line without q_all still reads"
+    assert finished_text(data3) ==         "3 points, Q -200 to -180 pC"
+    assert finished_text({"q_mean": [-1.9e-10], "q_std": [None]}) == "Q -190 pC",         "a journal line without q_all still reads"

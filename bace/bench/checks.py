@@ -1220,7 +1220,7 @@ def _classify_dio(c: Check, table: dict, modules, *, led_on: bool = True) -> Non
         return
     c.data["photocurrent state"] = (
         f"module {modules[0]}={lit[0]}, {modules[1]}={lit[1]}  "
-        f"-> {table[lit][1]:+.4e} A, V_oc {table[lit][0]:+.4f} V. "
+        f"-> {table[lit][1]:+.4e} A, Voc {table[lit][0]:+.4f} V. "
         "Device on the Keithley, light reaching it.")
 
     # Forward conduction indicates a connected electrical path.
@@ -1566,7 +1566,7 @@ def saturation_verdict(light, dark) -> tuple[int, int, bool, str | None]:
         return rail_light, rail_dark, True, (
             "the light and dark traces share an extreme value exactly. Two "
             "independently averaged acquisitions do not agree on an extremum to "
-            "full precision — that is the digitiser's own rail, so both traces "
+            "full precision — that is the scope's own rail, so both traces "
             "are saturated, `light - dark` is identically zero wherever they "
             "are, and the transient is subtracted away rather than measured. "
             "Widen the range or reduce the swing and rerun; do not interpret "

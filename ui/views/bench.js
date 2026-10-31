@@ -16,7 +16,7 @@ import { RESULT_CARDS, createChartThrottle, resultKeys, resultPanel, runFor } fr
 
 export default {
   route: 'bench',
-  title: 'Bench',
+  title: 'Measure',
 
   mount(container, { store, api, notify, query = {} }) {
     // Instruments act immediately; cards edit values used by later runs and pipeline
@@ -383,14 +383,14 @@ export default {
      */
     function savedBar(m) {
       const said = {
-        none: () => [h('span.none', 'no saved bench')],
+        none: () => [h('span.none', '')],
         idle: () => [h('span.none', { text: `${fmt.plural(m.count, 'saved bench', 'saved benches')}` })],
         match: () => [h('span.who', { text: m.name }), h('span.match', '✓ matches the bench')],
         drift: () => [h('span.who', m.name, h('span.dot', ' •')),
           h('span.drift', { text: `${fmt.plural(m.moved.length, 'value')} differ${m.moved.length === 1 ? 's' : ''}` })],
       }[m.state]();
       return h('div.modbar',
-        h('span.zt', 'Modules'),
+        h('span.zt', 'Measurements'),
         said,
         h('button.dots', {
           type: 'button',

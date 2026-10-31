@@ -4,7 +4,7 @@
 
 :root {
   --ink: #201e1d;
-  --grey: #7d7979;
+  --grey: #5c5858;
   --rule: #d7d3d3;
   --fill: #eae7e7;
   --grid: #f2efef;            /* Faint gridlines keep traces prominent. */
@@ -19,8 +19,6 @@
   --ok: #3f7d53;
 
   --font-body: 'IBM Plex Sans', system-ui, sans-serif;
-  --font-num: 'IBM Plex Mono', ui-monospace, monospace;
-  --font-head: 'Archivo', 'IBM Plex Sans', system-ui, sans-serif;
 
   --rail-height: 46px;
   --tabs-height: 38px;
@@ -34,23 +32,17 @@ html, body {
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-body);
+  font-variant-numeric: tabular-nums;
   font-size: 13px;
   line-height: 1.45;
 }
 
-/* Tabular figures keep changing numbers horizontally stable (`docs/ui-rules.md`
-   section 2). */
-.num, code, pre {
-  font-family: var(--font-num);
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: 'tnum' 1;
-}
+code, pre { font-family: ui-monospace, Consolas, monospace; }
 
-h1, h2, h3, .wordmark, button {
-  font-family: var(--font-head);
-  font-weight: 800;
-  letter-spacing: -0.01em;
-}
+h1, h2, h3, .wordmark { font-weight: 600; }
+
+button, input, select, textarea { font-family: inherit; font-variant-numeric: inherit; }
+button { font-weight: 500; }
 
 #app { display: flex; flex-direction: column; height: 100%; }
 
@@ -63,16 +55,16 @@ h1, h2, h3, .wordmark, button {
   color: #fff;
   flex: 0 0 auto;
 }
-.bar .wordmark { display: flex; align-items: center; font-size: 15px; text-transform: uppercase; letter-spacing: .02em; padding-right: 16px; }
+.bar .wordmark { display: flex; align-items: center; font-size: 15px; text-transform: uppercase; padding-right: 16px; }
 .bar .spacer { flex: 1 1 auto; }
 .bar .chips { display: flex; align-items: center; gap: 6px; }
 .chip {
   display: inline-flex; align-items: center; height: 22px; padding: 0 8px;
   border: 1px solid rgba(255,255,255,.35);
-  font-family: var(--font-num); font-size: 11px; color: rgba(255,255,255,.9);
+  font-size: 12px; color: rgba(255,255,255,.9);
   white-space: nowrap;
 }
-.chip.m { font-size: 11px; color: rgba(255,255,255,.65); }
+.chip.m { font-size: 12px; color: rgba(255,255,255,.65); }
 /* A trigger-chain warning stays visible on every tab beside access to the chain
    checks. */
 .chip.bad { border-color: #ff9783; color: #ffc4b8; }
@@ -81,7 +73,7 @@ h1, h2, h3, .wordmark, button {
 .chip.state.stopping, .chip.state.paused { background: var(--warn); border-color: var(--warn); color: #fff; }
 /* The identity chip opens a panel. The pointer marks the action; inverted
    colours mark the open state. */
-button.chip.ident { background: none; cursor: pointer; font: inherit; font-family: var(--font-num); font-size: 11px; }
+button.chip.ident { background: none; cursor: pointer; font: inherit; font-size: 12px; }
 button.chip.ident:hover { border-color: #fff; color: #fff; }
 button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); }
 
@@ -94,21 +86,18 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
 }
 .ident .id-head { display: flex; align-items: baseline; gap: 10px; padding-bottom: 6px; }
 .ident .id-head .cn {
-  font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase; color: var(--grey);
+  font-size: 11px; font-weight: 600; color: var(--grey);
 }
-.ident .id-head .cs { font-size: 11px; color: var(--grey); }
-.ident .id-status { font-family: var(--font-num); font-size: 11px; }
+.ident .id-head .cs { font-size: 12px; color: var(--grey); }
+.ident .id-status { font-size: 12px; }
 .ident .id-status.ok { color: var(--ok); }
 .ident .id-status.bad { color: var(--alert); }
 /* The comment needs sentence width; the three name fields hold short tokens. */
 .ident .id-rows { display: grid; grid-template-columns: repeat(3, 1fr) 1fr 1.6fr; gap: 10px; }
 .ident .id-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 6px; align-items: center; }
-.ident .id-row .l { grid-column: 1 / -1; font-size: 12px; color: var(--grey); display: flex; gap: 6px; align-items: baseline; }
-.ident .id-row .l i { font-size: 9px; letter-spacing: .06em; text-transform: uppercase; color: var(--grey); opacity: .8; }
-.ident .id-row input.v {
-  width: 100%; min-width: 0; padding: 4px 6px; border: 1px solid var(--rule);
-  background: var(--paper); font-family: var(--font-num); font-size: 12px; color: var(--ink);
-}
+.ident .id-row .l { grid-column: 1 / -1; font-size: 13px; color: var(--grey); display: flex; gap: 6px; align-items: baseline; }
+.ident .id-row .l i { font-size: 11px; color: var(--grey); opacity: .8; }
+.ident .id-row input.v { width: 100%; min-width: 0; color: var(--ink); }
 .ident .id-row input.v:focus { border-color: var(--accent); outline: none; }
 .ident .id-row .src { display: flex; align-items: center; min-width: 14px; }
 /* Each sample row keeps its explanation visible as a caption. Repeated accent
@@ -116,7 +105,7 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
 .ident .id-row .doc {
   grid-column: 1 / -1; margin: 0; padding: 3px 0 0; max-width: none;
   border-left: 0; background: none;
-  font-size: 10px; color: var(--grey); line-height: 1.35;
+  font-size: 11px; color: var(--grey); line-height: 1.35;
 }
 /* `warn` marks an awkward folder name; `bad` marks one the service refuses. The
    stronger colour distinguishes the blocking condition. */
@@ -129,9 +118,9 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
   text-decoration: underline; cursor: pointer;
 }
 .ident .id-foot { display: flex; align-items: baseline; gap: 8px; padding-top: 8px; }
-.ident .id-foot .l { font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase; color: var(--grey); }
-.ident .id-foot .cs { font-size: 10px; color: var(--grey); }
-.ident .id-stem { font-family: var(--font-num); font-size: 12px; color: var(--ink); }
+.ident .id-foot .l { font-size: 11px; font-weight: 600; color: var(--grey); }
+.ident .id-foot .cs { font-size: 11px; color: var(--grey); }
+.ident .id-stem { font-size: 13px; color: var(--ink); }
 .ident .id-stem.absent { color: var(--alert); }
 
 /* The rail keeps eight live values visible in one row (`docs/ui-rules.md`
@@ -167,7 +156,7 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
 .rail .brl {
   display: flex; align-items: center; gap: 4px;
   flex: 0 1 auto; min-width: 0; overflow: hidden;
-  font-size: 8px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase;
+  font-size: 11px; font-weight: 600;
   color: var(--grey);
 }
 .rail .brl > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -177,9 +166,8 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
 .rail .lv-alert .brl .icon { color: rgba(255,255,255,.85); }
 .rail .brv {
   flex: 0 0 auto; margin-left: auto; max-width: 100%;
-  font-family: var(--font-num); font-weight: 500; font-size: 13px; line-height: 1.3;
-  letter-spacing: -.01em;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 500; font-size: 13px; line-height: 1.3;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 /* For a closed circuit, the lit diagram identifies the connected source, so
    duplicate text takes space without adding information. Neutral and absent
@@ -197,7 +185,7 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
   display: none;
   width: max-content; min-width: calc(100% + 2px); max-width: 340px;
   padding: 4px 9px 5px;
-  font-family: var(--font-num); font-size: 10px; line-height: 1.35;
+  font-size: 11px; line-height: 1.35;
   white-space: normal;
   color: var(--ink); background: var(--paper);
   border: 1px solid var(--ink);
@@ -241,20 +229,19 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
 }
 .rail .lv-alert.inferred .brv { border-bottom-color: rgba(255,255,255,.8); }
 .tag-inferred {
-  font-family: var(--font-num); font-size: 8.5px; font-weight: 500;
-  letter-spacing: .04em; text-transform: none;
-  padding: 1px 4px; margin-left: auto;
+  font-size: 11px; font-weight: 500;
+    padding: 1px 4px; margin-left: auto;
   border: 1px dashed #ff9783; background: #fff2ef; color: var(--accent-dark);
 }
 .rail .lv-alert .tag-inferred { border-color: rgba(255,255,255,.7); background: transparent; color: #fff; }
 
 /* The interlock diagram identifies the circuit connected to the device. */
-.rail .relay { display: flex; align-items: center; flex: 0 0 auto; width: 96px; }
+.rail .relay { display: flex; align-items: center; flex: 0 0 auto; width: 124px; }
 /* The diagram replaces a drawn value at the right; a text value keeps the
    diagram beside its label. */
 .rail .brc.drawn .relay { margin-left: auto; }
 .rail .rn {
-  font-family: var(--font-num); font-weight: 500; font-size: 8px;
+  font-weight: 500; font-size: 11px;
   padding: 1px 4px; border: 1px solid var(--rule); color: var(--grey);
   white-space: nowrap;
 }
@@ -275,13 +262,13 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
   row-gap: 5px;
 }
 .strip .sk {
-  font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase;
+  font-size: 11px; font-weight: 600;
   color: var(--grey); white-space: nowrap;
 }
 .strip .st {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 3px 8px; background: var(--paper); border: 1px solid var(--rule);
-  font-family: var(--font-num); font-size: 11px; white-space: nowrap;
+  font-size: 12px; white-space: nowrap;
 }
 .strip .st .mark { color: var(--ok); }
 .strip .st.bad { border-color: #ff9783; color: var(--accent-dark); }
@@ -290,7 +277,6 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
 .strip .st.status.ok { border-color: var(--ok); color: var(--ok); }
 .strip .st.status.bad { border-color: var(--alert); color: var(--alert); }
 .strip .spacer { flex: 1 1 auto; }
-.strip button.btns { font-size: 11px; padding: 3px 8px; font-family: var(--font-body); font-weight: 500; }
 /* The dismissal control stays beside the status it clears. Quiet styling keeps
    it subordinate to the message. */
 .strip .st.status button.stx {
@@ -304,7 +290,7 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
 .tabs a {
   display: flex; align-items: center; padding: 0 14px;
   color: rgba(255,255,255,.6); text-decoration: none;
-  font-family: var(--font-head); font-weight: 600; font-size: 13px;
+  font-weight: 600; font-size: 13px;
   border-bottom: 2px solid transparent;
 }
 .tabs a.on { color: #fff; border-bottom-color: var(--accent); }
@@ -312,7 +298,7 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
 /* The view scrolls within the persistent bench controls. */
 .view { flex: 1 1 auto; overflow: auto; padding: 16px 18px var(--view-pad-b); }
 .view h1 { font-size: 17px; margin: 0 0 12px; }
-.view h1 .sub { font-family: var(--mono, monospace); font-weight: normal; font-size: 11px; color: var(--grey); margin-left: 12px; letter-spacing: 0; }
+.view h1 .sub { font-weight: normal; font-size: 12px; color: var(--grey); margin-left: 12px; }
 .chart-note .path { border-bottom: 1px dotted var(--grey); cursor: help; }
 .view .lede { color: var(--grey); margin: 0 0 16px; max-width: 74ch; }
 
@@ -329,7 +315,7 @@ button.chip.ident.on { background: #fff; border-color: #fff; color: var(--ink); 
 table.rows { border-collapse: collapse; width: 100%; }
 table.rows th, table.rows td { text-align: left; padding: 2px 10px 2px 0; vertical-align: top; }
 table.rows th { color: var(--grey); font-weight: 400; white-space: nowrap; }
-table.rows td.num, table.rows td .num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+table.rows td.num, table.rows td .num { font-variant-numeric: tabular-nums; }
 
 /* Status colours distinguish alerts, warnings and other content
    (`docs/ui-rules.md` section 3). */
@@ -346,7 +332,7 @@ table.rows td.num, table.rows td .num { font-family: var(--font-num); font-varia
   border-top: 1px solid var(--rule);
   background: var(--fill);
   color: var(--grey);
-  font-family: var(--font-num); font-size: 11px;
+  font-size: 12px;
   flex: 0 0 auto;
 }
 .stream-bar .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--grey); }
@@ -356,13 +342,13 @@ table.rows td.num, table.rows td .num { font-family: var(--font-num); font-varia
 
 /* The session log keeps service messages readable as a sequence. */
 .log { max-height: 260px; overflow: auto; border: 1px solid var(--rule); background: var(--paper); }
-.log div { display: flex; gap: 10px; padding: 1px 8px; font-family: var(--font-num); font-size: 11px; }
+.log div { display: flex; gap: 10px; padding: 1px 8px; font-size: 12px; }
 .log div:nth-child(even) { background: #fbfafa; }
 .log .ts { color: var(--grey); }
 .log .type { color: var(--grey); min-width: 15ch; }
 
 button {
-  font-size: 12px; padding: 4px 12px; cursor: pointer;
+  font-size: 13px; padding: 4px 12px; cursor: pointer;
   border: 1px solid var(--ink); background: var(--paper); color: var(--ink);
 }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -387,7 +373,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 }
 .zh { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
 .zt {
-  font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase;
+  font-size: 11px; font-weight: 600;
   color: var(--grey);
 }
 
@@ -397,17 +383,17 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .modbar { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; min-height: 22px; }
 .modbar .zt { flex: 0 0 auto; }
 .modbar .sp { flex: 1 1 auto; }
-.modbar .who { font-family: var(--font-num); font-size: 12px; color: var(--ink); }
+.modbar .who { font-size: 13px; color: var(--ink); }
 /* The warning dot marks a difference from the saved bench. It is evidence rather
    than a blocker. */
-.modbar .who .dot { color: var(--warn); font-weight: 700; }
-.modbar .drift { font-size: 11.5px; color: var(--warn); }
-.modbar .match { font-size: 11.5px; color: var(--ok); }
-.modbar .none { font-size: 11.5px; color: var(--grey); }
+.modbar .who .dot { color: var(--warn); font-weight: 600; }
+.modbar .drift { font-size: 12px; color: var(--warn); }
+.modbar .match { font-size: 12px; color: var(--ok); }
+.modbar .none { font-size: 12px; color: var(--grey); }
 /* The menu stays beside the identity so its scope remains clear even on wide
    screens (`docs/ui-rules.md` section 14). */
 .dots {
-  font-family: var(--font-num); font-size: 14px; line-height: 1;
+  font-size: 15px; line-height: 1;
   padding: 2px 8px 5px; cursor: pointer;
   border: 1px solid transparent; background: transparent; color: var(--grey);
 }
@@ -425,7 +411,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .bdrawer .namerow { gap: 10px; }
 .bdrawer .namerow input.v { max-width: 20em; }
 .bfiles { display: flex; flex-direction: column; gap: 1px; }
-.bcap { margin: 0 0 3px; font-size: 11.5px; color: var(--grey); }
+.bcap { margin: 0 0 3px; font-size: 12px; color: var(--grey); }
 /* Columns pack actions beside their names. The empty final column absorbs spare
    width. */
 .brow {
@@ -434,13 +420,12 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 }
 .brow:last-child { border-bottom: 0; }
 .brow.on { background: #fbf8f3; }
-.brow .fn { font-family: var(--font-num); font-size: 12px; }
+.brow .fn { font-size: 13px; }
 .brow .fn i { font-style: normal; color: var(--grey); }
-.brow .ft { font-family: var(--font-num); font-size: 11px; color: var(--grey); }
+.brow .ft { font-size: 12px; color: var(--grey); }
 .brow .fa { display: flex; gap: 6px; align-items: center; }
 /* Open is prominent because restoring a bench is frequent. Overwrite and Delete
    stay quieter beside it. */
-.brow .fa .btng { font-size: 11px; }
 .recipe-note.matched { border-left-color: var(--ok); background: #f2f8f3; }
 
 /* The module heading is an element so controls can sit beside the label. */
@@ -448,8 +433,8 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 /* Small switch labels name adjacent controls without introducing another zone
    heading. */
 .irow .n {
-  font-family: var(--font-head); font-weight: 700; font-size: 9px;
-  text-transform: uppercase; letter-spacing: .09em; color: var(--grey);
+  font-weight: 600; font-size: 11px;
+  color: var(--grey);
   white-space: nowrap;
 }
 /* Instrument switches act immediately on the shutter, LED or relay
@@ -457,8 +442,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
    underlines distinguish them from settings read by Run. */
 .sw { display: inline-flex; border: 1px solid var(--ink); }
 .sw .p {
-  padding: 4px 12px; font-size: 12px; color: var(--grey); cursor: pointer;
-  font-family: var(--font-num); font-weight: 400; letter-spacing: 0; line-height: 1.4;
+  color: var(--grey); font-weight: 400;
   border: 0; border-right: 1px solid var(--rule); background: var(--paper);
   box-shadow: inset 0 -3px 0 transparent;
 }
@@ -476,26 +460,20 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .irow.inferred .sw .p.on { box-shadow: inset 0 -3px 0 var(--grey); }
 .vals { display: flex; gap: 9px; align-items: baseline; flex-wrap: nowrap; }
 .vals label { display: inline-flex; align-items: baseline; gap: 4px; }
-.vals input.v {
-  font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 11.5px;
-  border: 1px solid transparent; border-bottom-color: var(--rule);
-  background: transparent; color: inherit; padding: 1px 3px; width: 4.2em; text-align: right;
-}
-.vals input.v:hover { border-color: var(--rule); }
+.vals input.v { color: inherit; width: 4.6em; text-align: right; }
+.vals input.v:hover { border-color: var(--grey); }
 .vals input.v:focus { border-color: var(--accent); outline: none; background: var(--paper); }
-.vals i { font-style: normal; color: var(--grey); font-size: 10px; }
-.vals label.dim input.v { color: var(--grey); border-bottom-color: var(--fill); }
-.vals label.dim i { color: var(--rule); }
+.vals i { font-style: normal; color: var(--grey); font-size: 11px; }
+.vals label.dim input.v { color: var(--grey); background: var(--grid); }
+.vals label.dim i { color: var(--grey); }
 
 /* Ink and the reset glyph distinguish a node override from its inherited value. */
 .pf.node .v, .pf.node input.v { color: var(--ink); font-weight: 500; border-bottom-color: var(--ink); }
-button.undo { font-family: var(--font-num); }
 
-.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(430px, 1fr));
-  gap: 12px;
-  align-items: start;
+.cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
+@media (min-width: 1280px) {
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .card.mod[data-module=bace] { grid-column: 1 / -1; }
 }
 .card.mod { margin: 0; padding: 0; display: flex; flex-direction: column; }
 /* A brief highlight identifies the bench card reached from a node form. */
@@ -510,12 +488,12 @@ a.btng.goto { text-decoration: none; display: inline-flex; align-items: center; 
   background: var(--fill);
   flex-wrap: wrap; row-gap: 5px;
 }
-.ch .cn { font-family: var(--font-head); font-weight: 600; font-size: 13px; }
-.cs { color: var(--grey); font-size: 11px; min-width: 0; }
+.ch .cn { font-weight: 600; font-size: 13px; }
+.cs { color: var(--grey); font-size: 12px; min-width: 0; }
 .cb { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 8px; }
 
 .tag {
-  font-size: 10px;
+  font-size: 11px;
   border: 1px solid var(--rule); padding: 0 4px; color: var(--grey);
   white-space: nowrap;
 }
@@ -540,42 +518,35 @@ a.btng.goto { text-decoration: none; display: inline-flex; align-items: center; 
   border-radius: 2px;
 }
 .pf:hover { background: var(--fill); }
-.pf .l { color: var(--grey); font-size: 12px; overflow-wrap: anywhere; }
-.pf .l i { font-style: normal; color: var(--rule); margin-left: 4px; }
-.pf .v, .pf input.v, .pf select.v {
-  font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 12px;
-}
+.pf .l { color: var(--grey); font-size: 13px; overflow-wrap: anywhere; }
+.pf .l i { font-style: normal; color: var(--grey); margin-left: 4px; }
+.pf .v { font-size: 13px; }
 /* A faint bottom rule identifies editable fields without requiring hover.
    Read-only values omit it. */
-.pf input.v, .pf select.v {
-  border: 1px solid transparent; border-bottom-color: var(--rule);
-  background: transparent; color: inherit;
-  padding: 1px 3px; width: 100%; max-width: 15em; font-family: var(--font-num);
-}
-.pf input.v:hover, .pf select.v:hover { border-color: var(--rule); }
+.pf input.v, .pf select.v { color: inherit; width: 100%; max-width: 15em; }
+.pf input.v:hover, .pf select.v:hover { border-color: var(--grey); }
 .pf input.v:focus, .pf select.v:focus { border-color: var(--accent); outline: none; background: var(--paper); }
 /* An empty editable field needs a visible outline when it is the only source of
    V_oc on a bench without a source meter. */
 .pf input.v.blank { border-color: var(--warn); background: #fff8ef; min-width: 5em; }
-.pf .v i { font-style: normal; color: var(--grey); margin-left: 6px; font-size: 11px; }
+.pf .v i { font-style: normal; color: var(--grey); margin-left: 6px; font-size: 12px; }
 
 /* The field name opens expanded help. A focusable button makes the explanation
    accessible by keyboard as well as mouse. */
 .pf .l.lh {
   border: 0; background: none; padding: 0; margin: 0;
-  font-family: var(--font-body); font-weight: 400; font-size: 12px;
-  color: var(--grey); text-align: left; cursor: pointer; letter-spacing: 0;
-}
+  font-weight: 400; font-size: 13px;
+  color: var(--grey); text-align: left; cursor: pointer; }
 .pf .l.lh:hover, .pf .l.lh[aria-expanded="true"] { color: var(--ink); text-decoration: underline dotted; }
 .doc {
   display: flex; flex-direction: column; gap: 3px;
   margin: 2px 4px 6px 0; padding: 5px 8px;
   border-left: 2px solid var(--accent); background: var(--fill);
-  font-size: 11.5px; color: var(--ink); max-width: 62ch; text-wrap: pretty;
+  font-size: 12px; color: var(--ink); max-width: 62ch; text-wrap: pretty;
 }
 .doc .dfull { color: var(--grey); }
 /* The identifier line: the code name and its run.toml key (`docs/ui-rules.md` §1). */
-.doc .dcode { font-family: var(--font-num); font-size: 10.5px; color: var(--grey); white-space: pre; }
+.doc .dcode { font-size: 12px; color: var(--grey); white-space: pre; }
 .ch .cs .cost { color: var(--ink); }
 .btng .tag { margin-left: 5px; }
 
@@ -583,18 +554,14 @@ a.btng.goto { text-decoration: none; display: inline-flex; align-items: center; 
    outside the value column leaves the LED level beside its value. */
 .need1, .note1 {
   display: flex; align-items: baseline; gap: 5px;
-  padding: 1px 4px 3px; font-size: 11.5px; color: var(--warn); text-wrap: pretty;
+  padding: 1px 4px 3px; font-size: 12px; color: var(--warn); text-wrap: pretty;
 }
 .note1 { color: var(--grey); }
 /* The repeated-point switch stays visible because `start == stop` means
    repetition rather than a sweep (`docs/ui-rules.md` section 4). */
-.tag.rep { border-color: var(--accent); color: var(--accent-dark); text-transform: none; }
+.tag.rep { border-color: var(--accent); color: var(--accent-dark); }
 /* Common source layers appear once per card to avoid repeated tags on every
    field. */
-.provsum {
-  font-size: 11px; color: var(--grey); font-family: var(--font-num);
-  border-top: 1px dashed var(--rule); padding-top: 5px;
-}
 
 .pf.ro { color: var(--grey); }
 .pf.ro .v { color: var(--ink); }
@@ -602,8 +569,8 @@ a.btng.goto { text-decoration: none; display: inline-flex; align-items: center; 
    enabled. Grey text and a dashed tag distinguish it; hover identifies the
    controlling setting. */
 .pf.inert .l, .pf.inert .v.off { color: var(--grey); opacity: .6; }
-.pf.inert .v.off { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 12px; }
-.tag.off { border-style: dashed; color: var(--grey); text-transform: none; letter-spacing: 0; }
+.pf.inert .v.off { font-variant-numeric: tabular-nums; font-size: 13px; }
+.tag.off { border-style: dashed; color: var(--grey); }
 .pf.inh, .pf.der { background: rgba(236, 48, 19, .04); }
 .pf.inh .l::before, .pf.der .l::before { content: '↳ '; color: var(--accent); }
 .pf.acc .l { color: var(--accent-dark); }
@@ -616,14 +583,13 @@ a.btng.goto { text-decoration: none; display: inline-flex; align-items: center; 
 .src { display: flex; align-items: center; gap: 5px; justify-self: end; }
 /* A segmented control cannot shrink below its choices. Its source tag sits below
    it so a narrow card does not spill into the next column. */
-.pf:has(> .seg) { grid-template-columns: 13em minmax(0, 1fr); }
+.pf:has(> .seg) { grid-template-columns: 8em minmax(0, 1fr); }
 .pf:has(> .seg) > .src { grid-column: 2; justify-self: start; }
-.src .tag { text-transform: none; letter-spacing: 0; }
 .src-inherited, .src-derived { border-color: var(--accent); color: var(--accent-dark); }
 .src-edited { border-color: var(--ink); color: var(--ink); }
 button.link {
   border: 0; background: none; padding: 0; color: var(--grey);
-  font-size: 10px; text-decoration: underline; cursor: pointer;
+  font-size: 11px; text-decoration: underline; cursor: pointer;
 }
 button.link:hover { color: var(--accent-dark); }
 
@@ -632,11 +598,7 @@ button.link:hover { color: var(--accent-dark); }
    bench actions. Buttons provide keyboard focus and accessible roles that
    clickable spans lack. */
 .seg { display: inline-flex; border: 1px solid var(--rule); }
-.seg .opt {
-  padding: 0 7px; font-size: 11px; cursor: pointer; color: var(--grey);
-  font-family: var(--font-num); font-weight: 400; letter-spacing: 0;
-  border: 0; background: none; line-height: 1.5;
-}
+.seg .opt { color: var(--grey); font-weight: 400; border: 0; background: none; }
 .seg .opt.on { background: var(--ink); color: #fff; }
 /* Hover darkens only unselected options. Dark text on the selected ink or accent
    background would hide the label. */
@@ -687,9 +649,8 @@ button.link:hover { color: var(--accent-dark); }
    settings. `.filt` groups options; `button.filt` marks a single toggle. */
 .filt { display: inline-flex; gap: 1px; align-items: baseline; }
 .filt .opt, button.filt {
-  padding: 0 5px; font-size: 11px; cursor: pointer; color: var(--grey);
-  font-family: var(--font-num); font-weight: 400; letter-spacing: 0;
-  border: 0; background: none; line-height: 1.5;
+  padding: 0 5px; font-size: 12px; cursor: pointer; color: var(--grey);
+  font-weight: 400; border: 0; background: none; line-height: 1.5;
   border-bottom: 1.5px solid transparent;
 }
 .filt .opt.on, button.filt.on { color: var(--ink); font-weight: 600; border-bottom-color: var(--ink); }
@@ -704,25 +665,25 @@ button.link:hover { color: var(--accent-dark); }
    one line. */
 .pf.range { grid-template-columns: 7.5em minmax(0, 1fr) auto; }
 .pf.range .rng { display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
-.pf.range input.v { width: 4.5em; max-width: 4.5em; text-align: right; }
+.pf.range input.v { width: 5.4em; max-width: 5.4em; text-align: right; }
 .pf.range .rng i, .pf.range .tag { white-space: nowrap; }
 .pf.range .pts { color: var(--ink); white-space: nowrap; }
 .pf.voc .v { display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
 .pf.voc input.v { max-width: 6em; }
-.pf.voc .v .det { flex-basis: 100%; margin-left: 0; font-size: 11px; color: var(--grey); overflow-wrap: anywhere; white-space: normal; }
+.pf.voc .v .det { flex-basis: 100%; margin-left: 0; font-size: 12px; color: var(--grey); overflow-wrap: anywhere; white-space: normal; }
 /* The V_oc row needs its value, LED level and unit on one line. A narrower label
    column prevents overlap. Shrinkable grid items stop long provenance text from
    widening the row. */
 .pf.voc { grid-template-columns: 6em minmax(0, 1fr) auto; }
-.pf.voc input.v { max-width: 5em; }
+.pf.voc input.v { max-width: 4.6em; }
 .pf > .v { min-width: 0; }
 /* The four polarity choices need more width than the value column. A narrower
    label and wrapping choices prevent clipping. */
-.pf.pol { grid-template-columns: 9.5em minmax(0, 1fr) auto; }
+.pf.pol { grid-template-columns: 7.5em minmax(0, 1fr) auto; }
 .pf.pol .seg { flex-wrap: wrap; }
 /* A missing-value reason stays beside the field so the operator can still locate
    its control. */
-.pf.voc .need { color: var(--warn); font-size: 11px; }
+.pf.voc .need { color: var(--warn); font-size: 12px; }
 
 /* Bench read-back stays distinct from editable module parameters. */
 .pf.rb { border-left: 2px solid var(--rule); background: var(--fill); }
@@ -732,26 +693,30 @@ button.link:hover { color: var(--accent-dark); }
 .pf.rb.inferred .l { border-bottom: 1px dashed var(--grey); }
 
 /* Needs and blockers stay beside the controls that resolve them. */
-.warn1 { display: flex; align-items: baseline; gap: 6px; color: var(--warn); font-size: 12px; }
+.warn1 { display: flex; align-items: baseline; gap: 6px; color: var(--warn); font-size: 13px; }
 .warn1.crit, .warn1.invalid { color: var(--alert); }
-.warn1 .code { font-family: var(--font-num); font-size: 10.5px; color: var(--grey); }
+.warn1 .code { font-size: 12px; color: var(--grey); }
 .blocked { border-top: 1px solid var(--rule); padding-top: 6px; }
 
 .fold { border-top: 1px solid var(--rule); padding-top: 6px; }
 .foldbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.btng {
-  border: 1px solid var(--rule); background: var(--paper); color: var(--grey);
-  font-size: 11px; padding: 1px 6px; cursor: pointer; font-family: var(--font-num);
+/* Buttons, switches and inputs share one height, one size and one box. */
+.btng, .btnp, .btns, .btnd, .btnw, .seg .opt, .sw .p {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 24px; padding: 0 10px; font-size: 13px; white-space: nowrap; cursor: pointer;
 }
+.vals input.v, .pf input.v, .pf select.v, .namerow input.v, .namerow select.v,
+.ident .id-row input.v, .mon-field input.v, .addbar select.v {
+  height: 24px; padding: 0 6px; font-size: 13px;
+  border: 1px solid var(--rule); background: var(--paper);
+}
+
+.btng { border: 1px solid var(--rule); background: var(--paper); color: var(--ink); }
 .btng:hover { border-color: var(--ink); color: var(--ink); }
 .btng.on { background: var(--ink); color: #fff; border-color: var(--ink); }
 
-.btnp, .btns, .btnd, .btnw {
-  border: 1px solid var(--ink); background: var(--paper); color: var(--ink);
-  font-size: 11px; padding: 2px 9px; cursor: pointer; white-space: nowrap;
-  font-family: var(--font-head); font-weight: 800; letter-spacing: -0.01em;
-}
-.btnp { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btnp, .btns, .btnd, .btnw { border: 1px solid var(--ink); background: var(--paper); color: var(--ink); }
+.btnp { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 /* Park and the long-running action need stronger hierarchy than ordinary row
    actions so their consequences remain visible. */
 .btnd { border-color: var(--alert); color: var(--alert); }
@@ -768,21 +733,18 @@ button.armed { background: var(--alert); border-color: var(--alert); color: #fff
 /* Validation checks stay beside the refusal message so the operator can find the
    blocking condition. */
 .strip .checks { display: inline-flex; gap: 5px; margin-left: 8px; }
-.strip .ck { font-family: var(--font-num); font-size: 10px; }
+.strip .ck { font-size: 11px; }
 .strip .ck.crit, .strip .ck.invalid { color: var(--alert); }
 
 
 /* Result charts stay beside their module forms (`docs/ui-rules.md` section 11).
    The timing diagram stays with the form because its content depends on those
-   settings. Cards span two columns only when space permits; otherwise the span
-   would create an implicit second column. */
+   settings. */
 
-.card.mod.wide { grid-column: span 1; }
 @media (min-width: 980px) {
-  .card.mod.wide { grid-column: span 2; }
   .cb.split {
     display: grid;
-    grid-template-columns: minmax(260px, 330px) minmax(0, 1fr);
+    grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
     gap: 14px;
     align-items: start;
   }
@@ -795,25 +757,25 @@ button.armed { background: var(--alert); border-color: var(--alert); color: #fff
    available width; scaling a fixed-width drawing would also shrink text when the
    statistics column takes space. */
 @media (min-width: 980px) {
-  .card.mod.wide .cb.split > .res {
+  .card.mod[data-module=bace] .cb.split > .res {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 172px;
     gap: 0 14px;
     align-items: start;
   }
-  .card.mod.wide .cb.split > .res > * { grid-column: 1; margin-bottom: 12px; }
-  .card.mod.wide .cb.split > .res > *:last-child { margin-bottom: 0; }
+  .card.mod[data-module=bace] .cb.split > .res > * { grid-column: 1; margin-bottom: 12px; }
+  .card.mod[data-module=bace] .cb.split > .res > *:last-child { margin-bottom: 0; }
   /* The statistics block spans the column so it stays in place while charts flow
      beside it. */
-  .card.mod.wide .cb.split > .res > .shot { grid-column: 2; grid-row: 1 / -1; margin-bottom: 0; }
+  .card.mod[data-module=bace] .cb.split > .res > .shot { grid-column: 2; grid-row: 1 / -1; margin-bottom: 0; }
 }
 
 /* Labels sit above values so each pair fits within the narrow statistics column. */
 dl.shot-rows { margin: 0; display: flex; flex-direction: column; gap: 5px; }
-dl.shot-rows dt { color: var(--grey); font-size: 11px; line-height: 1.3; }
+dl.shot-rows dt { color: var(--grey); font-size: 12px; line-height: 1.3; }
 dl.shot-rows dd {
-  margin: 0; font-family: var(--font-num); font-variant-numeric: tabular-nums;
-  font-size: 11.5px; line-height: 1.3; overflow-wrap: anywhere;
+  margin: 0; font-variant-numeric: tabular-nums;
+  font-size: 12px; line-height: 1.3; overflow-wrap: anywhere;
 }
 
 .chart { margin: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -823,34 +785,34 @@ dl.shot-rows dd {
 
 .chart-tools { display: flex; justify-content: flex-end; align-items: center; gap: 6px; min-height: 18px; }
 .chart-tool {
-  font: 500 11px var(--font-body); color: var(--grey); background: none;
+  font: 500 12px var(--font-body); color: var(--grey); background: none;
   border: 1px solid transparent; padding: 0 5px; cursor: pointer;
 }
 .chart-tool:hover { color: var(--ink); border-color: var(--rule); }
 .chart-tool.on { color: var(--ink); border-color: var(--ink); }
 .chart-info {
   width: 14px; height: 14px; border: 1px solid var(--rule); border-radius: 50%;
-  font: italic 500 10px/12px var(--font-body); text-align: center; color: var(--grey); cursor: help;
+  font: italic 500 11px/12px var(--font-body); text-align: center; color: var(--grey); cursor: help;
 }
 div.axes-pop {
   position: fixed; z-index: 60; padding: 10px; width: 340px; max-width: calc(100vw - 16px);
   background: var(--paper); border: 1px solid var(--ink);
-  display: flex; flex-direction: column; gap: 8px; font-size: 12px;
+  display: flex; flex-direction: column; gap: 8px; font-size: 13px;
 }
 .ax-grid { display: grid; grid-template-columns: minmax(0, 1fr) 72px 72px 44px; gap: 4px 6px; align-items: center; }
-.ax-head { color: var(--grey); font-size: 11px; }
+.ax-head { color: var(--grey); font-size: 12px; }
 .ax-name { overflow-wrap: anywhere; }
 .ax-in {
   width: 100%; min-width: 0; padding: 2px 4px; border: 1px solid var(--rule); background: var(--paper);
-  font-family: var(--font-num); font-size: 11.5px; color: var(--ink);
+  font-size: 12px; color: var(--ink);
 }
 .ax-in:focus { border-color: var(--ink); outline: none; }
 .ax-in.bad { border-color: var(--alert); }
 .ax-in::placeholder { color: var(--grey); }
-.ax-log { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; }
+.ax-log { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; }
 .ax-foot { display: flex; justify-content: flex-end; gap: 6px; }
 
-.chart-legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--grey); }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--grey); }
 .legend-item { display: inline-flex; align-items: center; gap: 4px; }
 
 /* The crosshair readout reserves height when empty to prevent card movement. A
@@ -858,14 +820,13 @@ div.axes-pop {
    transient. */
 .chart-readout {
   min-height: 15px;
-  font-family: var(--font-num);
-  font-variant-numeric: tabular-nums;
-  font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  font-size: 12px;
   color: var(--ink);
 }
 .chart-notes { display: flex; flex-direction: column; gap: 2px; }
-.chart-note { font-size: 11px; color: var(--grey); }
-.chart-absent { border: 1px dashed var(--rule); padding: 10px; }
+.chart-note { font-size: 12px; color: var(--grey); }
+.chart-absent { padding: 10px; }
 /* A chart with its own frame needs no second outer border, which would compete
    with its dashed edge. */
 .chart-absent.framed { border: 0; padding: 0; }
@@ -891,15 +852,14 @@ div.axes-pop {
 .alerts { display: flex; flex-direction: column; gap: 4px; }
 .alerts .warn1.info { color: var(--grey); }
 .alerts .warn1.alert { color: var(--alert); }
-.alerts .warn1 .code { text-transform: uppercase; letter-spacing: .04em; }
 
 /* Each curve keeps its LED level or dark label beside its derived parameters.
    Right-aligned numbers make columns comparable; headers remain text. */
 .metrics table.rows { width: auto; }
-.metrics table.rows th { text-align: right; font-weight: 600; font-size: 11px; padding: 2px 0 3px 14px; white-space: nowrap; border-bottom: 1px solid var(--rule); }
+.metrics table.rows th { text-align: right; font-weight: 600; font-size: 12px; padding: 2px 0 3px 14px; white-space: nowrap; border-bottom: 1px solid var(--rule); }
 .metrics table.rows th.l { text-align: left; padding-left: 0; }
-.metrics td.l { color: var(--grey); font-size: 11px; white-space: nowrap; padding-right: 0; }
-.metrics td.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 11px; text-align: right; padding: 2px 0 2px 14px; white-space: nowrap; }
+.metrics td.l { color: var(--grey); font-size: 12px; white-space: nowrap; padding-right: 0; }
+.metrics td.num { font-variant-numeric: tabular-nums; font-size: 12px; text-align: right; padding: 2px 0 2px 14px; white-space: nowrap; }
 
 /* The run monitor stays below the rail on every tab while a run holds the worker
    and disappears when the bench is parked. Separate counters distinguish
@@ -915,7 +875,7 @@ div.axes-pop {
 .mon-row { display: flex; align-items: center; gap: 8px; padding: 5px 12px; }
 .mon-live, .mon-actions, .mon-prompt {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  font-family: var(--font-num); font-size: 11.5px;
+  font-size: 12px;
 }
 .mon-live { flex: 1 1 auto; }
 .mon-actions { flex: 0 0 auto; }
@@ -926,12 +886,12 @@ div.axes-pop {
   background: #fff8ef;
 }
 .mon-state {
-  font-family: var(--font-head); font-weight: 800; font-size: 11px; text-transform: uppercase;
-  letter-spacing: .04em; padding: 1px 7px; background: var(--ink); color: #fff;
+  font-weight: 600; font-size: 12px;
+  padding: 1px 7px; background: var(--ink); color: #fff;
 }
 .mon-state.running { background: var(--accent); }
 .mon-state.paused, .mon-state.stopping { background: var(--warn); }
-.mon-run { font-family: var(--font-head); font-weight: 600; font-size: 12.5px; }
+.mon-run { font-weight: 600; font-size: 13px; }
 .mon-count {
   padding: 2px 7px; background: var(--paper); border: 1px solid var(--rule); white-space: nowrap;
 }
@@ -953,17 +913,16 @@ div.axes-pop {
 .mon-status.ok { color: var(--ok); }
 .mon-status.bad { color: var(--alert); }
 .monitor .spacer { flex: 1 1 auto; }
-.monitor button.btns { font-family: var(--font-body); font-weight: 500; font-size: 11px; padding: 3px 8px; }
 /* Each queued run keeps its own Cancel action beside it. */
 .mon-queue {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   padding: 4px 12px;
   border-top: 1px dashed var(--rule);
-  font-family: var(--font-num); font-size: 11px;
+  font-size: 12px;
 }
 .mon-queue:empty { display: none; }
 .mon-qk {
-  font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase;
+  font-size: 11px; font-weight: 600;
   color: var(--grey);
 }
 .mon-q {
@@ -976,24 +935,21 @@ div.axes-pop {
 .mon-reading .ok { color: var(--ok); }
 .mon-reading .warn { color: var(--warn); }
 .mon-field { display: inline-flex; align-items: baseline; gap: 4px; }
-.mon-field input.v {
-  border: 1px solid var(--rule); background: var(--paper); padding: 2px 5px; width: 7em;
-  font-family: var(--font-num); font-size: 11.5px;
-}
+.mon-field input.v { width: 7em; }
 .mon-field input.v.note { width: 22em; }
 .mon-field input.v:focus { border-color: var(--accent); outline: none; }
 .mon-field i { font-style: normal; color: var(--grey); }
-.mon-fallback { color: var(--grey); font-size: 10.5px; }
+.mon-fallback { color: var(--grey); font-size: 12px; }
 
 /* The latest shot stays beside its trace so its values and waveform can be
    compared. */
 .shot { border: 1px solid var(--rule); padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; }
 .shot.alert { border-color: var(--alert); }
 .shot-head { display: flex; align-items: center; gap: 8px; }
-.shot-title { font-family: var(--font-head); font-weight: 600; font-size: 12px; }
-.shot-verdict { font-size: 11px; color: var(--grey); }
+.shot-title { font-weight: 600; font-size: 13px; }
+.shot-verdict { font-size: 12px; color: var(--grey); }
 .shot-verdict.alert { color: var(--alert); font-weight: 600; }
-.shot-trigger { font-family: var(--font-num); font-size: 10.5px; color: var(--grey); }
+.shot-trigger { font-size: 12px; color: var(--grey); }
 .shot-trigger.auto { color: var(--warn); }
 
 /* The pipeline tree and service schedule share two columns. The 640 px tree
@@ -1009,10 +965,7 @@ div.axes-pop {
 .pipe-col > .cb { gap: 10px; }
 .hr { height: 1px; background: var(--rule); }
 .addbar { display: inline-flex; align-items: center; gap: 5px; flex-wrap: wrap; }
-.addbar select.v {
-  border: 1px solid var(--rule); background: var(--paper); padding: 2px 4px;
-  font-family: var(--font-num); font-size: 11px;
-}
+
 
 /* Indentation marks tree depth without repeated borders obscuring nested loops. */
 .tree { display: flex; flex-direction: column; gap: 2px; }
@@ -1026,14 +979,14 @@ div.axes-pop {
 .tr .nk {
   display: inline-flex; align-items: center; justify-content: center;
   width: 16px; height: 16px; flex: 0 0 auto;
-  border: 1px solid var(--rule); color: var(--grey); font-size: 10px;
+  border: 1px solid var(--rule); color: var(--grey); font-size: 11px;
 }
 .tr .nk.mod { border-color: var(--ink); color: var(--ink); }
-.tr .n { font-family: var(--font-num); font-size: 12px; font-weight: 500; }
-.tr .d { color: var(--grey); font-family: var(--font-num); font-size: 11px; }
+.tr .n { font-size: 13px; font-weight: 500; }
+.tr .d { color: var(--grey); font-size: 12px; }
 /* A node override uses the same glyph as its form. Hover exposes the differences
    from the bench. */
-.tr .ovr { color: var(--ink); font-family: var(--font-num); font-size: 12px; cursor: help; }
+.tr .ovr { color: var(--ink); font-size: 13px; cursor: help; }
 .tr .rowact { display: inline-flex; gap: 2px; opacity: .25; }
 .tr:hover .rowact, .tr.on .rowact { opacity: 1; }
 .tr .rowact button.btng { padding: 0 5px; line-height: 16px; }
@@ -1041,7 +994,7 @@ div.axes-pop {
 /* The arrow and accent match `.pf.inh` so a pipeline-supplied value has the same
    meaning in the tree, schedule and form. */
 .inh {
-  font-family: var(--font-num); font-size: 10.5px; color: var(--accent-dark);
+  font-size: 12px; color: var(--accent-dark);
   white-space: nowrap;
 }
 .binds { display: flex; flex-wrap: wrap; gap: 6px 14px; }
@@ -1063,7 +1016,7 @@ div.axes-pop {
 .vlist-block { display: flex; flex-direction: column; gap: 3px; }
 .lst {
   display: grid; gap: 3px 14px;
-  font-family: var(--font-num); font-size: 11px; color: var(--grey);
+  font-size: 12px; color: var(--grey);
   overflow-x: auto;
 }
 .lst .h { color: var(--ink); font-weight: 500; }
@@ -1072,12 +1025,11 @@ div.axes-pop {
 .nums { display: flex; gap: 32px; flex-wrap: wrap; }
 .nm { display: flex; flex-direction: column; gap: 1px; }
 .nm .l {
-  font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase;
+  font-size: 11px; font-weight: 600;
   color: var(--grey);
 }
 .nm .big {
-  font-family: var(--font-num); font-size: 24px; font-weight: 500; letter-spacing: -.02em;
-  font-variant-numeric: tabular-nums;
+  font-size: 20px; font-weight: 500; font-variant-numeric: tabular-nums;
 }
 
 .cksum { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -1111,27 +1063,23 @@ div.axes-pop {
 .recipe-note {
   display: flex; flex-direction: column; gap: 4px;
   border-left: 2px solid var(--warn); background: #fff8ef; padding: 5px 8px;
-  font-size: 12px;
+  font-size: 13px;
 }
 .recipe-note .rn-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .recipe-note .rn-list { display: grid; grid-template-columns: max-content max-content max-content auto; gap: 1px 14px; }
 .recipe-note .rn-row { display: contents; }
-.recipe-note .rn-row .l { color: var(--grey); font-family: var(--font-num); font-size: 11px; }
-.recipe-note .rn-row .v { font-family: var(--font-num); font-size: 11px; color: var(--grey); }
+.recipe-note .rn-row .l { color: var(--grey); font-size: 12px; }
+.recipe-note .rn-row .v { font-size: 12px; color: var(--grey); }
 .recipe-note .rn-row .v.now { color: var(--ink); font-weight: 500; }
-.recipe-note .rn-row i { font-style: normal; color: var(--grey); font-size: 11px; }
-.namerow .l { color: var(--grey); font-size: 12px; }
-.namerow input.v, .namerow select.v {
-  border: 1px solid var(--rule); background: var(--paper); padding: 3px 6px;
-  font-family: var(--font-num); font-size: 12px;
-}
+.recipe-note .rn-row i { font-style: normal; color: var(--grey); font-size: 12px; }
+.namerow .l { color: var(--grey); font-size: 13px; }
 .namerow input.v { flex: 1 1 auto; min-width: 0; }
 .namerow input.v:focus, .namerow select.v:focus { border-color: var(--accent); outline: none; }
 .btnrow { display: flex; align-items: center; gap: 10px; }
 /* Undo sits before forward actions and names the edit it reverses. Its longer
    label must shrink to keep Start on the row. */
 .btnrow .btng { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.btnrow .btnp { padding: 10px 16px; font-size: 14px; }
+.btnrow .btnp { height: auto; padding: 10px 16px; font-size: 15px; font-weight: 600; }
 
 /* Schedule rows use lines rather than boxes to keep large trees readable. A tree
    with 45 module leaves and 54 loop rows must remain scannable. */
@@ -1140,18 +1088,18 @@ div.axes-pop {
 .sr {
   display: flex; align-items: center; gap: 8px;
   padding: 2px 6px; border-left: 2px solid transparent; cursor: pointer;
-  font-family: var(--font-num); font-size: 11.5px;
+  font-size: 12px;
 }
 .sr:hover { background: var(--fill); }
 .sr.on { border-left-color: var(--ink); }
 .sr.mod { cursor: default; border-left-color: var(--rule); }
-.sr .nk { width: 12px; color: var(--grey); font-size: 10px; }
+.sr .nk { width: 12px; color: var(--grey); font-size: 11px; }
 .sr .n { font-weight: 500; }
 .sr .d { color: var(--grey); }
 .flatsteps { max-height: 320px; overflow: auto; border: 1px solid var(--rule); }
 .fs {
   display: flex; gap: 10px; padding: 1px 8px;
-  font-family: var(--font-num); font-size: 11px;
+  font-size: 12px;
 }
 .fs:nth-child(even) { background: #fbfafa; }
 .fs .i { color: var(--grey); min-width: 3.5ch; text-align: right; }
@@ -1180,23 +1128,21 @@ div.axes-pop {
 .hgh {
   display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
   padding: 2px 0 4px; border-bottom: 1px solid var(--rule);
-  font-size: 11px;
+  font-size: 12px;
 }
 .hrow {
   display: flex; flex-direction: column; gap: 1px; align-items: stretch;
   text-align: left; width: 100%;
   padding: 4px 8px; border: 1px solid var(--rule); background: var(--paper);
-  font-family: var(--font-body); font-weight: 400; font-size: 12px; letter-spacing: 0;
-  cursor: pointer;
+  font-weight: 400; font-size: 13px; cursor: pointer;
 }
 .hrow:hover { background: var(--fill); }
 .hrow.on { border-color: var(--ink); box-shadow: inset 2px 0 0 var(--ink); }
 .hr1, .hr2 { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.hr2 { font-size: 11px; color: var(--grey); }
-.hr3 { font-size: 11px; }
-.hname { font-family: var(--font-head); font-weight: 600; font-size: 12px; }
+.hr2 { font-size: 12px; color: var(--grey); }
+.hr3 { font-size: 12px; }
+.hname { font-weight: 600; font-size: 13px; }
 /* Failure states use alert colour so they stand out within the run list. */
-.tag.st { text-transform: none; letter-spacing: 0; font-family: var(--font-num); }
 .tag.st.ok { border-color: var(--ok); color: var(--ok); }
 .tag.st.warn { border-color: var(--warn); color: var(--warn); }
 .tag.st.crit { border-color: var(--alert); color: var(--alert); font-weight: 600; }
@@ -1207,34 +1153,34 @@ div.axes-pop {
 .open .rhd .ch { border-bottom: 0; }
 .rhead { padding: 8px 10px; border-bottom: 1px solid var(--rule); display: flex; flex-direction: column; gap: 3px; }
 .rh1, .rh2 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-.rh2 { font-size: 12px; }
-.rname { font-family: var(--font-head); font-weight: 800; font-size: 14px; }
-.rcomment { margin: 2px 0 0; font-size: 12px; }
+.rh2 { font-size: 13px; }
+.rname { font-weight: 600; font-size: 15px; }
+.rcomment { margin: 2px 0 0; font-size: 13px; }
 .rbody { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 14px; align-items: start; }
 .rleft { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .rright { min-width: 0; position: sticky; top: 0; }
-.rleft h3, .rright h3 { font-size: 11px; margin: 6px 0 2px; text-transform: uppercase; letter-spacing: .08em; color: var(--grey); }
+.rleft h3, .rright h3 { font-size: 12px; margin: 6px 0 2px; color: var(--grey); }
 
 /* Each parameter combination keeps a grid cell. Distinct borders preserve state
    differences without colour. */
 .qgrid-wrap { display: flex; flex-direction: column; gap: 6px; overflow-x: auto; }
 table.qgrid { border-collapse: separate; border-spacing: 3px; }
 table.qgrid th {
-  font-weight: 400; color: var(--grey); font-size: 11px; text-align: left; white-space: nowrap;
+  font-weight: 400; color: var(--grey); font-size: 12px; text-align: left; white-space: nowrap;
   padding: 2px 6px; vertical-align: middle;
 }
 table.qgrid th.corner { color: var(--grey); }
-table.qgrid thead th { text-align: center; font-family: var(--font-num); }
-table.qgrid tbody th .num { color: var(--ink); font-size: 12px; margin-right: 4px; }
+table.qgrid thead th { text-align: center; }
+table.qgrid tbody th .num { color: var(--ink); font-size: 13px; margin-right: 4px; }
 table.qgrid td { padding: 0; }
-.tlv { font-size: 10px; font-family: var(--font-num); }
+.tlv { font-size: 11px; }
 .tlv.warn { color: var(--warn); }
 .tlv.ok { color: var(--ok); }
 .cell {
   display: flex; flex-direction: column; gap: 1px; align-items: flex-start;
   min-width: 118px; padding: 4px 7px;
   border: 1px solid var(--rule); background: var(--paper);
-  font-family: var(--font-num); font-weight: 400; letter-spacing: 0; text-align: left;
+  font-weight: 400; text-align: left;
   cursor: pointer;
 }
 .cell:hover { background: var(--fill); }
@@ -1248,9 +1194,9 @@ table.qgrid td { padding: 0; }
   background: repeating-linear-gradient(45deg, var(--paper), var(--paper) 4px, var(--fill) 4px, var(--fill) 8px);
   border-color: var(--rule);
 }
-.cell .cq { font-size: 12.5px; font-weight: 500; }
-.cell .cv { font-size: 10.5px; color: var(--grey); }
-.cell .ck { font-size: 10px; color: var(--accent-dark); }
+.cell .cq { font-size: 13px; font-weight: 500; }
+.cell .cv { font-size: 12px; color: var(--grey); }
+.cell .ck { font-size: 11px; color: var(--accent-dark); }
 .cell .ck.cs { color: var(--grey); }
 .mk { display: inline-block; width: 9px; height: 9px; border: 1px solid var(--ink); background: var(--ink); }
 .mk.hollow { background: var(--paper); }
@@ -1259,9 +1205,9 @@ table.qgrid td { padding: 0; }
 
 /* The summary strip keeps whole-run conclusions separate from node details. */
 .rsum { display: flex; flex-direction: column; gap: 3px; border-top: 1px solid var(--rule); padding-top: 6px; }
-.rsl { display: grid; grid-template-columns: 8em 1fr; gap: 8px; font-size: 12px; }
-.rsk { color: var(--grey); font-size: 11px; }
-.rsv { font-family: var(--font-num); font-size: 11.5px; }
+.rsl { display: grid; grid-template-columns: 8em 1fr; gap: 8px; font-size: 13px; }
+.rsk { color: var(--grey); font-size: 12px; }
+.rsv { font-size: 12px; }
 .rsv.warn { color: var(--warn); }
 
 /* The node list includes every module, including J-V, so results remain
@@ -1270,13 +1216,13 @@ table.qgrid td { padding: 0; }
 .nrow {
   display: flex; flex-direction: column; gap: 1px; align-items: stretch; text-align: left;
   padding: 3px 8px; border: 1px solid var(--rule); background: var(--paper);
-  font-family: var(--font-body); font-weight: 400; font-size: 12px; letter-spacing: 0; cursor: pointer;
+  font-weight: 400; font-size: 13px; cursor: pointer;
 }
 .nrow:hover { background: var(--fill); }
 .nrow.on { border-color: var(--ink); box-shadow: inset 2px 0 0 var(--ink); }
 .nrow.partial { border-left: 3px dashed var(--accent-dark); }
 .nr1, .nr2 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-.nr2 { font-size: 11px; }
+.nr2 { font-size: 12px; }
 .nr2 .warn { color: var(--warn); }
 .nr2 .ok { color: var(--ok); }
 .np { font-weight: 500; }
@@ -1285,18 +1231,17 @@ table.qgrid td { padding: 0; }
    list. */
 .npanel { border: 1px solid var(--ink); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
 .nph { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-.nnum td .num { font-size: 12.5px; }
-.nnum td.cs, .nprov td { font-size: 11.5px; }
+.nnum td .num { font-size: 13px; }
+.nnum td.cs, .nprov td { font-size: 12px; }
 .nprov .warn { color: var(--warn); }
 .nprov .ok { color: var(--ok); }
 .flags { display: flex; flex-direction: column; gap: 4px; }
 .flags .warn1 { align-items: baseline; }
 .flags .warn1.info { color: var(--grey); }
-.flags .warn1 .code { flex: 0 0 13em; overflow-wrap: break-word; }
 .flags .warn1 > span:last-child { min-width: 0; }
 /* Long folder names wrap and remain fully selectable for identification and
    copying (`docs/ui-rules.md` section 1). */
-.path { margin: 0; font-size: 11px; overflow-wrap: anywhere; user-select: all; }
+.path { margin: 0; font-size: 12px; overflow-wrap: anywhere; user-select: all; }
 .rchart { border-top: 1px solid var(--rule); padding-top: 6px; }
 
 /* The rig view keeps the measurement chain beside shot timing at three scales. */
@@ -1311,7 +1256,7 @@ table.qgrid td { padding: 0; }
   .rig { grid-template-columns: minmax(0, 1fr); }
 }
 .rig .cb { gap: 10px; }
-.rig .cs .accent { color: var(--accent-dark); font-family: var(--font-num); }
+.rig .cs .accent { color: var(--accent-dark); }
 .rig-readback .card { margin: 0; }
 
 /* The power panel stays below the rail on every tab so the operator can follow
@@ -1326,14 +1271,14 @@ table.qgrid td { padding: 0; }
 .pw-row {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   padding: 4px 12px;
-  font-family: var(--font-num); font-size: 11.5px;
+  font-size: 12px;
 }
 .pw-row > span { display: inline-flex; align-items: center; gap: 8px; }
 .pw-row > span:empty:not(.spacer) { display: none; }
 .power .spacer { flex: 1 1 auto; }
 .pw-switch {
   display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
-  font-family: var(--font-head); font-weight: 600; font-size: 12px;
+  font-weight: 600; font-size: 13px;
 }
 .pw-switch input {
   appearance: none; -webkit-appearance: none;
@@ -1349,18 +1294,18 @@ table.qgrid td { padding: 0; }
 .pw-switch input:checked::after { left: 17px; }
 .pw-switch input:disabled { opacity: .4; cursor: not-allowed; }
 .pw-switch input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.pw-note { color: var(--warn); font-size: 10.5px; }
+.pw-note { color: var(--warn); font-size: 12px; }
 .pw-value {
-  font-size: 21px; font-weight: 500; letter-spacing: -.02em; line-height: 1;
+  font-size: 20px; font-weight: 500; line-height: 1;
   font-variant-numeric: tabular-nums; min-width: 6ch;
 }
 .pw-value.warn { color: var(--warn); }
 .pw-value.stale, .pw-value.off { color: var(--grey); }
-.pw-sub { color: var(--grey); font-size: 10.5px; }
+.pw-sub { color: var(--grey); font-size: 12px; }
 /* When monitoring is off, a muted row keeps the switch and last spot reading
    available without competing with the rail reading. */
 .power.off .pw-row { padding: 2px 12px; }
-.power.off .pw-value { font-size: 12px; font-weight: 400; color: var(--grey); letter-spacing: 0; }
+.power.off .pw-value { font-size: 13px; font-weight: 400; color: var(--grey); }
 .power.off .pw-switch { color: var(--grey); }
 /* The trace fold changes the view independently of the monitor switch. Folding
    keeps polling and the numeric reading active (`docs/ui-rules.md` section 14). */
@@ -1372,12 +1317,12 @@ table.qgrid td { padding: 0; }
 .pw-fold:hover { color: var(--ink); border-color: var(--rule); }
 .pw-fold:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .pw-fold.open { color: var(--ink); }
-.pw-caret { font-size: 11px; width: 1em; text-align: center; line-height: 1; }
+.pw-caret { font-size: 12px; width: 1em; text-align: center; line-height: 1; }
 /* The menu groups infrequent power controls so the switch, reading and trace
    remain accessible (`docs/ui-rules.md` section 14). */
 .pw-menu { position: relative; }
 .pw-menu summary {
-  list-style: none; cursor: pointer; color: var(--grey); font-size: 14px; line-height: 1;
+  list-style: none; cursor: pointer; color: var(--grey); font-size: 15px; line-height: 1;
   padding: 2px 6px; border: 1px solid transparent; user-select: none;
 }
 .pw-menu summary::-webkit-details-marker { display: none; }
@@ -1388,7 +1333,7 @@ table.qgrid td { padding: 0; }
   min-width: 22em; padding: 6px 10px 8px;
   background: var(--paper); border: 1px solid var(--rule); box-shadow: 0 2px 8px rgba(32, 30, 29, .12);
   display: flex; flex-direction: column; gap: 5px;
-  font-family: var(--font-num); font-size: 11px;
+  font-size: 12px;
 }
 .pw-opt { display: flex; align-items: baseline; gap: 10px; white-space: nowrap; }
 .pw-optl { flex: 0 0 4.5em; color: var(--grey); }
@@ -1405,10 +1350,10 @@ table.qgrid td { padding: 0; }
 
 /* The assistant overlays the view so opening it does not move the content being
    read. The rail and chain strip retain their positions. */
-button.chip.ask { background: none; cursor: pointer; font: inherit; font-family: var(--font-num); font-size: 11px; }
+button.chip.ask { background: none; cursor: pointer; font: inherit; font-size: 12px; }
 button.chip.ask:hover { border-color: #fff; color: #fff; }
 button.chip.ask.on { background: #fff; border-color: #fff; color: var(--ink); }
-button.chip.plans { background: none; cursor: pointer; font: inherit; font-family: var(--font-num); font-size: 11px; }
+button.chip.plans { background: none; cursor: pointer; font: inherit; font-size: 12px; }
 button.chip.plans:hover { border-color: #fff; color: #fff; }
 button.chip.plans.on { background: #fff; border-color: #fff; color: var(--ink); }
 /* The plan panel sits where the assistant does; a plan's approval covers
@@ -1426,35 +1371,35 @@ aside.plans[hidden] { display: none; }
   display: flex; align-items: baseline; gap: 10px; padding: 8px 12px;
   border-bottom: 1px solid var(--rule); background: var(--fill);
 }
-.plans .as-title { font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase; color: var(--grey); }
+.plans .as-title { font-size: 11px; font-weight: 600; color: var(--grey); }
 .plans .spacer { flex: 1 1 auto; }
-.plans button.as-link { background: none; border: 0; padding: 0; cursor: pointer; font-family: var(--font-num); font-size: 11px; color: var(--grey); }
+.plans button.as-link { background: none; border: 0; padding: 0; cursor: pointer; font-size: 12px; color: var(--grey); }
 .plans .as-note:empty { display: none; }
-.plans .as-note { padding: 10px 12px; border-bottom: 1px solid var(--rule); font-size: 12px; color: var(--grey); }
+.plans .as-note { padding: 10px 12px; border-bottom: 1px solid var(--rule); font-size: 13px; color: var(--grey); }
 .plans .as-note p { margin: 0; }
 .plans .pl-list { flex: 1 1 auto; overflow-y: auto; padding: 12px; }
 .pl-card { border: 1px solid var(--rule); padding: 10px 12px; margin-bottom: 12px; }
 .pl-card.pl-rejected, .pl-card.pl-closed { opacity: .6; }
 .pl-title { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; }
-.pl-state { font-family: var(--font-num); font-size: 11px; font-weight: 400; color: var(--grey); }
+.pl-state { font-size: 12px; font-weight: 400; color: var(--grey); }
 .pl-goal { margin: 6px 0 8px; }
-.pl-env { width: 100%; border-collapse: collapse; font-size: 12px; }
+.pl-env { width: 100%; border-collapse: collapse; font-size: 13px; }
 .pl-env th, .pl-env td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--rule); }
-.pl-env th { font-size: 10px; color: var(--grey); font-weight: 600; }
-.pl-fixed { margin-top: 6px; font-size: 12px; }
+.pl-env th { font-size: 11px; color: var(--grey); font-weight: 600; }
+.pl-fixed { margin-top: 6px; font-size: 13px; }
 .pl-fixed summary { cursor: pointer; color: var(--grey); }
 .pl-caps { display: grid; grid-template-columns: repeat(auto-fill, minmax(9em, 1fr)); gap: 6px 12px; margin: 8px 0 0; }
-.pl-caps dt { font-size: 10px; color: var(--grey); }
-.pl-caps dd { margin: 0; font-family: var(--font-num); font-size: 11.5px; overflow-wrap: anywhere; }
+.pl-caps dt { font-size: 11px; color: var(--grey); }
+.pl-caps dd { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
 .pl-actions { display: flex; gap: 8px; margin-top: 10px; }
-.pl-actions button { cursor: pointer; font: inherit; font-size: 12px; padding: 3px 10px; border: 1px solid var(--rule); background: var(--paper); }
+.pl-actions button { cursor: pointer; font: inherit; font-size: 13px; padding: 3px 10px; border: 1px solid var(--rule); background: var(--paper); }
 .pl-actions button.armed { background: var(--warn); border-color: var(--warn); color: #fff; }
-button.chip.quit { background: none; cursor: pointer; font: inherit; font-family: var(--font-num); font-size: 11px; }
+button.chip.quit { background: none; cursor: pointer; font: inherit; font-size: 12px; }
 button.chip.quit:hover { border-color: #fff; color: #fff; }
 button.chip.quit.armed { background: var(--warn); border-color: var(--warn); color: #fff; }
 /* The ended-service screen keeps the terminal state visible in the browser. */
 .ended { max-width: 60ch; margin: 18vh auto 0; padding: 0 16px; }
-.ended .wordmark { font-size: 15px; text-transform: uppercase; letter-spacing: .02em; color: var(--grey); }
+.ended .wordmark { font-size: 15px; text-transform: uppercase; color: var(--grey); }
 .ended h1 { font-size: 20px; margin: 8px 0 12px; }
 aside.assistant {
   position: fixed; top: var(--tabs-height); right: 0; bottom: 0; width: 460px; z-index: 30;
@@ -1474,32 +1419,32 @@ aside.assistant[hidden] { display: none; }
   display: flex; align-items: baseline; gap: 10px; padding: 8px 12px;
   border-bottom: 1px solid var(--rule); background: var(--fill);
 }
-.assistant .as-title { font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase; color: var(--grey); }
-.assistant .as-model { font-family: var(--font-num); font-size: 11px; color: var(--grey); }
+.assistant .as-title { font-size: 11px; font-weight: 600; color: var(--grey); }
+.assistant .as-model { font-size: 12px; color: var(--grey); }
 .assistant .spacer { flex: 1 1 auto; }
 .assistant button.as-link {
   background: none; border: 0; padding: 0; cursor: pointer;
-  font-family: var(--font-num); font-weight: 400; font-size: 11px; color: var(--grey);
+  font-weight: 400; font-size: 12px; color: var(--grey);
 }
 .assistant button.as-link:hover { color: var(--ink); }
 .assistant button.as-settings { border: 1px solid var(--rule); padding: 1px 8px; color: var(--ink); }
 .assistant button.as-settings:hover { border-color: var(--ink); }
 .assistant .as-note:empty { display: none; }
-.assistant .as-note { padding: 10px 12px; border-bottom: 1px solid var(--rule); font-size: 12px; }
+.assistant .as-note { padding: 10px 12px; border-bottom: 1px solid var(--rule); font-size: 13px; }
 .assistant .as-note p { margin: 0 0 8px; color: var(--grey); }
 .assistant .as-key { display: flex; gap: 6px; }
 .assistant .as-key input {
   flex: 1 1 auto; padding: 4px 6px; border: 1px solid var(--rule);
-  font-family: var(--font-num); font-size: 12px;
+  font-size: 13px;
 }
 .assistant .as-key input:focus { border-color: var(--accent); outline: none; }
-.assistant .as-remember { display: block; margin-top: 6px; font-size: 11px; color: var(--grey); }
+.assistant .as-remember { display: block; margin-top: 6px; font-size: 12px; color: var(--grey); }
 .assistant .as-log { flex: 1 1 auto; overflow-y: auto; padding: 12px; }
 .assistant .as-empty p { color: var(--grey); margin: 0 0 10px; }
 .assistant button.as-example {
   display: block; width: 100%; margin: 0 0 6px; padding: 6px 8px; text-align: left; cursor: pointer;
   background: none; border: 1px solid var(--rule);
-  font-family: var(--font-body); font-weight: 400; font-size: 12px; color: var(--ink);
+  font-weight: 400; font-size: 13px; color: var(--ink);
 }
 .assistant button.as-example:hover { border-color: var(--ink); }
 .assistant .as-q {
@@ -1510,36 +1455,36 @@ aside.assistant[hidden] { display: none; }
 .assistant .as-a p { margin: 0 0 8px; }
 .assistant .as-a h3, .assistant .as-a h4, .assistant .as-a h5, .assistant .as-a h6 { margin: 10px 0 4px; font-size: 13px; }
 .assistant .as-a ul, .assistant .as-a ol { margin: 0 0 8px; padding-left: 18px; }
-.assistant .as-a pre { margin: 0 0 8px; padding: 6px 8px; background: var(--grid); font-size: 11px; overflow-x: auto; }
-.assistant .as-a code { font-size: 12px; }
+.assistant .as-a pre { margin: 0 0 8px; padding: 6px 8px; background: var(--grid); font-size: 12px; overflow-x: auto; }
+.assistant .as-a code { font-size: 13px; }
 .assistant .as-table { overflow-x: auto; margin: 0 0 8px; }
-.assistant .as-a table { border-collapse: collapse; font-size: 12px; }
+.assistant .as-a table { border-collapse: collapse; font-size: 13px; }
 .assistant .as-a th, .assistant .as-a td { border-bottom: 1px solid var(--rule); padding: 3px 8px 3px 0; text-align: left; vertical-align: top; }
 .assistant .as-a th { font-weight: 600; color: var(--grey); }
 .assistant .as-tools { margin: 0 0 6px; }
-.assistant .as-tool { font-family: var(--font-num); font-size: 11px; color: var(--grey); }
+.assistant .as-tool { font-size: 12px; color: var(--grey); }
 .assistant .as-tool.bad { color: var(--warn); }
-.assistant .as-wait { font-size: 12px; color: var(--grey); }
-.assistant .as-err { font-size: 12px; color: var(--alert); }
+.assistant .as-wait { font-size: 13px; color: var(--grey); }
+.assistant .as-err { font-size: 13px; color: var(--alert); }
 .assistant .as-composer { display: flex; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--rule); }
 .assistant .as-composer textarea {
   flex: 1 1 auto; resize: none; padding: 6px; border: 1px solid var(--rule);
-  font-family: var(--font-body); font-size: 13px;
+  font-size: 13px;
 }
 .assistant .as-composer textarea:focus { border-color: var(--accent); outline: none; }
 .assistant button.as-send {
   align-self: flex-end; padding: 6px 12px; border: 0; cursor: pointer;
-  background: var(--accent); color: #fff; font-size: 12px;
+  background: var(--accent); color: #fff; font-size: 13px;
 }
 .assistant button.as-send:disabled { background: var(--rule); cursor: default; }
 .assistant .as-field { display: grid; grid-template-columns: 64px 1fr; align-items: center; gap: 8px; margin: 0 0 6px; }
-.assistant .as-field > span { font-size: 11px; color: var(--grey); }
+.assistant .as-field > span { font-size: 12px; color: var(--grey); }
 .assistant .as-field input, .assistant .as-field select {
   min-width: 0; padding: 4px 6px; border: 1px solid var(--rule); background: var(--paper);
-  font-family: var(--font-num); font-size: 12px; color: var(--ink);
+  font-size: 13px; color: var(--ink);
 }
 .assistant .as-field input:focus, .assistant .as-field select:focus { border-color: var(--accent); outline: none; }
 .assistant .as-actions { display: flex; align-items: baseline; gap: 12px; margin-top: 8px; }
-.assistant .as-actions > button:first-child { padding: 4px 12px; border: 0; background: var(--ink); color: #fff; cursor: pointer; font-size: 12px; }
+.assistant .as-actions > button:first-child { padding: 4px 12px; border: 0; background: var(--ink); color: #fff; cursor: pointer; font-size: 13px; }
 .assistant .as-warn { color: var(--warn); }
 .assistant .as-warn:empty { display: none; }
