@@ -482,14 +482,23 @@ def create_app(session: Session, *, ui_dir: str | None = None,
         if request_restart is None:
             return _error(409, "this service was not started by `python -m bace.service`; "
                                "restart it where it was started")
-        active = session.run_active()
-        if active is not None and not (body and body.force):
+        def refused():
+            active = session.run_active()
+            if active is None or (body and body.force):
+                return None
             return _error(409, f"run {active} holds the bench; restarting aborts it and "
                                "cancels the queue. Repeat with force to do so.", run=active)
+
+        if (refusal := refused()) is not None:
+            return refusal
         problem = await run_in_threadpool(restart_check) if restart_check is not None else None
         if problem:
             return _error(409, f"a new service would not start, so this one keeps running: "
                                f"{problem}")
+        # The check takes seconds, and a run can be submitted during it.
+        if (refusal := refused()) is not None:
+            return refusal
+        active = session.run_active()
         asyncio.get_running_loop().call_soon(request_restart)
         return {"restarting": True, "aborts": active}
 

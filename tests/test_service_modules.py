@@ -928,6 +928,20 @@ def test_the_utility_modules(tmp_path):
     sim.power.set_range(3)
     assert len(list(cat.build("power", {}, ctx, b.rig))) == 1, "a held range needs no warning"
     sim.power.set_range(None)
+
+    # A range the meter took but did not confirm is not left held.
+    held = sim.power.set_range
+
+    def unconfirmed(index):
+        held(index)
+        if index is not None:
+            raise RuntimeError("no read-back")
+
+    sim.power.set_range = unconfirmed
+    with pytest.raises(RuntimeError, match="no read-back"):
+        list(cat.build("power", {"meter_range": 4}, ctx, b.rig))
+    assert sim.power.range is None and sim.power.auto_range is True
+    sim.power.set_range = held
     b.rig.power = None
     with pytest.raises(ModuleError, match="^power: no power meter"):
         cat.build("power", {}, ctx, b.rig)

@@ -1492,8 +1492,8 @@ class Catalogue:
             if held < 0:
                 reading = power_reading(rig.power, samples=samples)
             else:
-                rig.power.set_range(held)
                 try:
+                    rig.power.set_range(held)
                     ctx.sleep(METER_RANGE_SETTLE_S)
                     reading = power_reading(rig.power, samples=samples)
                 finally:

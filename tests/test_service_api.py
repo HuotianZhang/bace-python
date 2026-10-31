@@ -1355,6 +1355,26 @@ def test_the_restart_route_refuses_a_run_and_a_replacement_that_would_not_start(
         wait_until(lambda: asked == [1])
 
 
+def test_a_run_submitted_during_the_restart_check_is_not_aborted_unasked(tmp_path, monkeypatch):
+    asked: list[int] = []
+    session = make_session(tmp_path, sid="20260902_220008")
+    active: list[str | None] = [None]
+    monkeypatch.setattr(session, "run_active", lambda: active[0])
+
+    def a_run_arrives():
+        active[0] = "20260902_220008-001"
+
+    with TestClient(create_app(session, request_restart=lambda: asked.append(1),
+                               restart_check=a_run_arrives)) as client:
+        r = client.post("/service/restart", json={})
+        assert r.status_code == 409 and r.json()["run"] == active[0] and asked == []
+        active[0] = None
+        r = client.post("/service/restart", json={"force": True})
+        assert r.status_code == 202 and r.json() == {"restarting": True,
+                                                     "aborts": "20260902_220008-001"}
+        wait_until(lambda: asked == [1])
+
+
 def test_a_restart_argument_list_does_not_grow():
     from bace.service.__main__ import service_args
     assert service_args(["--sim", "--after-pid", "12", "--port", "8900"]) == ["--sim", "--port", "8900"]
