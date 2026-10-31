@@ -148,6 +148,22 @@ class RigConfig:
     Zero disables the digital filter.
     """
 
+    power_meter_range: int | None = None
+    """1918-C range index 0 to 7 held for every reading; `None` leaves the meter on auto.
+
+    Auto-ranging follows the mean, so under pulses a range reached from a dark
+    beam clips the peaks. The reading then depends on what the meter saw before,
+    and stays there: 6 uW against 191 uW at one LED level (manual 1.2).
+    """
+
+    plans_auto_approve: bool = False
+    """Approve each plan as it is proposed, so an agent's runs need no click in the console.
+
+    The envelope, every check of the catalogue, the interlocks and park still apply.
+    The agent writes the envelope itself, so what then bounds it is this file and
+    the catalogue.
+    """
+
     power_meter_console: str = ""
     """URL of the console providing HTTP access to the 1918-C power meter; empty opens the meter directly in this process.
 

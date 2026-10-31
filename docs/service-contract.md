@@ -618,7 +618,7 @@ what the run will centre on; rather than `default · null` with an empty
 | `jv_bace` | `run_jv(rig, JVConfig(light_control="manage", dark=<dark>, led_levels_v=<levels>))` | all of `jv` + `led_start_v led_stop_v led_step_v` (or inherited `led_v` → one level), `led_settle_s`, `dark: bool = True` (include the dark curve), `led_low_v` (unused by run_jv, carried for the rail). This is the module that *owns* the light: it sweeps illumination as the measurement, and it is the V_oc source |
 | `light` | `rigs.apply_led` / `rigs.apply_shutter`; the same functions the `set-led-*`, `led-off` and `shutter-*` actions call | `shutter` (`open`/`shut`/`leave`), `led_mode` (`dc`/`pulse`/`off`/`leave`), `led_v led_low_v pulse_frequency_hz duty_percent settle_s`. Exists because a bench action is not a pipeline step: without it a tree of `jv` steps could never be dark. `leave` on either half touches nothing, so the shutter can move without cycling a generator that is at its thermal steady state. A run whose only module is `light` is `invalid` (`light.undone-by-park`): every run ends parked, so it would hand the bench back unchanged; the manual form is the bench action |
 | `bace` | `run_transient_scan(rig, ScanSpec, RunConfig, voc=…)` inside `router.transient()` with the LED pulsed at `led_v` | `axis_name axis_start axis_stop axis_step centre_on_voc` → Axis; `vpre vcoll delay_ns n_loops` → ScanSpec; `vpre_on_voc: bool = False` (group `pinned`: the pinned `vpre` is an *offset from the V_oc in scope*; `vpre = V_oc + 0.000 V` when `delay_ns` or `vcoll` is the axis, TDCF at V_oc; resolved in `build()` from the same V_oc source `centre_on_voc` uses, under the same coupling check, so the engine still gets an absolute prebias; inert with the `vpre` axis, where `centre_on_voc` is the flag; `core.axis.voc_flags` reads each of the pair only on its own side of `axis_name`, so the one the console hides never acts); every `RunConfig` field verbatim; `store_shots`; `led_v led_low_v` (33220A pulse levels; inherited inside an illumination loop); `voc` (derived from the V_oc source, or edited = typed by hand → warn); `measure_dc: bool = False` (measure V_oc/J_sc/J_sat on the Keithley under the LED first, like the intensity series; `v_sat`); `led_settle_s` (the least wait after DC → pulse), `led_settle_max_s: float = 60.0` s and `led_settle_tolerance: float = 0.02` (group `illumination`: the power meter behind the open shutter is polled every 0.5 s to obtain three readings that agree within the tolerance, giving up with a warning at the maximum; see the README's "Light"); `smu_*` as above |
-| `power` | `PowerReading` from the meter; `Read` is a worker job, `Monitor` is an observer | `wavelength_nm samples` |
+| `power` | `PowerReading` from the meter; `Read` is a worker job, `Monitor` is an observer | `wavelength_nm samples meter_range` |
 | `temperature` | `service.temperature.settle`: through the 331 when `Rig.temperature` holds a controller (setpoint written, band held for `hold_s`), else `NeedsOperator` + wait; status `partial` | `setpoint_k tolerance_k hold_s timeout_s` |
 | `park` | `Rig.park()` |; |
 | `wait` | sleep | `seconds` |
@@ -1103,6 +1103,13 @@ source, averaged`, `Content-Disposition: attachment`);
 `DELETE /monitors/power/history` forgets it; the journal on disk keeps every
 reading regardless.
 
+`meter_range` and `auto_range` on the same three give the range index in the
+status word and whether the meter was ranging itself. `[power_meter] range` in
+`rig.toml` holds one range for every reading; the `power` module's
+`meter_range` holds another for one reading and returns the rig's after it, and
+warns when it reads pulses on auto. A capture ends with one status read, so
+`trustworthy` describes it.
+
 `averaged` on `PowerReading`, `instruments.power` and `read-power` reports
 meter averaging. Direct opening configures DC-continuous mode, a 5 Hz analog
 filter when enabled, and `digital_filter` smoothing (`rig.toml`, default
@@ -1188,8 +1195,10 @@ API's server-side fallback on a refusal for the models that take it.
 
 ## 8b. `/plans`; experiment plans
 
-An agent runs experiments only inside a plan a person approved
-(`service/plans.py`). A plan has a title, a goal and an envelope:
+An agent runs experiments only inside an approved plan (`service/plans.py`).
+A person approves it in the console, or `[plans] auto_approve = true` in
+`rig.toml` approves it as it is proposed. A plan has a title, a goal and an
+envelope:
 
 ```json
 {"title": "V_coll saturation", "goal": "Q against V_coll at V_oc",
@@ -1220,7 +1229,7 @@ and `axis_stop`.
 | Route | |
 |---|---|
 | `GET /plans` | Every plan of the session: state (`proposed`, `approved`, `rejected`, `closed`), fingerprint, runs, `spent_s`, `expires_at`, and `open` (whether a submission would be accepted now). |
-| `POST /plans` | Proposes a plan; 201 with the plan, 422 when the envelope names an unknown module or parameter or a malformed bound. Journals `PlanProposed`. |
+| `POST /plans` | Proposes a plan; 201 with the plan, 422 when the envelope names an unknown module or parameter or a malformed bound. Journals `PlanProposed`. Under `auto_approve` the answer is the approved plan, and `PlanDecided` follows with the reason `auto_approve in rig.toml`. |
 | `GET /plans/{id}` | One plan; 404 when unknown. |
 | `POST /plans/{id}/approve` | `{"fingerprint": "…"}`: approves a proposed plan. A fingerprint other than the plan's is a 409, so an approval covers exactly the plan shown. Journals `PlanDecided` with the fingerprint. The console's plan card is the place for it; the MCP endpoint does not offer it. |
 | `POST /plans/{id}/reject`, `/close` | `{"reason": "…"}`: rejects a proposed plan, or closes an approved one. Journaled. |
@@ -1236,6 +1245,10 @@ section 7, the interlocks and park apply. `RunQueued.plan` and the run record's
 Plans are held in the session's memory: a restart forgets them, so no
 approval outlives the process it was given to.
 
+Under `auto_approve` the agent writes the envelope nobody reads, so the
+envelope is a budget and a record, not a limit set by a person. What bounds the
+agent then is `rig.toml`, the catalogue's checks, the interlocks and park.
+
 ## 8c. `/mcp`; the Model Context Protocol
 
 `POST /mcp` serves an external agent (Claude Code, Codex, any MCP client)
@@ -1248,7 +1261,7 @@ page cannot drive the bench through the browser at the console.
 
 | Method | Answer |
 |---|---|
-| `initialize` | Protocol version, `capabilities.tools`, `serverInfo` and `instructions` that tell the agent to read the manual, propose a plan and wait for a person's approval |
+| `initialize` | Protocol version, `capabilities.tools`, `serverInfo` and `instructions` that tell the agent to read the manual, propose a plan and run once it is approved |
 | `ping` | `{}` |
 | `tools/list` | The tools below, with JSON Schema inputs |
 | `tools/call` | `{"content": [{"type": "text", "text": …}], "isError": …}`; arguments checked against the schema first |
@@ -1262,7 +1275,7 @@ page cannot drive the bench through the browser at the console.
 | `stop_run` | `POST /runs/{id}/stop` for a run started under a plan; a run a person started is refused |
 
 No tool approves a plan. Approval is `POST /plans/{id}/approve` from the
-console (§8b).
+console, or `auto_approve` in `rig.toml` (§8b). No tool restarts the service.
 
 ## 9. CLI (`__main__.py`)
 
@@ -1314,6 +1327,18 @@ py -3 -m bace.service --rig rig.toml --run run.toml      # the lab PC
   closes the journal as Ctrl-C does. An app built without `request_exit` (a
   test client, an embedding) answers 409. Open requests get
   `GRACEFUL_SHUTDOWN_S` (5 s) to end.
+- `POST /service/restart` `{"force": bool}` → 202 `{"restarting": true,
+  "aborts": run_id | null}`, with the same 409 for a run. It first runs
+  `python -m bace.service … --check` in a new interpreter, which imports the
+  code on disk and reads the configuration and opens nothing; a failure is a
+  409 that quotes it, and this service keeps running. Otherwise the service ends
+  as on shutdown and starts a replacement with the same arguments and working
+  directory, with no window, output to `runs/logs/service_<stamp>.log`.
+  `--after-pid` holds the replacement until the old process has gone (at most
+  `RESTART_WAIT_S`, 90 s), because that process holds the USB meter until it
+  exits. The session id changes and plans are forgotten. The SSH tunnel is
+  separate and stays up. A replacement that passes `--check` and still fails
+  (an instrument that hangs at start) is seen only in its log.
 - The launcher (`bace/launcher.py`, `BACE.pyw` at the root) is standard
   library only. It probes the port: free (by binding it; on Windows a refused
   local connection takes about 2 s) → start

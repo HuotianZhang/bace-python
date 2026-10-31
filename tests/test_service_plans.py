@@ -12,7 +12,7 @@ import pytest
 from bace.experiment.rig import RigConfig
 from bace.service import pipeline
 from bace.service.modules import Catalogue
-from bace.service.plans import Envelope, PlanBook, PlanConflict, PlanError
+from bace.service.plans import AUTO_APPROVED, Envelope, PlanBook, PlanConflict, PlanError
 
 CAT = Catalogue(rig_config=RigConfig())
 
@@ -264,3 +264,33 @@ def test_a_proposal_the_service_cannot_accept_is_a_422(service):
     client, _ = service
     r = client.post("/plans", json={**PLAN, "envelope": {"modules": {"bake": {}}}})
     assert r.status_code == 422 and "no module 'bake'" in r.json()["error"]
+
+
+def test_auto_approve_opens_a_plan_as_it_is_proposed_and_keeps_the_envelope(tmp_path):
+    session = Session(RigConfig(plans_auto_approve=True), run_toml_layer(RECIPE),
+                      out=str(tmp_path / "runs"), mode="sim", fast=True, seed=5,
+                      session_id="20261031_100000",
+                      sample={"sample": "s4", "material": "SIM", "pixel": "a"})
+    with TestClient(create_app(session)) as client:
+        env = json.loads(json.dumps(ENVELOPE))
+        env["modules"]["bace"].update({k: {"choices": [v]} for k, v in FAST.items()})
+        env["modules"]["bace"]["voc"] = {"min": 0.0, "max": 2.0}
+        plan = client.post("/plans", json={**PLAN, "envelope": env}).json()
+        assert plan["state"] == "approved" and plan["open"] and plan["expires_at"]
+        assert plan["reason"] == AUTO_APPROVED
+
+        r = client.post("/runs", json=run_body(plan["plan_id"], vcoll=-1.0))
+        assert r.status_code == 202, r.text
+        wait_run(session, r.json()["run_id"])
+
+        r = client.post("/runs", json=run_body(plan["plan_id"], vcoll=-9.0))
+        assert r.status_code == 422 and "plan.envelope" in r.text
+
+        client.post(f"/plans/{plan['plan_id']}/close", json={"reason": "enough"})
+        assert client.get(f"/plans/{plan['plan_id']}").json()["open"] is False
+
+    with open(session.journal.path, encoding="utf-8") as fh:
+        decided = [json.loads(line) for line in fh if '"PlanDecided"' in line]
+    assert decided[0]["data"]["decision"] == "approve"
+    assert decided[0]["data"]["reason"] == AUTO_APPROVED
+    assert decided[0]["data"]["fingerprint"] == plan["fingerprint"]

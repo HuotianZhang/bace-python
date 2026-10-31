@@ -350,13 +350,18 @@ def power_reading(meter, *, samples: int = 1) -> E.PowerReading:
         averaged = getattr(meter, "averaged", None)
     if averaged is not None:
         averaged = bool(averaged)
+    meter_range = getattr(last, "range", None) if last is not None else None
+    if meter_range is None:
+        meter_range = getattr(meter, "range", None)
+    auto_range = getattr(meter, "auto_range", None)
     # Check `source` before `base_url`: the direct driver has no URL.
     # Otherwise a real power reading could be labelled simulated.
     source = (getattr(meter, "source", None) or getattr(meter, "base_url", None)
               or "simulated")
     return E.PowerReading(watts=float(watts), trustworthy=trustworthy,
                           wavelength_nm=wavelength, source=str(source),
-                          averaged=averaged)
+                          averaged=averaged, meter_range=meter_range,
+                          auto_range=auto_range)
 
 
 def apply_led(led, mode: str, *, level: float | None = None,
@@ -956,7 +961,8 @@ class Bench:
     def _power_state(self, monitor: bool) -> dict:
         power = self.rig.power
         out = {"available": False, "watts": None, "trustworthy": None,
-               "wavelength_nm": None, "averaged": None, "monitor": bool(monitor)}
+               "wavelength_nm": None, "averaged": None, "meter_range": None,
+               "auto_range": None, "monitor": bool(monitor)}
         if not _usable(power):
             out["reason"] = self.unavailable.get("power", "no power meter on this bench")
             return out
@@ -967,7 +973,8 @@ class Bench:
             return out
         out.update({"available": True, "watts": ev.watts,
                     "trustworthy": ev.trustworthy, "wavelength_nm": ev.wavelength_nm,
-                    "averaged": ev.averaged})
+                    "averaged": ev.averaged, "meter_range": ev.meter_range,
+                    "auto_range": ev.auto_range})
         return out
 
     def _temperature_state(self) -> dict:
@@ -1245,7 +1252,8 @@ class Bench:
                 "warn", f"the 1918-C console is silent: {exc}") from None
         return {"watts": ev.watts, "trustworthy": ev.trustworthy,
                 "wavelength_nm": ev.wavelength_nm, "source": ev.source,
-                "averaged": ev.averaged}
+                "averaged": ev.averaged, "meter_range": ev.meter_range,
+                "auto_range": ev.auto_range}
 
 
 # -- helpers ------------------------------------------------------------

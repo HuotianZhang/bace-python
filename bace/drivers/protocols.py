@@ -228,6 +228,10 @@ class PowerMeter(Protocol):
         """Return mean and sample standard deviation over `n` readings, in W."""
         ...
 
+    def set_range(self, index: int | None) -> dict:
+        """Hold range `index`, or return to auto with `None`; return the read-back."""
+        ...
+
 
 # -- illumination ---------------------------------------------------------
 @runtime_checkable

@@ -10,8 +10,9 @@ transport, without a server-sent stream). It serves `initialize`, `ping`,
 The tools are the console assistant's read-only tools (`service.assistant`),
 plus the ones an agent needs to run an experiment: list, propose and close
 plans, start a run or a pipeline under a plan, stop a run it started. There
-is no tool that approves a plan: a person does that in the console
-(`service.plans`), and every run an agent starts must name an approved plan
+is no tool that approves a plan: a person does that in the console, or
+`[plans] auto_approve` in rig.toml does (`service.plans`), and every run an
+agent starts must name an approved plan
 whose envelope it fits. Every check, interlock and park of an ordinary run
 applies.
 
@@ -44,8 +45,9 @@ and every parameter with the layer its value comes from.
 To run anything, propose a plan with `propose_plan`: a title, a goal, and an \
 envelope listing the modules you will run, the parameters you will set with \
 their bounds, the loops and their values, and caps on runs, time and the \
-approval's lifetime. A person approves or rejects it in the console; you cannot. \
-Check its state with `list_plans`. Once it is approved, `start_run` or \
+approval's lifetime. The answer gives its state: approved at once where rig.toml \
+says so, otherwise proposed until a person decides in the console; you cannot \
+approve it yourself. Check its state with `list_plans`. Once it is approved, `start_run` or \
 `start_pipeline` with its id. A submission outside the envelope is refused with \
 every reason; the ordinary checks still apply. Parameters you do not set keep the \
 values the operator chose. Follow a run with `get_run` and `get_events`, stop one \
@@ -69,8 +71,9 @@ ENVELOPE_DOC = ("The envelope: {\"modules\": {module: {parameter: bound}}, \"loo
 AGENT_TOOLS = [
     _tool("list_plans", "Every plan of the session with its state (proposed, approved, "
           "rejected, closed), whether it accepts runs now (open), its runs and time spent."),
-    _tool("propose_plan", "Propose an experiment plan for a person to approve in the "
-          "console. Nothing runs until it is approved. " + ENVELOPE_DOC,
+    _tool("propose_plan", "Propose an experiment plan. Nothing runs until it is approved: "
+          "at once where rig.toml says so, otherwise by a person in the console. The "
+          "answer gives the state. " + ENVELOPE_DOC,
           {"title": {"type": "string"}, "goal": {"type": "string",
                                                  "description": "what the plan measures and why"},
            "envelope": {"type": "object"}}, ("title", "goal", "envelope")),

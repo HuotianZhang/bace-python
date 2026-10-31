@@ -915,6 +915,33 @@ def test_the_utility_modules(tmp_path):
     assert len(evs) == 1 and isinstance(evs[0], E.PowerReading)
     assert evs[0].watts > 0 and evs[0].trustworthy and evs[0].source == "simulated"
     assert evs[0].wavelength_nm == 532.0 and sim.power.wavelength_nm == 532.0
+
+    # A range held for one reading, and the rig's setting back after it.
+    evs = list(cat.build("power", {"meter_range": 4}, ctx, b.rig))
+    assert evs[0].meter_range == 4 and evs[0].auto_range is False
+    assert sim.power.range is None and sim.power.auto_range is True
+
+    # Auto under pulses reads what the meter saw before, and the run says so.
+    sim.led.set_pulse(1.02, 0.0, frequency_hz=500.0, duty_percent=50.0)
+    evs = list(cat.build("power", {}, ctx, b.rig))
+    assert isinstance(evs[1], E.Notice) and "on auto under pulses" in evs[1].text
+    sim.power.set_range(3)
+    assert len(list(cat.build("power", {}, ctx, b.rig))) == 1, "a held range needs no warning"
+    sim.power.set_range(None)
+
+    # A range the meter took but did not confirm is not left held.
+    held = sim.power.set_range
+
+    def unconfirmed(index):
+        held(index)
+        if index is not None:
+            raise RuntimeError("no read-back")
+
+    sim.power.set_range = unconfirmed
+    with pytest.raises(RuntimeError, match="no read-back"):
+        list(cat.build("power", {"meter_range": 4}, ctx, b.rig))
+    assert sim.power.range is None and sim.power.auto_range is True
+    sim.power.set_range = held
     b.rig.power = None
     with pytest.raises(ModuleError, match="^power: no power meter"):
         cat.build("power", {}, ctx, b.rig)

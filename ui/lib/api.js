@@ -60,6 +60,7 @@ export function createApi({ base = '', fetch: fetchImpl = globalThis.fetch } = {
      * (`docs/service-contract.md` §9).
      */
     shutdown: (force = false) => call('POST', '/service/shutdown', { force }),
+    restart: (force = false) => call('POST', '/service/restart', { force }),
 
     // -- the bench ---------------------------------------------------------
     /**

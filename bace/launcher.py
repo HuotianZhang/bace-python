@@ -118,7 +118,7 @@ def log_path(now: datetime | None = None) -> str:
     return os.path.join(ROOT, "runs", "logs", f"service_{stamp}.log")
 
 
-def start_service(command: list[str], log: str) -> subprocess.Popen:
+def start_service(command: list[str], log: str, *, cwd: str = ROOT) -> subprocess.Popen:
     """The service as a process of its own with no window, outliving the
     launcher, its output appended to `log`."""
     os.makedirs(os.path.dirname(log), exist_ok=True)
@@ -127,7 +127,7 @@ def start_service(command: list[str], log: str) -> subprocess.Popen:
         flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
     env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8")
     with open(log, "ab") as out:
-        return subprocess.Popen(command, cwd=ROOT, stdout=out, stderr=subprocess.STDOUT,
+        return subprocess.Popen(command, cwd=cwd, stdout=out, stderr=subprocess.STDOUT,
                                 stdin=subprocess.DEVNULL, env=env, creationflags=flags)
 
 

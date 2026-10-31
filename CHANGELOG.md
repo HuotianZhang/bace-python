@@ -2,6 +2,21 @@
 
 Dated, newest first. Details and evidence are in `docs/`.
 
+## 2026-10-31
+
+- `[power_meter] range` holds one 1918-C range for every reading. On auto the
+  meter's reading of pulses depended on what it saw before: 6 uW after a shut
+  beam, 191 uW after DC, at one LED level. The key is not set yet: the range
+  has to be found on the bench with the `power` module's new `meter_range`.
+- `PowerReading` carries the range and whether the meter was on auto, and the
+  `power` module warns on auto under pulses. A capture now refreshes the status
+  that `trustworthy` is read from; it used to report an earlier reading.
+- `[plans] auto_approve = true` approves a plan as it is proposed. It is on in
+  this `rig.toml`. The envelope, checks, interlocks and park still apply, but the
+  agent writes the envelope (manual 1.6).
+- `POST /service/restart` and `Restart` in the bar restart the service from the
+  files on disk, after trying them in a separate process.
+
 ## 2026-10-30
 
 - Plots look like journal figures: closed frame, inward ticks, no gridlines,
