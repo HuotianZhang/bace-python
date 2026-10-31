@@ -579,7 +579,7 @@ def test_bace_refuses_a_voc_measured_at_another_level_before_touching_anything(t
     sim = b.sim
     cat = catalogue()
     ctx = make_ctx(tmp_path, voc=voc_at(1.04))
-    with pytest.raises(ModuleError, match=r"^bace: voc: V_oc was measured at 1.04 V drive"):
+    with pytest.raises(ModuleError, match=r"^bace: voc: Voc was measured at 1.04 V drive"):
         cat.build("bace", {**FAST, "centre_on_voc": True, "led_v": 1.02}, ctx, b.rig)
     assert not sim.led.output_enabled and sim.bench.led_mode == "OFF"
     assert sim.bench.shots == 0 and ctx.folders == []
@@ -620,7 +620,7 @@ def test_bace_refuses_centre_on_voc_without_a_source(tmp_path):
     b = bench()
     cat = catalogue()
     ctx = make_ctx(tmp_path)
-    with pytest.raises(ModuleError, match=r"^bace: centre_on_voc: no V_oc source .* 1.020 V"):
+    with pytest.raises(ModuleError, match=r"^bace: centre_on_voc: no Voc source .* 1.020 V"):
         cat.build("bace", {**FAST, "centre_on_voc": True, "led_v": 1.02}, ctx, b.rig)
     assert b.sim.bench.shots == 0
     # an absolute axis needs no source at all
@@ -661,7 +661,7 @@ def test_measure_dc_supplies_the_voc_and_centres_the_axis_on_it(tmp_path):
     # the dark 0 V if the shutter was shut during the read.
     assert positions == [("dc", "sourcemeter", "DC", 1.02), ("shot", "amplifier", "PULSE", 1.02)]
     assert dc.led_drive_v == 1.02
-    assert dc.dc.voc > 0.5, "the light V_oc, not the dark 0 V a shutter-shut read would give"
+    assert dc.dc.voc > 0.5, "the light Voc, not the dark 0 V a shutter-shut read would give"
     assert dc.dc.voc == pytest.approx(sim.bench.device.voc(1.02), abs=0.01)
     assert axis.voc == dc.dc.voc and axis.values[0] == pytest.approx(dc.dc.voc)
     assert (ctx.voc.how, ctx.voc.led_v, ctx.voc.value) == ("measure_dc", 1.02, dc.dc.voc)
@@ -991,18 +991,18 @@ def test_vpre_on_voc_pins_the_prebias_as_an_offset_from_the_voc_in_scope(tmp_pat
               "vpre": 0.05, "axis_name": "delay_ns", "axis_start": 50.0, "axis_stop": 150.0,
               "axis_step": 50.0, "led_v": 1.02}
     starts = [ev for ev in cat.build("bace", params, ctx, b.rig) if isinstance(ev, E.StepStarted)]
-    assert [s.setpoint.vpre for s in starts] == [pytest.approx(0.95)] * 3, "V_oc + 0.05 V"
+    assert [s.setpoint.vpre for s in starts] == [pytest.approx(0.95)] * 3, "Voc + 0.05 V"
     assert [s.setpoint.delay_ns for s in starts] == [50.0, 100.0, 150.0]
     assert ctx.voc is voc
 
-    with pytest.raises(ModuleError, match="vpre_on_voc: no V_oc source"):
+    with pytest.raises(ModuleError, match="vpre_on_voc: no Voc source"):
         cat.build("bace", params, make_ctx(tmp_path), b.rig)
     # With vpre the swept axis the flag does not apply (`core.axis.voc_flags`):
     # the console hides it, and the build reads a stale true as nothing.
     swept = {**params, "axis_name": "vpre", "axis_start": 0.9, "axis_stop": 0.9, "axis_step": 0.0}
     starts = [ev for ev in cat.build("bace", swept, make_ctx(tmp_path), b.rig)
               if isinstance(ev, E.StepStarted)]
-    assert [s.setpoint.vpre for s in starts] == [pytest.approx(0.9)], "absolute, no V_oc asked for"
+    assert [s.setpoint.vpre for s in starts] == [pytest.approx(0.9)], "absolute, no Voc asked for"
     assert b.sim.bench.shots == 8, "three shots and one, light and dark: the refusal touched nothing"
     spec = {p.name: p for p in cat._params["bace"]}["vpre_on_voc"]
     assert spec.group == "pinned" and spec.default is False

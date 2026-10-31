@@ -158,13 +158,13 @@ function renderChips(state) {
     h('button', {
       class: 'chip quit' + (restartArmed ? ' armed' : ''),
       text: restartArmed ? 'Restart?' : 'Restart',
-      title: 'Aborts the run, parks the bench, then starts the service again from the files on disk. Plans are forgotten.',
+      title: 'Aborts the run, turns all off, then restarts the service. Plans are forgotten.',
       onclick: () => restartService(),
     }),
     h('button', {
       class: 'chip quit' + (quitArmed ? ' armed' : ''),
       text: quitArmed ? 'Shut down?' : 'Shut down',
-      title: 'Aborts the run, parks the bench, closes the journal.',
+      title: 'Aborts the run and turns all off.',
       onclick: () => shutDown(),
     }),
   ]);
@@ -206,7 +206,7 @@ async function restartService() {
   }
   stream.close();
   document.getElementById('app').replaceChildren(h('div.ended', h('p.wordmark', 'bace'),
-    h('h1', 'Restarting'), h('p', 'Parking the bench and reading the instruments. Reload this page when the service answers.')));
+    h('h1', 'Restarting'), h('p', 'Reload this page when the service answers.')));
 }
 
 async function shutDown() {
@@ -220,7 +220,7 @@ async function shutDown() {
   }
   stream.close();
   const heading = h('h1', 'Shutting down');
-  const body = h('p', 'Aborting any run, parking the bench, closing the journal.');
+  const body = h('p', 'Aborting any run and turning all off.');
   document.getElementById('app').replaceChildren(h('div.ended', h('p.wordmark', 'bace'), heading, body));
   // HTTP 202 acknowledges the exit request, not park. An instrument call that does
   // not return can prevent park. The page waits for process exit and reports the
@@ -228,7 +228,7 @@ async function shutDown() {
   const gone = await serviceGone(SHUTDOWN_WAIT_MS);
   heading.textContent = gone ? 'Service stopped' : 'Service has not stopped';
   body.textContent = gone
-    ? 'Bench parked unless a run held an instrument; runs\\logs\\ says which. '
+    ? 'All off unless a run held an instrument; see runs\\logs\\. '
       + 'Close this window; BACE.pyw starts the service again.'
     : 'A run is still inside an instrument call. Check the instruments; see runs\\logs\\.';
 }
@@ -396,7 +396,7 @@ async function park() {
   const busy = (store.getState().benchState || 'idle') !== 'idle';
   if (busy && !parkArmed) return armPark(true);
   armPark(false);
-  stripStatus = { level: '', text: 'Parking …' };
+  stripStatus = { level: '', text: 'All off …' };
   drawStrip(store.getState());
   try {
     const out = await api.action('park');
@@ -404,8 +404,8 @@ async function park() {
     stripStatus = out && out.pending
       // A blocking VISA call can exceed the wait. Park remains queued for the worker,
       // so the operator needs to see that it is pending.
-      ? { level: '', text: 'Park queued; a run holds an instrument.' }
-      : { level: 'ok', text: 'Parked' };
+      ? { level: '', text: 'All off queued; a run holds an instrument.' }
+      : { level: 'ok', text: 'All off' };
   } catch (error) {
     stripStatus = { level: 'bad', text: error.text || error.message };
   }

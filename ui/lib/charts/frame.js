@@ -20,7 +20,6 @@ export function paint(colour) {
   return !colour ? 'none' : colour[0] === '#' ? colour : `var(--${colour})`;
 }
 
-export const FONT_N = "var(--font-num)";
 export const FONT_S = "var(--font-body)";
 
 /** The surround uses model units and one shared default. */
@@ -238,25 +237,25 @@ function absentSvg(spec) {
     const { rect } = panel;
     kids.push(s('rect', {
       x: rect.x, y: rect.y, width: rect.w, height: rect.h,
-      fill: 'none', stroke: paint('rule'), 'stroke-width': 1, 'stroke-dasharray': '3 3',
+      fill: 'none', stroke: paint('rule'), 'stroke-width': 1,
     }));
     if (panel.label) {
       kids.push(s('text', {
         x: rect.x + 6, y: rect.y + 13,
-        style: { font: `400 11px ${FONT_S}`, fill: paint('grey') }, text: panel.label,
+        style: { font: `400 12px ${FONT_S}`, fill: paint('grey') }, text: panel.label,
       }));
     }
   }
   const first = frame.panels[0].rect;
   kids.push(s('text', {
     x: first.x + first.w / 2, y: first.y + first.h / 2 + 4, 'text-anchor': 'middle',
-    style: { font: `400 11px ${FONT_S}`, fill: paint('grey') }, text: spec.text,
+    style: { font: `400 12px ${FONT_S}`, fill: paint('grey') }, text: spec.text,
   }));
   if (f.xLabel) {
     const last = frame.panels[frame.panels.length - 1].rect;
     kids.push(s('text', {
       x: last.x + last.w / 2, y: last.y + last.h + 33, 'text-anchor': 'middle',
-      style: { font: `400 11px ${FONT_S}`, fill: paint('grey') }, text: f.xLabel,
+      style: { font: `400 12px ${FONT_S}`, fill: paint('grey') }, text: f.xLabel,
     }));
   }
   return root(frame.width, frame.height, { class: 'chart-svg' }, ...kids);
@@ -391,7 +390,7 @@ function renderPanel(panel) {
       // the label offset; string concatenation can place integer ticks outside the
       // panel and fractional ticks on their gridlines.
       x: rect.x - 4, y: Number(tick.y) + 3, 'text-anchor': 'end',
-      style: { font: `400 9.5px ${FONT_N}`, fill: paint('grey') }, text: tick.text,
+      style: { font: `400 11px ${FONT_S}`, fill: paint('grey') }, text: tick.text,
     }));
   }
   kids.push(...contentOf(panel));
@@ -404,11 +403,11 @@ function renderPanel(panel) {
   const labelTop = noteAt - (panel.note ? HEAD_LINE : 0) - (lines.length - 1) * HEAD_LINE;
   lines.forEach((line, i) => {
     kids.push(s('text', { x: rect.x, y: labelTop + i * HEAD_LINE,
-      style: { font: `600 9px ${FONT_S}`, fill: paint('ink') }, text: line }));
+      style: { font: `600 11px ${FONT_S}`, fill: paint('ink') }, text: line }));
   });
   if (panel.note) {
     kids.push(s('text', { x: rect.x, y: noteAt,
-      style: { font: `400 9px ${FONT_S}`, fill: paint(panel.noteColour || 'grey') }, text: panel.note }));
+      style: { font: `400 11px ${FONT_S}`, fill: paint(panel.noteColour || 'grey') }, text: panel.note }));
   }
   kids.push(...cursorDots(panel));
   return s('g.panel', { dataset: { panel: panel.key } }, kids);
@@ -459,10 +458,10 @@ export function minorValues(f, ticks) {
 /** A log tick is set as a power of ten; every other tick is its text. */
 function tickLabel(tick, attrs) {
   if (tick.power === undefined) return s('text', { ...attrs, text: tick.text });
-  return s('text', attrs, '10', s('tspan', { dy: -4, style: { font: `400 8.5px ${FONT_S}` } }, tick.power));
+  return s('text', attrs, '10', s('tspan', { dy: -4, style: { font: `400 11px ${FONT_S}` } }, tick.power));
 }
 
-const LABEL = `400 11px ${FONT_S}`;
+const LABEL = `400 12px ${FONT_S}`;
 
 function renderPlotPanel(panel, model) {
   const { rect } = panel;
@@ -487,7 +486,7 @@ function renderPlotPanel(panel, model) {
     style: { font: LABEL, fill: paint('ink') }, text: panel.y.title }));
   if (panel.letter) {
     kids.push(s('text', { x: rect.x + 8, y: bottom - 7,
-      style: { font: `600 12px ${FONT_S}`, fill: paint('ink') }, text: panel.letter }));
+      style: { font: `600 13px ${FONT_S}`, fill: paint('ink') }, text: panel.letter }));
   }
   (panel.keys || []).forEach((key, i) => {
     const x = rect.x + rect.w * 0.62;
@@ -551,7 +550,7 @@ function contentOf(panel) {
     kids.push(s('text', {
       x: mark.x, y: mark.y, 'text-anchor': mark.anchor || 'start',
       style: {
-        font: `${mark.weight || 500} ${mark.size || 9}px ${mark.mono ? FONT_N : FONT_S}`,
+        font: `${mark.weight || 500} ${mark.size || 11}px ${FONT_S}`,
         fill: paint(mark.colour || 'grey'),
       },
       // An integration-window label needs its position over the data. A
@@ -594,13 +593,13 @@ function renderXAxis(model, axis, panel) {
     kids.push(s('line', { x1: tick.x, y1: baseline, x2: tick.x, y2: baseline + 4,
       stroke: paint('rule'), 'stroke-width': 1 }));
     kids.push(s('text', { x: tick.x, y: baseline + 14, 'text-anchor': 'middle',
-      style: { font: `400 9.5px ${FONT_N}`, fill: paint('grey') }, text: tick.text }));
+      style: { font: `400 11px ${FONT_S}`, fill: paint('grey') }, text: tick.text }));
   }
   if (axis.label) {
     // The axis caption sits below tick labels to avoid a collision at the rightmost
     // tick.
     kids.push(s('text', { x: panel.rect.x + panel.rect.w, y: baseline + (axis.ticks.length ? 26 : 14), 'text-anchor': 'end',
-      style: { font: `400 9px ${FONT_S}`, fill: paint('grey') }, text: axis.label }));
+      style: { font: `400 11px ${FONT_S}`, fill: paint('grey') }, text: axis.label }));
   }
   return s('g.xaxis', kids);
 }

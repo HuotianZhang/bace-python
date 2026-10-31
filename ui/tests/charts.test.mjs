@@ -39,13 +39,13 @@ function liveRun() {
 
 test('light, dark and photocurrent are in one frame, never the difference alone', () => {
   // `ui-rules` §4: photocurrent on its own hides the failure where both
-  // parents sit on the digitiser's rail and the difference is identically zero.
+  // parents sit on the scope's rail and the difference is identically zero.
   const model = transientModel(TRANSIENT);
   assert.deepEqual(model.panels.map((p) => p.key), ['traces', 'photo', 'charge']);
   assert.deepEqual(model.panels[0].series.map((s) => s.key), ['dark', 'light']);
 });
 
-test('the two traces share one vertical window, as the digitiser did', () => {
+test('the two traces share one vertical window, as the scope did', () => {
   const model = transientModel(TRANSIENT);
   const [dark, light] = model.panels[0].series;
   assert.equal(model.panels[0].y.scale, model.panels[0].y.scale);
@@ -111,14 +111,14 @@ test('the running integral is the service\'s where there is one, and says so whe
   assert.match(live.panels[2].note, /not the run's Q/);
 });
 
-test('σ_Q of zero is read as an absence, not as a zero', () => {
+test('σQ of zero is read as an absence, not as a zero', () => {
   // The statement moved off the chart's readout row and onto the shot block,
   // which can say *which* point the σ belongs to. The readout row is the
   // crosshair's, and printing Q / mean / σ there as well said them twice.
   const rows = shotRows({ ...liveRun().lastShot, q_std: 0 });
   const sigma = rows.find(([label]) => label.startsWith('σ'));
   assert.ok(sigma, 'the shot block states σ');
-  assert.match(sigma[1], /σ_Q not recorded/);
+  assert.equal(sigma[1], '—');
   assert.equal(transientModel({ ...liveRun().lastShot, q_std: 0 }).readout, '',
     'the chart no longer restates what the shot block already said');
 });
@@ -151,7 +151,7 @@ test('the settings under the transient became labels on the panel they define', 
 test('a plot names its axes and carries its unit in the title', () => {
   const model = transientModel(TRANSIENT);
   assert.equal(model.x.title, 'Time (ns)');
-  assert.deepEqual(model.panels.map((p) => p.y.title), ['Current (mA)', 'Light − dark (mA)', 'Charge (pC)']);
+  assert.deepEqual(model.panels.map((p) => p.y.title), ['Current (mA)', 'PhotoCurrent (mA)', 'Charge (pC)']);
   assert.deepEqual(model.panels.map((p) => p.letter), ['a', 'b', 'c']);
   assert.deepEqual(model.panels[0].keys.map((k) => k.label), ['Light', 'Dark']);
   assert.ok(!model.panels[2].y.ticks.some((t) => /e/.test(t.text)), 'charge ticks in a prefix, not in exponents');
@@ -272,7 +272,7 @@ test('a sweep in flight is drawn dotted in its own colour, into the planned rang
   assert.match(live.label, /sweeping/);
   assert.equal(model.panels[0].dots.length, 1, 'a dot on the last point read');
   assert.ok(model.x.scale.domain[1] >= 1.2, 'the axis is the planned range, not the points so far');
-  assert.match(model.panels[0].note, /1 curve · sweeping .* point 5 of/);
+  assert.match(model.panels[0].note, /^sweeping .* point 5 of/);
   assert.ok(!model.metrics.entries.some((e) => /sweeping/.test(e.label)), 'no metrics for half a curve');
   const legend = model.legend.find((l) => /sweeping 5 of/.test(l.label));
   assert.ok(legend, 'the legend says how far it got');
@@ -283,7 +283,7 @@ test('no pixel area means amps, not a density with an invented area', () => {
   assert.equal(currentOf(noArea).key, 'current');
   const model = jvModel(noArea);
   assert.match(model.panels[0].label, /I \/ A/);
-  assert.ok(model.notes.some((n) => /inventing one/.test(n)));
+  assert.ok(model.notes.some((n) => /No Pixel Area/.test(n)));
 });
 
 test('one curve without a density puts every curve in amps, because mixed is not a chart', () => {
@@ -291,13 +291,11 @@ test('one curve without a density puts every curve in amps, because mixed is not
   assert.equal(currentOf(mixed).key, 'current');
 });
 
-test('J_sc keeps its amps, because it is interpolated from the current', () => {
+test('Jsc keeps its amps, because it is interpolated from the current', () => {
   const model = jvModel(JV.curves);
   const light = model.metrics.entries.find((e) => e.label === '1.02 V');
-  const jsc = light.rows.find((r) => r.key === 'J_sc');
-  assert.equal(jsc.note, 'in amps');
+  const jsc = light.rows.find((r) => r.key === 'Jsc');
   assert.match(jsc.value, /A$/);
-  assert.match(model.metrics.note, /interpolated/);
 });
 
 test('a sweep that is dark all through is read over decades', () => {
@@ -313,7 +311,7 @@ test('a sweep that is dark all through is read over decades', () => {
 test('the light axis is the power quadrant, and says how much it cropped', () => {
   const model = jvModel(JV.curves);
   assert.ok(model.panels[0].y.scale.domain[1] < 50, 'forward injection is off the top');
-  assert.ok(model.notes.some((n) => /power quadrant/.test(n)));
+  assert.ok(model.notes.some((n) => /above the axis/.test(n)));
 });
 
 test('the −4 V start is a layout problem, so x is never cropped', () => {
@@ -323,7 +321,6 @@ test('the −4 V start is a layout problem, so x is never cropped', () => {
   }));
   const model = jvModel(wide);
   assert.ok(model.x.scale.domain[0] <= -4, 'the reverse arm is drawn, not cut off');
-  assert.ok(model.panels[0].note.includes('sweep starts at'));
 });
 
 test('the series ramp is ordered — strictly darkening', () => {
@@ -390,13 +387,13 @@ test('the 81150A at INV rests the device in extraction, and that is an alert', (
   const values = { ...RESOLVED, output_polarity: 'INV', invert_polarity: false, vpre: 1.0, vcoll: -4.0 };
   const bias = biasLevels(values, BENCH.chain);
   assert.equal(bias.polarity, 'INV');
-  assert.equal(bias.restsAt, -4.0, 'the device sits at V_coll between pulses');
+  assert.equal(bias.restsAt, -4.0, 'the device sits at Vcoll between pulses');
   const alert = timingAlerts(values, RIG, BENCH.chain).find((a) => a.key === 'bias-polarity');
   assert.equal(alert.level, 'alert');
   assert.match(alert.text, /extraction never stops/);
 });
 
-test('NORM rests the device at V_pre, which is the validated recipe', () => {
+test('NORM rests the device at Vpre, which is the validated recipe', () => {
   const bias = biasLevels({ ...RESOLVED, output_polarity: 'NORM', invert_polarity: false, vpre: 1.0, vcoll: -4.0 },
     BENCH.chain);
   assert.equal(bias.restsAt, 1.0);
@@ -702,14 +699,14 @@ test('step is the point, index is the shot', () => {
   assert.deepEqual(found.node.shots.map((s) => [s.index, s.step]), [[0, 1], [1, 2], [2, 3], [3, 1], [4, 2], [5, 3]]);
 });
 
-test('σ_Q of zero is not recorded, and the marker says so', () => {
+test('σQ of zero is not recorded, and the marker says so', () => {
   // After one loop every point carries `q_std = 0` — the service's sample
   // deviation needs two — so the point is a hollow square and no error bar.
   const one = loopsModel(nodeFrom('stream_stopped_sim.jsonl', 'bace', (f) => f.type === 'LoopDone' && f.data.loop === 1));
   const squares = one.panels[0].dots.filter((d) => d.shape === 'square' && d.hollow);
   assert.equal(squares.length, 3);
   assert.equal(one.panels[0].rules.length, 0, 'no error bar of zero length');
-  assert.match(one.readout, /σ_Q not recorded yet — one loop/);
+  assert.match(one.readout, /σQ not recorded yet — one loop/);
   assert.ok(one.legend.some((e) => e.marker === 'square-hollow' && /not recorded/.test(e.label)));
 
   // After the second loop the σ exists, and the marker changes with it.
@@ -871,7 +868,7 @@ test('a current axis takes its prefix from what it shows, not from what it crops
   const current = [-1.2e-6, -1.1e-6, -1e-6, 1e-6, 2e-3];
   const voltage = [-1, -0.5, 0, 0.5, 1];
   const model = jvModel([{ voltage, current, dark: false }]);
-  assert.ok(model.notes.some((n) => /power quadrant/.test(n)));
+  assert.ok(model.notes.some((n) => /above the axis/.test(n)));
   assert.equal(model.panels[0].y.title, 'I (µA)');
 });
 

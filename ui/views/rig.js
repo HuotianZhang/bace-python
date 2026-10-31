@@ -9,6 +9,8 @@ import * as fmt from '../lib/format.js';
 import { valuesOf } from '../lib/results.js';
 import { chainSvg, shotSvg, AXES } from '../lib/charts/rig.js';
 
+const AXIS_LABEL = { vpre: 'Vpre', vcoll: 'Vcoll', delay_ns: 'Delay' };
+
 const LEGEND = [
   { label: 'drive · DC · signal', stroke: 'var(--ink)', width: 1.6 },
   { label: 'light', stroke: 'var(--ink)', width: 2, dash: '1 4', cap: 'round' },
@@ -37,37 +39,38 @@ export function sweptAxis(state) {
 
 export default {
   route: 'rig',
-  title: 'Rig',
+  title: 'Setup',
 
   mount(container, { store }) {
     const chain = h('div.card.mod.rig-chain');
     const shot = h('div.card.mod.rig-shot');
     const readback = h('div.rig-readback');
     fill(container,
-      h('h1', 'Rig', h('span.tag', { title: 'Nothing here acts on the bench.' }, 'reference')),
+      h('h1', 'Setup'),
       h('div.rig', chain, shot),
       readback);
 
-    // The chain never changes while the service runs: drawn once.
-    keyed(chain, 'chain', () => [
-      h('div.ch', h('span.cn', 'Wiring')),
-      h('div.cb', chainSvg(), legend()),
-    ]);
-
     const off = store.subscribe((state) => {
+      // The chain moves only with `rig.toml`.
+      const resistor = state.bench && state.bench.rig && state.bench.rig.values ? state.bench.rig.values.sense_resistor_ohm : null;
+      keyed(chain, resistor, () => [
+        h('div.ch', h('span.cn', 'Wiring')),
+        h('div.cb', chainSvg(resistor), legend()),
+      ]);
+
       // Only swept-axis changes redraw the reference shot. Editing delay does not
       // alter its bench-reference values.
       const axis = sweptAxis(state);
       keyed(shot, axis, () => [
         h('div.ch', h('span.cn', { title: 'Timing measured on this bench, at three scales.' }, 'One shot'),
-          h('span.cs', 'swept ', h('span.accent', { text: axis }))),
+          h('span.accent', { text: AXIS_LABEL[axis] || axis })),
         h('div.cb', shotSvg(axis)),
       ]);
 
       const rig = state.bench && state.bench.rig;
       // `rig.toml` remains constant during the service session, so fingerprint-keyed
       // rendering avoids rebuilding unchanged read-back.
-      if (!rig) return keyed(readback, 'none', () => h('div.card', h('p.absent', 'No rig.toml read yet')));
+      if (!rig) return keyed(readback, 'none', () => h('div.card', h('p.absent', 'rig.toml not read')));
       keyed(readback, rig.fingerprint || JSON.stringify(rig.values), () => h('div.card',
         h('h2', 'rig.toml ', h('span.num.cs', { text: rig.fingerprint || '' })),
         h('table.rows', Object.entries(rig.values || {}).map(([key, value]) => h('tr',

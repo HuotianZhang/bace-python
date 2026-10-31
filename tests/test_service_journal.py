@@ -239,7 +239,7 @@ def test_run_index_reconstructs_every_run_newest_first(history):
     assert done["queued_at"] == T0 and done["started_at"] == T0 + 0.1
     assert done["finished_at"] == pytest.approx(T0 + 1.0 + 2.4 + 0.2)
     assert done["kept"] == 20 and done["requested"] == 20
-    assert done["outcome_text"] == "Q -0.352 ± 0.0009 nC (sem), 4 loops · 20/20"
+    assert done["outcome_text"] == "Q -352 ± 0.9 pC"
     assert done["folder"] == "runs/s4_290K_20260902_120000"
     assert done["tree_summary"] == "bace" and done["node_count"] == 1
 
@@ -436,9 +436,9 @@ def test_the_jv_bace_line_gives_the_voc_range_over_its_levels(tmp_path):
                   + jv_run("20260902_120000-002", T0 + 100, 50, [0.906]))
     with Journal(out, "20260902_120000", header=HEADER) as j:
         many, one = j.run_index("this")[1], j.run_index("this")[0]
-        assert many["outcome_text"] == "4 curves · V_oc 1.0269 … 1.0479 V"
+        assert many["outcome_text"] == "4 curves · Voc 1.0269 … 1.0479 V"
         assert (many["voc_min"], many["voc_max"], many["light_curves"]) == (1.0269, 1.0479, 3)
-        assert one["outcome_text"] == "2 curves · V_oc 0.906 V" and one["light_curves"] == 1
+        assert one["outcome_text"] == "2 curves · Voc 0.906 V" and one["light_curves"] == 1
 
 
 def test_run_record_finds_a_run_in_any_session_file_with_its_nodes(tmp_path):

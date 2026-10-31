@@ -30,10 +30,10 @@ test('the index groups by session and carries the identity on every row', () => 
   assert.equal(groups.groups.length, 1, 'one session recorded them all');
   const [group] = groups.groups;
   assert.deepEqual(group.identities, ['s4 · SIM · pixel a'], 'from `sample`, not from a folder name');
-  assert.deepEqual(group.runs.map((r) => r.label), ['pipeline · T×2/led×2/jv_bace+bace', 'bace', 'jv_bace']);
+  assert.deepEqual(group.runs.map((r) => r.label), ['Sequence', 'BACE', 'Intensity JV']);
   assert.deepEqual(group.runs.map((r) => r.level), ['warn', 'ok', 'ok'], 'stopped is a warning, done is ok');
   assert.equal(group.runs[0].counts, '614/808');
-  assert.match(group.runs[2].voc, /^V_oc /, 'a jv_bace row says what it measured');
+  assert.match(group.runs[2].voc, /^Voc /, 'a jv_bace row says what it measured');
 });
 
 test('a live state from the store overrides the index, and an unnamed sample says so', () => {
@@ -57,7 +57,7 @@ test('the 2 x 2 grid: three complete cells, one partial, none missing', () => {
   const g = gridModel(grid);
   assert.equal(g.shape, 'grid');
   assert.deepEqual(g.rows.map((r) => r.label), ['280.1 K', '250.1 K'], 'temperatures descend, as the canonical tree runs them');
-  assert.deepEqual(g.cols.map((c) => c.label), ['led_v 1.010 V', 'led_v 1.020 V']);
+  assert.deepEqual(g.cols.map((c) => c.label), ['LED 1.010 V', 'LED 1.020 V']);
   assert.equal(g.cells.length, 4);
   assert.deepEqual(g.cells.map((c) => c.missing), [false, false, false, false]);
   const partial = g.cells.filter((c) => c.partial);
@@ -73,7 +73,7 @@ test('the 2 x 2 grid: three complete cells, one partial, none missing', () => {
   assert.equal(cellName(g, partial[0]), '280.1 K · 1.020 V');
   for (const cell of g.cells) {
     assert.ok(cell.voc !== null && cell.vocHow === 'jv_bace', `${cell.path} is centred on the jv_bace before it`);
-    assert.equal(cell.points, 1, 'a bace at V_oc has a zero-width axis');
+    assert.equal(cell.points, 1, 'a bace at Voc has a zero-width axis');
   }
 });
 
@@ -106,7 +106,7 @@ test('a manual bace is one cell and a grid of one, never an apology', () => {
   assert.equal(cell.partial, false);
   assert.equal(cell.kept, 5);
   assert.ok(cell.sigma !== null, 'five loops leave a σ');
-  assert.equal(vocText(cell.node).mismatch, false, 'the V_oc came from a jv_bace at the same level');
+  assert.equal(vocText(cell.node).mismatch, false, 'the Voc came from a jv_bace at the same level');
 });
 
 test('a record with no bace has no grid, and its nodes are still listed', () => {
@@ -116,17 +116,17 @@ test('a record with no bace has no grid, and its nodes are still listed', () => 
   assert.equal(moduleNodes(manual).length, 1);
 });
 
-test('a swept axis shows the point nearest V_oc, never the mean of the curve', () => {
+test('a swept axis shows the point nearest Voc, never the mean of the curve', () => {
   const node = { module: 'bace', node_path: 'x', values: [0.8, 0.9, 1.0], q_mean: [-1e-10, -2e-10, -3e-10], q_std: [0, 1e-12, 0], voc: 0.92 };
   const q = cellQ(node);
   assert.equal(q.index, 1);
   assert.equal(q.q, -2e-10);
   assert.equal(q.sigma, 1e-12);
-  assert.match(q.at, /nearest V_oc/);
+  assert.match(q.at, /nearest Voc/);
   const noVoc = cellQ({ ...node, voc: null });
   assert.equal(noVoc.index, 1);
   assert.match(noVoc.at, /middle point/);
-  // σ_Q = 0 is not recorded (ui-rules §2).
+  // σQ = 0 is not recorded (ui-rules §2).
   assert.equal(cellQ({ ...node, voc: 0.8 }).sigma, null);
 });
 
@@ -186,20 +186,13 @@ test('a node that reached 280.1 K sits on the 280 K row, and the row says both',
 
 // -- the summary strip ---------------------------------------------------------
 
-test('the summary excludes the partial cell from the span and says so', () => {
+test('the summary names what is incomplete and leaves the rest out', () => {
   const g = gridModel(grid);
   const s = summaryModel(g, grid);
   assert.equal(s.complete, 3);
   assert.equal(s.partial, 1);
-  const span = s.lines.find((l) => l.key === 'span');
-  assert.match(span.text, /over 3 complete cells, 1 partial excluded/);
-  assert.match(span.text, /all negative/);
-  assert.match(span.text, /^-\d\.\d+e-10 C → -\d\.\d+e-10 C/);
-  const sigma = s.lines.find((l) => l.key === 'sigma');
-  assert.equal(sigma.text, 'recorded on every cell (4 of 4)');
-  const intensity = s.lines.find((l) => l.key === 'intensity');
-  assert.match(intensity.text, /read on every shot \(606 of 606\)/);
-  assert.match(intensity.text, /never mW\/cm²/, 'watts at the meter, never an irradiance');
+  assert.equal(s.lines.find((l) => l.key === 'sigma'), undefined);
+  assert.equal(s.lines.find((l) => l.key === 'intensity'), undefined);
   const flags = s.lines.find((l) => l.key === 'flags');
   assert.match(flags.text, /1 partial \(280.1 K · 1.020 V\)/);
   assert.match(flags.text, /warn at Start/);
@@ -211,10 +204,10 @@ test('σ recorded on some rows only names the rows, and none says a zero is not 
     nodes[k] = n.module === 'bace' && k.startsWith('T=250K') ? { ...n, q_std: [0] } : n;
   }
   const some = summaryModel(gridModel({ ...grid, nodes }), grid);
-  assert.match(some.lines.find((l) => l.key === 'sigma').text, /recorded at 280.1 K only · zero elsewhere means not recorded/);
+  assert.match(some.lines.find((l) => l.key === 'sigma').text, /only at 280.1 K/);
   for (const [k, n] of Object.entries(nodes)) if (n.module === 'bace') nodes[k] = { ...n, q_std: [0] };
   const none = summaryModel(gridModel({ ...grid, nodes }), grid);
-  assert.match(none.lines.find((l) => l.key === 'sigma').text, /a zero is not a σ/);
+  assert.match(none.lines.find((l) => l.key === 'sigma').text, /not recorded/);
   assert.equal(none.lines.find((l) => l.key === 'sigma').level, 'warn');
 });
 
@@ -223,7 +216,7 @@ test('intensity null on every shot is said as the meter not answering', () => {
   for (const [k, n] of Object.entries(grid.nodes)) nodes[k] = n.module === 'bace' ? { ...n, intensity_recorded: 0 } : n;
   const s = summaryModel(gridModel({ ...grid, nodes }), grid);
   const line = s.lines.find((l) => l.key === 'intensity');
-  assert.match(line.text, /null on 606 of 606 shots · the meter did not answer; watts not recorded, mW\/cm² never inferred/);
+  assert.match(line.text, /missing on 606 of 606 shots/);
   assert.equal(line.level, 'warn');
 });
 
@@ -239,11 +232,11 @@ test('every flag on the partial cell states its reason', () => {
   assert.equal(partial.level, 'warn');
   assert.match(partial.text, /^6 of 200 shots kept · stopped after a shot/);
   assert.match(partial.text, /never averaged in silently/);
-  // The digitiser line is the corrected wording: what the service flagged,
+  // The scope line is the corrected wording: what the service flagged,
   // not a shared extreme it judged as nothing.
-  const digitiser = flags.find((f) => f.code === 'digitiser');
-  assert.equal(digitiser.level, 'info');
-  assert.equal(digitiser.text, 'digitiser check: no shot flagged, 6 of 6 judged');
+  const scope = flags.find((f) => f.code === 'scope');
+  assert.equal(scope.level, 'info');
+  assert.equal(scope.text, 'scope check: no shot flagged, 6 of 6 judged');
   // The run's own verdicts at Start, each with its sentence, where they
   // apply: the whole run's, and a loop's for every node beneath it -- this
   // cell is under T=280K, so T=250K's `temperature.not-wired` is not its.
@@ -260,12 +253,12 @@ test('every flag on the partial cell states its reason', () => {
   assert.deepEqual(order, [...order].sort());
 });
 
-test('flags that only a bad node has: a flagged shot, a missing meter, a V_oc from another lamp level, no baseline', () => {
+test('flags that only a bad node has: a flagged shot, a missing meter, a Voc from another lamp level, no baseline', () => {
   const node = { ...grid.nodes['T=250K/led=1.010V/bace'], shots_flagged: 3, intensity_recorded: 100, voc_led_v: 1.02, offset_corrected: false };
   const flags = flagsFor({ verdicts: [] }, node);
   const by = Object.fromEntries(flags.map((f) => [f.code, f]));
-  assert.match(by.digitiser.text, /^3 of 200 shots flagged by the digitiser check/);
-  assert.match(by.digitiser.text, /Do not interpret those charges/);
+  assert.match(by.scope.text, /^3 of 200 shots flagged by the scope check/);
+  assert.match(by.scope.text, /Do not interpret those charges/);
   assert.match(by.intensity.text, /null on 100 of 200 shots/);
   assert.match(by.voc.text, /this cell pulsed at 1.010 V/);
   assert.match(by.voc.text, /worse than none/);
@@ -295,7 +288,7 @@ test('resolved from: the layers of params_as_executed, the few named', () => {
   assert.equal(provenanceSummary(null), null, 'a journal record has values, not layers');
 });
 
-test('running a cell again takes its overrides and its level, never its V_oc', () => {
+test('running a cell again takes its overrides and its level, never its Voc', () => {
   const again = rerunParams(grid.params_as_executed['T=250K/led=1.010V/bace']);
   assert.equal(again.led_v, 1.01, 'the level the loop gave it is a manual bace\'s own parameter');
   assert.equal(again.led_low_v, 0.4);

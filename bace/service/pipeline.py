@@ -108,12 +108,12 @@ CHECK_DOCS: dict[str, tuple[str, str, str]] = {
         "`set-led-dc`, `set-led-pulse`."),
     "voc.source": (
         "invalid",
-        "A `bace` node takes its prebias from V_oc (`centre_on_voc` or `vpre_on_voc`) "
+        "A `bace` node takes its prebias from Voc (`centre_on_voc` or `vpre_on_voc`) "
         "and nothing in its scope provides one.",
         "Add a `jv_bace` node before it, set `measure_dc`, or type `voc`."),
     "voc.coupling": (
         "invalid",
-        "The V_oc a `bace` node centres on was measured at another LED level than the "
+        "The Voc a `bace` node centres on was measured at another LED level than the "
         "node's own.",
         "Give both the same `led_v`, or place both in one illumination loop."),
     "led.levels": (
@@ -156,7 +156,7 @@ CHECK_DOCS: dict[str, tuple[str, str, str]] = {
         "warn",
         "`voc` is typed by hand rather than measured in this session, or a typed `voc` "
         "is ignored because `measure_dc` on the same node measures it.",
-        "Measure V_oc with `measure_dc` or a `jv_bace` node."),
+        "Measure Voc with `measure_dc` or a `jv_bace` node."),
     "chain.led-polarity": (
         "warn",
         "The 33220A's output polarity reads NORM or cannot be read, so its Sync's "
@@ -188,7 +188,7 @@ CHECK_DOCS: dict[str, tuple[str, str, str]] = {
         "Put the illumination loop inside the temperature loop."),
     "trigger.auto": (
         "info",
-        "`trigger_sweep = AUTO`: the digitiser sweeps without a trigger, so a loose "
+        "`trigger_sweep = AUTO`: the scope sweeps without a trigger, so a loose "
         "Sync cable gives untriggered noise that subtracts to a plausible charge.",
         "Set `trigger_sweep = TRIG` once the trigger path is known to work."),
     "power.console": (
@@ -1184,7 +1184,7 @@ def _c_owned_param(f: _Facts) -> list[Verdict]:
             out.append(_v("invalid", "tree.owned-param",
                           f"{node.module} sets {', '.join(typed)} inside an illumination "
                           "loop; the loop owns the LED level, so the typed value would "
-                          "either be ignored or centre the scan on a V_oc measured at "
+                          "either be ignored or centre the scan on a Voc measured at "
                           "another level", f.first_path(node.key),
                           node_key=node.key, params=typed))
     if out:
@@ -1235,7 +1235,7 @@ def _c_voc_source(f: _Facts) -> list[Verdict]:
             where = ("in this illumination step" if s.detail.get("in_illumination")
                      else "before it")
             by = ", ".join(s.detail.get("voc_needed_by") or ["centre_on_voc"])
-            failures.append((s, f"{s.module} needs V_oc ({by}) but nothing in scope "
+            failures.append((s, f"{s.module} needs Voc ({by}) but nothing in scope "
                                 f"measures it: no jv_bace {at}{where}, "
                                 "measure_dc is off, and nothing was typed",
                              {"led_v": led, "needed_by": s.detail.get("voc_needed_by")}))
@@ -1243,10 +1243,10 @@ def _c_voc_source(f: _Facts) -> list[Verdict]:
         return _grouped("voc.source", "invalid", failures)
     centred = sum(1 for s in f.modules if s.detail.get("centre_on_voc"))
     if not centred:
-        return [_v("ok", "voc.source", "no module centres on V_oc", sources=how)]
+        return [_v("ok", "voc.source", "no module centres on Voc", sources=how)]
     parts = ", ".join(f"{n} from {k}" for k, n in how.items())
     return [_v("ok", "voc.source",
-               f"V_oc source in scope for every centred module ({parts})",
+               f"Voc source in scope for every centred module ({parts})",
                sources=how, centred=centred)]
 
 
@@ -1281,7 +1281,7 @@ def _c_voc_coupling(f: _Facts) -> list[Verdict]:
         elif abs(float(led_v) - measured_at) <= LED_MATCH_V:
             continue
         else:
-            text = (f"V_oc was measured at {measured_at} V drive but the transient "
+            text = (f"Voc was measured at {measured_at} V drive but the transient "
                     f"will run at {led_v} V")
         failures.append((s, f"{s.module}: {text} ({src['how']} {src['node_path']})",
                          {"led_v": led_v, "voc_led_v": measured_at,
@@ -1289,7 +1289,7 @@ def _c_voc_coupling(f: _Facts) -> list[Verdict]:
     if failures:
         return _grouped("voc.coupling", "invalid", failures)
     return [_v("ok", "voc.coupling",
-               f"every centred scan runs at the drive its V_oc was measured at "
+               f"every centred scan runs at the drive its Voc was measured at "
                f"({checked} checked)", checked=checked)]
 
 
@@ -1577,12 +1577,12 @@ def _c_voc_typed(f: _Facts) -> list[Verdict]:
             if over and src["how"] == "measure_dc":
                 out.append((s, f"{s.module}.voc = {over['value']:g} V typed by hand "
                                f"({over.get('source', 'edited')}) is not used: measure_dc "
-                               "on this node measures the V_oc the scan centres on",
+                               "on this node measures the Voc the scan centres on",
                             {"value": over["value"], "source": over.get("source"),
                              "used": "measure_dc"}))
             continue
         if src.get("session"):
-            text = (f"{s.module}.voc = {src['value']:g} V is the session's typed V_oc, "
+            text = (f"{s.module}.voc = {src['value']:g} V is the session's typed Voc, "
                     "not a measurement")
         else:
             inside = (" -- inside an illumination loop, so it is not at a known drive "
@@ -1592,7 +1592,7 @@ def _c_voc_typed(f: _Facts) -> list[Verdict]:
         out.append((s, text, {"value": src["value"], "source": src.get("source")}))
     if out:
         return _grouped("voc.typed", "warn", out)
-    return [_v("ok", "voc.typed", "no V_oc typed by hand")]
+    return [_v("ok", "voc.typed", "no Voc typed by hand")]
 
 
 def _chain_not_read(code: str) -> list[Verdict]:

@@ -2,10 +2,9 @@
 """Lift the web fonts out of the Round 3 mockup and into `ui/fonts/`.
 
 `docs/bace-console-round3.html` is self-contained: its 33 assets are inlined as
-base64 in one JSON blob, and 24 of them are the woff2 subsets of the three
-faces the design uses — IBM Plex Sans for text, IBM Plex Mono for every number,
-Archivo for the wordmark, card titles and buttons (`docs/ui-rules.md` §2). The
-console needs the same files, and the lab PC has no network, so they are copied
+base64 in one JSON blob, and 24 of them are the woff2 subsets of three faces.
+The console uses IBM Plex Sans alone (`docs/ui-rules.md` §2). It needs the same
+files, and the lab PC has no network, so they are copied
 into the repo rather than fetched.
 
     python3 tools/extract_ui_fonts.py            # writes ui/fonts/
@@ -65,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
     for block in FACE.findall(html):
         family = _field(block, r"font-family:\s*'([^']+)'")
         uuid = _field(block, r'url\(\\?"([^"\\]+)\\?"\)')
-        if not (family and uuid) or uuid not in assets:
+        if family != "IBM Plex Sans" or not uuid or uuid not in assets:
             continue
         if uuid not in names:
             # These are variable fonts: one file per unicode subset serves
@@ -89,8 +88,7 @@ def main(argv: list[str] | None = None) -> int:
 
     header = ("/* Extracted from docs/bace-console-round3.html by\n"
               "   tools/extract_ui_fonts.py — do not edit by hand.\n"
-              "   IBM Plex Sans and Mono (SIL Open Font License 1.1),\n"
-              "   Archivo (SIL Open Font License 1.1). */\n\n")
+              "   IBM Plex Sans (SIL Open Font License 1.1). */\n\n")
     with open(os.path.join(a.out, "fonts.css"), "w", encoding="utf-8", newline="\n") as fh:
         fh.write(header + "\n\n".join(css) + "\n")
 

@@ -49,7 +49,7 @@ test('mid-run the four instruments the run implies are marked inferred, and the 
   const inferred = model.filter((c) => c.inferred).map((c) => c.key);
   // `service/live.py` overlays exactly what the running step implies: the
   // relay at NodeStarted, the bias and the LED at RunStarted, the shutter at
-  // each StepPhase. The SMU, the V_oc, the power meter and the temperature are
+  // each StepPhase. The SMU, the Voc, the power meter and the temperature are
   // still the read-back's, and drawing them the same way would be a claim the
   // console cannot make.
   assert.deepEqual(inferred.sort(), ['bias', 'led', 'relay', 'shutter']);
@@ -63,7 +63,7 @@ test('a live bias output is the one alert on the rail, with its two levels', () 
   const bias = cell(model, 'bias');
   assert.equal(bias.value, 'LIVE');
   assert.equal(bias.level, 'alert');
-  assert.equal(bias.sub, '0.5000 → -0.25 V');
+  assert.equal(bias.sub, '0.5000 → −0.25 V');
   // §3: "should be the only thing on screen at that intensity".
   assert.equal(model.filter((c) => c.level === 'alert').length, 1);
 });
@@ -101,16 +101,16 @@ test('the chain says which cell reads wrong; the rail never re-derives it', () =
   assert.match(cell(ok, 'led').sub, /POL INV ✓/);
 });
 
-test('the V_oc carries which measurement supplied it, and at what LED level', () => {
+test('the Voc carries which measurement supplied it, and at what LED level', () => {
   const model = railModel(stateFrom(HELLO.data.bench));
   const voc = cell(model, 'voc');
-  // A V_oc from a different illumination is worse than no V_oc (`ui-rules` §6).
+  // A Voc from a different illumination is worse than no Voc (`ui-rules` §6).
   assert.match(voc.value, /^0\.904\d V$/);
   assert.match(voc.sub, /@ 1\.020 V/);
   assert.match(voc.sub, /jv_bace/);
 
   const none = cell(railModel(stateFrom(RUNNING)), 'voc');
-  assert.equal(none.value, '—', 'no V_oc invents no number');
+  assert.equal(none.value, '—', 'no Voc invents no number');
   assert.equal(none.sub, 'none this session');
 });
 
@@ -257,15 +257,15 @@ test('an armed Park names the queue it is about to cancel', () => {
   // cancels every queued one. The confirmation said "abort the run and park?"
   // and named the queue only in a tooltip, so the operator who reached for it
   // to stop one scan lost the rest of the night silently (#53).
-  assert.equal(parkLabel(0), 'Abort the run and park?', 'nothing behind it, nothing to say');
-  assert.equal(parkLabel(), 'Abort the run and park?', 'and no count is the same case');
-  assert.equal(parkLabel(1), 'Abort the run, cancel 1 queued run, and park?');
-  assert.equal(parkLabel(4), 'Abort the run, cancel 4 queued runs, and park?');
+  assert.equal(parkLabel(0), 'Abort the run and turn all off?', 'nothing behind it, nothing to say');
+  assert.equal(parkLabel(), 'Abort the run and turn all off?', 'and no count is the same case');
+  assert.equal(parkLabel(1), 'Abort the run, cancel 1 queued run, and turn all off?');
+  assert.equal(parkLabel(4), 'Abort the run, cancel 4 queued runs, and turn all off?');
   // "not after the queue" is the point of the hover, and it only has one when
   // there is a queue to be ahead of.
-  assert.equal(parkTitle(0), 'Park aborts the run. The bench is safe now.');
+  assert.equal(parkTitle(0), 'All off aborts the run. The bench is safe now.');
   assert.equal(parkTitle(2),
-    'Park aborts the run and cancels 2 queued runs. The bench is safe now, not after the queue.');
+    'All off aborts the run and cancels 2 queued runs. The bench is safe now, not after the queue.');
 });
 
 test('the count Park names is the queue the strip already knows about', () => {

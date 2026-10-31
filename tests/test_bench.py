@@ -1652,7 +1652,7 @@ def test_a_shared_extreme_is_reported_as_the_digitisers_rail():
     rail_l, rail_d, shared, note = saturation_verdict(light, dark)
     assert rail_l == rail_d == 70
     assert shared is True
-    assert note and "digitiser's own rail" in note
+    assert note and "scope's own rail" in note
     assert "do not interpret the charge" in note
 
 

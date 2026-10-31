@@ -84,7 +84,7 @@ test('light sets the bench, and the jv after it reads what light did', options, 
     assert.equal(run.state, 'done');
     assert.equal(run.curves[0].dark, false, 'read back as lit');
     assert.equal(run.curves[0].label, 'as found 1.02 V');
-    assert.ok(run.curves[0].metrics.voc > 0, 'a lit curve has a V_oc');
+    assert.ok(run.curves[0].metrics.voc > 0, 'a lit curve has a Voc');
   } finally {
     await api.action('shutter-shut');
     stream.close();

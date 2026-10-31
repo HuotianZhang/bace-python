@@ -58,7 +58,7 @@ export const FIXTURES = [
     label: 'sim — GET /runs/{id} of a 2 T x 2 level pipeline stopped inside its last cell: the results grid',
     url: 'fixtures/run_grid_sim.json' },
   { key: 'run-bace', kind: 'record',
-    label: 'sim — GET /runs/{id} of a manual bace at the V_oc a jv_bace measured: one cell',
+    label: 'sim — GET /runs/{id} of a manual bace at the Voc a jv_bace measured: one cell',
     url: 'fixtures/run_bace_sim.json' },
 ];
 

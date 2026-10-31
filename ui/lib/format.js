@@ -4,6 +4,9 @@
 
 export const ABSENT = '—';           // The em dash denotes an unrecorded value.
 
+/** A typeset minus; inputs keep the ASCII sign, which is what they parse. */
+const minus = (text) => text.replace(/^-/, '−');
+
 /** Significant figures, in fixed or scientific notation as the magnitude asks. */
 export function sig(value, figures) {
   if (value === null || value === undefined || Number.isNaN(value)) return ABSENT;
@@ -11,14 +14,14 @@ export function sig(value, figures) {
   const exponent = Math.floor(Math.log10(Math.abs(value)));
   if (exponent < -4 || exponent >= 6) return scientific(value, figures);
   const decimals = Math.max(0, figures - 1 - exponent);
-  return value.toFixed(Math.min(decimals, 20));
+  return minus(value.toFixed(Math.min(decimals, 20)));
 }
 
 /** `3.65257e-10` — the archive's own spelling for a charge. */
 export function scientific(value, figures = 6) {
   if (value === null || value === undefined || Number.isNaN(value)) return ABSENT;
   const text = value.toExponential(Math.max(0, figures - 1));
-  return text.replace(/e([+-])(\d)$/, 'e$1$2');
+  return minus(text.replace(/e([+-])(\d)$/, 'e$1$2'));
 }
 
 /** Charge to 5–6 significant figures: `3.65257e-10 C`. */
@@ -39,7 +42,7 @@ export function sigmaQ(std) {
 /** Potential values, including V_oc, use four decimal places. */
 export function volts(v, { decimals = 4, unit = true } = {}) {
   if (v === null || v === undefined || Number.isNaN(v)) return ABSENT;
-  return v.toFixed(decimals) + (unit ? ' V' : '');
+  return minus(v.toFixed(decimals)) + (unit ? ' V' : '');
 }
 
 /**

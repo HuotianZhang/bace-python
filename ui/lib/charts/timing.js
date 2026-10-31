@@ -115,8 +115,8 @@ export function biasLevels(values = {}, chain = {}) {
     // (`docs/notes.md`, Closed questions).
     restsAt: polarity === 'INV' ? low : high,
     pulsesTo: polarity === 'INV' ? high : low,
-    restsLabel: polarity === 'INV' ? (invert ? '−V_pre' : 'V_coll') : (invert ? '−V_coll' : 'V_pre'),
-    pulsesLabel: polarity === 'INV' ? (invert ? '−V_coll' : 'V_pre') : (invert ? '−V_pre' : 'V_coll'),
+    restsLabel: polarity === 'INV' ? (invert ? '−Vpre' : 'Vcoll') : (invert ? '−Vcoll' : 'Vpre'),
+    pulsesLabel: polarity === 'INV' ? (invert ? '−Vcoll' : 'Vpre') : (invert ? '−Vpre' : 'Vcoll'),
   };
 }
 
@@ -160,7 +160,7 @@ export function timingAlerts(values = {}, rig = {}, chain = {}) {
 
   if (cycle.polarity === 'INV') {
     out.push({ level: 'alert', key: 'bias-polarity',
-      text: 'the 81150A at INV rests the device at V_coll through the inverting ×4 amplifier, '
+      text: 'the 81150A at INV rests the device at Vcoll through the inverting ×4 amplifier, '
         + 'so extraction never stops — measured: the photo peak collapsed from ~3 mA to ~0.5 mA '
         + 'and the displacement spike changed sign' });
   }
@@ -316,15 +316,15 @@ function shotStrip(panel, segments) {
     }
     if (x1 - x0 > 46) {
       marks.push({ x: (x0 + x1) / 2, y: top + barHeight / 2 + 3, text: seg.label, anchor: 'middle',
-        colour: seg.accent ? 'paper' : 'ink', size: 8.5, weight: 600 });
+        colour: seg.accent ? 'paper' : 'ink', size: 11, weight: 600 });
       marks.push({ x: (x0 + x1) / 2, y: top + barHeight + 11, text: seconds(seg.seconds),
-        anchor: 'middle', colour: 'grey', size: 8.5, mono: true });
+        anchor: 'middle', colour: 'grey', size: 11 });
     }
     if (seg.mark) {
       // Unreported events use staggered labels so coincident times do not overlap.
       const y = top - 6 - (markSide % 2) * 10;
       markSide += 1;
-      marks.push({ x: x0 + 3, y, text: seg.mark, colour: 'grey', size: 8.5 });
+      marks.push({ x: x0 + 3, y, text: seg.mark, colour: 'grey', size: 11 });
       rules.push({ x1: x0, y1: y + 2, x2: x0, y2: top, colour: 'rule', width: 1, dash: '2 2' });
     }
     at += seg.seconds;
@@ -366,7 +366,7 @@ function cycleRows(panel, cycle, swept) {
   // phase; INV lights its complement. Unknown polarity supplies no waveform because
   // neither phase is supported by read-back.
   if (cycle.ledPolarity === null) {
-    marks.push({ x: rect.x + 4, y: (rows[1].high + rows[1].low) / 2 + 3, size: 8.5, colour: 'warn',
+    marks.push({ x: rect.x + 4, y: (rows[1].high + rows[1].low) / 2 + 3, size: 11, colour: 'warn',
       text: 'which half is lit is unknown until the 33220A\'s polarity is read back' });
     annotate(marks, rows[1], rect,
       `the same square ${fmt.sig(cycle.lightDelayS * 1e9, 3)} ns later — the LED amp and the fibre`,
@@ -402,11 +402,11 @@ function cycleRows(panel, cycle, swept) {
   });
   annotate(marks, biasRow, rect,
     `rests at ${cycle.restsLabel} ${fmt.volts(cycle.restsAt, { decimals: 3 })}`,
-    { colour: cycle.polarity === 'INV' ? 'alert' : 'ink', weight: 600, mono: true });
+    { colour: cycle.polarity === 'INV' ? 'alert' : 'ink', weight: 600 });
   annotate(marks, biasRow, rect,
     `${cycle.pulsesLabel} ${fmt.volts(cycle.pulsesTo, { decimals: 3 })} for `
     + `${fmt.sig(cycle.widthS * 1e9, 4)} ns, ${fmt.sig(cycle.delayS * 1e9, 4)} ns after the Sync — panel C`,
-    { anchor: 'end', mono: true, colour: swept === 'delay_ns' || swept === 'vcoll' ? 'accent-dark' : 'grey' });
+    { anchor: 'end', colour: swept === 'delay_ns' || swept === 'vcoll' ? 'accent-dark' : 'grey' });
 
   return {
     ...panel,
@@ -448,14 +448,13 @@ function recordRows(panel, cycle, record, swept) {
   annotate(marks, row, rect,
     `${cycle.restsLabel} ${fmt.volts(cycle.restsAt, { decimals: 3 })} → `
     + `${cycle.pulsesLabel} ${fmt.volts(cycle.pulsesTo, { decimals: 3 })}`
-    + (returns ? '' : ' · the return is after the record ends'),
-    { mono: true });
+    + (returns ? '' : ' · the return is after the record ends'));
   // The trigger sits one division into the record. The record origin differs from the
   // trigger origin used by the other signals.
   rules.push({ x1: X(0), colour: 'grey', width: 1, dash: '3 3' });
   // The trigger label needs a separate line because the panel caption extends past
   // its position.
-  marks.push({ x: X(0) + 4, y: rect.y + 24, colour: 'grey', size: 8.5, halo: true, text: 'trigger' });
+  marks.push({ x: X(0) + 4, y: rect.y + 24, colour: 'grey', size: 11, halo: true, text: 'trigger' });
   if (record.fromTrigger !== null && record.fromTrigger >= start && record.fromTrigger < end) {
     const wx = X(record.fromTrigger);
     const wend = record.toTrigger === null ? end : Math.min(end, record.toTrigger);
@@ -465,14 +464,14 @@ function recordRows(panel, cycle, record, swept) {
     if (record.toTrigger !== null && record.toTrigger <= end) {
       rules.push({ x1: wx1, colour: 'accent', width: 1, dash: '4 3' });
     }
-    marks.push({ x: wx + 5, y: rect.y + rect.h - 8, mono: true, weight: 600, colour: 'accent', size: 9,
+    marks.push({ x: wx + 5, y: rect.y + rect.h - 8, weight: 600, colour: 'accent', size: 11,
       text: `t0_int ${fmt.sig(record.fromTrigger * 1e9, 4)} ns from the trigger`
         + (record.toTrigger === null ? '' : ` → ${fmt.sig(record.toTrigger * 1e9, 4)} ns`)
         + ' · with the pulse' });
-    marks.push({ x: rect.x + rect.w - 5, y: rect.y + rect.h - 8, anchor: 'end', colour: 'accent', size: 8.5,
+    marks.push({ x: rect.x + rect.w - 5, y: rect.y + rect.h - 8, anchor: 'end', colour: 'accent', size: 11,
       text: 'Q = ∫ (light − dark) dt over the shaded part' });
   } else {
-    marks.push({ x: rect.x + 5, y: rect.y + rect.h - 8, colour: 'alert', size: 8.5,
+    marks.push({ x: rect.x + 5, y: rect.y + rect.h - 8, colour: 'alert', size: 11,
       text: record.t0 === null
         ? 'no t0_int on this form'
         : `t0_int ${fmt.sig((record.fromTrigger ?? record.t0) * 1e9, 4)} ns from the trigger is `
@@ -516,15 +515,14 @@ function annotate(marks, row, rect, text, options = {}) {
     anchor: options.anchor || 'start',
     colour: options.colour || 'grey',
     weight: options.weight || 400,
-    mono: options.mono || false,
-    size: options.size || 8.5,
+    size: options.size || 11,
   });
 }
 
 function rowLabels(rect, rows, names) {
   return names.map((name, i) => ({
     x: rect.x - 8, y: (rows[i].high + rows[i].low) / 2 + 3, text: name,
-    anchor: 'end', colour: 'ink', weight: 600, size: 9,
+    anchor: 'end', colour: 'ink', weight: 600, size: 11,
   }));
 }
 

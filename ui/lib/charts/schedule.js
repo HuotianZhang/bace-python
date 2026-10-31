@@ -46,10 +46,10 @@ export function scheduleModel({ blocks, cost, width = 900, height = 118, now = n
     return {
       key: 'schedule', width, height, cursor: false,
       absent: {
-        text: list.length ? 'nothing to run' : 'no nodes yet',
+        text: list.length ? 'nothing to run' : 'no steps yet',
         detail: list.length
           ? 'every module in this structure costs nothing the catalogue can estimate'
-          : 'add a loop or a module, and the schedule appears with the first Dry run',
+          : 'Add a step, then Check',
       },
       panels: [], notes: [],
     };
@@ -81,7 +81,7 @@ export function scheduleModel({ blocks, cost, width = 900, height = 118, now = n
       shades.push({ x: x0, w: x1 - x0, colour: 'grey', opacity: 0.3 });
       if (x1 - x0 >= CAPTION_PX) {
         marks.push({ x: (x0 + x1) / 2, y: rect.y + rect.h / 2 + 3, anchor: 'middle',
-          mono: true, size: 9.5, colour: 'grey', text: fmt.duration(span.settle) });
+          size: 11, colour: 'grey', text: fmt.duration(span.settle) });
       }
       at += span.settle;
     }
@@ -98,8 +98,8 @@ export function scheduleModel({ blocks, cost, width = 900, height = 118, now = n
     }
     if (span.block.setpoint_k !== null && span.block.setpoint_k !== undefined) {
       marks.push({
-        x: (mx0 + mx1) / 2, y: rect.y - 6, anchor: 'middle', mono: true,
-        size: 10, weight: 600, colour: 'ink',
+        x: (mx0 + mx1) / 2, y: rect.y - 6, anchor: 'middle',
+        size: 11, weight: 600, colour: 'ink',
         text: `${Number(span.block.setpoint_k).toFixed(0)} K`,
       });
     }
@@ -119,17 +119,10 @@ export function scheduleModel({ blocks, cost, width = 900, height = 118, now = n
 
   const totalText = (lower ? 'at least ' : '') + fmt.duration(total);
   const notes = [];
-  notes.push(`${spans.length} ${spans.length === 1 ? 'block' : 'temperatures'} · `
-    + `${fmt.plural(list.reduce((n, b) => n + (b.modules || 0), 0), 'module run')} · `
-    + `${fmt.plural(list.reduce((n, b) => n + (b.shots || 0), 0), 'shot')}`);
-  notes.push(startAt
-    ? `start ${fmt.clock(startAt)} · finish ${fmt.clock(finishAt)} · ${totalText}`
-    : `${totalText} from Start · the axis is elapsed time, because no finish time is knowable yet`);
+  if (!startAt) notes.push(`${totalText} from Start`);
   if (spans.some((s) => s.unknownSettle)) {
     const n = spans.filter((s) => s.unknownSettle).length;
-    notes.push(`${n} of ${spans.length} temperatures have no measured settle behind them — `
-      + 'hatched, and taking no time on this axis rather than the median of the others. '
-      + 'The journal fills them in as this bench measures them.');
+    notes.push(`${n} of ${spans.length} temperatures: settle time not known yet`);
   }
 
   return {
@@ -139,11 +132,11 @@ export function scheduleModel({ blocks, cost, width = 900, height = 118, now = n
     // A panel note would collide with the last setpoint label above the bar. Counts
     // belong below it.
     panels: [{ ...panel, shades, marks, rules }],
-    x: { ticks, label: startAt ? 'clock' : 'elapsed / from Start' },
+    x: { ticks, label: startAt ? 'Time' : 'Time from Start' },
     legend: [
-      { label: 'settle · cryostat', colour: 'grey', marker: 'band' },
-      { label: 'measure', colour: 'accent' },
-      ...(spans.some((s) => s.unknownSettle) ? [{ label: 'settle not measured', colour: 'rule', marker: 'band' }] : []),
+      { label: 'Cryostat settle', colour: 'grey', marker: 'band' },
+      { label: 'Measure', colour: 'accent' },
+      ...(spans.some((s) => s.unknownSettle) ? [{ label: 'Settle not known', colour: 'rule', marker: 'band' }] : []),
     ],
     notes,
   };

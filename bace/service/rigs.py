@@ -120,7 +120,7 @@ ACTION_DOCS: dict[str, tuple[str, str, str]] = {
         "frequency is not positive, or the duty is outside 0–100 %."),
     "set-led-dc": (
         "33220A",
-        "The LED on continuously at `led_v` or the requested level, as for a V_oc "
+        "The LED on continuously at `led_v` or the requested level, as for a Voc "
         "measurement; output on.",
         "No level is given or in force."),
     "led-off": ("33220A", "Output off.", "Never."),
@@ -136,7 +136,7 @@ ACTION_DOCS: dict[str, tuple[str, str, str]] = {
         "its output query (`crit`)."),
     "relay-to-amplifier": (
         "Relay",
-        "DIO module 1, channel 0 = 0: the device to the amplifier and the digitiser. "
+        "DIO module 1, channel 0 = 0: the device to the amplifier and the scope. "
         "The 81150A output is then off.",
         "As `relay-to-sourcemeter`."),
     "read-power": (

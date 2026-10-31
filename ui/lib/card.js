@@ -6,7 +6,7 @@
 
 import { h, fill } from './dom.js';
 import * as fmt from './format.js';
-import { cardModel, foldCount, groupLabel } from './fields.js';
+import { cardModel, foldCount, groupLabel, moduleTitle } from './fields.js';
 import { icon } from './icons.js';
 
 /**
@@ -25,7 +25,6 @@ export function moduleCard(entry, ctx, open) {
   const form = [
     h('div.pr', model.above.map((row) => renderRow(row, model, ctx))),
     model.readback ? readback(model.readback) : null,
-    provSummary(model),
     needsList(model),
     fold(model, ctx, open),
     blocked.length ? blockedNote(blocked) : null,
@@ -65,7 +64,7 @@ function header(model, ctx, busy, blocked) {
     }, run.label));
   }
   return h('div.ch',
-    h('span.cn', { text: model.name }),
+    h('span.cn', { text: moduleTitle(model.name) }),
     model.status !== 'built' ? h('span.tag.nb', { text: model.status }) : null,
     subtitle(model),
     model.chips.map((text) => h('span.tag.cost', { text })),
@@ -83,62 +82,22 @@ const SLOW_RUN = new Set(['temperature']);
 /** A read-only run does not need the primary action treatment. */
 const PLAIN_RUN = new Set(['power']);
 
-const BUSY_TITLE = 'A run holds the bench. Only Park acts until it ends.';
+const BUSY_TITLE = 'A run holds the bench. Only All off acts until it ends.';
 
 /**
- * The estimate describes run cost: the time in ink, its count in grey, the shot
- * time and its source in the title. Action-only cards omit it because a no-op run
+ * The estimate gives the run time; the count, shot time and source are in the title. Action-only cards omit it because a no-op run
  * estimate would contradict the editable values sent by their actions. Without the
  * structured estimate the service's sentence stands.
  */
 function subtitle(model) {
   if (!model.run.length && model.actions.length) return h('span.cs', { text: 'Acts now' });
   const c = model.cost;
-  const count = c && Number.isInteger(c.points)
-    ? [Number.isInteger(c.loops) ? fmt.plural(c.loops, 'loop') : null,
-      Number.isInteger(c.curves) ? fmt.plural(c.curves, 'curve') : null,
-      fmt.plural(c.points, 'pt')].filter(Boolean).join(' × ')
-    : null;
-  if (!count || !(c.seconds > 0)) return h('span.cs', { text: model.estimate });
+  if (!c || !(c.seconds > 0)) return h('span.cs', { text: model.estimate });
   const shot = typeof c.shot_s === 'number'
     ? `One shot ${fmt.duration(c.shot_s)}, ${c.shot_source === 'journal' ? 'measured on this bench' : 'default'}.`
     : '';
   return h('span.cs', { title: [model.estimate, shot].filter(Boolean).join('\n') },
-    h('span.cost', { text: `≈ ${fmt.duration(c.seconds)}` }), ' ', count);
-}
-
-/** The helper lists parameters above the fold, including composite rows. */
-function aboveSpecs(model) {
-  const out = [];
-  for (const row of model.above) {
-    if (row.kind === 'range') out.push(row.start, row.stop, row.step);
-    else if (row.kind === 'voc') out.push(row.voc, row.led);
-    else if (row.kind === 'polarity') out.push(row.mode, row.fallback);
-    else if (row.spec) out.push(row.spec);
-  }
-  return out.filter(Boolean);
-}
-
-/**
- * Common provenance appears once per card. Individual tags remain for values whose
- * source needs attention, avoiding repeated default-layer labels.
- */
-function provSummary(model) {
-  const specs = aboveSpecs(model);
-  if (!specs.length) return null;
-  const counted = new Map();
-  for (const spec of specs) {
-    if (!QUIET_SOURCES.has(spec.source)) continue;
-    counted.set(spec.source, (counted.get(spec.source) || 0) + 1);
-  }
-  if (!counted.size) return null;
-  // Counts summarize common sources; edited, inherited and measured values keep
-  // individual tags.
-  const order = ['run.toml', 'last-used', 'default'];
-  const text = order.filter((k) => counted.has(k))
-    .map((k) => (k === 'default' ? fmt.plural(counted.get(k), 'default') : `${counted.get(k)} from ${k}`))
-    .join(' · ');
-  return h('div.provsum', { text });
+    h('span.cost', { text: `≈ ${fmt.duration(c.seconds)}` }));
 }
 
 function lastTag(last) {
@@ -215,6 +174,9 @@ function typed(spec) {
  * would make polarity, shutter and LED mode mouse-only. `aria-pressed` conveys the
  * visual selection.
  */
+/** What a segmented choice says; the wire keeps its values. */
+const CHOICE_TEXT = { vpre: 'Vpre', vcoll: 'Vcoll', delay_ns: 'Delay' };
+
 function option(label, on, commit) {
   return h('button.opt', {
     type: 'button',
@@ -264,7 +226,7 @@ function input(spec, commit, segmented, { blank = false } = {}) {
   if (spec.type === 'bool') return checkbox(spec, commit);
   if (spec.type === 'enum' && segmented) {
     return h('span.seg', { role: 'group', 'aria-label': spec.name },
-      ...spec.choices.map((choice) => option(choice, spec.value === choice, () => commit(choice))));
+      ...spec.choices.map((choice) => option(CHOICE_TEXT[choice] || choice, spec.value === choice, () => commit(choice))));
   }
   if (spec.type === 'enum') {
     return h('select.v', { 'aria-label': spec.name, onchange: (e) => commit(e.target.value) },
@@ -291,15 +253,17 @@ function input(spec, commit, segmented, { blank = false } = {}) {
  * §6).
  */
 /**
- * `provSummary` counts common sources once per card. Individual tags are reserved for
- * sources that need attention, avoiding repetitive labels in every row.
+ * Individual tags are reserved for sources that need attention.
  */
 const QUIET_SOURCES = new Set(['default', 'run.toml', 'last-used']);
+
+/** What a tag says; the wire keeps its source names. */
+const SOURCE_TEXT = { derived: 'from JV', inherited: 'from loop' };
 
 function provenance(spec, ctx, model, editable) {
   // A node override uses its value and reset control as its indication; an edited tag
   // would repeat that information.
-  const label = QUIET_SOURCES.has(spec.source) || spec.node ? '' : spec.source;
+  const label = QUIET_SOURCES.has(spec.source) || spec.node ? '' : SOURCE_TEXT[spec.source] || spec.source;
   // Reset ownership differs between bench cards and node forms. Both bench edits and
   // node overrides resolve as `edited`, so that source alone cannot identify a
   // node-owned key. `spec.node` identifies keys in the client's tree without parsing
@@ -339,7 +303,7 @@ function help(spec) {
 function unitTag(spec, name) {
   if (!spec.unit) return null;
   const suffix = '_' + spec.unit.toLowerCase().replace('²', '2').replace('µ', 'u');
-  return String(name).toLowerCase().endsWith(suffix) ? null : h('i', { text: spec.unit });
+  return String(name).toLowerCase().endsWith(suffix) ? null : h('i', { text: spec.unit.replace('cm2', 'cm²') });
 }
 
 /** The label, or the code name where the service sends none, as text or a help button. */
@@ -388,9 +352,9 @@ function rangeRow(row, ctx, model) {
         input(row.start, commit(row.start.name), false),
         h('i', '→'),
         input(row.stop, commit(row.stop.name), false),
-        h('i', 'step'),
+        h('i', { text: row.step.unit === 'V' ? 'dV' : 'step' }),
         input(row.step, commit(row.step.name), false),
-        repeat ? h('span.tag.rep', { title: 'start = stop: one point, repeated n_loops times. The chart shows Q per loop.', tabindex: '0' }, 'repeat')
+        repeat ? h('span.tag.rep', { title: 'Start = end: one point, repeated # of Loops times.', tabindex: '0' }, 'repeat')
           : row.points !== null ? h('i.pts', { text: fmt.plural(row.points, 'pt') }) : null),
       rangeProvenance(specs, ctx, model)));
 }
@@ -407,7 +371,7 @@ function rangeProvenance(specs, ctx, model) {
   const edited = specs.filter((s) => s.source === 'edited');
   const which = specs.filter((s) => s.source === top.source).map((s) => s.name).join(', ');
   return h('span.src',
-    h('span.tag.src-' + top.source, { title: `${top.detail || top.source}: ${which}`, text: top.source }),
+    h('span.tag.src-' + top.source, { title: `${top.detail || top.source}: ${which}`, text: SOURCE_TEXT[top.source] || top.source }),
     edited.length
       ? h('button.link', {
         title: `Drop the edits to ${edited.map((s) => s.name).join(', ')}; the layer below applies.`,
@@ -434,9 +398,9 @@ function vocRow(row, ctx, model) {
   return h('div.pw',
     h('div.pf.voc', {
       class: missing && row.need ? 'miss' : bound ? 'inh' : '',
-      title: voc.doc_full || voc.doc,
+      title: [voc.detail, voc.doc_full || voc.doc].filter(Boolean).join('\n'),
     },
-      h('span.l', 'V_oc'),
+      h('span.l', 'Voc'),
       h('span.v',
         bound
           ? h('span', { text: fmt.volts(voc.value) })
@@ -445,11 +409,7 @@ function vocRow(row, ctx, model) {
           // a separate line so `led_v` stays with V_oc.
           : input(voc, commit, false, { blank: missing }),
         h('i.at', '@'),
-        input(row.led, (v) => ctx.edit(model.name, { led_v: v }), false),
-        h('i', 'V LED'),
-        // V_oc provenance occupies a separate line after its LED level to avoid
-        // colliding with the source tag.
-        bound ? h('i.det', { text: voc.detail || 'derived' }) : null),
+        input(row.led, (v) => ctx.edit(model.name, { led_v: v }), false)),
       provenance(voc, ctx, model, !bound)),
     missing && row.need ? h('div.need1', icon('warn', { cls: 'ico' }), h('span', { text: row.need.text })) : null);
 }
@@ -499,9 +459,8 @@ function readback(row) {
     title: 'Read from the bench, not set here. The curve is labelled as found: '
       + 'dark, 1.020 V or unknown. Unknown unless shutter, LED output and LED mode all read back.',
   },
-    h('span.l', 'Illumination'),
-    h('span.v', { text: row.text },
-      h('i', { text: row.lit === null ? 'labelled unknown' : `shutter ${row.open ? 'open' : 'shut'}` })));
+    h('span.l', 'Light'),
+    h('span.v', { text: row.text }));
 }
 
 // -- needs, verdicts and the fold ----------------------------------------
@@ -527,7 +486,7 @@ export function fold(model, ctx, open) {
     h('div.foldbar',
       // On a node form, the fold contains unchanged bench values; the fields above it
       // show differences.
-      h('span.cs', { text: model.form === 'node' ? `${total} as on the bench` : `${total} more` }),
+      model.form === 'node' ? h('span.cs', { text: `${total} as on the bench` }) : null,
       model.fold.map((group) => h('button.btng', {
         class: open.has(group.group) ? 'on' : '',
         title: group.inert ? group.params[0].inert : group.group,

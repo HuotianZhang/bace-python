@@ -17,7 +17,7 @@ import { ranged } from './view.js';
 export const AXIS_UNITS = { vpre: 'V', vcoll: 'V', delay_ns: 'ns' };
 
 /** The plain names of the swept quantities, for an axis title. */
-const AXIS_NAMES = { vpre: 'V_pre', vcoll: 'V_coll', delay_ns: 'Delay' };
+const AXIS_NAMES = { vpre: 'Vpre', vcoll: 'Vcoll', delay_ns: 'Delay' };
 
 /**
  * The helper classifies an axis as repeat (`true`), sweep (`false`) or unresolved
@@ -205,9 +205,9 @@ function repeatModel(common, panel, node, counts, options) {
     const x0 = X(done + 0.5);
     shades.push({ x: x0, w: rect.x + rect.w - x0, hatch: true, colour: 'rule', opacity: 1 });
     rules.push({ x1: x0, colour: 'accent', width: 1.5 });
-    marks.push({ x: x0 + 6, y: rect.y + 12, colour: 'accent-dark', weight: 500, size: 9.5,
+    marks.push({ x: x0 + 6, y: rect.y + 12, colour: 'accent-dark', weight: 500, size: 11,
       text: `loops ${done + 1} – ${counts.loopsRequested} not acquired` });
-    marks.push({ x: x0 + 6, y: rect.y + 24, colour: 'accent-dark', size: 8.5,
+    marks.push({ x: x0 + 6, y: rect.y + 24, colour: 'accent-dark', size: 11,
       text: `${counts.ended} at loop ${done}` });
   }
   const last = series[series.length - 1];
@@ -291,7 +291,7 @@ function readoutRepeat(series, last, counts) {
   if (!last) return 'no shots yet';
   const parts = [`loop ${last.loop}${counts.loopsRequested ? ' of ' + counts.loopsRequested : ''}`,
     `Q ${fmt.charge(last.q)}`, `mean ${fmt.charge(last.mean)}`];
-  parts.push(last.sigma !== null ? `σ ${fmt.scientific(last.sigma, 3)} C` : 'σ_Q not recorded');
+  parts.push(last.sigma !== null ? `σ ${fmt.scientific(last.sigma, 3)} C` : 'σQ not recorded');
   return parts.join('  ·  ');
 }
 
@@ -366,7 +366,7 @@ function sweepModel(common, panel, node, counts, options) {
       }],
       dots, rules,
       marks: current ? [{
-        x: scale.fixed(X(current.x)) + 4, y: rect.y + 11, colour: 'accent', size: 8.5, mono: true, halo: true,
+        x: scale.fixed(X(current.x)) + 4, y: rect.y + 11, colour: 'accent', size: 11, halo: true,
         text: `now · point ${current.i + 1}`,
       }] : [],
       shades: current ? [{ x: scale.fixed(X(current.x)) - 1, w: 2, colour: 'accent', opacity: 0.5 }] : [],
@@ -381,8 +381,8 @@ function sweepModel(common, panel, node, counts, options) {
     },
     legend: [
       { label: 'mean over the loops so far', colour: 'ink', width: 1.2 },
-      { label: 'σ_Q measured', marker: 'dot', colour: 'ink' },
-      { label: 'σ_Q not recorded', marker: 'square-hollow', colour: 'ink' },
+      { label: 'σQ measured', marker: 'dot', colour: 'ink' },
+      { label: 'σQ not recorded', marker: 'square-hollow', colour: 'ink' },
       { label: 'each shot', marker: 'dot-faint', colour: 'grey' },
     ],
     readout: readoutSweep(points, counts, withSigma),
@@ -411,7 +411,7 @@ function readoutSweep(points, counts, withSigma) {
   const measured = points.filter((p) => p.mean !== null).length;
   const parts = [`${counts.kept}${counts.requestedShots ? ' of ' + counts.requestedShots : ''} shots`];
   parts.push(`${measured} of ${points.length} points measured`);
-  parts.push(withSigma ? `σ on ${withSigma}` : 'σ_Q not recorded yet — one loop');
+  parts.push(withSigma ? `σ on ${withSigma}` : 'σQ not recorded yet — one loop');
   if (counts.ended) parts.push(counts.ended);
   return parts.join('  ·  ');
 }
@@ -425,7 +425,7 @@ function notesFor(counts, loopsDone, node, { repeat, withSigma = 0, points = 0, 
       + (counts.ended ? ` · ${counts.ended}` : ''));
   }
   if (!repeat && points && withSigma < points && loopsDone >= 1) {
-    out.push(`σ_Q needs two loops at a point: ${points - withSigma} of ${points} still carry one`);
+    out.push(`σQ needs two loops at a point: ${points - withSigma} of ${points} still carry one`);
   }
   if (repeat && firstLoop > 1) {
     // The caption identifies a retained suffix so the space before its first point

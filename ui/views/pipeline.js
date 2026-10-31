@@ -12,7 +12,7 @@
 import { h, fill, keyed } from '../lib/dom.js';
 import * as fmt from '../lib/format.js';
 import { icon } from '../lib/icons.js';
-import { cardModel } from '../lib/fields.js';
+import { cardModel, moduleTitle } from '../lib/fields.js';
 import { renderRow, field, fold } from '../lib/card.js';
 import { chart } from '../lib/charts/frame.js';
 import { scheduleModel } from '../lib/charts/schedule.js';
@@ -31,7 +31,7 @@ const VALIDATE_MS = 250;
 
 export default {
   route: 'pipeline',
-  title: 'Pipeline',
+  title: 'Sequence',
 
   mount(container, { store, api, notify }) {
     // -- the state this view owns ------------------------------------------
@@ -84,7 +84,7 @@ export default {
 
     const body = h('div.pipe');
     fill(container,
-      h('h1', 'Pipeline'),
+      h('h1', 'Sequence'),
       body);
 
     const structureEl = h('div.card.pipe-col');
@@ -267,11 +267,7 @@ export default {
       const s = typed ? tree.structureSummary(typed) : { loops: 0, modules: 0 };
       const runs = v.counters.modules;
       keyed(headEl, JSON.stringify([s, runs, v.moduleNames, Boolean(typed), selected, recipes.length, inflight]), () => [
-        h('span.cn', 'Tree'),
-        h('span.cs', {
-          text: `${fmt.plural(s.loops, 'loop')}, ${fmt.plural(s.modules, 'module')}`
-            + (runs === undefined ? '' : `, ${fmt.plural(runs, 'run')}`),
-        }),
+        h('span.cn', 'Steps'),
         inflight ? h('span.tag', { text: 'checking' }) : null,
         h('span', { style: { flex: '1' } }),
         addControls(v),
@@ -301,7 +297,7 @@ export default {
       const at = into ? tree.nodeAt(typed, into) : null;
       const where = !typed || !at ? 'root' : `into ${at.kind === 'loop' ? at.loop : at.module}`;
       const picker = h('select.v', { title: 'The module this node runs.' },
-        ...v.moduleNames.map((n) => h('option', { value: n }, n)));
+        ...v.moduleNames.map((n) => h('option', { value: n }, moduleTitle(n))));
       const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
       return h('span.addbar',
         h('span.cs', { text: where }),
@@ -310,7 +306,7 @@ export default {
           onclick: () => addNode(tree.newLoop(kind), into, `add the ${kind} loop`),
         }, `+ ${cap(kind)}`)),
         picker,
-        h('button.btng', { onclick: () => addNode(tree.newModule(picker.value), into, `add ${picker.value}`) }, '+ Module'));
+        h('button.btng', { onclick: () => addNode(tree.newModule(picker.value), into, `add ${picker.value}`) }, '+ Measurement'));
     }
 
     function addNode(node, into, label = 'add a node') {
@@ -337,7 +333,7 @@ export default {
         v.rows.map((r) => [r.runs, r.shots, r.needs_operator, r.relay_transition, r.estimate_s, r.measure_s])]);
       keyed(treeEl, key, () => {
         if (!typed) {
-          return h('p.absent', 'Add a loop or a module, or open a recipe.');
+          return h('p.absent', 'Add a step or open a saved sequence.');
         }
         return v.rows.map((row) => treeRow(row, v));
       });
@@ -363,9 +359,9 @@ export default {
         else if (entry.status !== 'built') tags.push(h('span.tag.nb', { text: entry.status }));
         if (row.centre_on_voc) {
           tags.push(h('span.inh', {
-            title: row.voc ? `${row.voc.how} ${row.voc.node_path || ''} at ${fmt.volts(row.voc.led_v)}` : 'No V_oc source in scope.',
+            title: row.voc ? `${row.voc.how} ${row.voc.node_path || ''} at ${fmt.volts(row.voc.led_v)}` : 'No Voc source in scope.',
           }, icon(row.voc ? 'inherit' : 'warn'),
-          h('span', { text: row.voc ? `V_oc ← ${row.voc.how}` : 'V_oc' })));
+          h('span', { text: row.voc ? `Voc ← ${row.voc.how}` : 'Voc' })));
         }
         if (row.relay_transition) {
           tags.push(h('span.cs', { title: 'The relay moves here; refused while a source is live.', text: `relay → ${row.relay}` }));
@@ -379,7 +375,7 @@ export default {
       return fill(el,
         h('span.nk' + (row.kind === 'module' ? '.mod' : ''),
           icon(row.kind === 'loop' ? 'loop' : 'module')),
-        h('span.n', { text: row.kind === 'loop' ? row.loop : row.module }),
+        h('span.n', { text: row.kind === 'loop' ? row.loop : moduleTitle(row.module) }),
         // A module node uses bench values by default; only overrides need a row mark.
         row.kind === 'loop' ? h('span.d', { text: row.summary }) : overrideTag(row),
         h('span', { style: { flex: '1' } }),
@@ -429,14 +425,14 @@ export default {
         if (!node) return null;
         return h('div.nf',
           h('div.nfh',
-            h('span.cn', { text: node.kind === 'loop' ? `${node.loop} loop` : node.module }),
+            h('span.cn', { text: node.kind === 'loop' ? `${node.loop} loop` : moduleTitle(node.module) }),
             // The bench link opens the module card supplying every unoverridden node
             // value.
             node.kind === 'module'
               ? h('a.btng.goto', {
                 href: benchHash(node.module),
                 title: `Opens the ${node.module} card. Values not overridden here come from it.`,
-              }, 'Bench')
+              }, 'Measure')
               : null,
             h('span', { style: { flex: '1' } }),
             // Node reset appears only with overrides. Dropping them restores bench
@@ -730,7 +726,6 @@ export default {
       keyed(costEl, JSON.stringify([v.cost, v.counters]), () => {
         if (!v.cost) return h('p.absent', 'Not checked');
         const c = v.cost;
-        const counters = v.counters;
         return [
           h('div.nums',
             num('Total', c.total_s, c.prefix),
@@ -738,14 +733,7 @@ export default {
             num('Waiting for T', c.waiting_s, c.waiting_s === null ? '' : c.prefix)),
           h('div.cs', {
             title: c.t_shot_s ? `Shot time from the ${c.t_shot_source === 'journal' ? 'journal' : c.t_shot_source}.` : '',
-            text: [
-              counters.temperatures ? fmt.plural(counters.temperatures, 'temperature') : null,
-              counters.levels ? fmt.plural(counters.levels, 'level') : null,
-              counters.modules ? fmt.plural(counters.modules, 'module run') : null,
-              counters.shots ? fmt.plural(counters.shots, 'shot') : null,
-              c.t_shot_s ? `${fmt.duration(c.t_shot_s)} per shot` : null,
-              c.finish_at ? `finish ${fmt.clock(c.finish_at)}` : null,
-            ].filter(Boolean).join(', '),
+            text: c.finish_at ? `Finish ${fmt.clock(c.finish_at)}` : '',
           }),
           c.lower_bound
             ? h('p.chart-note', {
@@ -754,7 +742,7 @@ export default {
                 : 'The catalogue has no estimate for them.',
               text: c.unmeasured.length
                 ? `Lower bound: ${c.unmeasured.length} of ${c.per_temperature.length} settles unmeasured.`
-                : `Lower bound: ${fmt.plural(c.unestimated, 'module run')} not estimated.`,
+                : `Lower bound: ${fmt.plural(c.unestimated, 'measurement')} not estimated.`,
             })
             : null,
         ];
@@ -782,19 +770,18 @@ export default {
           h('div.cksum',
             h('span.m', { text: fmt.plural(c.total, 'check') }),
             ...tree.LEVELS.filter((l) => c.counts[l]).map((l) => h('span.tag.' + tagClass(l), { text: `${c.counts[l]} ${l}` })),
-            v.stale ? h('span.tag', { title: 'The tree has changed since the last check.', text: 'stale' }) : null,
+            v.stale ? h('span.tag', { title: 'The steps changed after the last check.', text: 'stale' }) : null,
             h('span', { style: { flex: '1' } }),
             h('button.btng', { onclick: () => { showAllChecks = !showAllChecks; render(); } },
               showAllChecks ? 'Hide' : 'Show')),
           // The text leads; the node path and the check code follow as identifiers
           // (`docs/ui-rules.md` §1), the code being what manual 4.2 is indexed by.
           shown.length
-            ? h('div.cklist', shown.map((check) => h('div.warn1.' + check.level,
+            ? h('div.cklist', shown.map((check) => h('div.warn1.' + check.level, { title: check.code },
               levelMark(check.level),
               h('span', { text: check.text }),
-              check.node_path ? h('span.cs', { text: check.node_path }) : null,
-              h('span.code', { text: check.code }))))
-            : h('p.chart-note', 'All checks ok'),
+              check.node_path ? h('span.cs', { text: check.node_path }) : null)))
+            : null,
         ];
       });
     }
@@ -832,7 +819,7 @@ export default {
           }),
           recipes.length
             ? h('select.v', {
-              title: 'Opens a saved recipe.',
+              title: 'Opens a saved sequence.',
               onchange: (e) => {
                 const found = recipes.find((r) => r.name === e.target.value);
                 if (found && found.tree) {
@@ -846,7 +833,7 @@ export default {
                   change(found.tree, { select: null, label: `open ${found.name}`, before: was });
                 }
               },
-            }, h('option', { value: '' }, 'Recipes …'),
+            }, h('option', { value: '' }, 'Open …'),
             ...recipes.map((r) => h('option', { value: r.name }, r.name)))
             : null),
         h('div.btnrow',
@@ -880,14 +867,14 @@ export default {
             disabled: !typed || null,
             title: overwrites
               ? `${stem} exists. Saving overwrites it; the old file is not in the undo history.`
-              : 'Writes the tree and the bench values to a file.',
+              : 'Saves the steps and the present values.',
             onclick: save,
-          }, armed ? `Overwrite ${stem}?` : 'Save recipe'),
+          }, armed ? `Overwrite ${stem}?` : 'Save'),
           h('button.btns', {
             disabled: !typed || null,
             title: 'Checks without touching the bench.',
             onclick: () => { showAllChecks = true; showFlat = false; revalidate({ now: true }); },
-          }, 'Dry run')),
+          }, 'Check')),
       ]);
     }
 
@@ -935,9 +922,9 @@ export default {
           h('span', { text: `Bench differs from ${loaded.name}. Nodes run with the bench.` }),
           h('span', { style: { flex: '1' } }),
           h('button.btns', {
-            title: 'Puts the recipe’s values back on the bench, module by module.',
+            title: 'Puts the saved values back.',
             onclick: () => restoreBench(moved),
-          }, 'Restore recipe values'),
+          }, 'Restore saved values'),
           h('button.btng', { title: 'Keeps the bench as it is.', onclick: () => { loaded = null; render(); } }, 'Keep bench')),
         h('div.rn-list', moved.map((it) => h('div.rn-row',
           h('span.l', { text: `${it.module}.${it.name}` }),
@@ -1050,7 +1037,7 @@ export default {
       keyed(gridEl, JSON.stringify([grid && grid.temperatures, grid && grid.levels, grid && grid.count]), () => {
         if (!grid) return null;
         return [
-          h('div.cs', { text: `Grid ${grid.temperatures.length} × ${grid.levels.length}, ${fmt.plural(grid.count, 'module run')}` }),
+          h('div.cs', { text: `Grid ${grid.temperatures.length} × ${grid.levels.length}, ${fmt.plural(grid.count, 'measurement')}` }),
           h('div.lst', { style: { gridTemplateColumns: `auto repeat(${grid.levels.length}, 1fr)` } },
             h('span.h', 'T / K'),
             grid.levels.map((led) => h('span.h', { text: Number(led).toFixed(3) })),
@@ -1080,7 +1067,7 @@ export default {
       if (node.kind === 'module') {
         return h('div.sr.mod', { style: { marginLeft: `${node.depth * 16}px` } },
           h('span.nk.mod', icon('module')),
-          h('span.n', { text: node.module }),
+          h('span.n', { text: moduleTitle(node.module) }),
           node.led_v !== null && node.led_v !== undefined ? h('span.d', { text: 'LED ' + fmt.volts(node.led_v) }) : null,
           node.temperature && node.temperature.k !== null && node.temperature.k !== undefined
             ? h('span.d', {
@@ -1147,7 +1134,7 @@ export default {
       }
       const voc = leaves.filter((l) => l.voc && l.voc.how);
       if (voc.length) {
-        out.push(`V_oc ← ${voc[0].voc.how}, ${fmt.plural(voc.length, 'centred scan')}`);
+        out.push(`Voc ← ${voc[0].voc.how}, ${fmt.plural(voc.length, 'centred scan')}`);
       }
       const transitions = leaves.filter((l) => l.relay_transition).length;
       if (transitions) out.push(`relay moves ${fmt.plural(transitions, 'time')}`);
