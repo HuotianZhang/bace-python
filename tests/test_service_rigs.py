@@ -842,3 +842,27 @@ def test_the_simulated_scope_refuses_the_front_panel_actions():
     b = bench()
     with pytest.raises(BenchActionRefused, match="no front-panel read-back"):
         b.action("read-scope", {})
+
+
+def test_a_capture_tells_a_square_from_a_narrow_pulse():
+    # A 500 Hz square averaged over short records reads as a flat ~1.3 V, as CHAN3
+    # did on 2026-11-03; a capture over a whole period shows its duty and edges.
+    import numpy as np
+    from bace.drivers.infiniium import Infiniium
+    from bace.drivers.protocols import Trace
+    b = bench()
+    scope = Infiniium(_ScopeIO())
+    b.rig.scope = scope
+    dt = 5e-9
+    t = np.arange(400_000) * dt          # one 2 ms period
+    square = np.where(((t - 0.5e-3) % 2e-3) < 1e-3, 2.6, 0.0)
+    pulse = np.where(((t - 1e-3) % 2e-3) < 5.5e-9, 2.0, 0.0)
+    scope.single_acquisition = lambda timeout_s=10.0: None
+    for y, duty, width in ((square, 0.5, 1e-3), (pulse, 5.5e-9 / 2e-3, 5e-9)):
+        scope.fetch_volts = lambda source, y=y: Trace(y=y, dt=dt, t0=-1e-4)
+        out = b.action("capture-scope", {"channel": 3, "window_s": 2.5e-3, "points": 500_000})
+        assert out["high_fraction"] == pytest.approx(duty, abs=2e-3)
+        assert out["rising_edges"] >= 1 and len(out["outline"]) == 100
+        assert out["high_widths_s"][0] == pytest.approx(width, rel=0.1, abs=dt)
+    with pytest.raises(ValueError):
+        b.action("capture-scope", {"channel": 7})

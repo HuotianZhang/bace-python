@@ -438,6 +438,51 @@ class Infiniium:
             first = first or reply
         return first
 
+    def capture(self, channel: int, *, window_s: float, points: int,
+                range_v: float, offset_v: float, trigger_channel: int | None = None,
+                level_v: float | None = None, timeout_s: float = 10.0) -> dict:
+        """Take one record of one channel and summarise its shape.
+
+        For finding what a channel carries, as the Sync on CHAN3: a 5 ns pulse at
+        500 Hz and a 500 Hz square look alike to a short averaged record. RTIM, no
+        averaging; `trigger_channel` None sweeps untriggered (AUTO), otherwise
+        waits for a rising edge through `level_v`. The next run sets range,
+        timebase, acquisition and trigger again. Returns levels in V, the edges
+        through the midpoint, the duty and a min/max outline of 100 bins."""
+        if int(channel) not in (1, 2, 3, 4):
+            raise ValueError(f"channel {channel}: 1-4")
+        if not 1e-8 <= float(window_s) <= 0.1 or not 1000 <= int(points) <= 2_000_000:
+            raise ValueError("window_s 10 ns to 100 ms, points 1000 to 2000000")
+        ch = f"CHAN{int(channel)}"
+        self._io.write(f":{ch}:DISP ON;:{ch}:RANG {float(range_v):g};:{ch}:OFFS {float(offset_v):g};")
+        self._io.write(f":TIM:RANG {float(window_s):g};:TIM:POS {float(window_s) * 0.4:g};")
+        self._io.write(f":ACQ:POIN {int(points):d};:ACQ:MODE RTIM;:ACQ:AVER OFF;:ACQ:INT OFF;")
+        self._io.write(":TRIG:MODE EDGE;")
+        if trigger_channel is None:
+            self._io.write(":TRIG:SWE AUTO;")
+        else:
+            src = f"CHAN{int(trigger_channel)}"
+            self._io.write(f":TRIG:EDGE:SOUR {src};:TRIG:EDGE:SLOP POS;"
+                           f":TRIG:LEV {src},{float(level_v if level_v is not None else 0.5):g};"
+                           ":TRIG:SWE TRIG;")
+        self.single_acquisition(timeout_s)
+        trace = self.fetch_volts(ch)
+        y = np.asarray(trace.y, dtype=float)
+        lo, hi = float(np.min(y)), float(np.max(y))
+        mid = (lo + hi) / 2.0
+        high = y > mid
+        rising = np.flatnonzero(~high[:-1] & high[1:])
+        falling = np.flatnonzero(high[:-1] & ~high[1:])
+        widths = [int(f - r) for r in rising for f in falling[falling > r][:1]]
+        bins = np.array_split(y, 100)
+        return {"points": int(y.size), "dt_s": float(trace.dt), "t0_s": float(trace.t0),
+                "min_v": lo, "max_v": hi, "mean_v": float(np.mean(y)),
+                "median_v": float(np.median(y)), "high_fraction": float(np.mean(high)),
+                "rising_edges": int(rising.size),
+                "rising_at_s": [float(trace.t0 + i * trace.dt) for i in rising[:20]],
+                "high_widths_s": [w * float(trace.dt) for w in widths[:20]],
+                "outline": [[round(float(b.min()), 4), round(float(b.max()), 4)] for b in bins]}
+
     INPUTS = ("DC", "DC50", "AC")
     TRIGGER_COUPLINGS = ("DC", "AC", "LFR", "HFR")
 
