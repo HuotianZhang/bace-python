@@ -867,7 +867,7 @@ class Session:
                 params = {n: pv.value for n, pv in step.params.items()
                           if pv.source in LAST_USED_SOURCES and n != VOC_PARAM}
                 resolved = {n: pv.value for n, pv in step.params.items()}
-            job = Job(run_id, "run", self._make_run(rec), park=self.bench.rig.park, name=name)
+            job = Job(run_id, "run", self._make_run(rec), park=self._park_and_read, name=name)
             # Queue before journaling: shutdown can refuse submission. A
             # `RunQueued` entry without an actual queued job would remain
             # permanently queued in the index.
@@ -1312,6 +1312,21 @@ class Session:
             raise outcome["error"]
         return {"job": job_id, "name": name, "result": outcome.get("result"),
                 "read_at": (self._snapshot or {}).get("read_at")}
+
+    def _park_and_read(self) -> None:
+        """Parks the bench after a run, then reads it back.
+
+        Without the read, the cache kept the run's Start read-back once the
+        live overlay cleared, so a shutter opened by hand before a `jv` still
+        read open after park had shut it. The read comes from the instruments,
+        not from what park meant to do: `Rig.park` suppresses its failures.
+        A failed read is logged and leaves the cache; it is not a park error.
+        """
+        self.bench.rig.park()
+        try:
+            self._read_back()
+        except Exception:                                   # noqa: BLE001
+            log.exception("read-back after park failed")
 
     def _read_back(self) -> dict:
         """Reads and caches every instrument on the worker thread."""

@@ -472,7 +472,9 @@ modules that manage it. LED and relay implications persist to the run-end
 transition, which clears the overlay. Park leaves the LED running. Every overlaid instrument
 carries `how: "inferred"` and is listed in `inferred`; `read_at` stays the
 read-back's. LED and relay state can persist between module nodes; terminal run
-transitions clear all inferred state. `state` is one
+transitions clear all inferred state. After park the worker reads the bench back
+before it reports `parked`, so the snapshot then is the parked bench, not the
+Start read-back; a failed read leaves the cache and is logged. `state` is one
 of `idle | preflight | running | paused | stopping`: a run still `queued` when
 its preflight frame has not been applied reads as `preflight`, and a run in a
 terminal state that the worker is still parking reads as `stopping`; `parked`

@@ -1027,7 +1027,9 @@ def test_with_the_331_named_a_temperature_pipeline_settles_over_the_api(tmp_path
         assert f"{kelvin:g}K" in os.path.basename(rec["folders"][0])
         assert [x for x in rec["verdicts"] if x["code"] == "temperature.settled"]
         t = client.get("/bench").json()["instruments"]["temperature"]
-        assert (t["kelvin"], t["setpoint_k"], t["source"]) == (kelvin, 250.0, "simulated")
+        # The bench is read back after park, so this is a later reading than the settle's.
+        assert (t["setpoint_k"], t["source"]) == (250.0, "simulated")
+        assert abs(t["kelvin"] - 250.0) <= 0.5
         notes = session.bench.sim.temperature.notes
         assert notes[0] == f"bace {run_id} T=250K: setpoint 250 K +/-0.2 K hold 0 s"
         assert notes[-1] == f"bace {run_id} T=250K: settled at {kelvin:.3f} K"

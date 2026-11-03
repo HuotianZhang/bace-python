@@ -78,6 +78,36 @@ def states_of(frames: list[dict]) -> list[str]:
     return [f["data"]["state"] for f in frames if f["type"] == "RunStateChanged"]
 
 
+# -- the bench after a run ------------------------------------------------------------
+def test_the_bench_reads_shut_after_a_jv_that_ran_with_the_shutter_open(tmp_path):
+    # 2026-11-03 on the lab PC: the shutter opened by hand, a `jv` (which leaves
+    # illumination alone), park shut it, and the console still showed it open.
+    with make_session(tmp_path) as s:
+        s.bench_action("shutter-open", {})
+        assert s.bench_snapshot()["instruments"]["shutter"]["open"] is True
+        run_id, _ = s.submit(tree_for_module("jv", {"step_v": 0.1}), kind="manual")
+        assert s.wait_run(run_id, TIMEOUT)
+        wait_until(lambda: s.run_record(run_id)["parked"])
+        snap = s.bench_snapshot()
+        assert snap["state"] == "idle"
+        assert snap["instruments"]["shutter"]["open"] is False, "read back after park"
+        assert snap["instruments"]["smu"]["output"] is False
+        assert snap["read_at"] >= s.run_record(run_id)["finished_at"] - 1.0
+
+
+def test_a_failed_read_after_park_is_not_a_run_error(tmp_path, monkeypatch):
+    with make_session(tmp_path) as s:
+        run_id, _ = s.submit(tree_for_module("jv", {"step_v": 0.1}), kind="manual")
+        def broken(*a, **kw):
+            raise RuntimeError("bus gone")
+        # The run's Start read-back goes to the bench directly; only this one fails.
+        monkeypatch.setattr(s, "_read_back", broken)
+        assert s.wait_run(run_id, TIMEOUT)
+        wait_until(lambda: s.run_record(run_id)["parked"])
+        rec = s.run_record(run_id)
+        assert rec["state"] == "done" and rec["error"] is None
+
+
 # -- arrays of an earlier session -----------------------------------------------------
 def test_an_earlier_sessions_jv_is_read_back_from_its_file(tmp_path):
     with make_session(tmp_path) as s:
