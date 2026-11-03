@@ -193,6 +193,7 @@ export function axesOf(model) {
     out.push({
       key: panel.key, title: panel.y.title, unit: panel.y.unit, scale: panel.y.scale,
       canLog: panel.y.canLog === true, log: panel.y.scale.kind === 'log10',
+      all: Array.isArray(panel.y.all) ? panel.y.all : null,
     });
   }
   return out;

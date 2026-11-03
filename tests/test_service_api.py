@@ -1027,7 +1027,9 @@ def test_with_the_331_named_a_temperature_pipeline_settles_over_the_api(tmp_path
         assert f"{kelvin:g}K" in os.path.basename(rec["folders"][0])
         assert [x for x in rec["verdicts"] if x["code"] == "temperature.settled"]
         t = client.get("/bench").json()["instruments"]["temperature"]
-        assert (t["kelvin"], t["setpoint_k"], t["source"]) == (kelvin, 250.0, "simulated")
+        # The bench is read back after park, so this is a later reading than the settle's.
+        assert (t["setpoint_k"], t["source"]) == (250.0, "simulated")
+        assert abs(t["kelvin"] - 250.0) <= 0.5
         notes = session.bench.sim.temperature.notes
         assert notes[0] == f"bace {run_id} T=250K: setpoint 250 K +/-0.2 K hold 0 s"
         assert notes[-1] == f"bace {run_id} T=250K: settled at {kelvin:.3f} K"
@@ -1614,8 +1616,12 @@ def test_a_run_of_an_earlier_session_is_served_from_the_journal(tmp_path):
         assert rec["from"] == "journal" and rec["state"] == "done" and rec["module"] == "jv"
         assert rec["nodes"]["jv"]["outcome"] == "ok" and rec["tree"]["module"] == "jv"
         assert rec["data_in_memory"] is False
-        assert client.get(f"/runs/{run_id}/data").status_code == 404
+        # Not in memory, so the J–V curves come back from the run's file.
+        r = client.get(f"/runs/{run_id}/data")
+        assert r.status_code == 200, r.text
+        assert len(r.json()["curves"][0]["voltage"]) == 15
         assert client.get("/runs/20260101_000000-001").status_code == 404
+        assert client.get("/runs/20260101_000000-001/data").status_code == 404
 
 
 def test_the_cli_refuses_a_lan_binding_and_names_the_missing_extra(tmp_path, monkeypatch, capsys):

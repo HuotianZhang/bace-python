@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import {
-  cellName, cellQ, csvOf, flagsFor, gridModel, identityOf, isPartial, moduleNodes, provenanceSummary,
+  cellName, cellQ, csvOf, curveSummary, flagsFor, gridModel, identityOf, isPartial, moduleNodes, provenanceSummary,
   rerunParams, runGroups, summaryModel, temperatureText, vocText, spanOf,
 } from '../lib/history.js';
 import { gridChartModel } from '../lib/charts/grid.js';
@@ -325,4 +325,15 @@ test('the chart is one series per temperature over led_v, and its transpose', ()
   assert.equal(byT.x.format(250.1), '250.1 K');
   const none = gridChartModel(gridModel({ nodes: {} }), {});
   assert.ok(none.absent);
+});
+
+test('a J-V curve row reads the record\'s own metric names', () => {
+  // The record says `fill_factor`; reading `ff` showed FF as absent on every curve.
+  const node = grid.nodes['T=250K/led=1.010V/jv_bace'];
+  const [dark, light] = node.curves;
+  assert.equal(curveSummary(dark), 'dark');
+  assert.equal(curveSummary(light), 'Voc 0.8876 V · Jsc −143 µA · FF 81.2 %');
+  const a = '—';
+  assert.equal(curveSummary({ metrics: { voc: null, jsc: null, fill_factor: null } }),
+    `Voc ${a} · Jsc ${a} · FF ${a}`);
 });

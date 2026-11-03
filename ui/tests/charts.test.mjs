@@ -278,6 +278,21 @@ test('a sweep in flight is drawn dotted in its own colour, into the planned rang
   assert.ok(legend, 'the legend says how far it got');
 });
 
+test('a sweep read back unfinished from its file says stopped, with no live dot', () => {
+  const light = JV.curves.find((c) => c.dark !== true);
+  const n = 5;
+  const stopped = { ...light, partial: true, ended: true, k: n, of: light.voltage.length,
+    voltage: light.voltage.slice(0, n), current: light.current.slice(0, n), density: light.density.slice(0, n) };
+  const done = JV.curves.filter((c) => c.dark === true);
+  const model = jvModel([...done, stopped]);
+  const series = model.panels[0].series.find((s) => s.key.endsWith('·partial'));
+  assert.match(series.label, /stopped$/);
+  assert.equal(model.panels[0].dots.length, 0, 'no instrument position on a finished run');
+  assert.match(model.panels[0].note, /^stopped .* point 5 of/);
+  assert.ok(model.legend.some((l) => /stopped 5 of/.test(l.label)));
+  assert.ok(!model.metrics.entries.some((e) => /1\.02/.test(e.label)), 'no metrics for half a curve');
+});
+
 test('no pixel area means amps, not a density with an invented area', () => {
   const noArea = JV.curves.map((c) => ({ ...c, density: null }));
   assert.equal(currentOf(noArea).key, 'current');
@@ -312,6 +327,28 @@ test('the light axis is the power quadrant, and says how much it cropped', () =>
   const model = jvModel(JV.curves);
   assert.ok(model.panels[0].y.scale.domain[1] < 50, 'forward injection is off the top');
   assert.ok(model.notes.some((n) => /above the axis/.test(n)));
+});
+
+test('the crop is forward injection only: the reverse arm stays, and the whole range is offered', () => {
+  // 2026-11-03, a weakly lit cell: J_sc −0.12 mA/cm², leakage −0.38 at −2 V, +1.25 forward.
+  // A window of ±J_sc multiples cut the reverse arm off at −0.5 V.
+  const v = [-2, -1, -0.5, 0, 0.3, 0.52, 0.8, 1.0];
+  const density = [-0.376, -0.25, -0.19, -0.122, -0.08, 0, 0.6, 1.253];
+  const curve = { label: '1 V', dark: false, led_level_v: 1, direction: 'forward', voltage: v,
+    current: density.map((j) => j * 1e-5), density, metrics: {} };
+  const model = jvModel([curve]);
+  const [lo, hi] = model.panels[0].y.scale.domain;
+  assert.ok(lo <= -0.376, `the reverse arm is in view (${lo})`);
+  assert.ok(hi < 1.253, 'forward injection is still cropped');
+  const all = model.panels[0].y.all;
+  assert.ok(all && all[0] <= -0.376 && all[1] >= 1.253, 'Show all has the whole range');
+  assert.deepEqual(axesOf(model).find((a) => a.key === 'jv').all, all);
+  const view = { ranges: { jv: { lo: all[0], hi: all[1], unit: model.panels[0].y.unit } }, log: null };
+  const shown = jvModel([curve], { view });
+  assert.deepEqual(shown.panels[0].y.scale.domain, all, 'and the chart draws it');
+  assert.ok(!shown.notes.some((n) => /above the axis/.test(n)));
+  const flat = jvModel([{ ...curve, density: density.map((j) => Math.min(j, 0.1)) }]);
+  assert.equal(flat.panels[0].y.all, null, 'nothing above the window, nothing to show');
 });
 
 test('the −4 V start is a layout problem, so x is never cropped', () => {

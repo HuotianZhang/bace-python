@@ -230,6 +230,63 @@ def write_hdf5(path: str, curves, *, metadata: dict, config: dict,
     return path
 
 
+METRIC_KEYS = ("voc", "jsc", "p_max", "v_mpp", "j_mpp", "fill_factor")
+
+
+def read_hdf5_curves(path: str) -> list[dict]:
+    """Reads a J–V run file back as the curve dicts of `GET /runs/{id}/data`.
+
+    `write_hdf5` stores `None` as `""`; it reads back as `None`. Density from
+    schemas 1–3 is in A/cm² and is scaled to mA/cm², the unit of schema 4 and
+    of the live data. An absent `dark` stays `None`: unknown illumination.
+    A sweep saved unfinished keeps `partial` with `k` points of `of`, as the
+    live partial curve has them, and `ended` because it will not grow.
+    """
+    import h5py
+
+    def value(v):
+        if isinstance(v, bytes):
+            v = v.decode()
+        if isinstance(v, str):
+            return None if v == "" else v
+        if isinstance(v, np.generic):
+            return v.item()
+        return v
+
+    out = []
+    with h5py.File(path, "r") as f:
+        group = f.get("curves")
+        for name in sorted(group) if group is not None else []:
+            sub = group[name]
+            a = {k: value(v) for k, v in sub.attrs.items()}
+            density = None
+            if "density" in sub:
+                ds = sub["density"]
+                density = np.asarray(ds[()], dtype=float)
+                if value(ds.attrs.get("unit")) == "A cm-2":
+                    density = density * 1000.0
+            dark = a.get("dark")
+            voltage = np.asarray(sub["voltage"][()], dtype=float)
+            partial = ({"partial": True, "k": int(voltage.size), "ended": True,
+                        "of": None if a.get("points_planned") is None
+                        else int(a["points_planned"])}
+                       if a.get("partial") else {})
+            out.append({
+                "label": a.get("label"), "dark": None if dark is None else bool(dark),
+                "led_level_v": a.get("led_level_v"),
+                "illumination": a.get("illumination")
+                or ("unknown" if dark is None else "dark" if dark else "light"),
+                "direction": a.get("direction"),
+                "voltage": voltage,
+                "current": np.asarray(sub["current"][()], dtype=float),
+                "density": density,
+                "metrics": {k: a.get(k) for k in METRIC_KEYS},
+                "intensity_w": a.get("intensity_w"),
+                **partial,
+            })
+    return out
+
+
 @dataclass
 class JVRecorder:
     """Accumulates J–V curves and write completed and partial data.

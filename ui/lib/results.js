@@ -348,7 +348,7 @@ function alertList(alerts) {
  * comes from `current` independently of area, so the density unit does not apply
  * (`docs/service-contract.md` §6).
  */
-function metricsTable(metrics) {
+export function metricsTable(metrics) {
   const keys = [];
   const notes = {};
   for (const entry of metrics.entries) {

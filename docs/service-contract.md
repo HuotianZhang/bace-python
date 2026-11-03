@@ -209,7 +209,8 @@ partial curve. Abort does not report the incomplete curve as done.
 The journal stores enough to render the session log and the history queries,
 never the traces; the recorders (HDF5 `bace-run/3` + legacy `.dat`)
 keep the data. `GET /runs/{id}/data` serves full arrays from an in-memory store
-of the last 20 runs (older → 404 with the folder path, read the HDF5).
+of the last 20 runs. A J–V node of an older run, or of an earlier session, is read
+back from its `jv<stamp>.h5`; other modules give 404 with the folder path (read the HDF5).
 
 The `since=` ring keeps the last 5000 *envelopes*, but only the traces of the
 last `RING_TRACES_KEPT` (200) `StepDone` shots. A ring full of thousand-point
@@ -471,7 +472,9 @@ modules that manage it. LED and relay implications persist to the run-end
 transition, which clears the overlay. Park leaves the LED running. Every overlaid instrument
 carries `how: "inferred"` and is listed in `inferred`; `read_at` stays the
 read-back's. LED and relay state can persist between module nodes; terminal run
-transitions clear all inferred state. `state` is one
+transitions clear all inferred state. After park the worker reads the bench back
+before it reports `parked`, so the snapshot then is the parked bench, not the
+Start read-back; a failed read leaves the cache and is logged. `state` is one
 of `idle | preflight | running | paused | stopping`: a run still `queued` when
 its preflight frame has not been applied reads as `preflight`, and a run in a
 terminal state that the worker is still parking reads as `stopping`; `parked`

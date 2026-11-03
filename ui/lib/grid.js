@@ -7,7 +7,7 @@
 import { h, num } from './dom.js';
 import * as fmt from './format.js';
 import { moduleTitle } from './fields.js';
-import { cellName, flagsFor, identityOf, isPartial, sigmaRecorded, spanOf,
+import { cellName, curveSummary, flagsFor, identityOf, isPartial, sigmaRecorded, spanOf,
   temperatureText, vocText, cellQ, moduleNodes, GRID_MODULES } from './history.js';
 
 // -- the run list -----------------------------------------------------------
@@ -181,10 +181,7 @@ export function renderNodePanel(record, node, grid, { onRerun, rerunState = null
   numbers.push(['Acquired', `${fmt.keptOf(node.kept, node.requested)} ${unit}`, partial ? (node.outcome || 'ended early') : node.outcome || '']);
   if (node.curves && node.curves.length) {
     for (const curve of node.curves) {
-      const m = curve.metrics || {};
-      numbers.push([curve.label || (curve.dark ? 'dark' : 'light'),
-        curve.dark === true ? 'dark' : `Voc ${fmt.volts(m.voc)}, FF ${m.ff === null || m.ff === undefined ? fmt.ABSENT : fmt.sig(m.ff, 3)}`,
-        '']);
+      numbers.push([curve.label || (curve.dark ? 'dark' : 'light'), curveSummary(curve), '']);
     }
   }
 
@@ -197,7 +194,9 @@ export function renderNodePanel(record, node, grid, { onRerun, rerunState = null
     h('table.rows.nprov',
       h('tr', h('th', 'T'), h('td', h('span', { class: t.level, text: t.text }))),
       h('tr', h('th', 'LED'), h('td', num(node.led_v === null || node.led_v === undefined ? fmt.ABSENT : fmt.volts(node.led_v, { decimals: 3 })))),
-      h('tr', h('th', 'Voc'), h('td', h('span', { class: v.level, text: v.text }))),
+      // A J–V's own Voc is in its curve rows; this row is the Voc a BACE was centred on.
+      ['jv', 'jv_bace'].includes(node.module) && !Number.isFinite(node.voc) ? null
+        : h('tr', h('th', 'Voc'), h('td', h('span', { class: v.level, text: v.text }))),
       node.offset_corrected !== null && node.offset_corrected !== undefined
         ? h('tr', h('th', 'Offset corr.'), h('td', { title: 'offset_correct', text: node.offset_corrected ? 'on' : 'off' })) : null,
       node.started_at ? h('tr', h('th', 'Ran'), h('td', num(spanOf(node.started_at, node.finished_at)))) : null),

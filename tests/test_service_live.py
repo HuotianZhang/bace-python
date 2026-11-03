@@ -159,7 +159,7 @@ def test_the_session_snapshot_says_live_while_a_scan_is_inside_its_acquisition(t
         assert s.wait_run(run_id, TIMEOUT)
         after = s.bench_snapshot()
         assert after["state"] == "idle" and after["inferred"] == []
-        assert after["read_at"] == snap["read_at"], "no read-back since Start; nothing inferred now"
+        assert after["read_at"] > snap["read_at"], "read back after park; nothing inferred now"
         assert after["instruments"]["bias"]["output"] is False
         assert "how" not in after["instruments"]["bias"], "nothing inferred once it ended"
 

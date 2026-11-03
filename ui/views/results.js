@@ -9,6 +9,8 @@ import { h, fill, keyed } from '../lib/dom.js';
 import * as fmt from '../lib/format.js';
 import { chart } from '../lib/charts/frame.js';
 import { gridChartModel } from '../lib/charts/grid.js';
+import { jvModel } from '../lib/charts/jv.js';
+import { metricsTable } from '../lib/results.js';
 import { runGroups, gridModel, summaryModel, moduleNodes, csvOf, rerunParams, GRID_MODULES } from '../lib/history.js';
 import { renderGroups, renderRunHead, renderGrid, renderSummary, renderNodes, renderNodePanel } from '../lib/grid.js';
 
@@ -16,6 +18,7 @@ import { renderGroups, renderRunHead, renderGrid, renderSummary, renderNodes, re
 let selectedRun = null;
 let selectedNode = null;
 let chartBy = 'led';
+const JV_MODULES = new Set(['jv', 'jv_bace']);
 
 export default {
   route: 'results',
@@ -28,6 +31,8 @@ export default {
     let recordStatus = '';
     let rerunState = null;
     let disposed = false;
+    /** J–V curves by `run|node`: `{ status: 'loading' | 'ok' | 'error', curves, text }`. */
+    const curveData = new Map();
     /**
      * Only the latest selection request applies; an earlier response cannot replace a
      * later choice.
@@ -49,10 +54,11 @@ export default {
     const gridEl = h('div.rgrid');
     const sumEl = h('div');
     const chartEl = h('div.rchart');
+    const curveEl = h('div.rchart');
     const nodesEl = h('div');
     const panelEl = h('div');
     fill(openEl, headEl, h('div.cb.rbody',
-      h('div.rleft', gridEl, sumEl, chartEl, h('h3', { title: 'In the order they ran.' }, 'Steps'), nodesEl),
+      h('div.rleft', gridEl, sumEl, chartEl, curveEl, h('h3', { title: 'In the order they ran.' }, 'Steps'), nodesEl),
       h('div.rright', panelEl)));
 
     // -- fetching --------------------------------------------------------
@@ -84,6 +90,8 @@ export default {
       if (disposed || mine !== recordRequest) return;
       if (got) {
         record = got;
+        // A reread can bring curves the earlier fetch did not have.
+        for (const key of [...curveData.keys()]) if (key.startsWith(`${runId}|`)) curveData.delete(key);
         // Refetch preserves node selection in the same run. Selecting another run
         // opens its first grid cell or node.
         const nodes = moduleNodes(record);
@@ -92,6 +100,25 @@ export default {
           selectedNode = (cell || nodes[0] || {}).node_path ?? null;
         }
       }
+      render(store.getState());
+    }
+
+    /**
+     * The record holds each curve's metrics, not its points. The points come from
+     * `GET /runs/{id}/data`, which reads an earlier session's run file.
+     */
+    async function loadCurves(runId, path) {
+      const key = `${runId}|${path}`;
+      curveData.set(key, { status: 'loading' });
+      let entry;
+      try {
+        const data = await api.runData(runId, path);
+        entry = { status: 'ok', curves: (data && data.curves) || [] };
+      } catch (error) {
+        entry = { status: 'error', text: error.text || error.message };
+      }
+      if (disposed || curveData.get(key)?.status !== 'loading') return;
+      curveData.set(key, entry);
       render(store.getState());
     }
 
@@ -169,7 +196,7 @@ export default {
         keyed(headEl, JSON.stringify(['none', recordStatus, selectedRun]), () => h('div.ch',
           h('span.cn', { text: selectedRun || 'No run' }),
           h('span.cs', { text: recordStatus || '' })));
-        for (const el of [gridEl, sumEl, chartEl, nodesEl, panelEl]) keyed(el, 'none', () => []);
+        for (const el of [gridEl, sumEl, chartEl, curveEl, nodesEl, panelEl]) keyed(el, 'none', () => []);
         return;
       }
       const grid = gridModel(record);
@@ -183,7 +210,7 @@ export default {
           recordStatus ? h('span.cs', { text: recordStatus }) : null,
           record.from === 'journal' ? h('span.tag', { text: 'journal' }) : null,
           record.data_in_memory === false
-            ? h('span.tag', { title: 'Scalars only; the arrays are in the HDF5 file.', text: 'summary only' }) : null,
+            ? h('span.tag', { title: 'Not in memory. J–V curves are read from the run file; other arrays are in the HDF5.', text: 'summary only' }) : null,
           h('span.spacer'),
           grid.shape === 'grid' ? h('button.btng', { onclick: () => exportCsv(grid) }, 'Export CSV') : null,
           h('button.btng', { onclick: () => loadRecord(record.run_id) }, 'Reload')),
@@ -200,6 +227,20 @@ export default {
               h('button.opt', { type: 'button', 'aria-pressed': chartBy === 'led' ? 'true' : 'false', class: chartBy === 'led' ? 'on' : '', onclick: () => { chartBy = 'led'; render(store.getState()); } }, 'Q vs LED'),
               h('button.opt', { type: 'button', 'aria-pressed': chartBy === 'T' ? 'true' : 'false', class: chartBy === 'T' ? 'on' : '', onclick: () => { chartBy = 'T'; render(store.getState()); } }, 'Q vs T'))),
           chart((w, view) => gridChartModel(grid, { by: chartBy, width: w, view }), { id: `grid/${chartBy}` }),
+        ];
+      });
+      const isJv = node && JV_MODULES.has(node.module) && node.kept;
+      const curveKey = isJv ? `${record.run_id}|${node.node_path}` : null;
+      if (curveKey && !curveData.has(curveKey)) loadCurves(record.run_id, node.node_path);
+      const got = curveKey ? curveData.get(curveKey) : null;
+      keyed(curveEl, JSON.stringify([curveKey, got && got.status]), () => {
+        if (!got) return [];
+        if (got.status === 'loading') return [h('p.absent', 'Loading curves …')];
+        if (got.status === 'error') return [h('p.absent', { text: `Curves not loaded: ${got.text}` })];
+        const model = jvModel(got.curves);
+        return [
+          chart((w, view) => jvModel(got.curves, { width: w, view }), { id: 'results/jv' }),
+          model.metrics.entries.length ? metricsTable(model.metrics) : null,
         ];
       });
       keyed(nodesEl, `${recordKey}|${selectedNode}`, () => renderNodes(record, { selected: selectedNode, onSelect: selectNode }));
