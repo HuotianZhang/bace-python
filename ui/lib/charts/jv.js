@@ -111,8 +111,11 @@ export function jvModel(curves, options = {}) {
   // preserve the reverse arm (`docs/ui-rules.md` §4).
   const raw = list.map((c) => c[measured.key]);
   const whole = scale.extent(raw, { includeZero: true, pad: 0.08 }) || [-1, 1];
-  const quadrant = useLog ? null : powerQuadrant(list, measured.key);
-  const cropped = Boolean(quadrant) && (whole[1] - whole[0]) > (quadrant[1] - quadrant[0]) * 2;
+  const finite = raw.flat().filter(Number.isFinite);
+  const quadrant = useLog ? null : powerQuadrant(list, measured.key, Math.min(0, ...finite));
+  // The crop applies only when a measured point lies above it, not its padding.
+  const highest = Math.max(...finite);
+  const cropped = Boolean(quadrant) && highest > quadrant[1];
 
   // A cropped axis takes its prefix from the window, not from the current cut off it.
   const quantity = cropped && measured.key === 'current'
@@ -241,6 +244,8 @@ export function jvModel(curves, options = {}) {
       y: {
         scale: Y, ticks: axisTicks(Y, { count: 4 }), canLog: true,
         title: useLog ? quantity.logTitle : quantity.title, unit: axisUnit,
+        // The uncropped range, for the Axes dialog's "Show all".
+        all: !useLog && cropped ? whole.map((v) => v / factor) : null,
       },
       series, rules, marks, dots,
     }],
@@ -261,9 +266,11 @@ export function jvModel(curves, options = {}) {
 /**
  * The helper selects the J–V y window around the power quadrant. It uses the curve's
  * magnitude at 0 V because `metrics.jsc` is in A and would require an area to compare
- * with a density axis.
+ * with a density axis. Only forward injection is cropped: the window keeps the whole
+ * negative range, so the reverse arm and its leakage stay in view (`docs/ui-rules.md`
+ * §4). `lowest` is the most negative measured value.
  */
-function powerQuadrant(list, key) {
+function powerQuadrant(list, key, lowest) {
   let reference = 0;
   for (const curve of list) {
     const y = curve[key];
@@ -272,10 +279,10 @@ function powerQuadrant(list, key) {
     if (i >= 0 && Number.isFinite(y[i])) reference = Math.max(reference, Math.abs(y[i]));
   }
   if (!(reference > 0)) return null;
-  // Headroom exposes injection before clipping and leaves room for the reverse-bias
-  // slope. A wider window compresses the curve into the panel's top third; a narrower
-  // one hides the shunt.
-  return [-1.6 * reference, 0.6 * reference];
+  // Headroom above zero matches the depth below it, so injection shows before the
+  // crop and the power quadrant keeps half the panel; at least 0.6 J_sc.
+  const lo = Math.min(-1.6 * reference, 1.08 * lowest);
+  return [lo, Math.max(0.6 * reference, -lo)];
 }
 
 function countOutside(values, [lo, hi]) {

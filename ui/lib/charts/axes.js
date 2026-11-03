@@ -80,12 +80,23 @@ export function openAxes(anchor, id) {
   if (open && open.id === id) { closeAxes(); return; }
   closeAxes();
   const rows = live.get(id).axes().map((axis) => rowFor(id, axis));
+  // A cropped axis offers its whole range; Auto returns to the crop.
+  const cropped = live.get(id).axes().filter((axis) => axis.all);
   const grid = h('div.ax-grid',
     h('span'), h('span.ax-head', 'Min'), h('span.ax-head', 'Max'), h('span'),
     rows.map((row) => row.el));
   const el = h('div.axes-pop', { role: 'dialog', 'aria-label': 'Axes' },
     grid,
     h('div.ax-foot',
+      cropped.length ? h('button.btns', {
+        type: 'button',
+        title: 'The whole range of the data, forward injection included',
+        onclick: () => {
+          const ctx = live.get(id);
+          for (const axis of cropped) setRange(ctx.view, axis.key, axis.unit, axis.all[0], axis.all[1]);
+          ctx.redraw();
+        },
+      }, 'Show all') : null,
       h('button.btns', {
         type: 'button',
         onclick: () => { const ctx = live.get(id); resetView(ctx.view); ctx.redraw(); },
