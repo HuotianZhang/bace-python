@@ -832,10 +832,14 @@ def test_the_scope_setup_is_read_back_and_set_through_two_actions():
     assert [c for c in io.log if "?" not in c] == [
         ":CHAN3:INP DC;", ":CHAN4:INP DC50;", ":CHAN3:BWL OFF;", ":TRIG:EDGE:COUP DC;"]
 
+    writes = len([c for c in io.log if "?" not in c])
     for bad in ({"inputs": {"5": "DC"}}, {"inputs": {"3": "DC75"}},
-                {"trigger_coupling": "NOISE"}, {"inputs": ["DC"]}, {"range": 1}):
+                {"trigger_coupling": "NOISE"}, {"inputs": ["DC"]}, {"range": 1},
+                {"bwlimit": {"3": "false"}}, {"bwlimit": {"3": 0}},
+                {"inputs": {"3": "DC"}, "bwlimit": {"3": "off"}}):
         with pytest.raises(ValueError):
             b.action("set-scope", bad)
+    assert len([c for c in io.log if "?" not in c]) == writes, "a refused request writes nothing"
 
 
 def test_the_simulated_scope_refuses_the_front_panel_actions():

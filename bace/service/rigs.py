@@ -1287,7 +1287,11 @@ class Bench:
                 return {int(k): v for k, v in value.items()}
             except (TypeError, ValueError):
                 raise ValueError(f"{name}: channels are numbers 1-4") from None
-        bwlimit = {n: bool(v) for n, v in channels("bwlimit").items()}
+        bwlimit = channels("bwlimit")
+        # `bool("false")` is True: a string would switch the filter on.
+        wrong = {n: v for n, v in bwlimit.items() if not isinstance(v, bool)}
+        if wrong:
+            raise ValueError(f"bwlimit: true or false per channel, not {wrong!r}")
         errors = scope.set_setup(channel_inputs=channels("inputs"), bwlimit=bwlimit,
                                  trigger_coupling=args.get("trigger_coupling"))
         return {"errors": errors, "setup": scope.read_setup()}
