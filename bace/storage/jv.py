@@ -239,6 +239,8 @@ def read_hdf5_curves(path: str) -> list[dict]:
     `write_hdf5` stores `None` as `""`; it reads back as `None`. Density from
     schemas 1–3 is in A/cm² and is scaled to mA/cm², the unit of schema 4 and
     of the live data. An absent `dark` stays `None`: unknown illumination.
+    A sweep saved unfinished keeps `partial` with `k` points of `of`, as the
+    live partial curve has them, and `ended` because it will not grow.
     """
     import h5py
 
@@ -264,17 +266,23 @@ def read_hdf5_curves(path: str) -> list[dict]:
                 if value(ds.attrs.get("unit")) == "A cm-2":
                     density = density * 1000.0
             dark = a.get("dark")
+            voltage = np.asarray(sub["voltage"][()], dtype=float)
+            partial = ({"partial": True, "k": int(voltage.size), "ended": True,
+                        "of": None if a.get("points_planned") is None
+                        else int(a["points_planned"])}
+                       if a.get("partial") else {})
             out.append({
                 "label": a.get("label"), "dark": None if dark is None else bool(dark),
                 "led_level_v": a.get("led_level_v"),
                 "illumination": a.get("illumination")
                 or ("unknown" if dark is None else "dark" if dark else "light"),
                 "direction": a.get("direction"),
-                "voltage": np.asarray(sub["voltage"][()], dtype=float),
+                "voltage": voltage,
                 "current": np.asarray(sub["current"][()], dtype=float),
                 "density": density,
                 "metrics": {k: a.get(k) for k in METRIC_KEYS},
                 "intensity_w": a.get("intensity_w"),
+                **partial,
             })
     return out
 

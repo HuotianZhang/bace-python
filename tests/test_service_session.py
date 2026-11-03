@@ -129,10 +129,14 @@ def test_old_schema_density_is_scaled_to_ma_per_cm2(tmp_path):
         sub.create_dataset("current", data=[-1e-4, 0.0])
         sub.create_dataset("density", data=[-0.01, 0.0]).attrs["unit"] = "A cm-2"
         f["curves"].create_group("01_unknown").attrs.update(
-            {"label": "?", "direction": "reverse", "illumination": "unknown"})
+            {"label": "?", "direction": "reverse", "illumination": "unknown",
+             "partial": True, "points_planned": 66})
         f["curves/01_unknown"].create_dataset("voltage", data=[0.0])
         f["curves/01_unknown"].create_dataset("current", data=[0.0])
     light, unknown = read_hdf5_curves(str(path))
+    assert "partial" not in light, "a finished curve reads back as the live one has it"
+    assert (unknown["partial"], unknown["k"], unknown["of"], unknown["ended"]) == \
+        (True, 1, 66, True), "an unfinished sweep is not shown as complete"
     np.testing.assert_allclose(light["density"], [-10.0, 0.0])
     assert light["metrics"] == {"voc": 0.5, "jsc": -1e-4, "p_max": None, "v_mpp": None,
                                 "j_mpp": None, "fill_factor": 0.4}

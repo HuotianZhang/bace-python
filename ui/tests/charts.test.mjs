@@ -278,6 +278,21 @@ test('a sweep in flight is drawn dotted in its own colour, into the planned rang
   assert.ok(legend, 'the legend says how far it got');
 });
 
+test('a sweep read back unfinished from its file says stopped, with no live dot', () => {
+  const light = JV.curves.find((c) => c.dark !== true);
+  const n = 5;
+  const stopped = { ...light, partial: true, ended: true, k: n, of: light.voltage.length,
+    voltage: light.voltage.slice(0, n), current: light.current.slice(0, n), density: light.density.slice(0, n) };
+  const done = JV.curves.filter((c) => c.dark === true);
+  const model = jvModel([...done, stopped]);
+  const series = model.panels[0].series.find((s) => s.key.endsWith('·partial'));
+  assert.match(series.label, /stopped$/);
+  assert.equal(model.panels[0].dots.length, 0, 'no instrument position on a finished run');
+  assert.match(model.panels[0].note, /^stopped .* point 5 of/);
+  assert.ok(model.legend.some((l) => /stopped 5 of/.test(l.label)));
+  assert.ok(!model.metrics.entries.some((e) => /1\.02/.test(e.label)), 'no metrics for half a curve');
+});
+
 test('no pixel area means amps, not a density with an invented area', () => {
   const noArea = JV.curves.map((c) => ({ ...c, density: null }));
   assert.equal(currentOf(noArea).key, 'current');

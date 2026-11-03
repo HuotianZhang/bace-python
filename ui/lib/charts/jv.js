@@ -171,12 +171,14 @@ export function jvModel(curves, options = {}) {
     // indicate progress. The last-point marker identifies the instrument's current
     // position.
     const partial = curve.partial === true;
+    // A sweep read back from its file was stopped there; it is not sweeping.
+    const state = curve.ended === true ? 'stopped' : 'sweeping';
     // Forward and reverse sweeps share a label but need distinct keys. Duplicate
     // `data-series` values would make the crosshair's first match show one
     // direction's value under the other's colour.
     series.push({
       key: `${label}·${curve.direction || 'forward'}${partial ? '·partial' : ''}`,
-      label: partial ? `${label} · sweeping` : label,
+      label: partial ? `${label} · ${state}` : label,
       colour,
       width: 1.5,
       // The return leg is a separate sweep on a device exposed to the forward sweep.
@@ -194,11 +196,11 @@ export function jvModel(curves, options = {}) {
       format: (v) => quantity.format(v * factor),
     });
     legend.push({
-      label: partial ? `${label} · sweeping ${curve.k || y.length} of ${curve.of || '?'}`
+      label: partial ? `${label} · ${state} ${curve.k || y.length} of ${curve.of || '?'}`
         : curve.direction === 'reverse' ? `${label} · reverse` : label,
       colour, width: 1.6, dash: partial ? '2 3' : curve.direction === 'reverse' ? '4 2' : null,
     });
-    if (partial) {
+    if (partial && curve.ended !== true) {
       const last = y.length - 1;
       const yv = useLog ? Math.abs(y[last]) : y[last];
       if (Number.isFinite(curve.voltage[last]) && Number.isFinite(yv)) {
@@ -315,7 +317,9 @@ export function curveLabel(curve) {
 function sweepNote(list) {
   const parts = [];
   const live = list.find((c) => c.partial === true);
-  if (live) parts.push(`sweeping ${curveLabel(live)} · point ${live.k || live.voltage.length} of ${live.of || '?'}`);
+  if (live) {
+    parts.push(`${live.ended === true ? 'stopped' : 'sweeping'} ${curveLabel(live)} · point ${live.k || live.voltage.length} of ${live.of || '?'}`);
+  }
   if (list.some((c) => c.direction === 'reverse')) parts.push('reverse dashed');
   return parts.join(' · ');
 }
