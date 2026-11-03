@@ -639,6 +639,31 @@ def test_bace_refuses_centre_on_voc_without_a_source(tmp_path):
     assert b.sim.led.output_enabled and not b.sim.bench.shutter_open
 
 
+def test_a_refused_dc_write_under_measure_dc_still_stops_the_bace(tmp_path):
+    """The stale-error drain comes before the module's first LED write, so a
+    refusal of its own DC setting is not cleared as old: V_oc would otherwise
+    be measured under the wrong light and the run would go on."""
+    from bace.service.modules import ModuleError
+    b = bench()
+    led = b.rig.led
+    queue = ['-221,"stale, from before"']
+    led.errors = lambda: [queue.pop(0) for _ in range(len(queue))]
+    set_dc = led.set_dc
+
+    def refusing_set_dc(level):
+        set_dc(level)
+        queue.append('-222,"Data out of range"')
+    led.set_dc = refusing_set_dc
+    params = {**FAST, "n_loops": 1, "centre_on_voc": True, "led_v": 1.02, "measure_dc": True}
+    events = []
+    with pytest.raises(ModuleError, match='-222'):
+        for ev in catalogue().build("bace", params, make_ctx(tmp_path), b.rig):
+            events.append(ev)
+    stale = [e for e in events if isinstance(e, E.Verdict) and e.code == "led.stale-errors"]
+    assert len(stale) == 1 and "stale" in stale[0].text and "-222" not in stale[0].text
+    assert not [e for e in events if isinstance(e, E.StepDone)], "nothing was acquired"
+
+
 def test_measure_dc_supplies_the_voc_and_centres_the_axis_on_it(tmp_path):
     b = bench()
     sim = b.sim
