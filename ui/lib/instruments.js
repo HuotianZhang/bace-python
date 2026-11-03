@@ -57,6 +57,9 @@ export function panelModel(bench, light) {
       // What the generator is actually at, when it is on: the switch says
       // `DC`, this says `1.000 V`, and the two are one reading.
       level: ledOn ? driveLevel(led) : null,
+      // With the LED on, a level it uses is sent on Enter, and the lit position
+      // sends again on a click: no Off and DC to change a voltage.
+      apply: ledPosition === 'dc' || ledPosition === 'pulse' ? ledPosition : null,
       levels: LED_LEVELS.filter((n) => specs[n]).map((n) => ({
         spec: specs[n],
         used: (SENDS[ledPosition || 'off'] || []).includes(n),
@@ -93,12 +96,13 @@ export function renderInstruments(model, ctx) {
           'aria-pressed': p.on ? 'true' : 'false',
           disabled: busy || null,
           title: busy ? 'A run holds the bench. Only All off acts until it ends.' : `${row.label}: ${p.label}`,
-          onclick: () => { if (!p.on) ctx.act(p.action, p.args); },
+          onclick: () => { if (!p.on || p.id === row.apply) ctx.act(p.action, p.args); },
         }, p.label))),
-      row.levels ? levels(row, ctx) : h('span'))));
+      row.levels ? levels(row, ctx, busy) : h('span'))));
 }
 
-function levels(row, ctx) {
+function levels(row, ctx, busy) {
+  const active = row.positions.find((p) => p.id === row.apply) || null;
   return h('span.vals', row.levels.map(({ spec, used }) => h('label', { class: used ? '' : 'dim' },
     h('input.v', {
       type: 'text', 'aria-label': spec.name, title: spec.doc || spec.name,
@@ -106,6 +110,9 @@ function levels(row, ctx) {
       onchange: (e) => {
         const raw = e.target.value.trim();
         ctx.edit('light', { [spec.name]: raw === '' ? null : raw });
+        // `act` waits for the edit and takes its arguments from the settled value;
+        // a refused edit sends nothing.
+        if (used && active && !busy && raw !== '') ctx.act(active.action, active.args);
       },
     }),
     h('i', { text: unitLabel(spec) }))));

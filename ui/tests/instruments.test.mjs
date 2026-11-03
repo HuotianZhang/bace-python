@@ -85,3 +85,12 @@ test('inferred is not read', () => {
   const how = panelModel(bench({ led: { output: true, mode: 'DC', how: 'inferred' } }), light);
   assert.equal(rowOf(how, 'led').inferred, true);
 });
+
+test('a lit LED takes a new level without going off first', () => {
+  // 2026-11-03 on the lab PC: a new DC voltage reached the 33220A only after Off, DC.
+  const apply = (led) => rowOf(panelModel(bench({ led }), light), 'led').apply;
+  assert.equal(apply({ output: true, mode: 'DC' }), 'dc');
+  assert.equal(apply({ output: true, mode: 'PULSE' }), 'pulse');
+  assert.equal(apply({ output: false, mode: 'DC' }), null, 'off has no level to change');
+  assert.equal(apply({ output: null, mode: '?' }), null, 'unread is not lit');
+});
