@@ -786,3 +786,59 @@ def test_the_simulated_meter_reads_the_average_of_a_pulsed_led_and_says_so():
     assert snap["instruments"]["power"]["averaged"] is False
     sim.power.set_averaging(True)
     assert b.read_back()["instruments"]["power"]["averaged"] is True
+
+
+# -- the scope's front panel ---------------------------------------------------------
+class _ScopeIO:
+    """An Infiniium transport that knows some queries and refuses one."""
+
+    def __init__(self):
+        self.timeout = 20000
+        self.log: list[str] = []
+        self.errors: list[str] = []
+        self.answers = {":CHAN3:INP?": "DC", ":CHAN3:BWL?": "ON", ":CHAN3:PROB?": "1.0,RAT"}
+
+    def write(self, cmd):
+        self.log.append(cmd)
+        if cmd.startswith(":CHAN3:BWL "):
+            self.answers[":CHAN3:BWL?"] = cmd.split()[1].rstrip(";")
+
+    def query(self, cmd):
+        self.log.append(cmd)
+        if cmd == ":SYST:ERR?":
+            return self.errors.pop(0) if self.errors else "0"
+        if cmd == ":ACQ:INT?":
+            # An unknown header: no reply, and an error in the queue.
+            self.errors.append('-113,"Undefined header"')
+            raise TimeoutError("VI_ERROR_TMO")
+        return self.answers.get(cmd, "0")
+
+
+def test_the_scope_setup_is_read_back_and_set_through_two_actions():
+    # 2026-11-03: the scope looked different and CHAN3 read 84 mV for a ~1 V Sync;
+    # coupling, impedance and bandwidth limit are front-panel settings no run writes.
+    from bace.drivers.infiniium import Infiniium
+    b = bench()
+    io = _ScopeIO()
+    b.rig.scope = Infiniium(io)
+    setup = b.action("read-scope", {})["setup"]
+    assert setup["chan3.input"] == "DC" and setup["chan3.bwlimit"] == "ON"
+    assert setup["acq.interpolate"].startswith("? (-113"), "an unknown query reads ?"
+    assert io.timeout == 20000, "the short timeout is put back"
+
+    out = b.action("set-scope", {"inputs": {"3": "dc", "4": "DC50"}, "bwlimit": {"3": False},
+                                 "trigger_coupling": "DC"})
+    assert out["errors"] == [] and out["setup"]["chan3.bwlimit"] == "OFF"
+    assert [c for c in io.log if "?" not in c] == [
+        ":CHAN3:INP DC;", ":CHAN4:INP DC50;", ":CHAN3:BWL OFF;", ":TRIG:EDGE:COUP DC;"]
+
+    for bad in ({"inputs": {"5": "DC"}}, {"inputs": {"3": "DC75"}},
+                {"trigger_coupling": "NOISE"}, {"inputs": ["DC"]}, {"range": 1}):
+        with pytest.raises(ValueError):
+            b.action("set-scope", bad)
+
+
+def test_the_simulated_scope_refuses_the_front_panel_actions():
+    b = bench()
+    with pytest.raises(BenchActionRefused, match="no front-panel read-back"):
+        b.action("read-scope", {})

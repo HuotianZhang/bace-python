@@ -54,6 +54,7 @@ ACTIONS: tuple[str, ...] = (
     "shutter-open", "shutter-shut",
     "relay-to-sourcemeter", "relay-to-amplifier",
     "read-power",
+    "read-scope", "set-scope",
 )
 """The bench accepts these action names.
 
@@ -143,6 +144,19 @@ ACTION_DOCS: dict[str, tuple[str, str, str]] = {
         "1918-C",
         "One power reading.",
         "The meter does not answer."),
+    "read-scope": (
+        "DSO9054H",
+        "The front-panel settings the runs never write: input coupling and impedance, "
+        "bandwidth limit and probe per channel, and the acquisition, trigger and "
+        "timebase settings in force. A query the scope does not know reads `?`.",
+        "No scope on this bench, or one without the queries (the simulator)."),
+    "set-scope": (
+        "DSO9054H",
+        "Input coupling and impedance (`inputs`: channel to `DC`, `DC50` or `AC`), "
+        "bandwidth limit (`bwlimit`: channel to true or false) and trigger coupling "
+        "(`trigger_coupling`), then the same read as `read-scope`. Manual 1.2: CHAN2 "
+        "and CHAN3 `DC` (1 MΩ), CHAN4 `DC50`.",
+        "A channel outside 1–4, a value outside those lists, or no scope."),
 }
 """The action descriptions list instruments, effects and refusal conditions.
 
@@ -1241,6 +1255,33 @@ class Bench:
     def _act_relay_to_amplifier(self, args: dict, led: dict) -> dict:
         self._only(args)
         return self._move_relay("transient")
+
+    def _scope_with_setup(self) -> Any:
+        scope = self._need("scope")
+        if not callable(getattr(scope, "read_setup", None)):
+            raise BenchActionRefused("warn", "this scope has no front-panel read-back")
+        return scope
+
+    def _act_read_scope(self, args: dict, led: dict) -> dict:
+        self._only(args)
+        return {"setup": self._scope_with_setup().read_setup()}
+
+    def _act_set_scope(self, args: dict, led: dict) -> dict:
+        self._only(args, "inputs", "bwlimit", "trigger_coupling")
+        scope = self._scope_with_setup()
+
+        def channels(name: str) -> dict[int, Any]:
+            value = args.get(name) or {}
+            if not isinstance(value, dict):
+                raise ValueError(f"{name}: a map of channel to value")
+            try:
+                return {int(k): v for k, v in value.items()}
+            except (TypeError, ValueError):
+                raise ValueError(f"{name}: channels are numbers 1-4") from None
+        bwlimit = {n: bool(v) for n, v in channels("bwlimit").items()}
+        errors = scope.set_setup(channel_inputs=channels("inputs"), bwlimit=bwlimit,
+                                 trigger_coupling=args.get("trigger_coupling"))
+        return {"errors": errors, "setup": scope.read_setup()}
 
     def _act_read_power(self, args: dict, led: dict) -> dict:
         self._only(args, "samples")
