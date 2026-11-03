@@ -1136,18 +1136,22 @@ class Session:
 
         The route applies `modules.jsonable`. Unknown or unavailable data
         returns 404; a pipeline request without a node returns 400
-        (docs/service-contract.md section 6).
+        (docs/service-contract.md section 6). A run of another session, or one
+        evicted from memory, reads a J–V node's curves back from its file.
         """
         with self._lock:
             rec = self._records.get(run_id)
-            if rec is None:
+            have = [k[1] for k in self._data if k[0] == run_id] if rec is not None else []
+            if rec is not None and not have and not rec.evicted:
+                raise DataUnavailable(run_id, "no data yet", rec.all_folders())
+            record = rec.as_wire() if rec is not None and not have else None
+        if rec is None or not have:
+            if record is None:
+                record = self.journal.run_record(run_id)
+            if record is None:
                 raise UnknownRun(run_id)
-            have = [k[1] for k in self._data if k[0] == run_id]
-            if not have:
-                reason = ("no longer in memory (older than the last "
-                          f"{DATA_RUNS_KEPT} runs); read the HDF5" if rec.evicted
-                          else "no data yet")
-                raise DataUnavailable(run_id, reason, rec.all_folders())
+            return self._data_from_file(run_id, node_path, record)
+        with self._lock:
             nodes = list(rec.schedule.node_paths)
             if node_path is None:
                 # Node paths are part of every pipeline data address, even with one
@@ -1161,6 +1165,44 @@ class Session:
                 raise DataUnavailable(run_id, f"no data for node {node_path!r}; have: "
                                       + ", ".join(have), rec.all_folders())
             return data
+
+    def _data_from_file(self, run_id: str, node_path: str | None, record: dict) -> dict:
+        """Reads a J–V node's curves from its `jv<stamp>.h5`.
+
+        The node and its folder come from the run record. A folder outside this
+        session's output directory is refused. Other modules keep the 404 with
+        the folders, as their arrays are not read back here.
+        """
+        nodes = record.get("nodes") or {}
+        folders = [f for f in (record.get("folders") or [record.get("folder")]) if f]
+        if node_path is None:
+            if record.get("kind") == "pipeline" or len(nodes) != 1:
+                raise NodeRequired(run_id, list(nodes))
+            node_path = next(iter(nodes))
+        node = nodes.get(node_path)
+        if node is None:
+            raise DataUnavailable(run_id, f"no node {node_path!r}", folders)
+        if node.get("module") not in ("jv", "jv_bace"):
+            raise DataUnavailable(run_id, "not in memory; read the HDF5", folders)
+        folder = node.get("folder")
+        if not folder:
+            raise DataUnavailable(run_id, f"node {node_path!r} wrote no folder", folders)
+        root = os.path.realpath(self.out)
+        where = os.path.realpath(folder)
+        if os.path.commonpath([root, where]) != root:
+            raise DataUnavailable(run_id, f"{folder} is outside {self.out}", folders)
+        stamp = re.search(r"\d{8}_\d{6}$", where)
+        named = os.path.join(where, f"jv{stamp.group(0)}.h5") if stamp else None
+        found = ([named] if named and os.path.isfile(named) else
+                 [os.path.join(where, n) for n in sorted(os.listdir(where))
+                  if n.startswith("jv") and n.endswith(".h5")] if os.path.isdir(where) else [])
+        if len(found) != 1:
+            raise DataUnavailable(run_id, f"no single J–V file in {folder}", folders)
+        from ..storage.jv import read_hdf5_curves
+        try:
+            return {"curves": read_hdf5_curves(found[0])}
+        except (OSError, KeyError, ValueError) as exc:
+            raise DataUnavailable(run_id, f"{found[0]} not read: {exc}", folders) from None
 
     # -- the bench ----------------------------------------------------------------
     def run_active(self) -> str | None:

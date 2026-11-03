@@ -448,6 +448,20 @@ export function vocText(node) {
 // -- the flags --------------------------------------------------------------
 
 /**
+ * One J–V curve's metrics as the record keeps them (`fill_factor`, `jsc` in A).
+ * A dark curve has no Voc or FF to report.
+ */
+export function curveSummary(curve) {
+  if (curve.dark === true) return 'dark';
+  const m = curve.metrics || {};
+  const given = (v) => v !== null && v !== undefined && Number.isFinite(v);
+  const ff = given(m.fill_factor) ? fmt.sig(m.fill_factor * 100, 3) + ' %' : fmt.ABSENT;
+  const jsc = given(m.jsc) ? fmt.amps(m.jsc) : fmt.ABSENT;
+  const voc = given(m.voc) ? fmt.volts(m.voc) : fmt.ABSENT;
+  return `Voc ${voc} · Jsc ${jsc} · FF ${ff}`;
+}
+
+/**
  * Node flags include their reasons. Ordering puts invalidating conditions first,
  * qualifications next and informational records last.
  */

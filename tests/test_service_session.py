@@ -78,6 +78,68 @@ def states_of(frames: list[dict]) -> list[str]:
     return [f["data"]["state"] for f in frames if f["type"] == "RunStateChanged"]
 
 
+# -- arrays of an earlier session -----------------------------------------------------
+def test_an_earlier_sessions_jv_is_read_back_from_its_file(tmp_path):
+    with make_session(tmp_path) as s:
+        jv_run, _ = s.submit(tree_for_module("jv", {"step_v": 0.1}), kind="manual")
+        assert s.wait_run(jv_run, TIMEOUT)
+        bace_run, _ = s.submit(bace(1, voc=0.9))
+        assert s.wait_run(bace_run, TIMEOUT)
+        live = s.run_data(jv_run)
+    with make_session(tmp_path, session_id="20260903_090000") as s2:
+        assert s2.run_record(jv_run)["from"] == "journal"
+        data = s2.run_data(jv_run)
+        (curve,) = data["curves"]
+        (was,) = live["curves"]
+        np.testing.assert_allclose(curve["voltage"], was["voltage"])
+        np.testing.assert_allclose(curve["current"], was["current"])
+        assert curve["metrics"] == pytest.approx(was["metrics"], nan_ok=True)
+        assert (curve["label"], curve["dark"], curve["direction"]) == \
+            (was["label"], was["dark"], was["direction"])
+        assert s2.run_data(jv_run, "jv")["curves"][0]["label"] == was["label"]
+        with pytest.raises(DataUnavailable, match="read the HDF5"):
+            s2.run_data(bace_run)
+        with pytest.raises(DataUnavailable):
+            s2.run_data(jv_run, "nope")
+        with pytest.raises(UnknownRun):
+            s2.run_data("20260903_090000-099")
+
+
+def test_a_file_outside_the_output_directory_is_not_read(tmp_path):
+    with make_session(tmp_path) as s:
+        record = {"kind": "manual", "folders": [str(tmp_path)],
+                  "nodes": {"jv": {"module": "jv", "folder": str(tmp_path / "elsewhere")}}}
+        with pytest.raises(DataUnavailable, match="outside"):
+            s._data_from_file("x-001", None, record)
+
+
+def test_old_schema_density_is_scaled_to_ma_per_cm2(tmp_path):
+    import h5py
+
+    from bace.storage.jv import read_hdf5_curves
+    path = tmp_path / "jv.h5"
+    with h5py.File(path, "w") as f:
+        f.attrs["schema"] = "bace-jv/3"
+        sub = f.create_group("curves").create_group("00_light")
+        sub.attrs.update({"label": "1 V", "direction": "forward", "illumination": "light",
+                          "dark": False, "led_level_v": 1.0, "intensity_w": "",
+                          "voc": 0.5, "jsc": -1e-4, "p_max": "", "v_mpp": "",
+                          "j_mpp": "", "fill_factor": 0.4})
+        sub.create_dataset("voltage", data=[0.0, 0.5])
+        sub.create_dataset("current", data=[-1e-4, 0.0])
+        sub.create_dataset("density", data=[-0.01, 0.0]).attrs["unit"] = "A cm-2"
+        f["curves"].create_group("01_unknown").attrs.update(
+            {"label": "?", "direction": "reverse", "illumination": "unknown"})
+        f["curves/01_unknown"].create_dataset("voltage", data=[0.0])
+        f["curves/01_unknown"].create_dataset("current", data=[0.0])
+    light, unknown = read_hdf5_curves(str(path))
+    np.testing.assert_allclose(light["density"], [-10.0, 0.0])
+    assert light["metrics"] == {"voc": 0.5, "jsc": -1e-4, "p_max": None, "v_mpp": None,
+                                "j_mpp": None, "fill_factor": 0.4}
+    assert light["intensity_w"] is None and light["dark"] is False
+    assert unknown["dark"] is None and unknown["density"] is None
+
+
 # -- a manual run, end to end ---------------------------------------------------------
 def test_a_manual_jv_goes_through_the_worker_the_journal_and_the_registry(tmp_path):
     with make_session(tmp_path) as s:

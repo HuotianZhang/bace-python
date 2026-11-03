@@ -1614,8 +1614,12 @@ def test_a_run_of_an_earlier_session_is_served_from_the_journal(tmp_path):
         assert rec["from"] == "journal" and rec["state"] == "done" and rec["module"] == "jv"
         assert rec["nodes"]["jv"]["outcome"] == "ok" and rec["tree"]["module"] == "jv"
         assert rec["data_in_memory"] is False
-        assert client.get(f"/runs/{run_id}/data").status_code == 404
+        # Not in memory, so the J–V curves come back from the run's file.
+        r = client.get(f"/runs/{run_id}/data")
+        assert r.status_code == 200, r.text
+        assert len(r.json()["curves"][0]["voltage"]) == 15
         assert client.get("/runs/20260101_000000-001").status_code == 404
+        assert client.get("/runs/20260101_000000-001/data").status_code == 404
 
 
 def test_the_cli_refuses_a_lan_binding_and_names_the_missing_extra(tmp_path, monkeypatch, capsys):
