@@ -426,6 +426,19 @@ def resolve_window(config: RunConfig, trace_t0: float, pulse_delay_s: float,
     return start, start + config.t_int_width_s
 
 
+SYNC_START_RANGE_V = 8.0
+SYNC_START_OFFSET_V = 2.0
+"""The trigger channel's range and centre in V before calibration: -2 to 6 V.
+
+The 81150A Sync reads 1.2-3.4 V on CHAN3 at 1 MΩ, depending on sampling."""
+
+
+def _channel_number(source: str) -> int | None:
+    """Return 3 for `CHAN3`, `None` for a source that is not a channel."""
+    s = str(source).upper()
+    return int(s[4:]) if s.startswith("CHAN") and s[4:].isdigit() else None
+
+
 PROVISIONAL_TRIGGER_V = 0.5
 """The provisional Sync threshold is 0.5 V during calibration.
 
@@ -567,6 +580,14 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
 
         threshold = None
         if config.calibrate_trigger:
+            # The autorange grows from the range it finds. Left at 80 mV around
+            # 1.29 V by a front-panel change, CHAN3 clipped a 0-3.4 V Sync on both
+            # rails, read 84 mV and stopped a sweep (2026-11-03). Start from a
+            # window that holds a Sync of any height the generator gives.
+            sync_ch = _channel_number(cfg.trigger_source)
+            if sync_ch is not None:
+                rig.scope.configure_channel(sync_ch, vertical_range=SYNC_START_RANGE_V,
+                                            offset=SYNC_START_OFFSET_V)
             rig.scope.configure_edge_trigger(cfg.trigger_source,
                                              positive=cfg.trigger_positive,
                                              high_threshold=PROVISIONAL_TRIGGER_V,

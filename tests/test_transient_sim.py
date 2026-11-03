@@ -819,6 +819,25 @@ def test_the_trigger_threshold_is_calibrated_in_volts_whatever_the_sign_conventi
     assert thresholds[-1.0] > MIN_SYNC_SWING_V / 2
 
 
+def test_the_trigger_channel_starts_from_a_wide_window_before_calibration():
+    # 2026-11-03: CHAN3 left at 80 mV around 1.29 V clipped the Sync on both rails;
+    # the calibration read the window as the swing and stopped the sweep.
+    from bace.experiment.transient import SYNC_START_OFFSET_V, SYNC_START_RANGE_V
+    sim = make_bench(seed=1)
+    sim.led.set_pulse(1.020, 0.4)
+    calls = []
+    real = sim.scope.configure_channel
+    sim.scope.configure_channel = lambda ch, **kw: (calls.append((ch, kw)), real(ch, **kw))
+    rig = Rig(bias=sim.bias, scope=sim.scope, shutter=sim.shutter, config=RigConfig(),
+              power=sim.power)
+    cfg = RunConfig(n_averages=50, settle_s=0.0, dark_settle_s=0.0, t0_int_s=2.71e-7,
+                    calibrate_trigger=True)
+    run(rig, bace_sweep(0.90, 0.90, 0.0, n_loops=1), cfg=cfg)
+    assert calls[0] == (3, {"vertical_range": SYNC_START_RANGE_V, "offset": SYNC_START_OFFSET_V})
+    lo, hi = SYNC_START_OFFSET_V - SYNC_START_RANGE_V / 2, SYNC_START_OFFSET_V + SYNC_START_RANGE_V / 2
+    assert lo < 0.0 and hi > 3.4, "holds 0 V and the highest Sync seen"
+
+
 class _NoSync:
     """A digitizer whose trigger channel carries nothing but noise."""
 
