@@ -20,8 +20,8 @@ test('an unnamed session says what its folders will be called instead', () => {
   assert.equal(model.unnamed, true);
   assert.equal(model.chip, 'No sample named');
   assert.equal(model.stem, '');
-  assert.equal(model.preview, '290K_…',
-    'the consequence, not the absence — an unnamed run opens on the temperature');
+  assert.equal(model.preview, '<T>K_…',
+    'the consequence, not the absence — an unnamed run opens on the temperature, and no number poses as it');
 });
 
 test('the preview is the folder name the next run starts with, in the archive’s order', () => {
@@ -126,6 +126,23 @@ test('SampleNamed replaces the block, so a second console is not left filing und
   assert.equal(model.rows.find((r) => r.name === 'sample').value, 's7');
   assert.equal(model.rows.find((r) => r.name === 'operator').value, '',
     'a replacement, not a merge — the merge happened in the service');
+});
+
+test('a name set elsewhere moves this console\'s folder stem too', () => {
+  // 2026-11-03: the name came in over the API, and the console that had loaded
+  // before kept the empty filed spelling, so its stem stayed unnamed.
+  const store = createStore({ schedule: () => {} });
+  store.applySession({ sample: { sample: '' }, sample_in_name: { sample: '', material: '', pixel: '' } });
+  store.applyFrame({ seq: 2, ts: 2, run_id: null, node_path: '', type: 'SampleNamed',
+    data: { before: {}, after: { sample: '261102-02', material: 'PTQ10:ITIC', pixel: 'pxa' },
+      changed: ['material', 'pixel', 'sample'],
+      in_name: { sample: '261102-02', material: 'PTQ10ITIC', pixel: 'pxa' } } });
+  assert.equal(identityModel(store.getState()).preview, '261102-02_PTQ10ITIC_pxa_…',
+    'the service\'s spelling, not the typed colon');
+  // An older event without `in_name` falls back to the typed values.
+  store.applyFrame({ seq: 3, ts: 3, run_id: null, node_path: '', type: 'SampleNamed',
+    data: { before: {}, after: { sample: 's7' }, changed: ['sample'] } });
+  assert.equal(identityModel(store.getState()).preview, 's7_…');
 });
 
 test('identityOf is the chip the bar has always drawn', () => {

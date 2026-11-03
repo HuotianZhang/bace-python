@@ -620,7 +620,11 @@ export function createStore({ logLimit = LOG_LIMIT, schedule = queueMicrotask } 
         // `SampleNamed.after` replaces the full identity block for all consoles. The
         // service owns merging and lower layers. Waiting for another bench fetch
         // would leave other consoles displaying stale filing identity.
-        state.session = { ...(state.session || {}), sample: { ...data.after } };
+        // `in_name` is the folder spelling. Without it (an older journal) the stale
+        // spelling is dropped, and the stem shows the typed values until the next
+        // bench read.
+        state.session = { ...(state.session || {}), sample: { ...data.after },
+          sample_in_name: data.in_name ? { ...data.in_name } : undefined };
         log(frame, 'info', `sample · ${(data.changed || []).join(', ') || 'named'}`);
         break;
 

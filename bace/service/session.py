@@ -710,9 +710,12 @@ class Session:
                 # even if they retain the preceding object.
                 self.catalogue.sample = after
             active = self.run_active()
+            in_name = dict(zip(("sample", "material", "pixel"),
+                               self._metadata_for_name().identity_in_name()))
         if changed:
             self._dispatch(None, E.SampleNamed(before=before, after=dict(after),
-                                               changed=list(changed)), node_path="")
+                                               changed=list(changed), in_name=in_name),
+                           node_path="")
         return {"session": self.session_info(), "changed": list(changed),
                 "run_active": active}
 

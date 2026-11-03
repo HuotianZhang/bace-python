@@ -431,11 +431,16 @@ class SampleNamed(Event):
     A running or queued measurement therefore keeps its identity. Recording the
     change lets the journal associate each run with its sample even when one
     session file contains several identities.
+
+    `in_name` is the folder spelling of sample, material and pixel, as
+    `GET /session` gives it in `sample_in_name`, so a console that did not make
+    the edit previews the same folder stem.
     """
 
     before: dict
     after: dict
     changed: list
+    in_name: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

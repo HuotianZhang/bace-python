@@ -363,6 +363,8 @@ def test_naming_the_sample_is_an_event_and_a_journal_line(service):
     assert ev["data"]["changed"] == ["material"]
     assert ev["data"]["before"]["material"] == "SIM"
     assert ev["data"]["after"]["material"] == "PTQ10IT4F"
+    # The folder spelling travels with it, so every console previews the same stem.
+    assert ev["data"]["in_name"] == client.get("/session").json()["sample_in_name"]
     # In the file too: a journal read years later has to be able to say which
     # runs in it were measured under which name.
     assert any(line.get("type") == "SampleNamed" for line in journal_lines(session))
