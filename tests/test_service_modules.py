@@ -1061,8 +1061,12 @@ class _Led33220A:
                       "high_v": 1.02, "low_v": 0.4, "frequency_hz": 500.0,
                       "sync_output": True, **state}
         self.error_queue: list[str] = []
+        # What the generator queues when it refuses the pulse write itself.
+        self.on_pulse: list[str] = []
 
-    def set_pulse(self, *a, **k): self.log.append("set_pulse")
+    def set_pulse(self, *a, **k):
+        self.log.append("set_pulse")
+        self.error_queue.extend(self.on_pulse)
     def set_dc(self, *a, **k): self.log.append("set_dc")
     def enable_output(self, on=True): self.log.append(f"enable({on})")
     def disable_output(self): self.log.append("enable(False)")
@@ -1070,7 +1074,10 @@ class _Led33220A:
     def set_polarity(self, inverted): pass
     def polarity(self): return "INV"
     def read_state(self): return dict(self.state)
-    def errors(self): return list(self.error_queue)
+    def errors(self):
+        # `:SYST:ERR?` drains, as the instrument does.
+        out, self.error_queue = list(self.error_queue), []
+        return out
 
 
 def test_bace_refuses_a_33220a_that_did_not_take_pulse_mode_or_its_output(tmp_path):
@@ -1098,12 +1105,15 @@ def test_bace_refuses_a_33220a_that_did_not_take_pulse_mode_or_its_output(tmp_pa
 
     b = bench()
     b.rig.led = led
+    # This time the refusal is of the module's own pulse write.
+    led.on_pulse = ['-221,"Settings conflict"']
     cat = catalogue()
     ctx = make_ctx(tmp_path)
     gen = cat.build("bace", {**FAST, "centre_on_voc": False, "axis_start": 0.9,
                              "axis_stop": 0.9, "n_loops": 1}, ctx, b.rig)
     first = next(gen)
     assert first.values["led_output"] == "OFF" and first.values["led_mode"] == "DC"
+    assert "Settings conflict" in first.values["led_errors"]
     with pytest.raises(ModuleError, match="33220A is not driving the LED"):
         next(gen)
     assert b.sim.bench.shots == 0, "nothing was acquired"

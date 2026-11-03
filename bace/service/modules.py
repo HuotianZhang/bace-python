@@ -1398,6 +1398,21 @@ class Catalogue:
                                             how="measure_dc")
 
                 s = drive.pulse_settings()
+                # The queue check below must judge this module's commands only. An
+                # error left by an earlier `light` or bench action (nothing else
+                # reads the queue) failed the first BACE of a sweep on 2026-11-03,
+                # although the generator ended where it was asked. Record and clear.
+                stale = getattr(rig.led, "errors", None)
+                if callable(stale):
+                    try:
+                        left = [str(e) for e in stale()]
+                    except Exception:                       # noqa: BLE001
+                        left = []
+                    if left:
+                        yield E.Verdict(level="info", code="led.stale-errors",
+                                        text="33220A error queue held, from before this "
+                                             "BACE, cleared: " + "; ".join(left),
+                                        node_path=ctx.node_path, data={"errors": left})
                 # The 81150A must arm on light off: the rising Sync edge under INV.
                 # Enforce this before extraction. NORM extracts during illumination
                 # and can still yield plausible Q. Inverting the waveform does not

@@ -78,6 +78,29 @@ def states_of(frames: list[dict]) -> list[str]:
     return [f["data"]["state"] for f in frames if f["type"] == "RunStateChanged"]
 
 
+# -- the 33220A error queue -----------------------------------------------------------
+def test_an_error_left_in_the_33220a_queue_does_not_fail_the_next_bace(tmp_path):
+    # 2026-11-03: a `light` pulse at 16:14 queued -221 and the first BACE, at 17:26,
+    # read it as its own refusal and failed the sweep.
+    with make_session(tmp_path) as s:
+        led = s.bench.rig.led
+        queue = ['-221,"Settings conflict; low level changed due to high level"']
+        led.errors = lambda: [queue.pop()] if queue else []
+        run_id, _ = s.submit(bace(1, voc=0.9))
+        assert s.wait_run(run_id, TIMEOUT)
+        rec = s.run_record(run_id)
+        assert rec["state"] == "done", rec["error"]
+        (stale,) = [v for v in rec["verdicts"] if v["code"] == "led.stale-errors"]
+        assert stale["level"] == "info" and "-221" in stale["text"]
+
+        # A refusal of this BACE's own commands still fails it.
+        led.errors = lambda: ['-222,"Data out of range"']
+        run_id, _ = s.submit(bace(1, voc=0.9))
+        assert s.wait_run(run_id, TIMEOUT)
+        rec = s.run_record(run_id)
+        assert rec["state"] == "failed" and "-222" in rec["error"]
+
+
 # -- the bench after a run ------------------------------------------------------------
 def test_the_bench_reads_shut_after_a_jv_that_ran_with_the_shutter_open(tmp_path):
     # 2026-11-03 on the lab PC: the shutter opened by hand, a `jv` (which leaves
