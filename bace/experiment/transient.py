@@ -168,11 +168,24 @@ class RunConfig:
     """
 
     offset_region: str = "tail"
-    """Where baseline correction takes the mean of light minus dark: `tail` uses the last 10 % of the record; `pre-trigger` uses samples before the trigger.
+    """Where baseline correction takes the mean of light minus dark: `after-window` uses the record after the integration window; `tail` the last 10 % of the record; `pre-trigger` samples before the trigger.
 
-    `tail` uses the last 10 % of the record. `pre-trigger` uses samples before
-    the trigger, excluding `PRE_TRIGGER_GUARD_S` for Sync pickup. Both reuse
-    stored samples and add no acquisition time.
+    `after-window` uses the samples from the end of the integration window to
+    the end of the record, so Q is the charge above the level light − dark
+    settles at. `tail` uses the last 10 % of the record. `pre-trigger` uses
+    samples before the trigger, excluding `PRE_TRIGGER_GUARD_S` for Sync
+    pickup. All reuse stored samples and add no acquisition time.
+
+    `after-window` is the bench default in `run.toml` since 2026-11-04, by the
+    operator's choice; the dataclass keeps `tail`, which LabVIEW used, because
+    its 2 µs record leaves no samples after the default window.
+    On device 261102-02 (220–295 K) the light trace's level before the trigger
+    varied from cell to cell by up to 23 µA while light − dark after the window
+    stayed near 17 µA; the pre-trigger baseline carried that spread into Q and
+    flattened Q(intensity) above 0.7 sun at 275–295 K
+    (`docs/analysis/2026-11-04/txi-warming/README.md`). With a 10 µs record and
+    a 6 µs window the region is about 2.9 µs long; a tail still running there
+    makes Q a few % low (up to 4 % at 220 K on that device).
 
     The tail is a baseline only after extraction ends. On this bench a 2 µs
     record leaves extraction current in the tail and Q reads 10–20 % low. Longer
@@ -378,9 +391,9 @@ class RunConfig:
                 f"monitor_channel must be 'off', 'CHAN1' or 'CHAN4', not "
                 f"{self.monitor_channel!r}: the current and Sync channels are "
                 "already stored")
-        if self.offset_region not in ("tail", "pre-trigger"):
+        if self.offset_region not in ("after-window", "tail", "pre-trigger"):
             raise ValueError(
-                f"offset_region must be 'tail' or 'pre-trigger', not "
+                f"offset_region must be 'after-window', 'tail' or 'pre-trigger', not "
                 f"{self.offset_region!r}")
         if self.output_polarity.lower() not in ("auto", "norm", "inv", "leave"):
             raise ValueError(
@@ -797,6 +810,16 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                         f"baseline: light − dark before {baseline_end * 1e9:.0f} ns of "
                         f"record time ({int(baseline_end / dt) + 1} samples before the "
                         "trigger)")
+            baseline_start = None
+            if config.offset_correct and config.offset_region == "after-window":
+                baseline_start = t1_rec
+                if first:
+                    yield Notice(
+                        "info",
+                        f"baseline: light − dark from {baseline_start * 1e9:.0f} ns of "
+                        f"record time, the end of the integration window, to the end "
+                        f"of the record ({max(0, int((record_end - baseline_start) / dt) + 1)} "
+                        "samples)")
             if config.offset_correct and config.offset_region == "tail" and first:
                 flat, head, tail, peak = baseline_is_flat(light.y, dark.y)
                 if not flat:
@@ -811,7 +834,8 @@ def run_transient_scan(rig: Rig, spec: ScanSpec, config: RunConfig = RunConfig()
                         f"traces are stored, so this is recoverable offline")
             photo = photocurrent(light.y, dark.y, dt,
                                  offset_correct=config.offset_correct,
-                                 baseline_end_s=baseline_end)
+                                 baseline_end_s=baseline_end,
+                                 baseline_start_s=baseline_start)
             if averaged is None:
                 averaged = RunningAverage(n_steps=plan.n_steps, n_samples=photo.size)
             photo_avg = averaged.update(s.step, s.loop, photo)

@@ -652,6 +652,30 @@ def test_axis_geometry_is_judged_by_axis_scanspec_and_pulse_levels():
     assert ok.level == "ok" and "centred on V_oc" in ok.text
 
 
+def test_an_after_window_baseline_needs_record_after_the_window():
+    """`photocurrent` refuses fewer than 20 samples after the window mid-run;
+    validation refuses the geometry first. run.toml's 10 µs record leaves
+    about 2.9 µs after a 6 µs window at 90 ns."""
+    v = validate(module("bace", measure_dc=True, offset_region="after-window"))
+    assert levels(v, "axis.geometry") == ["ok"]
+    v = validate(module("bace", measure_dc=True, offset_region="after-window",
+                        t_int_width_s=9e-6))
+    [bad] = v.by_code("axis.geometry")
+    assert bad.level == "invalid" and "after-window baseline" in bad.text
+    v = validate(module("bace", measure_dc=True, offset_region="after-window",
+                        axis_name="delay_ns", axis_start=0.0, axis_stop=3000.0,
+                        axis_step=1000.0, centre_on_voc=False))
+    assert levels(v, "axis.geometry") == ["invalid"], "judged at the latest delay"
+    for bad_record in ({"timebase_ns_per_div": 0.0}, {"timebase_ns_per_div": -1.0},
+                       {"record_length": 1}):
+        v = validate(module("bace", measure_dc=True, offset_region="after-window",
+                            **bad_record))
+        assert levels(v, "axis.geometry") == ["invalid"], bad_record
+    v = validate(module("bace", measure_dc=True, offset_region="pre-trigger",
+                        t_int_width_s=9e-6))
+    assert "after-window" not in v.by_code("axis.geometry")[0].text
+
+
 def test_a_temperature_loop_warns_that_the_331_is_not_wired():
     v = validate(canonical())
     [w] = v.by_code("temperature.not-wired")

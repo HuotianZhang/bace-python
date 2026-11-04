@@ -55,8 +55,8 @@ pulse_frequency_hz = 500.0        # 500 Hz on both generators is the bench opera
 duty_percent = 50.0
 offset_correct = true           # Subtracts the baseline selected by offset_region
                                 # before integrating Q (manual 2.3).
-offset_region = "pre-trigger"   # Uses the pre-trigger baseline; the last 10 % can
-                                # contain extraction current and bias Q low (manual
+offset_region = "after-window"  # Uses light - dark after the integration window as
+                                # zero; the operator's choice since 2026-11-04 (manual
                                 # 2.3).
 alternate_order = true          # Dark trace first on even loops; stable drift cancels
                                 # over loop pairs (manual 2.3).

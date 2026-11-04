@@ -41,14 +41,17 @@ the baseline clear of that pickup and the later voltage step (manual 2.3,
 
 def photocurrent(light: np.ndarray, dark: np.ndarray, dt: float, *,
                  offset_correct: bool = True,
-                 baseline_end_s: float | None = None) -> np.ndarray:
+                 baseline_end_s: float | None = None,
+                 baseline_start_s: float | None = None) -> np.ndarray:
     """Returns light minus dark in A, with optional baseline subtraction.
 
     `dt` is the sample interval in s. `baseline_end_s = None` selects the last
     10 % of the record, as required for LabVIEW numerical compatibility.
     A number selects samples before that record time in s, suitable for a
-    pre-trigger baseline. Fewer than 20 such samples raises `ValueError`,
-    because that region cannot provide a reliable baseline. A tail baseline
+    pre-trigger baseline. `baseline_start_s` instead selects samples from that
+    record time to the end of the record, suitable for a baseline after the
+    integration window. Fewer than 20 samples in either region raises
+    `ValueError`, because that region cannot provide a reliable baseline. A tail baseline
     underestimates Q by 10–20 % on a 2 µs record on this bench; on longer
     records drift enters the baseline (manual 2.3,
     `docs/manual/2.3-signal.md`).
@@ -77,7 +80,17 @@ def photocurrent(light: np.ndarray, dark: np.ndarray, dt: float, *,
     if offset_correct:
         n = photo.size
         t = np.arange(n) * dt
-        if baseline_end_s is None:
+        if baseline_end_s is not None and baseline_start_s is not None:
+            raise ValueError("give baseline_end_s or baseline_start_s, not both")
+        if baseline_start_s is not None:
+            region = t >= baseline_start_s
+            if region.sum() < 20:
+                raise ValueError(
+                    f"the after-window baseline starts at {baseline_start_s * 1e9:.1f} ns "
+                    f"of record time, which leaves {int(region.sum())} samples after it; "
+                    "a longer timebase or a shorter t_int_width_s leaves record after "
+                    "the window")
+        elif baseline_end_s is None:
             total = dt * (n - 1)
             region = t > total * 0.9
         else:

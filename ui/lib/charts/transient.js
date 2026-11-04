@@ -445,6 +445,7 @@ function darkClause(dark_reference) {
 
 /** The label identifies baseline correction applied to the traces. */
 function offsetClause(offset_corrected, offset_region = null) {
+  if (offset_corrected === true && offset_region === 'after-window') return '  ·  offset corrected, after the window';
   if (offset_corrected === true && offset_region === 'pre-trigger') return '  ·  offset corrected, before the trigger';
   if (offset_corrected === true) return '  ·  offset corrected, last 10 % of the record';
   if (offset_corrected === false) return '  ·  no offset correction';
