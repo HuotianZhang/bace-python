@@ -786,3 +786,87 @@ def test_the_simulated_meter_reads_the_average_of_a_pulsed_led_and_says_so():
     assert snap["instruments"]["power"]["averaged"] is False
     sim.power.set_averaging(True)
     assert b.read_back()["instruments"]["power"]["averaged"] is True
+
+
+# -- the scope's front panel ---------------------------------------------------------
+class _ScopeIO:
+    """An Infiniium transport that knows some queries and refuses one."""
+
+    def __init__(self):
+        self.timeout = 20000
+        self.log: list[str] = []
+        self.errors: list[str] = []
+        self.answers = {":CHAN3:INP?": "DC", ":CHAN3:BWL?": "ON", ":CHAN3:PROB?": "1.0,RAT"}
+
+    def write(self, cmd):
+        self.log.append(cmd)
+        if cmd.startswith(":CHAN3:BWL "):
+            self.answers[":CHAN3:BWL?"] = cmd.split()[1].rstrip(";")
+
+    def query(self, cmd):
+        self.log.append(cmd)
+        if cmd == ":SYST:ERR?":
+            return self.errors.pop(0) if self.errors else "0"
+        if cmd == ":ACQ:INT?":
+            # An unknown header: no reply, and an error in the queue.
+            self.errors.append('-113,"Undefined header"')
+            raise TimeoutError("VI_ERROR_TMO")
+        return self.answers.get(cmd, "0")
+
+
+def test_the_scope_setup_is_read_back_and_set_through_two_actions():
+    # 2026-11-03: the scope looked different and CHAN3 read 84 mV for a ~1 V Sync;
+    # coupling, impedance and bandwidth limit are front-panel settings no run writes.
+    from bace.drivers.infiniium import Infiniium
+    b = bench()
+    io = _ScopeIO()
+    b.rig.scope = Infiniium(io)
+    setup = b.action("read-scope", {})["setup"]
+    assert setup["chan3.input"] == "DC" and setup["chan3.bwlimit"] == "ON"
+    assert setup["acq.interpolate"].startswith("? (-113"), "an unknown query reads ?"
+    assert io.timeout == 20000, "the short timeout is put back"
+
+    out = b.action("set-scope", {"inputs": {"3": "dc", "4": "DC50"}, "bwlimit": {"3": False},
+                                 "trigger_coupling": "DC"})
+    assert out["errors"] == [] and out["setup"]["chan3.bwlimit"] == "OFF"
+    assert [c for c in io.log if "?" not in c] == [
+        ":CHAN3:INP DC;", ":CHAN4:INP DC50;", ":CHAN3:BWL OFF;", ":TRIG:EDGE:COUP DC;"]
+
+    writes = len([c for c in io.log if "?" not in c])
+    for bad in ({"inputs": {"5": "DC"}}, {"inputs": {"3": "DC75"}},
+                {"trigger_coupling": "NOISE"}, {"inputs": ["DC"]}, {"range": 1},
+                {"bwlimit": {"3": "false"}}, {"bwlimit": {"3": 0}},
+                {"inputs": {"3": "DC"}, "bwlimit": {"3": "off"}}):
+        with pytest.raises(ValueError):
+            b.action("set-scope", bad)
+    assert len([c for c in io.log if "?" not in c]) == writes, "a refused request writes nothing"
+
+
+def test_the_simulated_scope_refuses_the_front_panel_actions():
+    b = bench()
+    with pytest.raises(BenchActionRefused, match="no front-panel read-back"):
+        b.action("read-scope", {})
+
+
+def test_a_capture_tells_a_square_from_a_narrow_pulse():
+    # A 500 Hz square averaged over short records reads as a flat ~1.3 V, as CHAN3
+    # did on 2026-11-03; a capture over a whole period shows its duty and edges.
+    import numpy as np
+    from bace.drivers.infiniium import Infiniium
+    from bace.drivers.protocols import Trace
+    b = bench()
+    scope = Infiniium(_ScopeIO())
+    b.rig.scope = scope
+    dt = 5e-9
+    t = np.arange(400_000) * dt          # one 2 ms period
+    square = np.where(((t - 0.5e-3) % 2e-3) < 1e-3, 2.6, 0.0)
+    pulse = np.where(((t - 1e-3) % 2e-3) < 5.5e-9, 2.0, 0.0)
+    scope.single_acquisition = lambda timeout_s=10.0: None
+    for y, duty, width in ((square, 0.5, 1e-3), (pulse, 5.5e-9 / 2e-3, 5e-9)):
+        scope.fetch_volts = lambda source, y=y: Trace(y=y, dt=dt, t0=-1e-4)
+        out = b.action("capture-scope", {"channel": 3, "window_s": 2.5e-3, "points": 500_000})
+        assert out["high_fraction"] == pytest.approx(duty, abs=2e-3)
+        assert out["rising_edges"] >= 1 and len(out["outline"]) == 100
+        assert out["high_widths_s"][0] == pytest.approx(width, rel=0.1, abs=dt)
+    with pytest.raises(ValueError):
+        b.action("capture-scope", {"channel": 7})

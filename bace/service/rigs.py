@@ -54,6 +54,7 @@ ACTIONS: tuple[str, ...] = (
     "shutter-open", "shutter-shut",
     "relay-to-sourcemeter", "relay-to-amplifier",
     "read-power",
+    "read-scope", "set-scope", "capture-scope",
 )
 """The bench accepts these action names.
 
@@ -143,6 +144,28 @@ ACTION_DOCS: dict[str, tuple[str, str, str]] = {
         "1918-C",
         "One power reading.",
         "The meter does not answer."),
+    "read-scope": (
+        "DSO9054H",
+        "The front-panel settings the runs never write: input coupling and impedance, "
+        "bandwidth limit and probe per channel, and the acquisition, trigger and "
+        "timebase settings in force. A query the scope does not know reads `?`.",
+        "No scope on this bench, or one without the queries (the simulator)."),
+    "set-scope": (
+        "DSO9054H",
+        "Input coupling and impedance (`inputs`: channel to `DC`, `DC50` or `AC`), "
+        "bandwidth limit (`bwlimit`: channel to true or false) and trigger coupling "
+        "(`trigger_coupling`), then the same read as `read-scope`. Manual 1.2: CHAN2 "
+        "and CHAN3 `DC` (1 MΩ), CHAN4 `DC50`.",
+        "A channel outside 1–4, a value outside those lists, or no scope."),
+    "capture-scope": (
+        "DSO9054H",
+        "One record of one `channel` over `window_s` with `points` samples, at "
+        "`range_v` and `offset_v`; untriggered, or on a rising edge of "
+        "`trigger_channel` through `level_v`. Returns levels, edges, duty and a "
+        "100-bin outline, to see what a channel carries. The next run sets the scope "
+        "again.",
+        "A channel outside 1–4, a window outside 10 ns–100 ms, points outside "
+        "1000–2 000 000, or no scope."),
 }
 """The action descriptions list instruments, effects and refusal conditions.
 
@@ -1241,6 +1264,56 @@ class Bench:
     def _act_relay_to_amplifier(self, args: dict, led: dict) -> dict:
         self._only(args)
         return self._move_relay("transient")
+
+    def _scope_with_setup(self) -> Any:
+        scope = self._need("scope")
+        if not callable(getattr(scope, "read_setup", None)):
+            raise BenchActionRefused("warn", "this scope has no front-panel read-back")
+        return scope
+
+    def _act_read_scope(self, args: dict, led: dict) -> dict:
+        self._only(args)
+        return {"setup": self._scope_with_setup().read_setup()}
+
+    def _act_set_scope(self, args: dict, led: dict) -> dict:
+        self._only(args, "inputs", "bwlimit", "trigger_coupling")
+        scope = self._scope_with_setup()
+
+        def channels(name: str) -> dict[int, Any]:
+            value = args.get(name) or {}
+            if not isinstance(value, dict):
+                raise ValueError(f"{name}: a map of channel to value")
+            try:
+                return {int(k): v for k, v in value.items()}
+            except (TypeError, ValueError):
+                raise ValueError(f"{name}: channels are numbers 1-4") from None
+        bwlimit = channels("bwlimit")
+        # `bool("false")` is True: a string would switch the filter on.
+        wrong = {n: v for n, v in bwlimit.items() if not isinstance(v, bool)}
+        if wrong:
+            raise ValueError(f"bwlimit: true or false per channel, not {wrong!r}")
+        errors = scope.set_setup(channel_inputs=channels("inputs"), bwlimit=bwlimit,
+                                 trigger_coupling=args.get("trigger_coupling"))
+        return {"errors": errors, "setup": scope.read_setup()}
+
+    def _act_capture_scope(self, args: dict, led: dict) -> dict:
+        self._only(args, "channel", "window_s", "points", "range_v", "offset_v",
+                   "trigger_channel", "level_v")
+        scope = self._scope_with_setup()
+        try:
+            return scope.capture(int(args.get("channel", 3)),
+                                 window_s=float(args.get("window_s", 2.5e-3)),
+                                 points=int(args.get("points", 500_000)),
+                                 range_v=float(args.get("range_v", 4.0)),
+                                 offset_v=float(args.get("offset_v", 1.5)),
+                                 trigger_channel=(None if args.get("trigger_channel") is None
+                                                  else int(args["trigger_channel"])),
+                                 level_v=(None if args.get("level_v") is None
+                                          else float(args["level_v"])))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(str(exc)) from None
+        except Exception as exc:                            # noqa: BLE001
+            raise BenchActionRefused("warn", f"the capture failed: {exc}") from None
 
     def _act_read_power(self, args: dict, led: dict) -> dict:
         self._only(args, "samples")

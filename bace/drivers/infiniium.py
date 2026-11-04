@@ -383,6 +383,145 @@ class Infiniium:
         except Exception:
             return None
 
+    # -- front-panel setup ------------------------------------------------
+    def read_setup(self, *, timeout_ms: int = 3000) -> dict[str, str]:
+        """Query the settings the runs never write and return the raw answers.
+
+        Input coupling and impedance, bandwidth limit, probe, display, range and
+        offset per channel, then acquisition, trigger and timebase. Manual 1.2
+        sets impedance and coupling by hand; a front-panel reset changes them
+        silently. Each query is separate under a short timeout, so one the
+        DSO9054H does not know answers `?` (with its `:SYST:ERR?` text) instead
+        of stalling for the session timeout."""
+        queries = {f"chan{n}.{key}": f":CHAN{n}:{cmd}?" for n in (1, 2, 3, 4)
+                   for key, cmd in (("display", "DISP"), ("input", "INP"),
+                                    ("bwlimit", "BWL"), ("probe", "PROB"),
+                                    ("range", "RANG"), ("offset", "OFFS"))}
+        queries.update({
+            "acq.mode": ":ACQ:MODE?", "acq.bandwidth": ":ACQ:BAND?",
+            "acq.srate": ":ACQ:SRAT?", "acq.points": ":ACQ:POIN?",
+            "acq.average": ":ACQ:AVER?", "acq.count": ":ACQ:AVER:COUN?",
+            "acq.interpolate": ":ACQ:INT?",
+            "trig.mode": ":TRIG:MODE?", "trig.sweep": ":TRIG:SWE?",
+            "trig.source": ":TRIG:EDGE:SOUR?", "trig.slope": ":TRIG:EDGE:SLOP?",
+            "trig.coupling": ":TRIG:EDGE:COUP?", "trig.level3": ":TRIG:LEV? CHAN3",
+            "trig.hthreshold3": ":TRIG:HTHR? CHAN3", "trig.holdoff": ":TRIG:HOLD?",
+            "tim.range": ":TIM:RANG?", "tim.position": ":TIM:POS?",
+            "tim.reference": ":TIM:REF?",
+        })
+        saved = self._io.timeout
+        self._io.timeout = timeout_ms
+        out: dict[str, str] = {}
+        try:
+            for key, query in queries.items():
+                try:
+                    out[key] = str(self._io.query(query)).strip()
+                except Exception as exc:                    # noqa: BLE001
+                    out[key] = f"? ({type(exc).__name__})"
+                err = self._first_error()
+                if err:
+                    out[key] = f"? ({err})"
+        finally:
+            self._io.timeout = saved
+        return out
+
+    def _first_error(self) -> str:
+        """Drain `:SYST:ERR?` and return its first entry, or `""`."""
+        first = ""
+        for _ in range(10):
+            try:
+                reply = str(self._io.query(":SYST:ERR?")).strip()
+            except Exception:                               # noqa: BLE001
+                return first
+            if reply.startswith(("0", "+0")):
+                return first
+            first = first or reply
+        return first
+
+    def capture(self, channel: int, *, window_s: float, points: int,
+                range_v: float, offset_v: float, trigger_channel: int | None = None,
+                level_v: float | None = None, timeout_s: float = 10.0) -> dict:
+        """Take one record of one channel and summarise its shape.
+
+        For finding what a channel carries, as the Sync on CHAN3: a 5 ns pulse at
+        500 Hz and a 500 Hz square look alike to a short averaged record. RTIM, no
+        averaging; `trigger_channel` None sweeps untriggered (AUTO), otherwise
+        waits for a rising edge through `level_v`. The next run sets range,
+        timebase, acquisition and trigger again. Returns levels in V, the edges
+        through the midpoint, the duty and a min/max outline of 100 bins."""
+        if int(channel) not in (1, 2, 3, 4):
+            raise ValueError(f"channel {channel}: 1-4")
+        if not 1e-8 <= float(window_s) <= 0.1 or not 1000 <= int(points) <= 2_000_000:
+            raise ValueError("window_s 10 ns to 100 ms, points 1000 to 2000000")
+        ch = f"CHAN{int(channel)}"
+        self._io.write(f":{ch}:DISP ON;:{ch}:RANG {float(range_v):g};:{ch}:OFFS {float(offset_v):g};")
+        self._io.write(f":TIM:RANG {float(window_s):g};:TIM:POS {float(window_s) * 0.4:g};")
+        self._io.write(f":ACQ:POIN {int(points):d};:ACQ:MODE RTIM;:ACQ:AVER OFF;:ACQ:INT OFF;")
+        self._io.write(":TRIG:MODE EDGE;")
+        if trigger_channel is None:
+            self._io.write(":TRIG:SWE AUTO;")
+        else:
+            src = f"CHAN{int(trigger_channel)}"
+            self._io.write(f":TRIG:EDGE:SOUR {src};:TRIG:EDGE:SLOP POS;"
+                           f":TRIG:LEV {src},{float(level_v if level_v is not None else 0.5):g};"
+                           ":TRIG:SWE TRIG;")
+        self.single_acquisition(timeout_s)
+        trace = self.fetch_volts(ch)
+        y = np.asarray(trace.y, dtype=float)
+        lo, hi = float(np.min(y)), float(np.max(y))
+        mid = (lo + hi) / 2.0
+        high = y > mid
+        rising = np.flatnonzero(~high[:-1] & high[1:])
+        falling = np.flatnonzero(high[:-1] & ~high[1:])
+        widths = [int(f - r) for r in rising for f in falling[falling > r][:1]]
+        bins = np.array_split(y, 100)
+        return {"points": int(y.size), "dt_s": float(trace.dt), "t0_s": float(trace.t0),
+                "min_v": lo, "max_v": hi, "mean_v": float(np.mean(y)),
+                "median_v": float(np.median(y)), "high_fraction": float(np.mean(high)),
+                "rising_edges": int(rising.size),
+                "rising_at_s": [float(trace.t0 + i * trace.dt) for i in rising[:20]],
+                "high_widths_s": [w * float(trace.dt) for w in widths[:20]],
+                "outline": [[round(float(b.min()), 4), round(float(b.max()), 4)] for b in bins]}
+
+    INPUTS = ("DC", "DC50", "AC")
+    TRIGGER_COUPLINGS = ("DC", "AC", "LFR", "HFR")
+
+    def set_setup(self, *, channel_inputs: dict[int, str] | None = None,
+                  bwlimit: dict[int, bool] | None = None,
+                  trigger_coupling: str | None = None) -> list[str]:
+        """Write input coupling and impedance, bandwidth limit and trigger coupling.
+
+        Only these: the run writes range, offset, probe gain, timebase and the
+        trigger edge itself. Returns the generator's error replies, empty when
+        it took every command."""
+        for n, value in (channel_inputs or {}).items():
+            if int(n) not in (1, 2, 3, 4) or str(value).upper() not in self.INPUTS:
+                raise ValueError(f"channel {n} input {value!r}: channels 1-4, "
+                                 f"inputs {', '.join(self.INPUTS)}")
+        for n in (bwlimit or {}):
+            if int(n) not in (1, 2, 3, 4):
+                raise ValueError(f"bandwidth limit on channel {n}: channels 1-4")
+        if trigger_coupling is not None and str(trigger_coupling).upper() not in self.TRIGGER_COUPLINGS:
+            raise ValueError(f"trigger coupling {trigger_coupling!r}: "
+                             f"{', '.join(self.TRIGGER_COUPLINGS)}")
+        errors = []
+        for n, value in (channel_inputs or {}).items():
+            self._io.write(f":CHAN{int(n)}:INP {str(value).upper()};")
+            err = self._first_error()
+            if err:
+                errors.append(f"CHAN{n}:INP {value}: {err}")
+        for n, on in (bwlimit or {}).items():
+            self._io.write(f":CHAN{int(n)}:BWL {'ON' if on else 'OFF'};")
+            err = self._first_error()
+            if err:
+                errors.append(f"CHAN{n}:BWL: {err}")
+        if trigger_coupling is not None:
+            self._io.write(f":TRIG:EDGE:COUP {str(trigger_coupling).upper()};")
+            err = self._first_error()
+            if err:
+                errors.append(f"TRIG:EDGE:COUP: {err}")
+        return errors
+
     def _read_waveform(self, expected_points: int) -> np.ndarray:
         """Query `:WAV:DATA?` and return raw integer samples.
 
