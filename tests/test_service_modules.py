@@ -639,6 +639,31 @@ def test_bace_refuses_centre_on_voc_without_a_source(tmp_path):
     assert b.sim.led.output_enabled and not b.sim.bench.shutter_open
 
 
+def test_a_refused_dc_write_under_measure_dc_still_stops_the_bace(tmp_path):
+    """The stale-error drain comes before the module's first LED write, so a
+    refusal of its own DC setting is not cleared as old: V_oc would otherwise
+    be measured under the wrong light and the run would go on."""
+    from bace.service.modules import ModuleError
+    b = bench()
+    led = b.rig.led
+    queue = ['-221,"stale, from before"']
+    led.errors = lambda: [queue.pop(0) for _ in range(len(queue))]
+    set_dc = led.set_dc
+
+    def refusing_set_dc(level):
+        set_dc(level)
+        queue.append('-222,"Data out of range"')
+    led.set_dc = refusing_set_dc
+    params = {**FAST, "n_loops": 1, "centre_on_voc": True, "led_v": 1.02, "measure_dc": True}
+    events = []
+    with pytest.raises(ModuleError, match='-222'):
+        for ev in catalogue().build("bace", params, make_ctx(tmp_path), b.rig):
+            events.append(ev)
+    stale = [e for e in events if isinstance(e, E.Verdict) and e.code == "led.stale-errors"]
+    assert len(stale) == 1 and "stale" in stale[0].text and "-222" not in stale[0].text
+    assert not [e for e in events if isinstance(e, E.StepDone)], "nothing was acquired"
+
+
 def test_measure_dc_supplies_the_voc_and_centres_the_axis_on_it(tmp_path):
     b = bench()
     sim = b.sim
@@ -1061,8 +1086,12 @@ class _Led33220A:
                       "high_v": 1.02, "low_v": 0.4, "frequency_hz": 500.0,
                       "sync_output": True, **state}
         self.error_queue: list[str] = []
+        # What the generator queues when it refuses the pulse write itself.
+        self.on_pulse: list[str] = []
 
-    def set_pulse(self, *a, **k): self.log.append("set_pulse")
+    def set_pulse(self, *a, **k):
+        self.log.append("set_pulse")
+        self.error_queue.extend(self.on_pulse)
     def set_dc(self, *a, **k): self.log.append("set_dc")
     def enable_output(self, on=True): self.log.append(f"enable({on})")
     def disable_output(self): self.log.append("enable(False)")
@@ -1070,7 +1099,10 @@ class _Led33220A:
     def set_polarity(self, inverted): pass
     def polarity(self): return "INV"
     def read_state(self): return dict(self.state)
-    def errors(self): return list(self.error_queue)
+    def errors(self):
+        # `:SYST:ERR?` drains, as the instrument does.
+        out, self.error_queue = list(self.error_queue), []
+        return out
 
 
 def test_bace_refuses_a_33220a_that_did_not_take_pulse_mode_or_its_output(tmp_path):
@@ -1098,12 +1130,15 @@ def test_bace_refuses_a_33220a_that_did_not_take_pulse_mode_or_its_output(tmp_pa
 
     b = bench()
     b.rig.led = led
+    # This time the refusal is of the module's own pulse write.
+    led.on_pulse = ['-221,"Settings conflict"']
     cat = catalogue()
     ctx = make_ctx(tmp_path)
     gen = cat.build("bace", {**FAST, "centre_on_voc": False, "axis_start": 0.9,
                              "axis_stop": 0.9, "n_loops": 1}, ctx, b.rig)
     first = next(gen)
     assert first.values["led_output"] == "OFF" and first.values["led_mode"] == "DC"
+    assert "Settings conflict" in first.values["led_errors"]
     with pytest.raises(ModuleError, match="33220A is not driving the LED"):
         next(gen)
     assert b.sim.bench.shots == 0, "nothing was acquired"

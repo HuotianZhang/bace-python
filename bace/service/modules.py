@@ -1372,6 +1372,22 @@ class Catalogue:
             voc_src = source
             acc = _BaceData(run_cfg, rig_cfg)
             try:
+                # The queue check after the pulse must judge this module's commands
+                # only, its DC preparation included, so the drain comes before the
+                # first LED write. An error left by an earlier `light` or bench action
+                # (nothing else reads the queue) failed the first BACE of a sweep on
+                # 2026-11-03, although the generator ended where it was asked.
+                stale = getattr(rig.led, "errors", None)
+                if callable(stale):
+                    try:
+                        left = [str(e) for e in stale()]
+                    except Exception:                       # noqa: BLE001
+                        left = []
+                    if left:
+                        yield E.Verdict(level="info", code="led.stale-errors",
+                                        text="33220A error queue held, from before this "
+                                             "BACE, cleared: " + "; ".join(left),
+                                        node_path=ctx.node_path, data={"errors": left})
                 if measure_dc:
                     # V_oc requires steady illumination: the 33220A at DC at the pulse's
                     # high level, the shutter open, and `led_settle_s` for the device.

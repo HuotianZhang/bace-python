@@ -497,8 +497,9 @@ def test_the_led_generator_commands_carry_no_channel_index():
     io = FakeIO(idn="Agilent Technologies,33220A")
     g = Agilent33220A(io)
     g.set_pulse(1.020, 0.4, frequency_hz=500.0, duty_percent=50.0)
+    # Low before high: from DC the stored low can sit above the new high (-221).
     assert io.log == ["FUNC:SHAP PULSE;", "FUNC:PULS:HOLD DCYC;", ":FREQ 500;",
-                      ":VOLT:HIGH 1.02;", ":VOLT:LOW 0.4;", "FUNC:PULS:DCYC 50;"]
+                      ":VOLT:LOW 0.4;", ":VOLT:HIGH 1.02;", "FUNC:PULS:DCYC 50;"]
 
 
 def test_the_generator_holds_duty_cycle_so_a_frequency_change_is_not_a_conflict():

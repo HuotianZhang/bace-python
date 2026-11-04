@@ -81,8 +81,13 @@ class Agilent33220A:
         # can hide a real settings conflict.
         self._io.write("FUNC:PULS:HOLD DCYC;")
         self._io.write(f":FREQ {frequency_hz:g};")
-        self._io.write(f":VOLT:HIGH {high_v:g};")
+        # Low before high. From DC the generator keeps its amplitude around the new
+        # offset, so its low can sit above the pulse's high: DC 1.088 V with 0.1 V
+        # amplitude leaves low 1.038 V, and HIGH 1.03 then queues -221 "low level
+        # changed due to high level" (2026-11-03). The low (0.4 V, under threshold)
+        # is below any lit level, so writing it first conflicts with nothing.
         self._io.write(f":VOLT:LOW {low_v:g};")
+        self._io.write(f":VOLT:HIGH {high_v:g};")
         self._io.write(f"FUNC:PULS:DCYC {duty_percent:g};")
         self._mode = "PULSE"
         self._level = float(high_v)
