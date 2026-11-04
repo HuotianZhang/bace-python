@@ -104,8 +104,8 @@ export function identityModel(state) {
     unnamed: !named,
     stem,
     // Without identity fields, filenames begin with temperature and carry no device
-    // name.
-    preview: stem ? `${stem}_…` : '290K_…',
+    // name. A number here would read as this run's temperature.
+    preview: stem ? `${stem}_…` : '<T>K_…',
     /**
      * The helper lists fields whose filename spelling differs from their typed value.
      */
