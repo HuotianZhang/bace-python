@@ -132,13 +132,14 @@ def test_a_failed_read_after_park_is_not_a_run_error(tmp_path, monkeypatch):
 
 
 # -- arrays of an earlier session -----------------------------------------------------
-def test_an_earlier_sessions_jv_is_read_back_from_its_file(tmp_path):
+def test_an_earlier_sessions_jv_and_bace_are_read_back_from_their_files(tmp_path):
     with make_session(tmp_path) as s:
         jv_run, _ = s.submit(tree_for_module("jv", {"step_v": 0.1}), kind="manual")
         assert s.wait_run(jv_run, TIMEOUT)
         bace_run, _ = s.submit(bace(1, voc=0.9))
         assert s.wait_run(bace_run, TIMEOUT)
         live = s.run_data(jv_run)
+        live_bace = s.run_data(bace_run)
     with make_session(tmp_path, session_id="20260903_090000") as s2:
         assert s2.run_record(jv_run)["from"] == "journal"
         data = s2.run_data(jv_run)
@@ -150,8 +151,12 @@ def test_an_earlier_sessions_jv_is_read_back_from_its_file(tmp_path):
         assert (curve["label"], curve["dark"], curve["direction"]) == \
             (was["label"], was["dark"], was["direction"])
         assert s2.run_data(jv_run, "jv")["curves"][0]["label"] == was["label"]
-        with pytest.raises(DataUnavailable, match="read the HDF5"):
-            s2.run_data(bace_run)
+        traces = s2.run_data(bace_run)
+        for name in ("time_s", "light", "dark", "photo", "q_mean", "window"):
+            np.testing.assert_allclose(traces[name], live_bace[name], err_msg=name)
+        assert traces["last_shot"] is None, "a file holds loop averages, not the newest shot"
+        assert (traces["kept"], traces["requested"]) == (live_bace["kept"], live_bace["requested"])
+        assert traces["axis"]["name"] == live_bace["axis"]["name"]
         with pytest.raises(DataUnavailable):
             s2.run_data(jv_run, "nope")
         with pytest.raises(UnknownRun):
