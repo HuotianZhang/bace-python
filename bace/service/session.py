@@ -1170,7 +1170,8 @@ class Session:
             return data
 
     def _data_from_file(self, run_id: str, node_path: str | None, record: dict) -> dict:
-        """Reads a J–V node's curves from its `jv<stamp>.h5`.
+        """Reads a node's arrays from its folder: J–V curves from `jv<stamp>.h5`,
+        BACE traces from `run<stamp>.h5`.
 
         The node and its folder come from the run record. A folder outside this
         session's output directory is refused. Other modules keep the 404 with
@@ -1185,7 +1186,9 @@ class Session:
         node = nodes.get(node_path)
         if node is None:
             raise DataUnavailable(run_id, f"no node {node_path!r}", folders)
-        if node.get("module") not in ("jv", "jv_bace"):
+        module = node.get("module")
+        prefix = {"jv": "jv", "jv_bace": "jv", "bace": "run"}.get(module)
+        if prefix is None:
             raise DataUnavailable(run_id, "not in memory; read the HDF5", folders)
         folder = node.get("folder")
         if not folder:
@@ -1195,15 +1198,19 @@ class Session:
         if os.path.commonpath([root, where]) != root:
             raise DataUnavailable(run_id, f"{folder} is outside {self.out}", folders)
         stamp = re.search(r"\d{8}_\d{6}$", where)
-        named = os.path.join(where, f"jv{stamp.group(0)}.h5") if stamp else None
+        named = os.path.join(where, f"{prefix}{stamp.group(0)}.h5") if stamp else None
         found = ([named] if named and os.path.isfile(named) else
                  [os.path.join(where, n) for n in sorted(os.listdir(where))
-                  if n.startswith("jv") and n.endswith(".h5")] if os.path.isdir(where) else [])
+                  if n.startswith(prefix) and n.endswith(".h5")] if os.path.isdir(where) else [])
+        what = "J–V" if prefix == "jv" else "BACE"
         if len(found) != 1:
-            raise DataUnavailable(run_id, f"no single J–V file in {folder}", folders)
-        from ..storage.jv import read_hdf5_curves
+            raise DataUnavailable(run_id, f"no single {what} file in {folder}", folders)
         try:
-            return {"curves": read_hdf5_curves(found[0])}
+            if prefix == "jv":
+                from ..storage.jv import read_hdf5_curves
+                return {"curves": read_hdf5_curves(found[0])}
+            from .modules import bace_arrays_from_file
+            return bace_arrays_from_file(found[0], node.get("voc"))
         except (OSError, KeyError, ValueError) as exc:
             raise DataUnavailable(run_id, f"{found[0]} not read: {exc}", folders) from None
 

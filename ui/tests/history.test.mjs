@@ -11,9 +11,10 @@ import { dirname, join } from 'node:path';
 
 import {
   cellName, cellQ, csvOf, curveSummary, flagsFor, gridModel, identityOf, isPartial, moduleNodes, provenanceSummary,
-  rerunParams, runGroups, summaryModel, temperatureText, vocText, spanOf,
+  rerunParams, runGroups, summaryModel, temperatureText, vocText, spanOf, pointTraces, pointLabel,
 } from '../lib/history.js';
 import { gridChartModel } from '../lib/charts/grid.js';
+import { traceSet } from '../lib/charts/transient.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = (name) => JSON.parse(readFileSync(join(here, '../fixtures', name), 'utf8'));
@@ -336,4 +337,30 @@ test('a J-V curve row reads the record\'s own metric names', () => {
   const a = '—';
   assert.equal(curveSummary({ metrics: { voc: null, jsc: null, fill_factor: null } }),
     `Voc ${a} · Jsc ${a} · FF ${a}`);
+});
+
+test('pointTraces gives one point of a node, with the window that point integrated', () => {
+  const data = {
+    time_s: [0, 1e-9, 2e-9], dt: 1e-9,
+    light: [[1, 2, 3], [4, 5, 6]], dark: [[0, 0, 0], [1, 1, 1]], photo: [[1, 2, 3], [3, 4, 5]],
+    q_mean: [-1e-10, -2e-10], q_std: [1e-12, null], window: [[1e-9, 2e-9], [null, null]],
+  };
+  const second = pointTraces(data, 1);
+  assert.deepEqual([second.light, second.dark, second.photo], [[4, 5, 6], [1, 1, 1], [3, 4, 5]]);
+  assert.equal(second.q_mean, -2e-10);
+  assert.equal(second.q_std, null);
+  assert.equal(second.last_shot, null, 'a file without the window draws none rather than a computed one');
+  const set = traceSet(pointTraces(data, 0));
+  assert.equal(set.source, 'data');
+  assert.deepEqual(set.light, [1, 2, 3]);
+  assert.equal(set.window, 1e-9);
+  assert.equal(set.windowEnd, 2e-9);
+  assert.equal(traceSet(pointTraces({ ...data, window: undefined }, 0)).window, null);
+});
+
+test('pointLabel names the axis as the console does', () => {
+  assert.equal(pointLabel({ axis: { name: 'vpre' }, values: [-0.1, 0.9123456] }, 0), 'Vpre −0.1 V');
+  assert.equal(pointLabel({ axis: { name: 'vpre' }, values: [-0.1, 0.9123456] }, 1), 'Vpre 0.9123 V');
+  assert.equal(pointLabel({ axis: { name: 'delay_ns' }, values: [90] }, 0), 'Delay 90 ns');
+  assert.equal(pointLabel({ axis: { name: 'vcoll' }, values: [null] }, 0), 'Point 1');
 });

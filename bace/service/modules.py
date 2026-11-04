@@ -1687,6 +1687,7 @@ class _BaceData:
         self.light: RunningAverage | None = None
         self.dark: RunningAverage | None = None
         self.photo: np.ndarray | None = None
+        self.window: np.ndarray | None = None
         self.dt = float("nan")
         self.last_shot: dict | None = None
         self.finished: E.RunFinished | None = None
@@ -1709,10 +1710,13 @@ class _BaceData:
                 self.light = RunningAverage(self.n_steps, n)
                 self.dark = RunningAverage(self.n_steps, n)
                 self.photo = np.full((self.n_steps, n), np.nan)
+                self.window = np.full((self.n_steps, 2), np.nan)
             self.dt = ev.light.dt
             self.light.update(ev.step, ev.loop, ev.light.y)
             self.dark.update(ev.step, ev.loop, ev.dark.y)
             self.photo[ev.step - 1] = ev.photo_averaged
+            self.window[ev.step - 1] = (np.nan if ev.t0_int_record_s is None else ev.t0_int_record_s,
+                                        np.nan if ev.t1_int_record_s is None else ev.t1_int_record_s)
             if self.charges is not None:
                 self.charges.add(ev.loop, ev.step, ev.q)
             self.kept += 1
@@ -1760,8 +1764,35 @@ class _BaceData:
                 "light": self.light.traces if self.light is not None else empty,
                 "dark": self.dark.traces if self.dark is not None else empty,
                 "photo": self.photo if self.photo is not None else empty,
+                "window": self.window,
                 "last_shot": self.last_shot, "kept": self.kept,
                 "requested": self.requested, "voc": self.voc, "dt": self.dt}
+
+
+def bace_arrays_from_file(path: str, voc: float | None = None) -> dict:
+    """A BACE file's arrays in the shape the live node serves them.
+
+    The traces are the loop averages per point; the single shots stay in the
+    file. `window` is absent from files written before it was recorded."""
+    from ..storage.hdf5 import read_run
+    f = read_run(path)
+    time_s = np.asarray(f["time_s"], dtype=float)
+    q_all = np.asarray(f["q_all"], dtype=float)
+    axis = f["axis"]
+    stored = axis.get("voc")
+    return {"axis": {"name": str(axis.get("name", "")), "unit": str(axis.get("unit", "")),
+                     "start": axis.get("start"), "stop": axis.get("stop"),
+                     "step": axis.get("step"),
+                     "centre_on_voc": bool(axis.get("centre_on_voc", False))},
+            "values": f["values"], "q_mean": f["q_mean"], "q_std": f["q_std"],
+            "q_all": q_all, "time_s": time_s,
+            "light": f["light"], "dark": f["dark"], "photo": f["photocurrent"],
+            "window": f.get("window"),
+            "last_shot": None,
+            "kept": int(np.isfinite(q_all).sum()), "requested": int(q_all.size),
+            "voc": float(stored) if isinstance(stored, (int, float, np.floating)) else voc,
+            "dt": float(time_s[1] - time_s[0]) if time_s.size > 1 else float("nan"),
+            "file": path}
 
 
 def _bind_temperature(ctx: RunContext, rig: Rig) -> tuple[float | None, str, str]:

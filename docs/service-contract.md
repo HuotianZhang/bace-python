@@ -209,8 +209,12 @@ partial curve. Abort does not report the incomplete curve as done.
 The journal stores enough to render the session log and the history queries,
 never the traces; the recorders (HDF5 `bace-run/3` + legacy `.dat`)
 keep the data. `GET /runs/{id}/data` serves full arrays from an in-memory store
-of the last 20 runs. A J–V node of an older run, or of an earlier session, is read
-back from its `jv<stamp>.h5`; other modules give 404 with the folder path (read the HDF5).
+of the last 20 runs. A J–V or BACE node of an older run, or of an earlier session,
+is read back from its `jv<stamp>.h5` or `run<stamp>.h5`; other modules give 404
+with the folder path (read the HDF5). A BACE node read back carries each point's
+loop-averaged `light`, `dark` and `photo`, and `window` (point, [start, end]) in
+record time where the file stored it; `last_shot` is null and the single shots
+stay in the file. The in-memory store gives the same keys, with `last_shot`.
 
 The `since=` ring keeps the last 5000 *envelopes*, but only the traces of the
 last `RING_TRACES_KEPT` (200) `StepDone` shots. A ring full of thousand-point

@@ -16,6 +16,10 @@ Dated, newest first. Details and evidence are in `docs/`.
 - `axis.geometry` refuses an after-window baseline with fewer than 20 samples
   between the window end and the record end, at the largest delay of a delay
   axis.
+- Results draws a BACE node's light, dark and light − dark traces, averaged
+  over the loops, with the window it integrated, also for runs of earlier
+  sessions: `GET /runs/{id}/data` reads them from `run<stamp>.h5`. A sweep
+  chooses its point from a `Point` list.
 
 ## 2026-10-31
 

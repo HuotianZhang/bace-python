@@ -10,8 +10,11 @@ import * as fmt from '../lib/format.js';
 import { chart } from '../lib/charts/frame.js';
 import { gridChartModel } from '../lib/charts/grid.js';
 import { jvModel } from '../lib/charts/jv.js';
+import { transientModel } from '../lib/charts/transient.js';
 import { metricsTable } from '../lib/results.js';
-import { runGroups, gridModel, summaryModel, moduleNodes, csvOf, rerunParams, GRID_MODULES } from '../lib/history.js';
+import {
+  runGroups, gridModel, summaryModel, moduleNodes, csvOf, rerunParams, cellQ, pointTraces, pointLabel, GRID_MODULES,
+} from '../lib/history.js';
 import { renderGroups, renderRunHead, renderGrid, renderSummary, renderNodes, renderNodePanel } from '../lib/grid.js';
 
 /** Which run and node are open, kept across a tab switch. */
@@ -31,8 +34,13 @@ export default {
     let recordStatus = '';
     let rerunState = null;
     let disposed = false;
-    /** J–V curves by `run|node`: `{ status: 'loading' | 'ok' | 'error', curves, text }`. */
-    const curveData = new Map();
+    /**
+     * A node's arrays by `run|node`: `{ status: 'loading' | 'ok' | 'error', data, text }`.
+     * J–V nodes carry curves, BACE nodes the averaged traces of each point.
+     */
+    const nodeData = new Map();
+    /** The BACE point shown by `run|node`, when the operator picked one. */
+    const pointShown = new Map();
     /**
      * Only the latest selection request applies; an earlier response cannot replace a
      * later choice.
@@ -90,8 +98,8 @@ export default {
       if (disposed || mine !== recordRequest) return;
       if (got) {
         record = got;
-        // A reread can bring curves the earlier fetch did not have.
-        for (const key of [...curveData.keys()]) if (key.startsWith(`${runId}|`)) curveData.delete(key);
+        // A reread can bring arrays the earlier fetch did not have.
+        for (const key of [...nodeData.keys()]) if (key.startsWith(`${runId}|`)) nodeData.delete(key);
         // Refetch preserves node selection in the same run. Selecting another run
         // opens its first grid cell or node.
         const nodes = moduleNodes(record);
@@ -104,21 +112,20 @@ export default {
     }
 
     /**
-     * The record holds each curve's metrics, not its points. The points come from
+     * The record holds each node's numbers, not its arrays. The arrays come from
      * `GET /runs/{id}/data`, which reads an earlier session's run file.
      */
-    async function loadCurves(runId, path) {
+    async function loadNodeData(runId, path) {
       const key = `${runId}|${path}`;
-      curveData.set(key, { status: 'loading' });
+      nodeData.set(key, { status: 'loading' });
       let entry;
       try {
-        const data = await api.runData(runId, path);
-        entry = { status: 'ok', curves: (data && data.curves) || [] };
+        entry = { status: 'ok', data: (await api.runData(runId, path)) || {} };
       } catch (error) {
         entry = { status: 'error', text: error.text || error.message };
       }
-      if (disposed || curveData.get(key)?.status !== 'loading') return;
-      curveData.set(key, entry);
+      if (disposed || nodeData.get(key)?.status !== 'loading') return;
+      nodeData.set(key, entry);
       render(store.getState());
     }
 
@@ -177,6 +184,31 @@ export default {
 
     // -- rendering -------------------------------------------------------
 
+    /**
+     * A BACE node's light, dark and light − dark for one point, averaged over its
+     * loops, with the window that point integrated. A sweep picks its point here;
+     * the first shown is the one the grid cell reports.
+     */
+    function baceTraces(node, data, point, key) {
+      const n = (data.values || node.values || []).length;
+      const picker = n > 1
+        ? h('div.schedbar',
+          h('span.cs', 'Point'),
+          h('select.v', {
+            'aria-label': 'point',
+            onchange: (e) => { pointShown.set(key, Number(e.target.value)); render(store.getState()); },
+          }, ...Array.from({ length: n }, (_, i) => h('option', { value: String(i), selected: i === point || null },
+            pointLabel(node, i)))))
+        : null;
+      const input = pointTraces(data, point);
+      return [
+        picker,
+        chart((w, view) => transientModel(input, {
+          width: w, view, offset_corrected: node.offset_corrected,
+        }), { id: 'results/transient' }),
+      ];
+    }
+
     function render(state) {
       const live = {};
       for (const id of state.order) {
@@ -210,7 +242,7 @@ export default {
           recordStatus ? h('span.cs', { text: recordStatus }) : null,
           record.from === 'journal' ? h('span.tag', { text: 'journal' }) : null,
           record.data_in_memory === false
-            ? h('span.tag', { title: 'Not in memory. J–V curves are read from the run file; other arrays are in the HDF5.', text: 'summary only' }) : null,
+            ? h('span.tag', { title: 'Not in memory. J–V curves and BACE traces are read from the run file; single shots are in the HDF5.', text: 'summary only' }) : null,
           h('span.spacer'),
           grid.shape === 'grid' ? h('button.btng', { onclick: () => exportCsv(grid) }, 'Export CSV') : null,
           h('button.btng', { onclick: () => loadRecord(record.run_id) }, 'Reload')),
@@ -230,16 +262,22 @@ export default {
         ];
       });
       const isJv = node && JV_MODULES.has(node.module) && node.kept;
-      const curveKey = isJv ? `${record.run_id}|${node.node_path}` : null;
-      if (curveKey && !curveData.has(curveKey)) loadCurves(record.run_id, node.node_path);
-      const got = curveKey ? curveData.get(curveKey) : null;
-      keyed(curveEl, JSON.stringify([curveKey, got && got.status]), () => {
+      const isBace = node && node.module === 'bace' && node.kept;
+      const dataKey = isJv || isBace ? `${record.run_id}|${node.node_path}` : null;
+      if (dataKey && !nodeData.has(dataKey)) loadNodeData(record.run_id, node.node_path);
+      const got = dataKey ? nodeData.get(dataKey) : null;
+      const point = isBace ? pointShown.get(dataKey) ?? cellQ(node).index ?? 0 : null;
+      keyed(curveEl, JSON.stringify([dataKey, got && got.status, point]), () => {
         if (!got) return [];
-        if (got.status === 'loading') return [h('p.absent', 'Loading curves …')];
-        if (got.status === 'error') return [h('p.absent', { text: `Curves not loaded: ${got.text}` })];
-        const model = jvModel(got.curves);
+        if (got.status === 'loading') return [h('p.absent', isBace ? 'Loading traces …' : 'Loading curves …')];
+        if (got.status === 'error') {
+          return [h('p.absent', { text: `${isBace ? 'Traces' : 'Curves'} not loaded: ${got.text}` })];
+        }
+        if (isBace) return baceTraces(node, got.data, point, dataKey);
+        const curves = got.data.curves || [];
+        const model = jvModel(curves);
         return [
-          chart((w, view) => jvModel(got.curves, { width: w, view }), { id: 'results/jv' }),
+          chart((w, view) => jvModel(curves, { width: w, view }), { id: 'results/jv' }),
           model.metrics.entries.length ? metricsTable(model.metrics) : null,
         ];
       });

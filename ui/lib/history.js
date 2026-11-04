@@ -167,6 +167,40 @@ export function cellQ(node) {
   };
 }
 
+/**
+ * One axis point of a node's data, in the shape `traceSet` reads. The traces are
+ * that point's loop averages, and the window is the one that point integrated.
+ * Files written before the window was stored give none, and the chart then
+ * draws no window rather than a computed one.
+ */
+export function pointTraces(data, index) {
+  const row = (a) => (Array.isArray(a) && Array.isArray(a[0]) ? a[index] || null : a);
+  const window = Array.isArray(data.window) ? data.window[index] : null;
+  return {
+    time_s: data.time_s,
+    dt: data.dt,
+    light: row(data.light),
+    dark: row(data.dark),
+    photo: row(data.photo),
+    q_mean: finite((data.q_mean || [])[index]) ? data.q_mean[index] : null,
+    q_std: finite((data.q_std || [])[index]) ? data.q_std[index] : null,
+    last_shot: window && finite(window[0])
+      ? { t0_int_record_s: window[0], t1_int_record_s: finite(window[1]) ? window[1] : null }
+      : null,
+  };
+}
+
+const POINT_NAMES = { vpre: ['Vpre', 'V'], vcoll: ['Vcoll', 'V'], delay_ns: ['Delay', 'ns'] };
+
+/** The label of axis point `i`: the console's name for the axis, its value and unit. */
+export function pointLabel(node, i) {
+  const values = node.values || [];
+  const [name, unit] = POINT_NAMES[axisName(node)] || [axisName(node), ''];
+  if (!finite(values[i])) return `Point ${i + 1}`;
+  const value = String(Number(values[i].toPrecision(4))).replace(/^-/, '−');
+  return `${name} ${value} ${unit}`.trim();
+}
+
 function nearest(values, target) {
   let best = 0;
   for (let i = 1; i < values.length; i += 1) {
