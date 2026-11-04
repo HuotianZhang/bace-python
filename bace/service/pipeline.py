@@ -1380,7 +1380,9 @@ def _after_window_samples(v: Mapping[str, Any], axis: Any, delay_ns: float,
                  + float(v["t_int_width_s"]))
     except (KeyError, TypeError, ValueError):
         return None
-    dt = 10 * tb_s / max(n - 1, 1)
+    if tb_s <= 0 or n < 2:
+        return 0                     # no record to take a baseline from
+    dt = 10 * tb_s / (n - 1)
     return int((9 * tb_s - end_s) / dt)
 
 

@@ -666,6 +666,11 @@ def test_an_after_window_baseline_needs_record_after_the_window():
                         axis_name="delay_ns", axis_start=0.0, axis_stop=3000.0,
                         axis_step=1000.0, centre_on_voc=False))
     assert levels(v, "axis.geometry") == ["invalid"], "judged at the latest delay"
+    for bad_record in ({"timebase_ns_per_div": 0.0}, {"timebase_ns_per_div": -1.0},
+                       {"record_length": 1}):
+        v = validate(module("bace", measure_dc=True, offset_region="after-window",
+                            **bad_record))
+        assert levels(v, "axis.geometry") == ["invalid"], bad_record
     v = validate(module("bace", measure_dc=True, offset_region="pre-trigger",
                         t_int_width_s=9e-6))
     assert "after-window" not in v.by_code("axis.geometry")[0].text
