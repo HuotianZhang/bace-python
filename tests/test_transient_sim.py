@@ -672,6 +672,57 @@ def test_a_run_with_the_pre_trigger_baseline_recovers_the_photocharge():
         "the tail check belongs to the tail baseline"
 
 
+# -- the after-window baseline (default since 2026-11-04) ----------------------
+def test_the_after_window_baseline_takes_off_the_level_light_minus_dark_settles_at():
+    """261102-02 at 275-295 K: the light trace's level before the trigger is
+    not the level light - dark settles at after the transient. The after-window
+    baseline refers Q to the settled level; the pre-trigger one carries the
+    difference into Q over the whole window."""
+    from bace.core.process import charge, photocurrent
+    n, dt, step, end = 10000, 1e-9, 1000, 7000
+    t = np.arange(n) * dt
+    after = (t - step * dt).clip(0)
+    fast = np.where(t >= step * dt, 3e-3 * np.exp(-after / 300e-9), 0.0)
+    settled = np.where(t >= step * dt, 15e-6, 0.0)       # a level light - dark settles at
+    light = 0.16e-3 + 2e-6 + fast + settled
+    dark = np.full(n, 0.16e-3)
+    true_q = fast[step:end].sum() * dt
+    late = photocurrent(light, dark, dt, baseline_start_s=end * dt)
+    head = photocurrent(light, dark, dt, baseline_end_s=(step - 10) * dt)
+    assert abs(late[end:].mean()) < 1e-12
+    assert charge(late, dt, step * dt, end * dt) == pytest.approx(true_q, rel=1e-2)
+    assert charge(head, dt, step * dt, end * dt) > true_q * 1.02,         "the pre-trigger baseline adds the settled level over the window"
+
+
+def test_an_after_window_baseline_of_a_few_samples_is_refused():
+    from bace.core.process import photocurrent
+    with pytest.raises(ValueError, match="after-window baseline"):
+        photocurrent(np.zeros(100), np.zeros(100), 1e-9, baseline_start_s=95e-9)
+    with pytest.raises(ValueError, match="not both"):
+        photocurrent(np.zeros(100), np.zeros(100), 1e-9, baseline_end_s=50e-9,
+                     baseline_start_s=50e-9)
+
+
+def test_the_after_window_baseline_is_the_bench_default():
+    """run.toml since 2026-11-04; the dataclass keeps LabVIEW's tail, whose 2 µs
+    record leaves nothing after the default window."""
+    from bace.config import load_run
+    assert load_run("run.toml")[1].offset_region == "after-window"
+    assert RunConfig().offset_region == "tail"
+
+
+def test_a_run_with_the_after_window_baseline_recovers_the_photocharge():
+    sim, rig = build()
+    cfg = RunConfig(n_averages=200, settle_s=0.0, dark_settle_s=0.0, t0_int_s=-2e-9,
+                    invert_polarity=True, offset_region="after-window")
+    evs = run(rig, bace_sweep(0.86, 0.90, 0.02, n_loops=2), cfg)
+    f = finished(evs)
+    physical = np.array([sim.bench.device.photocharge(v, 1.020) for v in f.values])
+    np.testing.assert_allclose(f.q_mean, sim.scope.current_sign * physical, rtol=0.05)
+    said = [e.text for e in evs if isinstance(e, E.Notice) and e.text.startswith("baseline:")]
+    assert len(said) == 1 and "end of the integration window" in said[0]
+
+
 def test_alternate_order_takes_the_dark_trace_first_on_even_loops():
     """Loop 1 keeps the original order; loop 2 starts with the dark trace, in
     the vertical window loop 1's light trace settled on at the same step."""

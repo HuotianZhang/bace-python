@@ -127,8 +127,9 @@ CHECK_DOCS: dict[str, tuple[str, str, str]] = {
     "axis.geometry": (
         "invalid",
         "A scan is refused: a step that is not positive over a span that is not zero, "
-        "fewer than one loop, a negative `delay_ns`, or a J–V voltage or LED range "
-        "whose step does not fit it.",
+        "fewer than one loop, a negative `delay_ns`, a J–V voltage or LED range "
+        "whose step does not fit it, or an after-window baseline with fewer than 20 "
+        "samples after the window.",
         "Correct the axis, the loop count or the J–V range the message names."),
     "bench.instrument": (
         "invalid",
@@ -1356,6 +1357,33 @@ def _c_led_levels(f: _Facts) -> list[Verdict]:
                levels=sorted(set(levels)), low_v=sorted(lows), threshold_v=thr)]
 
 
+AFTER_WINDOW_MIN_SAMPLES = 20
+"""`bace.core.process.photocurrent` refuses an after-window baseline of fewer samples."""
+
+
+def _after_window_samples(v: Mapping[str, Any], axis: Any, delay_ns: float,
+                          rig: RigConfig) -> int | None:
+    """The samples left between the latest window end and the record end.
+
+    `None` when the step does not use the after-window baseline. The record
+    spans ten divisions with the trigger one division in (`Infiniium` sets
+    `:TIM:POS` to 0.4 of the range, the record centre); the window ends
+    `delay + trigger_offset_s + t0_int_s + t_int_width_s` after the trigger,
+    latest at the largest delay of a delay axis."""
+    if not v.get("offset_correct", True) or v.get("offset_region") != "after-window":
+        return None
+    try:
+        tb_s = float(v["timebase_ns_per_div"]) * 1e-9
+        n = int(v["record_length"])
+        delay_s = (max(axis.start, axis.stop) if axis.name == "delay_ns" else delay_ns) * 1e-9
+        end_s = (delay_s + float(rig.trigger_offset_s) + float(v.get("t0_int_s", 0.0))
+                 + float(v["t_int_width_s"]))
+    except (KeyError, TypeError, ValueError):
+        return None
+    dt = 10 * tb_s / max(n - 1, 1)
+    return int((9 * tb_s - end_s) / dt)
+
+
 def _c_axis_geometry(f: _Facts) -> list[Verdict]:
     if f.schedule is None:
         return _skipped("axis.geometry")
@@ -1403,6 +1431,15 @@ def _c_axis_geometry(f: _Facts) -> list[Verdict]:
                          float(v.get("pulse_width_ns", 5000.0)))
         except ValueError as exc:
             failures.append((s, f"{s.module}: {exc}", {"delay_ns": delay}))
+            continue
+        left = _after_window_samples(v, axis, spec.delay_ns, f.rig)
+        if left is not None and left < AFTER_WINDOW_MIN_SAMPLES:
+            failures.append((s, f"{s.module}: the after-window baseline has {max(left, 0)} "
+                                f"samples between the window end and the record end, "
+                                f"under {AFTER_WINDOW_MIN_SAMPLES}: a longer timebase or "
+                                "a shorter t_int_width_s leaves record after the window",
+                             {k: v.get(k) for k in ("offset_region", "timebase_ns_per_div",
+                                                    "record_length", "t_int_width_s")}))
             continue
         described.append(f"{axis} x {spec.n_loops}")
     if failures:

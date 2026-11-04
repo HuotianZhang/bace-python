@@ -2,6 +2,21 @@
 
 Dated, newest first. Details and evidence are in `docs/`.
 
+## 2026-11-04
+
+- `offset_region = "after-window"`: the baseline is the mean of light − dark
+  from the end of the integration window to the end of the record, so Q is the
+  charge above the level light − dark settles at. It is the bench default in
+  `run.toml`, by the operator's choice; the pre-trigger baseline is no longer
+  used. On 261102-02 at 220–295 K the light trace's pre-trigger level varied
+  by up to 23 µA from cell to cell while light − dark after the window stayed
+  near 17 µA, and the pre-trigger baseline flattened Q(intensity) above 0.7
+  sun at 275–295 K (`docs/analysis/2026-11-04/txi-warming/`). `RunConfig`
+  keeps `tail`, LabVIEW's, as its own default.
+- `axis.geometry` refuses an after-window baseline with fewer than 20 samples
+  between the window end and the record end, at the largest delay of a delay
+  axis.
+
 ## 2026-10-31
 
 - Console type: IBM Plex Sans alone, with tabular figures; Plex Mono and Archivo

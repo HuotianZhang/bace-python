@@ -317,7 +317,7 @@ class RunContext:
 RUN_CHOICES: dict[str, tuple[str, ...]] = {
     "dark_reference": ("translated", "same"),
     "light_shutter": ("open", "shut"),
-    "offset_region": ("tail", "pre-trigger"),
+    "offset_region": ("after-window", "tail", "pre-trigger"),
     "monitor_channel": ("off", "CHAN1", "CHAN4"),
     "output_polarity": ("auto", "NORM", "INV", "leave"),
     "trigger_sweep": ("AUTO", "TRIG"),
