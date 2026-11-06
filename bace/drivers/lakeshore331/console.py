@@ -199,10 +199,15 @@ class ConsoleTemperatureController:
         """Return both sensor inputs in K from `/api/state`, and the control input.
 
         Same shape as `DirectTemperatureController.read_inputs`. A field the
-        console does not send gives `None`, or `""` for the control input."""
+        console does not send gives `None`, or `""` for the control input.
+        With `connected=False` the console still sends its last values; they
+        are not a reading at this file's start, so both inputs are `None`."""
         d = self._get("/api/state")
         if not isinstance(d, dict):
             return {"control_input": "", "A": None, "B": None}
+        if not d.get("connected", False):
+            return {"control_input": str(d.get("control_input") or ""),
+                    "A": None, "B": None}
         return {"control_input": str(d.get("control_input") or ""),
                 "A": _float_or_none(d.get("temperature_a")),
                 "B": _float_or_none(d.get("temperature_b"))}
