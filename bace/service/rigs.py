@@ -53,7 +53,7 @@ ACTIONS: tuple[str, ...] = (
     "led-off", "bias-off", "smu-off",
     "shutter-open", "shutter-shut",
     "relay-to-sourcemeter", "relay-to-amplifier",
-    "read-power",
+    "read-power", "read-temperature",
     "read-scope", "set-scope", "capture-scope",
 )
 """The bench accepts these action names.
@@ -144,6 +144,11 @@ ACTION_DOCS: dict[str, tuple[str, str, str]] = {
         "1918-C",
         "One power reading.",
         "The meter does not answer."),
+    "read-temperature": (
+        "331",
+        "Both sensor inputs, A and B, in K, and the input the control loop uses. "
+        "Only queries; the setpoint and heater are not touched.",
+        "No 331 on this bench, or it does not answer."),
     "read-scope": (
         "DSO9054H",
         "The front-panel settings the runs never write: input coupling and impedance, "
@@ -1327,6 +1332,23 @@ class Bench:
                 "wavelength_nm": ev.wavelength_nm, "source": ev.source,
                 "averaged": ev.averaged, "meter_range": ev.meter_range,
                 "auto_range": ev.auto_range}
+
+    def _act_read_temperature(self, args: dict, led: dict) -> dict:
+        self._only(args)
+        controller = self._need("temperature")
+        read_inputs = getattr(controller, "read_inputs", None)
+        if read_inputs is None:
+            raise BenchActionRefused(
+                "warn", "this 331 driver cannot read the two inputs separately")
+        try:
+            got = read_inputs()
+        except Exception as exc:                            # noqa: BLE001
+            raise BenchActionRefused("warn", f"the 331 did not answer: {exc}") from None
+        if got.get("A") is None and got.get("B") is None:
+            raise BenchActionRefused("warn", "the 331 answered neither KRDG? A nor KRDG? B")
+        return {"control_input": got.get("control_input") or "",
+                "a_k": got.get("A"), "b_k": got.get("B"),
+                "source": temperature_source(controller)}
 
 
 # -- helpers ------------------------------------------------------------

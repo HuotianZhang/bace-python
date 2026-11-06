@@ -110,7 +110,9 @@ class Model331Simulator:
         self.tuning = p.TuningState.IDLE
         self.loops: Dict[int, _Loop] = {1: _Loop(), 2: _Loop()}
 
-        # Sensor B sits on the cold head and is not controlled.
+        # On the bench (operator, 2026-11-06) the loop controls on A, on the
+        # cold head; B is a free sensor pasted next to the sample and is not
+        # controlled. The offset is only a stand-in for the gap between them.
         self.sensor_b_offset_k = -6.0
 
         self._last_t = self.clock()
