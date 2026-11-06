@@ -266,6 +266,31 @@ def test_park_shutter_power_and_unknown_actions():
         b.action("park", {"hard": True})
 
 
+def test_read_temperature_reads_both_331_inputs_and_touches_nothing():
+    """`read-temperature` says which input the loop controls on and what
+    each sensor reads (2026-11-06), with only queries."""
+    from bace.drivers.simulated import SimulatedTemperatureController
+
+    b = bench()
+    with pytest.raises(BenchActionRefused, match="no temperature"):
+        b.action("read-temperature", {})
+    b.rig.temperature = SimulatedTemperatureController(b.sim.bench, start_k=250.0)
+    before = (b.rig.temperature.setpoint_k, b.rig.temperature.reads)
+    r = b.action("read-temperature", {})
+    assert r == {"control_input": "A", "a_k": pytest.approx(250.0), "b_k": None,
+                 "source": "simulated"}
+    assert (b.rig.temperature.setpoint_k, b.rig.temperature.reads) == before
+    with pytest.raises(ValueError, match="unknown argument"):
+        b.action("read-temperature", {"input": "B"})
+
+    def dead():
+        raise RuntimeError("GPIB timeout")
+
+    b.rig.temperature.read_inputs = dead
+    with pytest.raises(BenchActionRefused, match="GPIB timeout"):
+        b.action("read-temperature", {})
+
+
 def test_a_silent_console_is_a_warn_not_a_crash():
     b = bench()
 
