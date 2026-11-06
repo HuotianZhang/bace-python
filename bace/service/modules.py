@@ -1267,6 +1267,7 @@ class Catalogue:
         temperature, temp_how, temp_source = _bind_temperature(ctx, rig)
         meta = replace(ctx.metadata, temperature_k=temperature,
                        temperature_how=temp_how, temperature_source=temp_source,
+                       **_sensor_inputs(rig),
                        led_drive_v=levels[0] if len(levels) == 1 else None,
                        voc_v=None, offset_corrected=False, started=datetime.now())
         folder = os.path.join(ctx.out_folder, meta.folder_name())
@@ -1459,6 +1460,7 @@ class Catalogue:
                 meta = replace(ctx.metadata, led_drive_v=led_v, voc_v=voc,
                                temperature_k=temperature,
                                temperature_how=temp_how, temperature_source=temp_source,
+                               **_sensor_inputs(rig),
                                offset_corrected=run_cfg.offset_correct,
                                started=datetime.now())
                 rec = RunRecorder(ctx.out_folder, meta, store_shots=store_shots,
@@ -1819,6 +1821,35 @@ def _bind_temperature(ctx: RunContext, rig: Rig) -> tuple[float | None, str, str
     ctx.temperature_how = "read"
     ctx.temperature_source = source_of(rig.temperature)
     return ctx.temperature()
+
+
+def _sensor_inputs(rig: Rig) -> dict:
+    """Read both 331 sensor inputs for a file's metadata, best effort.
+
+    Return `RunMetadata` fields `temperature_a_k`, `temperature_b_k` and
+    `control_input`, read as the file starts. `temperature_k` stays the node
+    temperature (settled or bound); these two say what each sensor read
+    while this file was taken, so the sample and the cold head can be told
+    apart. A controller without `read_inputs`, or one that fails, gives `{}`
+    and the fields stay empty: a run never stops for the second sensor."""
+    try:
+        read_inputs = getattr(getattr(rig, "temperature", None), "read_inputs", None)
+        got = read_inputs() if read_inputs is not None else None
+    except Exception:                                       # noqa: BLE001
+        return {}
+    if not isinstance(got, dict):
+        return {}
+
+    def kelvin(v):
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return None
+        return v if math.isfinite(v) else None
+
+    return {"temperature_a_k": kelvin(got.get("A")),
+            "temperature_b_k": kelvin(got.get("B")),
+            "control_input": str(got.get("control_input") or "")}
 
 
 class _JVData:

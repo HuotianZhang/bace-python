@@ -891,6 +891,24 @@ def test_available_keys_on_the_consoles_own_liveness_key(monkeypatch):
     assert t.available() is False
 
 
+def test_the_console_adapter_reads_both_inputs(monkeypatch):
+    import urllib.request
+
+    from bace.drivers.lakeshore331 import ConsoleTemperatureController
+
+    t = ConsoleTemperatureController("http://127.0.0.1:8331")
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda req, timeout=None: _HTTPReply(STATE_331))
+    assert t.read_inputs() == {"control_input": "A", "A": 249.93, "B": 251.1}
+
+    # The instrument silent: the console still sends its last values, which
+    # must not go into a file as readings taken at its start.
+    silent = {**STATE_331, "connected": False}
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda req, timeout=None: _HTTPReply(silent))
+    assert t.read_inputs() == {"control_input": "A", "A": None, "B": None}
+
+
 def test_the_simulated_331_converges_per_read_and_refuses_above_the_ceiling():
     """One step per `read()`, not per second, so `--fast` converges in a
     handful of polls and a test can count them; the ceiling refused in the

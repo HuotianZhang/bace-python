@@ -112,6 +112,14 @@ class RunMetadata:
     `console` is the 331 through its console; `simulated` identifies a simulated
     reading; `operator` identifies a typed value. Empty means no read-back.
     """
+    temperature_a_k: float | None = None
+    """Sensor input A of the 331, in K, read as the file is started."""
+    temperature_b_k: float | None = None
+    """Sensor input B of the 331, in K, read as the file is started."""
+    control_input: str = ""
+    """The 331 input the control loop uses (`A` or `B`), and so the one
+    `temperature_k` comes from. Empty, and both inputs `None`, without a
+    controller read."""
     led_drive_v: float | None = None
     voc_v: float | None = None
     offset_corrected: bool = True
@@ -164,6 +172,8 @@ class RunMetadata:
         d = asdict(self)
         d["started"] = self.started.isoformat()
         d["temperature_k"] = "" if self.temperature_k is None else self.temperature_k
+        for key in ("temperature_a_k", "temperature_b_k"):
+            d[key] = "" if d[key] is None else d[key]
         d["led_drive_v"] = "" if self.led_drive_v is None else self.led_drive_v
         d["voc_v"] = "" if self.voc_v is None else self.voc_v
         return d

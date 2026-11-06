@@ -157,6 +157,25 @@ class DirectTemperatureController:
         self.last = r
         return r
 
+    def read_inputs(self) -> dict:
+        """Read both sensor inputs in K and name the control input.
+
+        Return `{"control_input": "A", "A": 249.98, "B": 251.3}`. An input
+        that does not answer, or reads NaN, gives `None`. A bus error gives
+        `None` for both, because a run must not stop for the second sensor.
+        `read` stays on the control input, which settling and the watchdog
+        use."""
+        control = self.discovery.control_input if self.discovery else ""
+        out: dict = {"control_input": control, "A": None, "B": None}
+        with _LOCK:
+            for channel in ("A", "B"):
+                try:
+                    k = float(self.device.kelvin(channel))
+                except (TransportError, p.ProtocolError, ValueError):
+                    continue
+                out[channel] = k if math.isfinite(k) else None
+        return out
+
     # -- the watchdog -----------------------------------------------------
     def _fault_text(self, status: Any) -> str | None:
         """Return a control-sensor or heater fault reason, or `None`.

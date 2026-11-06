@@ -519,6 +519,42 @@ def test_jv_bace_measures_one_level_when_led_v_is_inherited_else_the_range(tmp_p
         "refused before anything was touched")
 
 
+def test_a_jv_file_records_both_331_inputs_and_survives_a_failing_one(tmp_path):
+    """`temperature_k` stays the node temperature; `temperature_a_k`,
+    `temperature_b_k` and `control_input` are what each sensor read as the
+    file started (2026-11-06). A controller that fails leaves them empty and
+    the scan goes on."""
+    import h5py
+
+    class Two331:
+        def read_inputs(self):
+            return {"control_input": "B", "A": 251.3, "B": 249.98}
+
+    class Broken331:
+        def read_inputs(self):
+            raise RuntimeError("bus timeout")
+
+    def meta_of(folder):
+        h5 = [f for f in os.listdir(folder) if f.endswith(".h5")][0]
+        with h5py.File(os.path.join(folder, h5), "r") as f:
+            return dict(f["metadata"].attrs)
+
+    b = bench()
+    cat = catalogue()
+    b.rig.temperature = Two331()
+    ctx = make_ctx(tmp_path / "two", node_path="jv")
+    list(cat.build("jv", {"step_v": 0.1}, ctx, b.rig))
+    meta = meta_of(ctx.folders[0])
+    assert (meta["temperature_a_k"], meta["temperature_b_k"], meta["control_input"]) ==         (pytest.approx(251.3), pytest.approx(249.98), "B")
+    assert meta["temperature_k"] == pytest.approx(290.0), "the node temperature is unchanged"
+
+    b.rig.temperature = Broken331()
+    ctx = make_ctx(tmp_path / "broken", node_path="jv")
+    list(cat.build("jv", {"step_v": 0.1}, ctx, b.rig))
+    meta = meta_of(ctx.folders[0])
+    assert (meta["temperature_a_k"], meta["temperature_b_k"], meta["control_input"]) ==         ("", "", "")
+
+
 # -- bace ----------------------------------------------------------------------------
 def test_bace_pulses_the_led_runs_on_the_amplifier_and_records_the_folder(tmp_path):
     b = bench()

@@ -2,6 +2,14 @@
 
 Dated, newest first. Details and evidence are in `docs/`.
 
+## 2026-11-06
+
+- Every BACE and J–V file records both 331 sensor inputs as it starts:
+  `temperature_a_k`, `temperature_b_k` and `control_input` in `/metadata`.
+  `temperature_k` is still the node temperature, from the control input.
+  Before, only the control input was read, and the file did not say which
+  input that was.
+
 ## 2026-11-04
 
 - `offset_region = "after-window"`: the baseline is the mean of light − dark
