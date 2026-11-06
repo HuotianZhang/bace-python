@@ -223,6 +223,31 @@ def _direct331(monkeypatch, **kw) -> DirectTemperatureController:
     return DirectTemperatureController(**kw)
 
 
+def test_read_inputs_reads_both_sensors_and_names_the_control_input(monkeypatch):
+    """A run file records both 331 inputs (2026-11-06), so the sample and the
+    cold head can be told apart. `read` stays on the control input; one input
+    that will not answer gives `None` for it and does not raise."""
+    t = _direct331(monkeypatch)
+    try:
+        got = t.read_inputs()
+        assert got["control_input"] == "A"
+        assert got["A"] == pytest.approx(t.read().kelvin, abs=0.5)
+        assert got["B"] is not None and got["A"] is not None
+
+        real = t.device.kelvin
+
+        def b_dead(channel="A"):
+            if channel.upper() == "B":
+                raise TransportError("timeout on KRDG? B")
+            return real(channel)
+
+        monkeypatch.setattr(t.device, "kelvin", b_dead)
+        got = t.read_inputs()
+        assert got["B"] is None and got["A"] is not None
+    finally:
+        t.close()
+
+
 def test_a_setpoint_above_the_ceiling_is_refused_not_clamped(monkeypatch):
     """350 K is this cryostat's limit. Quietly giving 350 K for a requested
     400 K hides the mistake, so it is refused -- and refused in the same

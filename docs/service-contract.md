@@ -888,7 +888,19 @@ cannot distinguish them.
 | `operator` | `instrument` \| `console` \| `simulated` | A person ended the pause without typing one; the number is the last reading polled while they decided. |
 
 Both fields are stored and rendered. Missing fields mean the file does not
-record that provenance. Current transient files use `bace-run/3`.
+record that provenance.
+
+`temperature_k` comes from the control loop's input. Each file also stores
+both 331 inputs, read as the file starts (`modules._sensor_inputs`):
+
+| Field | Content |
+|---|---|
+| `temperature_a_k` | Input A in K, `""` if it did not answer |
+| `temperature_b_k` | Input B in K, `""` if it did not answer |
+| `control_input` | `A` or `B`, the input `temperature_k` and settling use; `""` without a controller |
+
+A failed read leaves the three empty and the run goes on. Files from before
+2026-11-06 have none of them. Current transient files use `bace-run/3`.
 
 `[sample] comment` is retained verbatim in metadata. The folder uses
 `bace.storage.naming.slug`: whitespace and `_` become `-`, Windows-forbidden

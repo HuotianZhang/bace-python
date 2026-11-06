@@ -852,6 +852,14 @@ class SimulatedTemperatureController:
             self.last = r
             return r
 
+    def read_inputs(self) -> dict:
+        """Return the model as sensor A, the control input; the model has no B.
+
+        Does not advance the model, so a file write does not move the
+        temperature."""
+        with self._lock:
+            return {"control_input": "A", "A": self.kelvin, "B": None}
+
     def set_setpoint(self, kelvin: float) -> float:
         kelvin = float(kelvin)
         if kelvin > self.ceiling_k:
